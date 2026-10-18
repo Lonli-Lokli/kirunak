@@ -1,29 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import runnerClaude, { claudeArgs, KEEP_ALIVE_PROMPT, parseResult } from '../plugins/runner-claude.mjs';
-import { FIXTURES } from './helpers.mjs';
+import { fakeClaude, RESULT } from './helpers.mjs';
 
-export const RESULT = readFileSync(join(FIXTURES, 'run', 'result.json'), 'utf8');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-// A fake `claude`: it records its argv, stdin, cwd and the step's variables, and prints the fixture result.
-export function fakeClaude(result = RESULT) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-fake-claude-')));
-  const bin = join(dir, 'claude');
-  writeFileSync(join(dir, 'result.json'), result);
-  writeFileSync(bin, `#!${process.execPath}
-const fs = require('fs');
-const calls = fs.existsSync(${JSON.stringify(join(dir, 'calls.json'))}) ? JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, 'calls.json'))}, 'utf8')) : [];
-calls.push({ argv: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8'), cwd: process.cwd(), task: process.env.KIRUNAK_TASK, step: process.env.KIRUNAK_STEP });
-fs.writeFileSync(${JSON.stringify(join(dir, 'calls.json'))}, JSON.stringify(calls));
-process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}, 'utf8'));
-`);
-  chmodSync(bin, 0o755);
-  return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
-}
 
 const BASE = { permissionMode: 'auto', maxTurns: 100, maxBudgetUsd: 3, sessionId: '11111111-2222-4333-8444-555555555555' };
 

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,3 +48,21 @@ export async function makeWorkspace({ finished = true } = {}) {
 // `k <args>` as the command, in a child with the given $KIRUNAK_HOME: { status, stdout, stderr }.
 export const k = (home, args, env = {}) =>
   spawnSync(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, KIRUNAK_HOME: home, ...env } });
+
+export const RESULT = readFileSync(join(FIXTURES, 'run', 'result.json'), 'utf8');
+
+// A fake `claude`: it records its argv, stdin, cwd and the step's variables, and prints the fixture result.
+export function fakeClaude(result = RESULT) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-fake-claude-')));
+  const bin = join(dir, 'claude');
+  writeFileSync(join(dir, 'result.json'), result);
+  writeFileSync(bin, `#!${process.execPath}
+const fs = require('fs');
+const calls = fs.existsSync(${JSON.stringify(join(dir, 'calls.json'))}) ? JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, 'calls.json'))}, 'utf8')) : [];
+calls.push({ argv: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8'), cwd: process.cwd(), task: process.env.KIRUNAK_TASK, step: process.env.KIRUNAK_STEP });
+fs.writeFileSync(${JSON.stringify(join(dir, 'calls.json'))}, JSON.stringify(calls));
+process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}, 'utf8'));
+`);
+  chmodSync(bin, 0o755);
+  return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
+}
