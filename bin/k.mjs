@@ -26,6 +26,7 @@ import * as cost from '../lib/cost.mjs';
 import * as keeper from '../lib/keeper.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
+import * as review from '../lib/review.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch']);
@@ -39,6 +40,7 @@ Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects
           k check <id> | k check --file <task.md>
 Plan      k plan check <id> | k run <id> [--once|--watch]: start every ready step; --watch until none is ready
           k step brief|start|finish <id> S-n [--session <id>] | k step fail <id> S-n --why "..."
+Review    k review check <id> [<review-n.md>]: the latest review against the frozen task and the code at its head
 Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
 Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
           k keeper report: keep-alives, misses, hits and skips per task and per week
@@ -289,6 +291,14 @@ const VERBS = {
     const r = await orchestrator.run({ ws, id, watch: !!flags.watch, out: flags.json ? () => {} : (line) => console.log(line) });
     const states = Object.entries(r.states).map(([k, v]) => `${k} ${v}`).join(', ');
     return { ...r, code: r.refused.length && !flags.watch ? 1 : 0, text: `${id}: ${states}` };
+  },
+
+  async review({ ws, pos }) {
+    const sub = need(pos[0], 'review verb: check');
+    if (sub !== 'check') throw usage(`unknown review verb ${sub}`);
+    const id = need(pos[1], 'task id');
+    const r = review.check(ws, id, pos[2] || null);
+    return report(`${id} ${r.file}`, r.problems, '');
   },
 
   async verify({ ws, pos }) {
