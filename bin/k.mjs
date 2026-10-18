@@ -23,6 +23,7 @@ import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
+import * as keeper from '../lib/keeper.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
 
@@ -39,6 +40,8 @@ Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects
 Plan      k plan check <id> | k run <id> [--once|--watch]: start every ready step; --watch until none is ready
           k step brief|start|finish <id> S-n [--session <id>] | k step fail <id> S-n --why "..."
 Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
+Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
+          k keeper report: keep-alives, misses, hits and skips per task and per week
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
@@ -237,6 +240,19 @@ const VERBS = {
     const comparisons = baseline ? cost.compare(c, baseline) : [];
     if (flags.baseline) return { comparisons, text: comparisons.join('\n') };
     return { ...c, comparisons, text: [cost.format(c), ...(comparisons.length ? ['', ...comparisons] : [])].join('\n') };
+  },
+
+  async keep({ ws, flags }) {
+    const s = need(session(flags), '--session <id> (or $CLAUDE_CODE_SESSION_ID)');
+    const { conversation, ...r } = await keeper.keep({ ws, session: s, dryRun: !!flags['dry-run'] });
+    return r;
+  },
+
+  async keeper({ ws, pos }) {
+    const sub = need(pos[0], 'keeper verb: report');
+    if (sub !== 'report') throw usage(`unknown keeper verb ${sub}`);
+    const r = await keeper.report(ws);
+    return { ...r, text: keeper.formatReport(r) };
   },
 
   async step({ ws, pos, flags }) {

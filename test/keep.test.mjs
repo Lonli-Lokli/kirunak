@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { keep, readLines, updateSession } from '../lib/keeper.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
-import { approvedWorkspace } from './helpers.mjs';
+import { approvedWorkspace, k } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -71,4 +71,14 @@ test('a cold cache is a miss at the write\'s weight; a session waiting for nothi
   assert.deepEqual([none.action, none.text], ['none', 'nothing to keep for session sess-1: it waits for nothing']);
   assert.deepEqual(readLines(idle.home), []);
   await assert.rejects(keep({ ws: idle.ws, session: 'sess-2', clock: fakeClock() }), (e) => e.code === 1 && /no session file for sess-2/.test(e.message));
+});
+
+test('k keep on the command line: the session from --session, --dry-run waits for nothing', async () => {
+  const w = await setup({ task: false, expiresAt: new Date(Date.now() + 40 * 60000).toISOString() });
+  const r = k(w.home, ['keep', '--session', 'sess-1', '--dry-run']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'nothing to keep for session sess-1: it waits for nothing');
+  const env = k(w.home, ['keep', '--json'], { CLAUDE_CODE_SESSION_ID: 'sess-1' });
+  assert.equal(JSON.parse(env.stdout).action, 'none');
+  assert.equal(k(w.home, ['keep'], { CLAUDE_CODE_SESSION_ID: '' }).status, 2);
 });
