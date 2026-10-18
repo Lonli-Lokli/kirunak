@@ -95,3 +95,14 @@ test('the estimate: the median of the last ten jobs with the same what, 15 minut
   assert.equal(st.queued[0].estimateMinutes, 15);
   assert.equal(st.estimateMinutes, 22.5);
 });
+
+test('claims: one holder at a time, released by its holder, every resource ever claimed listed', () => {
+  const { g } = guard();
+  g.claim('phone', 'kirunak:a', 'smoke test', 1);
+  assert.throws(() => g.claim('phone', 'kirunak:b', 'other test'), /phone is claimed by kirunak:a until .*: smoke test/);
+  assert.deepEqual(g.resources(), [{ id: 'phone', name: 'phone', state: 'claimed by kirunak:a' }]);
+  assert.equal(g.release('phone', 'kirunak:b'), false);
+  assert.equal(g.release('phone', 'kirunak:a'), true);
+  assert.deepEqual(g.resources(), [{ id: 'phone', name: 'phone', state: 'free' }]);
+  assert.equal(g.claim('phone', 'kirunak:b', 'other test').by, 'kirunak:b');
+});

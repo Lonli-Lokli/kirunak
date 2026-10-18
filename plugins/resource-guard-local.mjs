@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { join } from 'node:path';
+import { refuse } from '../lib/errors.mjs';
 import { kirunakHome } from '../lib/home.mjs';
 
 // The core's default `resourceGuard` (plugins.md §2): one heavy job at a time on this machine. The lock is
@@ -167,6 +168,9 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
     return last.length % 2 ? last[mid] : (last[mid - 1] + last[mid]) / 2;
   };
 
+  const held = (c, now = Date.now()) => !c.released && (!c.until || Date.parse(c.until) > now);
+  const claimsOf = (P) => readJson(P.claims, []) || [];
+
   return {
     name: 'resource-guard-local',
     version: '1',
@@ -199,6 +203,32 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           const queued = readQueue(P).filter((e) => e && alive(e.pid)).map(job);
           const left = h ? Math.max(0, h.estimateMinutes - minutesSince(h.since)) : 0;
           return { held: h, queued, estimateMinutes: Math.round((left + queued.reduce((s, q) => s + q.estimateMinutes, 0)) * 100) / 100 };
+        },
+
+        claim(resource, by, why, hours) {
+          const P = at();
+          const claims = claimsOf(P);
+          const cur = claims.find((c) => c.resource === resource);
+          if (cur && held(cur) && cur.by !== by) throw refuse(`${resource} is claimed by ${cur.by}${cur.until ? ` until ${cur.until}` : ''}: ${cur.why}`);
+          const now = Date.now();
+          const entry = { resource, by, why, since: new Date(now).toISOString(), until: hours ? new Date(now + hours * 3600000).toISOString() : null };
+          writeFileSync(P.claims, JSON.stringify([...claims.filter((c) => c !== cur), entry], null, 2) + '\n');
+          return entry;
+        },
+
+        release(resource, by) {
+          const P = at();
+          const claims = claimsOf(P);
+          const cur = claims.find((c) => c.resource === resource && c.by === by && held(c));
+          if (!cur) return false;
+          cur.released = new Date().toISOString();
+          writeFileSync(P.claims, JSON.stringify(claims, null, 2) + '\n');
+          return true;
+        },
+
+        // What was ever claimed, free or held.
+        resources() {
+          return claimsOf(at()).map((c) => ({ id: c.resource, name: c.resource, state: held(c) ? `claimed by ${c.by}` : 'free' }));
         },
       },
     },
