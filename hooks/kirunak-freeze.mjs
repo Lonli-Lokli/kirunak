@@ -27,6 +27,10 @@ const ownerVerb = (verb) =>
   `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`;
 const INTAKE = 'kirunak: intake.md is append-only: record the question or answer with `k intake question|answer`';
 const TICKS = 'kirunak: the owner ticks the checklist: leave its items as `- [ ]`';
+const SLAPIGNORE = 'kirunak: .slapignore is the owner\'s (R23): say which pattern to add or remove and why, and ask the ' +
+  'owner to edit it and type `! k slapignore approve <repo>`';
+const SLAP_RECORD = 'kirunak: only the owner\'s own command writes the .slapignore approvals: ask them to type ' +
+  '`! k slapignore approve <repo>`';
 
 // Where a path sits in a repo's kirunak/ folder; the repo is the directory that holds it.
 function locate(path) {
@@ -74,6 +78,8 @@ function frozenReason(root, found) {
  * that holds protected files (rm -r, mv).
  */
 function verdict(path, change, removing = false) {
+  if (basename(path) === '.slapignore') return SLAPIGNORE;
+  if (path === join(kirunakHome(), 'slapignore.json')) return SLAP_RECORD;
   const at = locate(path);
   if (!at) {
     return removing && basename(path) === 'kirunak' && existsSync(join(path, 'approvals')) ? ownerOnly() : null;
@@ -252,6 +258,7 @@ function ownerVerbOf(args) {
   if (verb === 'queue' && sub === 'show') return null;
   if (OWNER_VERBS.has(verb)) return verb;
   if (verb === 'amend' && sub === 'decline') return 'amend decline';
+  if (verb === 'slapignore' && sub === 'approve') return 'slapignore approve';
   return null;
 }
 
@@ -311,7 +318,7 @@ function effects(words, redirected, dir) {
     else if (sub === 'rm' || sub === 'mv') removes.push(...paths);
   } else if (['node', 'nodejs', 'bun', 'deno'].includes(verb)) {
     const code = args.filter((a) => WRITE_API.test(a)).join('\n');
-    for (const m of code.matchAll(/[^\s'"`(),]*kirunak\/(?:approvals|tasks)\/[^\s'"`(),]*/g)) writes.push(absolute(m[0], dir));
+    for (const m of code.matchAll(/[^\s'"`(),]*(?:kirunak\/(?:approvals|tasks)\/[^\s'"`(),]*|\.slapignore\b)/g)) writes.push(absolute(m[0], dir));
   }
   return { writes, removes };
 }
@@ -349,7 +356,7 @@ export function decide(input) {
   const cwd = typeof input?.cwd === 'string' ? input.cwd : process.cwd();
   if (EDIT_TOOLS.has(tool)) {
     const path = ti.file_path ?? ti.notebook_path;
-    if (typeof path !== 'string' || !path.includes('kirunak/')) return null;
+    if (typeof path !== 'string' || !/kirunak\/|\.slapignore$|slapignore\.json$/.test(path)) return null;
     return verdict(absolute(path, cwd), changeOf(tool, ti));
   }
   if (tool === 'Skill') {

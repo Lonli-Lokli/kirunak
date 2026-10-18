@@ -349,3 +349,33 @@ test('decide: tools it does not guard, and files outside kirunak/, are allowed',
   assert.equal(decide(write(r.task(FROZEN, 'evidence/report.md'), '- [x] measured\n')), null);
   assert.equal(decide(null), null);
 });
+
+// ---- R23: a repo's .slapignore and its approvals are the owner's ----
+
+test('an Edit or Write of any .slapignore, and of the approvals record, is denied', () => {
+  const r = makeRepo();
+  const owner = /^kirunak: \.slapignore is the owner's \(R23\): say which pattern to add or remove and why/;
+  assert.match(run(edit(join(r.repo, '.slapignore'), '*.md', '*.md\n*.kt'), r.home).reason, owner);
+  assert.match(run(write(join(r.top, 'elsewhere', '.slapignore'), '*\n'), r.home).reason, owner);
+  assert.match(run(write(join(r.home, 'slapignore.json'), '{}'), r.home).reason, /only the owner's own command writes the \.slapignore approvals/);
+  assert.equal(run(write(join(r.repo, '.slapignore.bak'), 'x'), r.home).reason, null);
+  assert.equal(run(write(join(r.repo, 'src', 'slapignore.kt'), 'x'), r.home).reason, null);
+});
+
+test('Bash: writes to .slapignore and `k slapignore approve` are denied; reading and committing it are not', () => {
+  const r = makeRepo();
+  for (const command of [
+    "echo '*.kt' >> .slapignore", "sed -i '' 's/md/kt/' .slapignore", 'rm .slapignore', 'cp /tmp/x .slapignore',
+    'git checkout HEAD~1 -- .slapignore', `node -e "require('fs').appendFileSync('.slapignore', '*.kt')"`,
+  ]) {
+    assert.match(run(bash(command, r.repo), r.home).reason ?? '', /\.slapignore is the owner's/, command);
+  }
+  assert.match(run(bash(`echo '{}' > ${join(r.home, 'slapignore.json')}`, r.repo), r.home).reason, /\.slapignore approvals/);
+  for (const command of ['k slapignore approve --all', 'k slapignore approve .', 'node bin/k.mjs slapignore approve ~/repo']) {
+    assert.match(run(bash(command, r.repo), r.home).reason, /`k slapignore approve` is the owner's/, command);
+  }
+  for (const command of ['cat .slapignore', 'git add .slapignore && git commit -m "Add the starter"', 'k slapignore status',
+    'k slapignore approve --all --dry-run', 'k slap --staged', 'git diff -- .slapignore']) {
+    assert.equal(run(bash(command, r.repo), r.home).reason, null, command);
+  }
+});
