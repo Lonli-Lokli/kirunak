@@ -26,7 +26,7 @@ validation, archives) then go unused, and what the owner needs is not in it:
   ideas may be borrowed (an interview, thin slices, blocked-by).
 - D2 **Its own repo**, apart from the workspace it serves. The core carries nothing specific to any workspace: a
   workspace's own parts (its checklist, its resource guard, its handoff, its queue file, its config) are plugins and
-  config kept in the workspace's own repo.
+  config kept in the workspace's own repo. kirunak is open source under the MIT licence (`LICENSE`).
 - D3 **Plugins** at every seam, so it can grow into a full tracker (a Linear replacement) later.
 - D4 **Tasks live in their repo** (in git), with **one queue** across the workspace, since one machine serves all of
   it.
@@ -55,8 +55,10 @@ validation, archives) then go unused, and what the owner needs is not in it:
 - D14 **A Claude Code mod as the working view**: a pane or panel with the current task, its criteria and their review
   state, the queue and the build lock; a line above the prompt; toasts when a build ends, a review is ready, a cache is
   kept warm or an openspec change is refused; the `k-` commands. If a mod's slash command runs without the model and
-  the model cannot call it, it becomes the owner's approval command in place of `!` (the design checks this). A mod
-  is specific to Claude Code, so it stays one front end, a plugin over the core.
+  the model cannot call it, it becomes the owner's approval command in place of `!`. The design settled it
+  (`design/approval.md` §5): a mod's registered command runs without the model and carries an engine-stamped origin
+  the model cannot produce, so it replaces `!` once the mod exists; `!` stays for sessions without it. A mod is
+  specific to Claude Code, so it stays one front end, a plugin over the core.
 
 ## Requirements
 
@@ -82,11 +84,18 @@ validation, archives) then go unused, and what the owner needs is not in it:
   when its inputs exist. No agent is alive while it waits for another step or a build.
 - R10 Heavy jobs (builds, tests, emulators, simulators) run outside agents, through a resource-guard plugin, one at a
   time. The core's default guard is a lock in kirunak's state folder; a workspace with its own lock supplies a plugin.
-  The number of agents running at once is capped by a machine guard.
+  The number of agents running at once is capped by a machine guard. It counts headless steps and the subagents a
+  step is allowed; the owner's interactive sessions are not counted (nothing can cap them).
 - R11 A cache keeper tracks each live conversation's last call, context size and cache lifetime; it keeps the cache
-  warm while the expected wait stays under about 17 hours (where a keep-alive stops paying for itself), and records
-  every keep-alive and every miss.
+  warm while the expected wait stays under the break-even, where a keep-alive stops paying for itself, and records
+  every keep-alive and every miss. The break-even is a ratio, not hours: (cache write price − cache read price) /
+  cache read price keep-alive intervals, taken from the `prices` seam so a price change moves it. At today's prices
+  that is 19 intervals under a 1-hour cache (`(2 − 0.1) / 0.1`): 17.4 hours at 55-minute intervals, 15.8 at 50;
+  under a 5-minute cache, 52 minutes.
 - R12 Each step records its token use, so a task's cost can be measured against a baseline the workspace supplies.
+  What is compared: the median and p90 context per call, the share of calls over a context size the workspace sets,
+  the weight per repo and working day, and keep-alives and misses per task (the baseline is per call and per
+  period, so it has no per-task figure to compare with directly).
 
 ### Review and acceptance
 - R13 The reviewer is not the agent that did the work. It gets the frozen task, the diff and the evidence, not the

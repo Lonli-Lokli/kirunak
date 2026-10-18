@@ -11,7 +11,7 @@ no Python (R19).
 
 ```
 README.md                   what kirunak is and how to set it up (below)
-package.json                { "name": "kirunak", "private": true, "type": "module", "bin": { "k": "bin/k.mjs" },
+package.json                { "name": "kirunak", "private": true, "license": "MIT", "type": "module", "bin": { "k": "bin/k.mjs" },
                               "scripts": { "test": "node --test test/" }, "engines": { "node": ">=22" } }
 bin/k.mjs                   argv → verb; loads the workspace (lib/workspace.mjs) for every verb but `init`, `install`,
                             `check` and the hooks; every verb takes --json and --dry-run; exit 0 ok, 1 refused (with
@@ -91,7 +91,7 @@ agents cannot rewrite, an intake that leaves nothing to guess, a review against 
 git, no server), and **setup** (the steps of "What the owner wires" above as commands: `npm link`, a workspace module
 with its repos and queue, `k init --workspace`, `k install`, `k install --git` per repo, then a first
 `/k-intake`). It names no workspace, person or machine, points at `REQUIREMENTS.md` and `design/` for the rest, and
-has no licence section (the owner's call). Judgement: everything else a reader needs is in the design files, and a
+ends with one line naming the MIT licence (`LICENSE`). Judgement: everything else a reader needs is in the design files, and a
 long README goes stale first.
 
 ### Verbs in slice 1
