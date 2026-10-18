@@ -26,7 +26,8 @@ const KEEP = {
 };
 
 test('a run record gives the conversation: its end, the lifetime of its writes, the context', () => {
-  assert.deepEqual(fromRun(RUN, T0), { kind: 'headless', lastCall: at(0), context: 152000, ttl: '1h', expiresAt: at(60) });
+  assert.deepEqual(fromRun(RUN, T0), { kind: 'headless', lastCall: at(0), context: 152000, ttl: '1h', expiresAt: at(60), model: null });
+  assert.equal(fromRun(KEEP, T0).model, 'claude-sonnet-5-5', 'the model whose weights price its records');
   assert.equal(fromRun(KEEP, T0).context, 152123, 'one call: input, writes and reads');
   const five = { ...KEEP, usage: { ...KEEP.usage, cache_creation: { ephemeral_5m_input_tokens: 120 } } };
   assert.equal(fromRun(five, T0).expiresAt, at(5));
@@ -68,7 +69,7 @@ test('a two-hour heavy job: a keep-alive at expires_at − 5 min each time, each
   assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"keep-alive"/);
   clock.advance(5);
   const hit = await atResume(w, 's-1', clock.now());
-  assert.deepEqual([hit.kind, hit.costWeight], ['hit', 0.1 * 152123]);
+  assert.deepEqual([hit.kind, Math.round(hit.costWeight)], ['hit', Math.round(0.6 * 0.1 * 152123)], 'at the sonnet weights');
   assert.equal(readSession(w.home, 's-1').waitsFor, null);
 });
 

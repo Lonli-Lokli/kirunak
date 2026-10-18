@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readLines } from '../lib/keeper.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
@@ -203,4 +204,72 @@ test('k run refuses a step past the machine cap and says who runs; a task not qu
   }
   writeFileSync(w.ws.queue, '');
   await assert.rejects(run({ ws: w.ws, id: w.id }), /weather\/offline-forecast is not in the queue/);
+});
+
+// The keeper in k run: a clock whose sleep moves time on at once, and runs whose records show a 1-hour cache.
+function keeperClock() {
+  let t = Date.parse('2026-11-03T12:00:00Z');
+  return { now: () => new Date(t), sleep: async (ms) => ((t += ms), await new Promise(setImmediate)), advance: (m) => (t += m * 60000) };
+}
+const USAGE = { input_tokens: 900, cache_creation_input_tokens: 90000, cache_read_input_tokens: 300000, output_tokens: 4000, cache_creation: { ephemeral_1h_input_tokens: 90000 } };
+const KEPT = (sid) => ({ type: 'result', session_id: sid, num_turns: 1, usage: { input_tokens: 3, cache_creation_input_tokens: 40, cache_read_input_tokens: 90900, output_tokens: 2 } });
+function withCache(w) {
+  const original = w.ws.seams.runner.start;
+  w.ws.seams.runner.start = (step) => {
+    const h = original(step);
+    return { ...h, done: h.done.then((o) => ({ ...o, result: { ...o.result, usage: USAGE } })) };
+  };
+}
+
+test('a heavy job past the cache\'s lifetime: k run keeps the conversation warm, records it, and the resume hits', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const clock = keeperClock();
+  let release;
+  const job = new Promise((r) => (release = r));
+  w.ws.seams.resourceGuard = {
+    run: () => job.then(() => ({ exitCode: 0, log: 'ok\n' })),
+    status: () => ({ held: { session: 'kirunak:weather/offline-forecast', what: 'tests', since: clock.now().toISOString(), estimateMinutes: 90 }, queued: [], estimateMinutes: 90 }),
+    claim() {}, release() {}, resources: () => [],
+  };
+  const calls = fakeRunner(w, (step, n) => {
+    if (n > 1) return 'write';
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 120 }, then: 'resume' }));
+    return 'nothing';
+  });
+  withCache(w);
+  const keeps = [];
+  w.ws.seams.runner.keepAlive = async (sid, cwd, flags) => (keeps.push({ sid, cwd, flags, at: clock.now().toISOString() }), release(), { exitCode: 0, result: KEPT(sid) });
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, out: (l) => lines.push(l) });
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  const sid = calls[0].sessionId;
+  assert.deepEqual(keeps.map((x) => [x.sid, x.cwd, x.at, x.flags.env.KIRUNAK_STEP, x.flags.disallowedTools]), [[sid, w.p.root, '2026-11-03T12:55:00.000Z', 'S-1', ['Agent']]]);
+  assert.equal(JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'keep-1.json'), 'utf8')).session_id, sid);
+  assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.session, l.task, l.step]), [['keepalive', sid, w.id, 'S-1'], ['hit', sid, w.id, 'S-1']]);
+  assert.ok(lines.some((l) => l.startsWith(`${w.id} keep-alive: session ${sid}`)), 'k run prints the keep-alive');
+  assert.ok(!existsSync(join(w.home, 'sessions', `${sid}.json`)), 'a conversation that ended is no longer tracked');
+  assert.match(k(w.home, ['cost', w.id]).stdout, /keep-alives 1, misses 0/);
+});
+
+test('a conversation that waits for the owner is skipped, never kept; after a long wait its resume misses', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const clock = keeperClock();
+  const calls = fakeRunner(w, (step, n) => {
+    if (n > 1) return 'write';
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+    return 'nothing';
+  });
+  withCache(w);
+  w.ws.seams.runner.keepAlive = () => assert.fail('no keep-alive for the owner');
+  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
+  const sid = calls[0].sessionId;
+  const file = JSON.parse(readFileSync(join(w.home, 'sessions', `${sid}.json`), 'utf8'));
+  assert.deepEqual([file.kind, file.task, file.step, file.waitsFor, file.ttl], ['headless', w.id, 'S-1', 'owner', '1h']);
+  assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.reason]), [['skip', 'owner']]);
+  clock.advance(180);
+  const again = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
+  assert.deepEqual(again.states, { 'S-1': 'done', 'S-2': 'done' });
+  const [, miss] = readLines(w.home);
+  assert.deepEqual([miss.kind, miss.session, miss.context], ['miss', sid, 90900]);
+  assert.equal(miss.costWeight, 2 * 90900);
 });
