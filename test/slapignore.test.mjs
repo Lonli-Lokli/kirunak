@@ -17,6 +17,7 @@ function setup() {
   mkdirSync(join(repo, 'src'), { recursive: true });
   gitInit(repo);
   writeFileSync(join(repo, 'src', 'a.kt'), 'val a = 1\n');
+  writeFileSync(join(repo, 'src', 'fixture.kt'), Buffer.from([0, 7, 0, 8]));
   writeFileSync(join(repo, 'README.MD'), '# r\n');
   writeFileSync(join(repo, 'icon.png'), Buffer.from([0, 1, 0, 2]));
   writeFileSync(join(repo, 'art.PNG'), Buffer.from([0, 3, 0, 4]));
@@ -30,13 +31,14 @@ function setup() {
 const k = (args, home, cwd) =>
   spawnSync(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), ...args], { cwd, encoding: 'utf8', env: { ...process.env, KIRUNAK_HOME: home } });
 
-test('the starter: A-7\'s list, the case variants, the binary types the repo tracks, the .gitattributes marks', () => {
+test('the starter: A-7\'s list, the case variants, the binary files the repo tracks, the .gitattributes marks', () => {
   const s = setup();
   const text = starter(s.repo);
   assert.ok(text.startsWith(STARTER));
   const after = text.slice(STARTER.length);
   assert.match(after, /# The same, in the other cases this repo uses\n\*\.MD\n/);
-  assert.match(after, /# Binary types this repo tracks\n\*\.PNG\n\*\.png\n/);
+  // A type every file of which is binary is named by its extension; a binary .kt among code is named alone.
+  assert.match(after, /# Binary files this repo tracks\n\*\.PNG\n\*\.png\n\/src\/fixture\.kt\n/);
   assert.match(after, /# Marked generated, vendored or documentation in \.gitattributes\ngen\/\*\*\ndocs\/x\.kt\n$/);
   assert.doesNotMatch(after, /\.bin/, 'build/ already leaves out what is in it');
   assert.deepEqual(marked('a linguist-vendored\n# b linguist-generated\nc text\n'), ['a']);

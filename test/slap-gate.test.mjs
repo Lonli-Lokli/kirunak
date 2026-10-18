@@ -59,7 +59,7 @@ test('an approved .slapignore leaves out what it lists; an unlisted binary is re
   const res = commit(r, 'Art');
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /a binary file that \.slapignore does not list: art\/b\.webp/);
-  assert.match(res.stderr, /add `\*\.webp` to \.slapignore/);
+  assert.match(res.stderr, /add to \.slapignore either `\*\.webp` \(every file of that type\) or `\/art\/b\.webp` \(only this one\)/);
   assert.match(res.stderr, new RegExp(`! k slapignore approve ${repoInfo(r.dir).key}`));
 });
 
