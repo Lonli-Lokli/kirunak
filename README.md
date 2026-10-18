@@ -81,8 +81,11 @@ task is started by hand, one task per session:
    `k list` shows the task as in progress once `progress.md` has a line such as `S-1 started`.
 4. A change to what the task asks for is an amendment: `k amend new <id>`, then the owner types
    `! k approve <id> --amendment A-n`.
-5. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>`. Until the
-   review lands (slice 4) there is no verdict to read, so the owner adds `--checklist-open "<why>"`, and it is
-   recorded.
+5. The plan's review step writes `review.md` in a fresh conversation, and `k review check <id>` holds it to the
+   grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
+   owner ticks them.
+6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>`. It refuses
+   without the review's verdict and while a checklist item is unticked; the owner may accept with items open by
+   adding `--checklist-open "<why>"`, which is recorded.
 
 MIT licence: `LICENSE`.

@@ -11,9 +11,9 @@ The owner says when a task is done. You record nothing yourself: the acceptance 
    anything uncommitted, unpushed or unverified, and ask whether it belongs to the task. Commit only if the owner
    says so.
 2. **Ask for the acceptance**: "Type `! k accept <id>` to record it." (With the kirunak mod: `/k-accept <id>`.)
-   Before a review exists, the owner adds `--checklist-open "<why>"`. The task is done only when the command
-   succeeds and `kirunak/tasks/<slug>/done.json` exists. If it refuses (an unticked checklist item, no review
-   verdict), say what it named and stop. Never run `k accept` yourself.
+   The task is done only when the command succeeds and `kirunak/tasks/<slug>/done.json` exists. If it refuses (an
+   unticked checklist item, no review verdict), say what it named and stop. The owner may accept with items open
+   by adding `--checklist-open "<why>"`, which is recorded. Never run `k accept` yourself.
 3. **Write the handoff and release**: run `k handoff <id> --json`. For each target, write the handoff there: the
    state now, what is open, the next step, the owner's decisions with their dates, and where things are; nothing
    git or the code already records. The command has already released what kirunak and the workspace's plugins

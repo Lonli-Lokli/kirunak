@@ -6,6 +6,7 @@ import { accept, approve, hashBytes, hold, readRecord, resume, verify } from '..
 import { applyAmendment, checkAmendment, decline, newAmendment, parseAmendment } from '../lib/amend.mjs';
 import { log1 } from '../lib/git.mjs';
 import * as queue from '../lib/queue.mjs';
+import { generate } from '../lib/checklist.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask } from '../lib/task.mjs';
 import { gitCommitAll, makeWorkspace, sh } from './helpers.mjs';
@@ -275,22 +276,42 @@ test('decline stamps declined: with the date and why, commits it, and the amendm
   assert.equal(newAmendment({ ws, id: ID, now: NOV7 }).n, 2);
 });
 
-test('accept: refuses without a verdict unless the checklist is recorded open, writes done.json, leaves the queue', async () => {
+// A review of the invented task: AC-3 for a device, E-1 for the owner, or every row met.
+const REVIEW = (verdict, needs = true) => `---
+task: ${ID}
+head: HEAD
+---
+
+| id | verdict | evidence |
+| --- | --- | --- |
+| AC-1 | met | file docs/offline.md:1 |
+| AC-2 | met | file docs/offline.md:1 |
+| AC-3 | ${needs ? 'needs device | On a phone: restart offline' : 'met | file docs/offline.md:1'} |
+| E-1 | ${needs ? 'needs owner | Read: the age line' : 'met | file docs/offline.md:1'} |
+
+${verdict}
+`;
+
+test('accept: refuses without a review verdict, even with --checklist-open; writes done.json, leaves the queue', async () => {
   const { ws, weather, hub, home } = await makeWorkspace();
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /never approved/);
   await approve({ ws, id: ID, now: NOV5 });
-  assert.throws(() => accept({ ws, id: ID }), /no review verdict/);
+  assert.throws(() => accept({ ws, id: ID }), /no review verdict: the plan's review step writes kirunak\/tasks\/offline-forecast\/review\.md/);
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /no review verdict/);
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: pass', false));
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /no review verdict: the last line of kirunak\/tasks\/offline-forecast\/review\.md is not verdict: met/);
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: met', false));
+  gitCommitAll(weather, 'review');
   const head = sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
-  const r = accept({ ws, id: ID, checklistOpen: 'no review yet', now: NOV7 });
+  const r = accept({ ws, id: ID, via: 'mod', now: NOV7 });
   assert.equal(r.state, 'done');
   const done = JSON.parse(readFileSync(join(taskDir(weather), 'done.json'), 'utf8'));
-  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit', 'checklistOpen']);
+  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit']);
   assert.equal(done.task, ID);
   assert.match(done.accepted, ISO_LOCAL);
   assert.equal(done.by, 'owner');
-  assert.equal(done.via, 'shell');
+  assert.equal(done.via, 'mod');
   assert.equal(done.commit, head);
-  assert.equal(done.checklistOpen, 'no review yet');
   assert.equal(subject(weather), `kirunak: accept ${ID}`);
   assert.equal(subject(hub), `kirunak: queue remove ${ID}`);
   assert.deepEqual(queue.read(ws), []);
@@ -298,19 +319,24 @@ test('accept: refuses without a verdict unless the checklist is recorded open, w
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'again' }), /already accepted/);
 });
 
-test('accept with a review: a verdict and every checklist item ticked, or it refuses naming the unticked', async () => {
+test('accept with a review: every item the owner checks is ticked, or it refuses naming them; --checklist-open is recorded', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
-  writeFileSync(join(taskDir(weather), 'review.md'), '# Review\n\nverdict: pass\n');
-  writeFileSync(join(taskDir(weather), 'checklist.md'), '- [x] Opens offline on a phone\n- [ ] Large text on a small phone\n');
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: needs owner (AC-3, E-1)'));
   gitCommitAll(weather, 'review');
-  assert.throws(() => accept({ ws, id: ID }), /1 unticked item\(s\):\n {2}- \[ \] Large text on a small phone/);
-  writeFileSync(join(taskDir(weather), 'checklist.md'), '- [x] Opens offline on a phone\n- [x] Large text on a small phone\n');
+  assert.throws(() => accept({ ws, id: ID }), new RegExp(`2 unticked item\\(s\\), 2 not in checklist\\.md yet \\(k checklist ${ID} writes them from review\\.md\\):\n {2}- \\[ \\] AC-3 On a phone: restart offline \\(review\\.md\\)\n {2}- \\[ \\] E-1`));
+  generate(ws, ID);
+  assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 2 unticked item\(s\):\n {2}- \[ \] AC-3 On a phone: restart offline \(review\.md\)\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
+  const file = join(taskDir(weather), 'checklist.md');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('- [ ] AC-3', '- [x] AC-3'));
+  assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 1 unticked item\(s\):\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: '  ' }), /needs its reason/);
   gitCommitAll(weather, 'ticked');
-  accept({ ws, id: ID, via: 'mod', now: NOV7 });
+  accept({ ws, id: ID, checklistOpen: 'the age line is read at the next release', now: NOV7 });
   const done = JSON.parse(readFileSync(join(taskDir(weather), 'done.json'), 'utf8'));
-  assert.equal(done.via, 'mod');
-  assert.equal('checklistOpen' in done, false);
+  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit', 'checklistOpen']);
+  assert.equal(done.via, 'shell');
+  assert.equal(done.checklistOpen, 'the age line is read at the next release');
 });
 
 test('hold writes hold.md with the date and why, resume deletes it, each in its own commit', async () => {
