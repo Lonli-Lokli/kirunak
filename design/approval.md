@@ -53,9 +53,12 @@ It refuses, with the reason that says what to do instead:
 | A Bash command running `k approve`, `k accept`, `k amend decline`, `k hold`, `k resume`, `k queue` (or `k.mjs` with those verbs) | the owner's verbs | "`k <verb>` is the owner's: it runs only from the owner's own prompt (`!`) or the mod" |
 | Edit/Write of `kirunak/tasks/<slug>/intake.md` | append-only through `k intake` | "record the question or answer with `k intake question|answer`" |
 | Edit/Write of `checklist.md` ticks (`- [x]`) | R15: the owner's checklist | "the owner ticks the checklist" |
+| Edit/Write of any `.slapignore`, or a shell write to one (redirection, `sed -i`, `cp`, `rm`, `git checkout`/`restore` of it, a `node -e` that writes it) | R23: the owner's list (`change-size.md` §4) | "`.slapignore` is the owner's (R23): say which pattern to add or remove and why, and ask the owner to edit it and type `! k slapignore approve <repo>`" |
+| Any write to `$KIRUNAK_HOME/slapignore.json`, or a Bash command running `k slapignore approve` | R23: only the owner approves | "only the owner's own command writes the `.slapignore` approvals" / "`k slapignore approve` is the owner's" |
 
 It allows everything else: draft `task.md`, `plan.md`, `progress.md`, `notes.md`, `handoff.md`, `review.md`,
-`evidence/`, a new amendment file, reading anything, `git commit` of the allowed files, every `k` reading verb and
+`evidence/`, a new amendment file, reading anything, `git commit` of the allowed files (a `.slapignore` too: the git
+hook checks it against its approval), every `k` reading verb and
 `k intake`, `k check`, `k step`, `k review`, `k board`, `k handoff`. A `k` verb run with `--dry-run` is always
 allowed.
 

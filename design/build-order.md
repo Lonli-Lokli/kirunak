@@ -138,11 +138,13 @@ long README goes stale first.
    it → `git log` shows the intake commit, the approval commit, the queue commit in the queue's repo → `/k-done` with
    `! k accept` and the handoff written where the workspace's `handoff` says.
 
-## Slice 1b: change size. Closes R21, R22
+## Slice 1b: change size. Closes R21, R22, R23
 
 Built after slice 1, before the first repo's migration, so every commit of its tasks is measured from the start.
-Files: `lib/slap.mjs` (`score`, `tier`, `measure`, `measureDiff`, `parseNumstat`, `parseAttrs`),
-`hooks/git-prepare-commit-msg.mjs`, the `k slap` verb, `k install --git` writing the hook. Design, tests and numbers:
+Files: `lib/slap.mjs` (`score`, `tier`, `limit`, `measure`, `measureDiff`, `parseDiff`, `gate`), `lib/ignore.mjs`
+(the `.slapignore` matcher), `lib/slapignore.mjs` (the starter, the registry, `approve`),
+`hooks/git-prepare-commit-msg.mjs`, the `k slap` and `k slapignore` verbs, `k install --git` writing the hook and the
+starter. R23 and "at most M" came with the owner's amendment of the same week. Design, tests and numbers:
 `change-size.md`.
 
 ## Slice 2: the orchestrator. Closes R8, R9, R10, R12

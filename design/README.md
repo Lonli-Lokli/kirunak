@@ -13,7 +13,7 @@ examples are invented: a repo `weather`, a task `weather/offline-forecast`, a hu
 | `orchestrator.md` | `plan.md`, the step lifecycle, the headless `claude -p` runner with every flag cited, models and budgets as config, heavy jobs and the machine guard, the cache keeper with the 17-hour figure checked, token records and the workspace's baseline |
 | `review.md` | the reviewer's separation and inputs, the `review.md` grammar, the owner's checklist, closing through kirunak's `k-done` skill and `k accept` |
 | `boards.md` | `k list`, the generated local page, the phone artifact sync step, the mod |
-| `change-size.md` | SLAP on every commit (R21, R22): the measure, what counts as code, the prepare-commit-msg gate that `--no-verify` cannot skip, `k slap` |
+| `change-size.md` | SLAP on every commit (R21, R22, R23): the measure, the owner's `.slapignore` and its approval, the prepare-commit-msg gate that `--no-verify` cannot skip, `k slap`, `k slapignore` |
 | `build-order.md` | slice 1 in full (files, functions, verbs, `k install`, what a workspace supplies, the root README, the tests per requirement, the numbers to check), slices 2 to 7 |
 
 ## The slices and what each closes

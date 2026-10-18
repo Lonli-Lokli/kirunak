@@ -113,13 +113,15 @@ sessions/<id>.json     a session's current task and step, context and cache (set
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)
 events.jsonl           what the front ends show as toasts: build ended, review ready, keep-alive, refusal
 freeze.log             every refusal of the PreToolUse hook (approval.md §2)
+slapignore.json        the repos with the git hooks and the owner's approval of each one's .slapignore (change-size.md §4)
 guard/                 the default resource guard: lock, queue, claims.json, log.jsonl (§2)
 board.html             the generated board (boards.md §2)
 board-artifact.json    the phone board's URL (boards.md §3)
 ```
 
 Judgement: nothing here is a record of a task (those are in git); losing the folder loses nothing but a toast, the
-guard's history and the board's URL.
+guard's history and the board's URL, and the `.slapignore` approvals, which the owner gives again (`k slapignore
+approve --all`) before a commit that carries a `.slapignore` passes.
 
 ## 5. Requirements this file satisfies
 
