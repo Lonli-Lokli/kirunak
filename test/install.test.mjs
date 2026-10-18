@@ -124,21 +124,22 @@ test('--git writes a hook in a repo with none, and only prints for a repo with i
   const h = home();
   const bare = repo(h.dir, 'weather');
   const own = repo(h.dir, 'hub');
-  const line = `node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`;
+  const fallback = 'PATH="$PATH":/opt/node/bin';
+  const line = `${fallback} node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`;
   writeFileSync(join(own, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nnpm test\n', { mode: 0o755 });
-  const { actions } = install({ ...h, git: [bare, own] });
+  const { actions } = install({ ...h, git: [bare, own], nodePath: '/opt/node/bin/node' });
   const hook = join(bare, '.git', 'hooks', 'pre-commit');
-  assert.equal(readFileSync(hook, 'utf8'), `#!/bin/sh\n${line}\n`);
+  assert.equal(readFileSync(hook, 'utf8'), `#!/bin/sh\n${fallback}\nnode ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1\n`);
   assert.equal(statSync(hook).mode & 0o777, 0o755);
   assert.equal(readFileSync(join(own, '.git', 'hooks', 'pre-commit'), 'utf8'), '#!/bin/sh\nnpm test\n');
   assert.ok(actions.includes(`wrote ${hook}`));
   assert.ok(actions.some((a) => a.endsWith(`add this line to it: ${line}`)));
   writeFileSync(join(own, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\nnpm test\n${line}\n`);
-  const again = install({ ...h, git: [bare, own] }).actions;
+  const again = install({ ...h, git: [bare, own], nodePath: '/opt/node/bin/node' }).actions;
   assert.equal(again.filter((a) => a.includes("already runs kirunak's hook")).length, 4);
   for (const r of [bare, own]) {
     const slap = join(r, '.git', 'hooks', 'prepare-commit-msg');
-    assert.equal(readFileSync(slap, 'utf8'), `#!/bin/sh\nexec node ${join(h.kirunakRoot, 'hooks', 'git-prepare-commit-msg.mjs')} "$@"\n`);
+    assert.equal(readFileSync(slap, 'utf8'), `#!/bin/sh\n${fallback}\nexec node ${join(h.kirunakRoot, 'hooks', 'git-prepare-commit-msg.mjs')} "$@"\n`);
     assert.equal(statSync(slap).mode & 0o777, 0o755);
   }
   assert.throws(() => install({ ...h, git: join(h.dir, 'not-a-repo') }), /not a git repository/);
@@ -152,4 +153,19 @@ test('--git follows core.hooksPath', () => {
   install({ ...h, git: r });
   assert.ok(existsSync(join(r, '.githooks', 'prepare-commit-msg')));
   assert.ok(!existsSync(join(r, '.git', 'hooks', 'prepare-commit-msg')));
+});
+
+test('a hook kirunak wrote before is rewritten; the new one finds node with a GUI\'s bare PATH', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  const slap = join(r, '.git', 'hooks', 'prepare-commit-msg');
+  writeFileSync(slap, `#!/bin/sh\nexec node ${join(KIRUNAK, 'hooks', 'git-prepare-commit-msg.mjs')} "$@"\n`, { mode: 0o755 });
+  const { actions } = install({ ...h, kirunakRoot: KIRUNAK, git: r });
+  assert.ok(actions.includes(`rewrote ${slap}`));
+  assert.match(readFileSync(slap, 'utf8'), /^#!\/bin\/sh\nPATH="\$PATH":.+\nexec node /);
+  writeFileSync(join(r, 'a.mjs'), 'export {};\n');
+  execFileSync('git', ['add', 'a.mjs'], { cwd: r });
+  const env = { HOME: h.dir, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', KIRUNAK_HOME: h.home };
+  execFileSync('git', ['commit', '-q', '-m', 'From a GUI'], { cwd: r, env });
+  assert.match(execFileSync('git', ['log', '-1', '--format=%B'], { cwd: r, encoding: 'utf8' }), /SLAP: 0 \(S\)/);
 });
