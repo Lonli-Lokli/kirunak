@@ -65,11 +65,12 @@ test('the default prices: the cache ratios and the model multipliers', () => {
   assert.equal(p.weights('claude-fable-5-1').write1h, 5);
 });
 
-test('a workspace loads the core defaults for the guards and the prices', async () => {
+test('a workspace loads the core defaults for the guards, the runner and the prices', async () => {
   const { ws } = await makeWorkspace();
   const modules = Object.fromEntries(ws.seams.loaded.map((l) => [l.seam, l.module]));
   assert.match(modules.resourceGuard, /resource-guard-local\.mjs$/);
   assert.match(modules.machineGuard, /machine-guard-pids\.mjs$/);
   assert.match(modules.prices, /prices-default\.mjs$/);
+  assert.match(modules.runner, /runner-claude\.mjs$/);
   assert.deepEqual(await ws.seams.machineGuard.limits(), { maxAgents: 2, maxHeavy: 1 });
 });
