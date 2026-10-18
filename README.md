@@ -64,4 +64,21 @@ You need Node 22 or later, git and Claude Code.
 The state kirunak keeps on this machine (the pointer, logs, the board) is in `~/.kirunak`, or wherever
 `KIRUNAK_HOME` points.
 
+## Working a task
+
+Until the orchestrator lands (`k run`, slice 2 in `design/build-order.md`), the queue is an order you read and a
+task is started by hand, one task per session:
+
+1. `k queue show` lists the approved tasks in order. Only the owner changes it:
+   `! k queue move <id> --first` (or `--last`, `--before <id>`, `--after <id>`).
+2. Open a fresh Claude Code session in the task's repo and ask it to work the task by its id. The session runs
+   `k start <id>`, which records which task that session is on and changes nothing else.
+3. The session keeps its plan and progress beside the task, in `plan.md` and `progress.md`, never in `task.md`.
+   `k list` shows the task as in progress once `progress.md` has a line such as `S-1 started`.
+4. A change to what the task asks for is an amendment: `k amend new <id>`, then the owner types
+   `! k approve <id> --amendment A-n`.
+5. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>`. Until the
+   review lands (slice 4) there is no verdict to read, so the owner adds `--checklist-open "<why>"`, and it is
+   recorded.
+
 MIT licence: `LICENSE`.
