@@ -151,6 +151,18 @@ const VERBS = {
       say(existsSync(join(homedir(), '.claude', 'skills', s, 'SKILL.md')), `skill ${s} is linked (k install)`);
     }
     try {
+      const st = await ws.seams.resourceGuard.status();
+      say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what})` : 'free'}, ${st.queued.length} queued`);
+    } catch (e) {
+      say(false, `resource guard: status() did not answer: ${e.message}`);
+    }
+    const limits = await ws.seams.machineGuard.limits();
+    say(true, `machine: at most ${limits.maxAgents} steps at once, ${limits.maxHeavy} heavy job`);
+    for (const model of ['opus', 'sonnet', 'haiku', 'fable']) {
+      const w = await ws.seams.prices.weights(model);
+      say(true, `prices ${model}: ${Object.entries(w).map(([k, v]) => `${k} ${+v.toFixed(4)}`).join(', ')}`);
+    }
+    try {
       say(true, `claude ${execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 10000 }).trim()}`);
     } catch {
       say(false, 'claude --version did not answer (needed from slice 2, the runner)');
