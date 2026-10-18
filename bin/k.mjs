@@ -24,9 +24,10 @@ import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
 import * as steps from '../lib/steps.mjs';
+import * as orchestrator from '../lib/run.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -35,7 +36,7 @@ Setup     k init --workspace <module> | k install [--settings <file>] [--skills 
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
-Plan      k plan check <id>
+Plan      k plan check <id> | k run <id> [--once|--watch]: start every ready step; --watch until none is ready
           k step brief|start|finish <id> S-n [--session <id>] | k step fail <id> S-n --why "..."
 Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
@@ -258,6 +259,20 @@ const VERBS = {
     }
     const r = steps.fail({ ws, id, step, why: need(flags.why, '--why "<why>"') });
     return { ...r, text: `${id} ${step}: failed, ${r.report}${r.escalated ? '; marked [escalate] in plan.md' : ''}` };
+  },
+
+  async run({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    if (flags.once && flags.watch) throw usage('--once or --watch, not both');
+    if (flags['dry-run']) {
+      const t = steps.load(ws, id);
+      const problems = steps.gate(t);
+      const states = [...t.states].map(([k, v]) => `${k} ${v.state}${v.why ? ` (${v.why})` : ''}`);
+      return { problems, code: problems.length ? 1 : 0, text: [...problems, ...states].join('\n') };
+    }
+    const r = await orchestrator.run({ ws, id, watch: !!flags.watch, out: flags.json ? () => {} : (line) => console.log(line) });
+    const states = Object.entries(r.states).map(([k, v]) => `${k} ${v}`).join(', ');
+    return { ...r, code: r.refused.length && !flags.watch ? 1 : 0, text: `${id}: ${states}` };
   },
 
   async verify({ ws, pos }) {
