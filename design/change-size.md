@@ -50,9 +50,10 @@ built-in list left it: lock files (`*.lock`, `package-lock.json`, `npm-shrinkwra
 `*.min.css`), source maps (`*.map`), prose (`*.md`, `*.mdx`, `*.markdown`, `*.txt`, `*.rst`, `*.adoc`) and tables
 (`*.tsv`, `*.csv`); then the same extensions in other cases the repo tracks (the built-in list ignored case); the
 binary files the repo tracks (`git diff --numstat` of HEAD against the empty tree, rows with `-`, not already left
-out), named by extension when every tracked file of it is binary and by their own paths when not; and the patterns its root `.gitattributes` marks `linguist-generated`, `linguist-vendored` or
-`linguist-documentation`, which slice 1b read. The starter is not committed by `k install`: the owner approves it
-first (§4), then it is committed like any file.
+out), named by extension when every tracked file of it is binary and by their own paths when not (a binary fixture
+among code files of its extension leaves out only itself); and the patterns its root `.gitattributes` marks
+`linguist-generated`, `linguist-vendored` or `linguist-documentation`, which slice 1b read. The starter is not
+committed by `k install`: the owner approves it first (§4), then it is committed like any file.
 
 - Judgement: configuration and resources (`.json`, `.xml`, `.yaml`, `.gradle.kts`, string tables) count unless a repo
   lists them. A reviewer reads them, and a string table translated into many languages at once is the change R22
