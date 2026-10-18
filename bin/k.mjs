@@ -27,6 +27,7 @@ import * as keeper from '../lib/keeper.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
+import * as checklist from '../lib/checklist.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch']);
@@ -41,6 +42,7 @@ Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects
 Plan      k plan check <id> | k run <id> [--once|--watch]: start every ready step; --watch until none is ready
           k step brief|start|finish <id> S-n [--session <id>] | k step fail <id> S-n --why "..."
 Review    k review check <id> [<review-n.md>]: the latest review against the frozen task and the code at its head
+          k checklist <id>: checklist.md, the latest review's needs device and needs owner rows, for the owner to tick
 Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
 Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
           k keeper report: keep-alives, misses, hits and skips per task and per week
@@ -299,6 +301,14 @@ const VERBS = {
     const id = need(pos[1], 'task id');
     const r = review.check(ws, id, pos[2] || null);
     return report(`${id} ${r.file}`, r.problems, '');
+  },
+
+  async checklist({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    if (flags['dry-run']) return { text: `would write ${taskPaths(ws, id).rel('checklist.md')}` };
+    const r = checklist.generate(ws, id);
+    const items = r.items.map((x) => `- [${x.ticked ? 'x' : ' '}] ${x.text}`);
+    return { ...r, text: [`${r.path}: ${r.items.length} item${r.items.length === 1 ? '' : 's'} from ${r.review}`, ...items].join('\n') };
   },
 
   async verify({ ws, pos }) {
