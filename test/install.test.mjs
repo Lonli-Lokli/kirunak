@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { install } from '../lib/install.mjs';
 import { gitInit, KIRUNAK } from './helpers.mjs';
 
@@ -134,6 +135,21 @@ test('--git writes a hook in a repo with none, and only prints for a repo with i
   assert.ok(actions.some((a) => a.endsWith(`add this line to it: ${line}`)));
   writeFileSync(join(own, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\nnpm test\n${line}\n`);
   const again = install({ ...h, git: [bare, own] }).actions;
-  assert.ok(again.filter((a) => a.includes("already runs kirunak's git hook")).length === 2);
+  assert.equal(again.filter((a) => a.includes("already runs kirunak's hook")).length, 4);
+  for (const r of [bare, own]) {
+    const slap = join(r, '.git', 'hooks', 'prepare-commit-msg');
+    assert.equal(readFileSync(slap, 'utf8'), `#!/bin/sh\nexec node ${join(h.kirunakRoot, 'hooks', 'git-prepare-commit-msg.mjs')} "$@"\n`);
+    assert.equal(statSync(slap).mode & 0o777, 0o755);
+  }
   assert.throws(() => install({ ...h, git: join(h.dir, 'not-a-repo') }), /not a git repository/);
+});
+
+test('--git follows core.hooksPath', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  mkdirSync(join(r, '.githooks'));
+  execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { cwd: r });
+  install({ ...h, git: r });
+  assert.ok(existsSync(join(r, '.githooks', 'prepare-commit-msg')));
+  assert.ok(!existsSync(join(r, '.git', 'hooks', 'prepare-commit-msg')));
 });

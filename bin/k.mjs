@@ -19,13 +19,14 @@ import * as list from '../lib/list.mjs';
 import * as board from '../lib/board.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install } from '../lib/install.mjs';
+import * as slap from '../lib/slap.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
-Setup     k init --workspace <module> | k install [--settings <file>] [--skills <dir>] [--git <repo>] [--print]
+Setup     k init --workspace <module> | k install [--settings <file>] [--skills <dir>] [--git <repo>]... [--print]
           k plugins | k doctor
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
@@ -35,6 +36,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] | k verify [<id>] | k queue show
+Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
 Work      k amend new <id> [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
 Every verb takes --json and --dry-run.`;
@@ -50,10 +52,13 @@ export function parseArgs(argv) {
     }
     const eq = a.indexOf('=');
     const name = eq > 0 ? a.slice(2, eq) : a.slice(2);
-    if (eq > 0) flags[name] = a.slice(eq + 1);
-    else if (BOOLEAN.has(name)) flags[name] = true;
-    else if (i + 1 < argv.length) flags[name] = argv[++i];
+    let value;
+    if (eq > 0) value = a.slice(eq + 1);
+    else if (BOOLEAN.has(name)) value = true;
+    else if (i + 1 < argv.length) value = argv[++i];
     else throw usage(`--${name} needs a value`);
+    // A repeated flag (`--git a --git b`) collects its values.
+    flags[name] = name in flags && value !== true ? [flags[name], value].flat() : value;
   }
   return { pos, flags };
 }
@@ -108,7 +113,7 @@ const VERBS = {
       settingsPath: flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json'),
       kirunakRoot: KIRUNAK,
       skillsDir: flags.skills ? resolve(expandHome(flags.skills)) : join(homedir(), '.claude', 'skills'),
-      git: flags.git ? resolve(expandHome(flags.git)) : undefined,
+      git: flags.git ? [flags.git].flat().map((g) => resolve(expandHome(g))) : undefined,
       print: !!(flags.print || flags['dry-run']),
     });
     return { ...r, text: r.actions.join('\n') };
@@ -280,6 +285,32 @@ const VERBS = {
     return { path, text: path };
   },
 
+  async slap({ pos, flags }) {
+    const root = process.cwd();
+    const git = (args) => {
+      try {
+        return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      } catch (e) {
+        throw new KError(`git ${args[0]}: ${String(e.stderr || e.message).trim().split('\n')[0]}`, 1);
+      }
+    };
+    const fmt = (m, what) => `${String(m.score).padStart(4)} ${m.tier.padEnd(2)} L ${String(m.L).padStart(5)} F ${String(m.F).padStart(3)}  ${what}`;
+    if (flags.staged) {
+      let head = null;
+      try {
+        head = git(['rev-parse', '--verify', '-q', 'HEAD']);
+      } catch {}
+      const m = slap.measureDiff(root, ['--cached', head || slap.EMPTY_TREE]);
+      return { ...m, code: m.score >= slap.XL ? 1 : 0, text: fmt(m, 'staged') + (m.score >= slap.XL ? '\nXL: git will refuse this commit; split it' : '') };
+    }
+    const spec = pos[0] || 'HEAD';
+    const shas = spec.includes('..') ? git(['rev-list', '--no-merges', '--reverse', spec]).split('\n').filter(Boolean) : [git(['rev-parse', '--verify', spec])];
+    const rows = shas.map((sha) => ({ sha, subject: git(['log', '-1', '--format=%h %s', sha]), ...slap.measureDiff(root, [slap.parentOf(root, sha), sha]) }));
+    const tiers = rows.reduce((t, r) => ({ ...t, [r.tier]: (t[r.tier] || 0) + 1 }), {});
+    const summary = rows.length > 1 ? `\n${rows.length} commits: ${['S', 'M', 'L', 'XL'].map((t) => `${t} ${tiers[t] || 0}`).join(', ')}` : '';
+    return { rows: rows.map(({ counted, skipped, ...r }) => r), text: rows.map((r) => fmt(r, r.subject.slice(0, 80))).join('\n') + summary };
+  },
+
   async start({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
     const s = need(session(flags), '--session (or $CLAUDE_CODE_SESSION_ID)');
@@ -307,7 +338,7 @@ function report(what, problems, note) {
   return { ok: false, problems, code: 1, text: `${what}: ${problems.length} problem${problems.length > 1 ? 's' : ''}${note}\n${lines.join('\n')}` };
 }
 
-const NO_WORKSPACE = new Set(['init', 'install']);
+const NO_WORKSPACE = new Set(['init', 'install', 'slap']);
 
 export async function main(argv = process.argv.slice(2)) {
   const { pos, flags } = parseArgs(argv);
