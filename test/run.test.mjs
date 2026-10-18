@@ -120,6 +120,14 @@ test('exit 1 fails the step with its exit code', async () => {
   assert.match(progress(w), /S-1 failed: exit 1\n$/);
 });
 
+test('a runner that throws after the step started fails the step instead of leaving it running', async () => {
+  const w = await approvedWorkspace(PLAN);
+  w.ws.seams.runner = { start() { throw new Error('no runner here'); }, keepAlive: () => null };
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.equal(r.ended['S-1'], 'failed');
+  assert.match(progress(w), /S-1 failed: kirunak stopped the step: no runner here\n$/);
+});
+
 test('a run past its budget minutes is killed and fails, rather than hanging', async () => {
   const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nbudget: 0.005 minutes\n'));
   fakeRunner(w, () => 'nothing');
