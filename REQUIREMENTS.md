@@ -1,6 +1,6 @@
 # kirunak: a task system for Claude Code workspaces. Requirements
 
-kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R20). A change from here on is an
+kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R22). A change from here on is an
 amendment the owner approves (R7 applies to this file too). "The owner" is the person whose workspace kirunak serves:
 the one who approves tasks and says when one is done. A **workspace** is the set of repos one owner works on with
 Claude Code on one machine.
@@ -104,6 +104,16 @@ validation, archives) then go unused, and what the owner needs is not in it:
   test name, a file and line, a measurement or a screenshot.
 - R15 What needs a device or the owner becomes the owner's checklist. A task is done only when the owner says so
   (kirunak's `k-done` skill).
+
+### Change size
+- R21 Every commit in a repo where kirunak's git hooks are installed is measured by SLAP:
+  `SLAP = √L × √F_adj`, where L is the lines added plus deleted and F the files changed, and
+  `F_adj = F × min(1, (L/F) / 5) + ln(1 + max(0, L/F − 50))`. Only code counts: lock files, build output, minified
+  files and source maps, binary files, prose and data files (Markdown, plain text, tables), and anything the repo's
+  `.gitattributes` marks generated, vendored or documentation are left out. Tiers: S up to 10, M 11 to 35, L 36 to
+  70, XL 71 and over. A workspace installs the hooks in every repo it wants measured, on kirunak or not.
+- R22 An XL commit is refused, with no override: it is split into smaller commits. Every other commit records its
+  score as a line `SLAP: <score> (<tier>)` in its message.
 
 ### Visibility, cloud, trackers
 - R16 Tasks are readable files in git. A list and a generated board page can be seen locally (D5, D10).
