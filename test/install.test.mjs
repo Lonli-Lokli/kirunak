@@ -23,7 +23,7 @@ function home() {
     permissions: { allow: ['Bash(ls:*)'] },
   };
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-  return { dir, kirunakRoot, settingsPath, skillsDir: join(dir, '.claude', 'skills'), settings };
+  return { dir, kirunakRoot, settingsPath, skillsDir: join(dir, '.claude', 'skills'), settings, home: join(dir, 'state') };
 }
 
 const repo = (dir, name) => {

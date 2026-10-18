@@ -20,6 +20,7 @@ import * as board from '../lib/board.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
+import * as slapignore from '../lib/slapignore.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged']);
@@ -37,6 +38,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k queue remove <id>
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] | k verify [<id>] | k queue show
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
+          k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
 Every verb takes --json and --dry-run.`;
@@ -300,15 +302,30 @@ const VERBS = {
       try {
         head = git(['rev-parse', '--verify', '-q', 'HEAD']);
       } catch {}
-      const m = slap.measureDiff(root, ['--cached', head || slap.EMPTY_TREE]);
-      return { ...m, code: m.score >= slap.XL ? 1 : 0, text: fmt(m, 'staged') + (m.score >= slap.XL ? '\nXL: git will refuse this commit; split it' : '') };
+      const { m, refusals } = slap.gate(root, head || slap.EMPTY_TREE);
+      const text = [m ? fmt(m, 'staged') : null, ...refusals].filter(Boolean).join('\n');
+      return { ...m, refusals, code: refusals.length ? 1 : 0, text };
     }
     const spec = pos[0] || 'HEAD';
     const shas = spec.includes('..') ? git(['rev-list', '--no-merges', '--reverse', spec]).split('\n').filter(Boolean) : [git(['rev-parse', '--verify', spec])];
-    const rows = shas.map((sha) => ({ sha, subject: git(['log', '-1', '--format=%h %s', sha]), ...slap.measureDiff(root, [slap.parentOf(root, sha), sha]) }));
+    const rows = shas.map((sha) => ({ sha, subject: git(['log', '-1', '--format=%h %s', sha]), ...slap.measureDiff(root, [slap.parentOf(root, sha), sha], slap.slapignoreAt(root, sha)) }));
     const tiers = rows.reduce((t, r) => ({ ...t, [r.tier]: (t[r.tier] || 0) + 1 }), {});
     const summary = rows.length > 1 ? `\n${rows.length} commits: ${['S', 'M', 'L', 'XL'].map((t) => `${t} ${tiers[t] || 0}`).join(', ')}` : '';
     return { rows: rows.map(({ counted, skipped, ...r }) => r), text: rows.map((r) => fmt(r, r.subject.slice(0, 80))).join('\n') + summary };
+  },
+
+  // The owner's approval of each repo's .slapignore (R23); status reads it.
+  async slapignore({ pos, flags }) {
+    const sub = need(pos[0], 'slapignore verb: status|approve');
+    if (sub === 'status') {
+      const rows = slapignore.status();
+      return { rows, text: rows.map((r) => `${r.state.padEnd(10)} ${r.key}${r.approved ? `  (approved ${r.approved})` : ''}`).join('\n') || 'no repo is registered: k install --git <repo>' };
+    }
+    if (sub !== 'approve') throw usage(`unknown slapignore verb ${sub}`);
+    const dryRun = !!flags['dry-run'];
+    const rows = slapignore.approve({ repos: pos.slice(1), all: !!flags.all, via: flags.via || 'shell', dryRun });
+    const text = rows.map((r) => `${r.already ? 'already approved' : dryRun ? 'would approve' : 'approved'} ${r.key}/.slapignore (${r.patterns} patterns, ${r.hash.slice(0, 19)}…)`).join('\n');
+    return { rows, text: text || 'nothing to approve' };
   },
 
   async start({ ws, pos, flags }) {
@@ -338,7 +355,7 @@ function report(what, problems, note) {
   return { ok: false, problems, code: 1, text: `${what}: ${problems.length} problem${problems.length > 1 ? 's' : ''}${note}\n${lines.join('\n')}` };
 }
 
-const NO_WORKSPACE = new Set(['init', 'install', 'slap']);
+const NO_WORKSPACE = new Set(['init', 'install', 'slap', 'slapignore']);
 
 export async function main(argv = process.argv.slice(2)) {
   const { pos, flags } = parseArgs(argv);
