@@ -60,8 +60,8 @@ test('the skills stay short', () => {
   assert.ok(read('skills/k-done/SKILL.md').split('\n').length <= 60);
 });
 
-test('the README is the two parts and the licence line', () => {
+test('the README is its three parts and the licence line', () => {
   const text = read('README.md');
-  assert.deepEqual([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]), ['What it is', 'Setup']);
+  assert.deepEqual([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]), ['What it is', 'Setup', 'Working a task']);
   assert.match(text.trim().split('\n').at(-1), /MIT/);
 });
