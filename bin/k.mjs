@@ -22,9 +22,10 @@ import * as handoff from '../lib/handoff.mjs';
 import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
+import * as cost from '../lib/cost.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -34,6 +35,7 @@ Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
 Plan      k plan check <id>
+Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
@@ -222,6 +224,16 @@ const VERBS = {
     if (!existsSync(plan)) throw new KError(`${id} has no plan: ${p.rel('plan.md')}`, 1);
     const problems = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p);
     return report(`${id} plan`, problems, '');
+  },
+
+  async cost({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    if (!existsSync(taskPaths(ws, id).task)) throw new KError(`unknown task ${id}`, 1);
+    const c = await cost.costOf(ws, id);
+    const baseline = ws.baseline && existsSync(ws.baseline) ? JSON.parse(readFileSync(ws.baseline, 'utf8')) : null;
+    const comparisons = baseline ? cost.compare(c, baseline) : [];
+    if (flags.baseline) return { comparisons, text: comparisons.join('\n') };
+    return { ...c, comparisons, text: [cost.format(c), ...(comparisons.length ? ['', ...comparisons] : [])].join('\n') };
   },
 
   async verify({ ws, pos }) {
