@@ -10,6 +10,7 @@ import { expandHome, kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, allTaskIds, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask, removedIds } from '../lib/task.mjs';
+import { checkPlan, parsePlan } from '../lib/plan.mjs';
 import { isCommitted } from '../lib/git.mjs';
 import * as approval from '../lib/approval.mjs';
 import * as amend from '../lib/amend.mjs';
@@ -32,6 +33,7 @@ Setup     k init --workspace <module> | k install [--settings <file>] [--skills 
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
+Plan      k plan check <id>
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
@@ -196,6 +198,18 @@ const VERBS = {
     const p = taskPaths(ws, id);
     const r = checkTaskDir(p.dir, (await aspectsOf(ws)).map((a) => a.id), id);
     return report(id, r.problems, '');
+  },
+
+  async plan({ ws, pos }) {
+    const sub = need(pos[0], 'plan verb: check');
+    if (sub !== 'check') throw usage(`unknown plan verb ${sub}`);
+    const id = need(pos[1], 'task id');
+    const p = taskPaths(ws, id);
+    if (!existsSync(p.task)) throw new KError(`unknown task ${id}: ${p.task} does not exist`, 1);
+    const plan = join(p.dir, 'plan.md');
+    if (!existsSync(plan)) throw new KError(`${id} has no plan: ${p.rel('plan.md')}`, 1);
+    const problems = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p);
+    return report(`${id} plan`, problems, '');
   },
 
   async verify({ ws, pos }) {

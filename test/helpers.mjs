@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,3 +44,7 @@ export async function makeWorkspace({ finished = true } = {}) {
   const ws = await loadWorkspace(join(home, 'workspace'));
   return { root, home, ws, weather: join(root, 'weather'), hub: join(root, 'hub'), modulePath };
 }
+
+// `k <args>` as the command, in a child with the given $KIRUNAK_HOME: { status, stdout, stderr }.
+export const k = (home, args, env = {}) =>
+  spawnSync(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, KIRUNAK_HOME: home, ...env } });
