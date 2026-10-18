@@ -88,6 +88,7 @@ test('k cost --baseline prints only the comparisons, and nothing without a basel
 
   writeFileSync(join(w.home, 'keeper.jsonl'), [
     { session: A, kind: 'keepalive' }, { session: A, kind: 'miss' }, { session: B, kind: 'hit' }, { session: 'other', kind: 'miss' },
+    { session: 'interactive-1', task: ID, kind: 'hit' }, { session: 'interactive-2', task: 'weather/other', kind: 'miss' },
   ].map((x) => JSON.stringify(x) + '\n').join(''));
   const baseline = {
     period: { from: '2026-09-01', to: '2026-09-14' }, contextPerCall: { median: 150000, p90: 400000 },
@@ -102,7 +103,7 @@ test('k cost --baseline prints only the comparisons, and nothing without a basel
     'context per call: median 20,100 against 150,000, p90 26,100 against 400,000',
     'calls over 25,000: 41% against 20%',
     'weight: 1.35e5 over 2 working days against 1.90e7 (weather, 9.50e6 a day)',
-    'misses: 1 of 2 resumes (50%) against a miss rate of 5%; keep-alives 1',
+    'misses: 1 of 3 resumes (33%) against a miss rate of 5%; keep-alives 1',
   ]);
   // A baseline with fewer numbers gives fewer comparisons.
   const c = await costOf(w.ws, ID);
