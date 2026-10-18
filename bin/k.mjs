@@ -23,6 +23,7 @@ import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
+import * as steps from '../lib/steps.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline']);
@@ -35,6 +36,7 @@ Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
 Plan      k plan check <id>
+          k step brief|start|finish <id> S-n [--session <id>] | k step fail <id> S-n --why "..."
 Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
@@ -234,6 +236,28 @@ const VERBS = {
     const comparisons = baseline ? cost.compare(c, baseline) : [];
     if (flags.baseline) return { comparisons, text: comparisons.join('\n') };
     return { ...c, comparisons, text: [cost.format(c), ...(comparisons.length ? ['', ...comparisons] : [])].join('\n') };
+  },
+
+  async step({ ws, pos, flags }) {
+    const sub = need(pos[0], 'step verb: brief|start|finish|fail');
+    const id = need(pos[1], 'task id');
+    const step = need(pos[2], 'the step, S-n');
+    if (!['brief', 'start', 'finish', 'fail'].includes(sub)) throw usage(`unknown step verb ${sub}`);
+    if (flags['dry-run']) return { text: `would ${sub} ${id} ${step}` };
+    if (sub === 'brief') {
+      const r = steps.brief({ ws, id, step });
+      return { path: r.path, text: r.path };
+    }
+    if (sub === 'start') {
+      await steps.start({ ws, id, step, session: session(flags) });
+      return { text: `${id} ${step}: started` };
+    }
+    if (sub === 'finish') {
+      steps.finish({ ws, id, step });
+      return { text: `${id} ${step}: done` };
+    }
+    const r = steps.fail({ ws, id, step, why: need(flags.why, '--why "<why>"') });
+    return { ...r, text: `${id} ${step}: failed, ${r.report}${r.escalated ? '; marked [escalate] in plan.md' : ''}` };
   },
 
   async verify({ ws, pos }) {

@@ -66,3 +66,14 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}
   chmodSync(bin, 0o755);
   return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
 }
+
+// The invented workspace with its task approved (and so queued) and the given plan.md.
+export async function approvedWorkspace(plan) {
+  const w = await makeWorkspace();
+  const { approve } = await import('../lib/approval.mjs');
+  const { taskPaths } = await import('../lib/workspace.mjs');
+  await approve({ ws: w.ws, id: 'weather/offline-forecast' });
+  const p = taskPaths(w.ws, 'weather/offline-forecast');
+  writeFileSync(join(p.dir, 'plan.md'), plan);
+  return { ...w, p, id: 'weather/offline-forecast' };
+}
