@@ -119,3 +119,80 @@ test('exit 1 fails the step with its exit code', async () => {
   await run({ ws: w.ws, id: w.id });
   assert.match(progress(w), /S-1 failed: exit 1\n$/);
 });
+
+test('a run past its budget minutes is killed and fails, rather than hanging', async () => {
+  const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nbudget: 0.005 minutes\n'));
+  fakeRunner(w, () => 'nothing');
+  const original = w.ws.seams.runner.start;
+  w.ws.seams.runner.start = (step) => original({ ...step, sleep: '30' });
+  const t0 = Date.now();
+  await run({ ws: w.ws, id: w.id });
+  assert.ok(Date.now() - t0 < 10000);
+  assert.match(progress(w), /S-1 failed: no end within the budget's 0\.005 minutes\n$/);
+});
+
+test('needs.json heavy: the guard runs the job while running/ holds no pid of the step, then the same conversation resumes', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const jobs = [];
+  w.ws.seams.resourceGuard = {
+    run(job) {
+      jobs.push({ job, running: readdirSync(join(w.home, 'running')) });
+      return { exitCode: 0, log: [...Array(100)].map((_, i) => `line ${i + 1}`).join('\n') + '\n' };
+    },
+    status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [],
+  };
+  const calls = fakeRunner(w, (step, n) => {
+    if (n === 1) {
+      put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'weather unit tests', command: ['npm', 'test'], maxMinutes: 10 }, then: 'resume' }));
+      return 'nothing';
+    }
+    return 'write';
+  });
+  const r = await watch(w);
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal(jobs.length, 1);
+  assert.deepEqual(jobs[0].running, [], 'no process of the step while the job runs');
+  assert.deepEqual(jobs[0].job, { session: 'kirunak:weather/offline-forecast', what: 'weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
+  assert.equal(calls[1].resume, calls[0].sessionId);
+  assert.equal(calls[1].prompt, 'the job ended; read kirunak/tasks/offline-forecast/steps/S-1/heavy-1.json and continue');
+  assert.equal(calls[1].maxTurns, 97, 'the step keeps one budget across the resume');
+  const heavy = JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'heavy-1.json'), 'utf8'));
+  assert.deepEqual([heavy.exitCode, heavy.report, heavy.lastLines.length, heavy.lastLines[0]], [0, 'kirunak/tasks/offline-forecast/steps/S-1/heavy-1.log', 60, 'line 41']);
+  assert.ok(existsSync(join(w.p.dir, 'steps', 'S-1', 'needs-1.json')) && !existsSync(join(w.p.dir, 'steps', 'S-1', 'needs.json')));
+  assert.match(progress(w), /S-1 waiting for a heavy job: weather unit tests\n.*S-1 heavy job ended: exit 0 after [\d.]+ min \(steps\/S-1\/heavy-1\.json\)\n.*S-1 resumed \(session /);
+});
+
+test('needs.json owner: the task stops with the question; the next k run resumes the conversation', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, (step, n) => {
+    if (n > 1) return 'write';
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+    return 'nothing';
+  });
+  const r = await watch(w);
+  assert.equal(r.stopped, 'S-1 waits for the owner: Three days or a week?');
+  assert.equal(calls.length, 1);
+  assert.match(progress(w), /S-1 waiting for the owner: Three days or a week\?\n$/);
+  assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"awaiting owner".*"question":"Three days or a week\?"/);
+  assert.match(k(w.home, ['list']).stdout, /awaiting owner +weather\/offline-forecast/);
+  const again = await watch(w);
+  assert.deepEqual(again.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal(calls[1].resume, calls[0].sessionId);
+  assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; read kirunak\/tasks\/offline-forecast\/notes\.md/);
+});
+
+test('k run refuses a step past the machine cap and says who runs; a task not queued does not run', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w);
+  const others = [spawn('sleep', ['5']), spawn('sleep', ['5'])];
+  try {
+    others.forEach((c, i) => register(w.ws, c.pid, { task: 'hub/other', step: `S-${i + 1}`, session: `s${i}` }));
+    const r = await run({ ws: w.ws, id: w.id });
+    assert.equal(calls.length, 0);
+    assert.match(r.refused[0], /^S-1 waits for the machine: 2 of 2 steps run: hub\/other S-1 \(pid \d+ since .*\); hub\/other S-2/);
+  } finally {
+    others.forEach((c) => c.kill());
+  }
+  writeFileSync(w.ws.queue, '');
+  await assert.rejects(run({ ws: w.ws, id: w.id }), /weather\/offline-forecast is not in the queue/);
+});
