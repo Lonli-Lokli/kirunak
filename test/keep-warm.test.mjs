@@ -87,6 +87,21 @@ test('a wait over the break-even is skipped once and kept no more; the resume af
   assert.deepEqual([miss.reason, miss.costWeight], [`the cache expired at ${at(60)}`, 2 * 152000]);
 });
 
+test('a wait just over the break-even is decided again at the keep-alive time, and kept once it is under', async () => {
+  const w = ws();
+  const clock = fakeClock();
+  track(w, { session: 's-1', task: 'weather/x', step: 'S-1', result: RUN, end: clock.now(), waitsFor: 'heavy', willResume: true });
+  let finish;
+  const until = new Promise((r) => (finish = r));
+  const calls = [];
+  await keepWarm({
+    ws: w, session: 's-1', until, clock, expectedWait: () => 1000 - (clock.now() - T0) / 60000,
+    keepAlive: async () => (calls.push(clock.now().toISOString()), finish(), { exitCode: 0, result: KEEP }),
+  });
+  assert.deepEqual(calls, [at(55)], '945 minutes left at the keep-alive time: under 950');
+  assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.expectedWaitMin]), [['skip', 1000], ['keepalive', 945]]);
+});
+
 test('a keep-alive that wrote the context again is a miss too; one with no result stops the keeping', async () => {
   const w = ws();
   const clock = fakeClock();

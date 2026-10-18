@@ -55,8 +55,10 @@ You need Node 22 or later, git and Claude Code.
    k doctor
    ```
 
-   `k install` adds one PreToolUse hook to `~/.claude/settings.json` (keeping yours) and links the `k-intake` and
-   `k-done` skills into `~/.claude/skills/`. `--print` shows what it would do and writes nothing. A repo that already
+   `k install` adds a PreToolUse hook and a SessionStart hook to `~/.claude/settings.json` (keeping yours) and links
+   the `k-intake` and `k-done` skills into `~/.claude/skills/`. It also prints one line to add to your status line
+   command, so the cache keeper sees each session's context and cache; it never edits your status line itself.
+   `--print` shows what it would do and writes nothing. A repo that already
    has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
    `.slapignore`, the files left out of a commit's size (R21), when the repo has none: read it, type
    `! k slapignore approve ~/code/app`, and commit it.
