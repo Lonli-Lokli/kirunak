@@ -38,8 +38,8 @@ Nothing is left out by default. Left out of L and F:
 
 - The `.slapignore` that applies is the one the change carries: the index's for a commit being made, the commit's
   own for `k slap <commit>`, so the score in a message is what `k slap` gives for that commit later.
-- Every other binary file (`git diff --numstat` gives `-` for its lines) refuses the commit (§3), naming the pattern
-  to add: `*.<extension>`, or the file's own path when it has none.
+- Every other binary file (`git diff --numstat` gives `-` for its lines) refuses the commit (§3), naming both patterns
+  that would leave it out: its type (`*.<extension>`, every file of it) and its own path (only this one).
 - A file whose change is only a rename (no line changed) adds nothing; renames are found with `-M`.
 - `.gitattributes` is not read. Judgement, the owner's: one list, in one file the owner approves, says everything that
   is left out.
@@ -49,8 +49,8 @@ built-in list left it: lock files (`*.lock`, `package-lock.json`, `npm-shrinkwra
 `pnpm-lock.yaml`, `Package.resolved`, `gradle.lockfile`), `build/` and `dist/` folders, minified files (`*.min.js`,
 `*.min.css`), source maps (`*.map`), prose (`*.md`, `*.mdx`, `*.markdown`, `*.txt`, `*.rst`, `*.adoc`) and tables
 (`*.tsv`, `*.csv`); then the same extensions in other cases the repo tracks (the built-in list ignored case); the
-binary types the repo tracks (`git diff --numstat` of HEAD against the empty tree, rows with `-`, not already left
-out); and the patterns its root `.gitattributes` marks `linguist-generated`, `linguist-vendored` or
+binary files the repo tracks (`git diff --numstat` of HEAD against the empty tree, rows with `-`, not already left
+out), named by extension when every tracked file of it is binary and by their own paths when not; and the patterns its root `.gitattributes` marks `linguist-generated`, `linguist-vendored` or
 `linguist-documentation`, which slice 1b read. The starter is not committed by `k install`: the owner approves it
 first (§4), then it is committed like any file.
 
@@ -74,7 +74,8 @@ first (§4), then it is committed like any file.
      record (§4). With none in the index, nothing is checked and nothing but whole deletions is left out: a repo
      without the file, or one whose file is removed, measures more, never less, so that needs no approval.
      Judgement: comparing the index's file, not the working tree's, because that is what the commit carries.
-  2. A binary file `.slapignore` does not list, naming the pattern to add and asking the owner to approve it.
+  2. A binary file `.slapignore` does not list, naming its type's pattern and its own, for the owner to choose and
+     approve.
   3. A score over 35, tier L or XL (R22): the score, L, F, the first files, the most lines at most M allows over this
      many files and at the usual edges (207 lines in one file, 250 in 5, 126 in 10, 79 in 20, computed by `limit(F)`),
      and how to split: `git restore --staged <file>`, `git add -p`, `k slap --staged`.
