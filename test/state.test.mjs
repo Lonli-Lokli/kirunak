@@ -69,6 +69,20 @@ test('a blocker that is done does not block', () => {
   assert.equal(stateOf(f), 'ready');
 });
 
+test('a step waiting on an input no step produces blocks', () => {
+  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task, docs/none.md\noutputs: steps/S-1/report.md\n';
+  assert.equal(stateOf(folder(({ put }) => put('plan.md', plan))), 'blocked');
+  assert.equal(stateOf(folder(({ put }) => put('plan.md', plan.replace('docs/none.md', 'intake.md')))), 'ready');
+});
+
+test('a step that asks the owner in needs.json is awaiting owner', () => {
+  const f = folder(({ put }) => {
+    put('progress.md', '2026-11-03 14:02 S-1 started (session 7c1)\n');
+    put('steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+  });
+  assert.equal(stateOf(f), 'awaiting owner');
+});
+
 test('the owner as a blocker blocks', () => {
   const f = folder(({ put }) => put('plan.md', '---\nblocked-by: [owner Q-3]\n---\n'));
   assert.equal(stateOf(f), 'blocked');
