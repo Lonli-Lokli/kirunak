@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readRecord } from '../lib/approval.mjs';
+import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { approvedWorkspace, k, sh } from './helpers.mjs';
 
@@ -103,4 +105,44 @@ test('a review step finishes only when its review passes k review check', async 
   put(w, 'review.md', review(rows));
   assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status, 0);
   assert.equal(steps.load(w.ws, w.id).states.get('S-2').state, 'done');
+});
+
+test('k run runs a review in a fresh conversation on models.review; a review that fails the grammar fails, and the retry reads why', async () => {
+  const w = await approvedWorkspace(PLAN);
+  w.ws.models = { review: { model: 'opus', effort: 'high' } };
+  const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file docs/offline.md:1 |`);
+  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: met\n`;
+  const calls = [];
+  w.ws.seams.runner = {
+    start(step) {
+      const n = calls.push(step);
+      const child = spawn('sleep', ['0.05'], { detached: true });
+      const done = new Promise((resolve) => child.on('exit', () => {
+        if (step.env.KIRUNAK_STEP === 'S-1') for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
+        else put(w, 'review.md', review(n === 2 ? rows.slice(1) : rows));
+        resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });
+      }));
+      return { pid: child.pid, sessionId: step.sessionId, done };
+    },
+    keepAlive: () => null,
+  };
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal(calls.length, 3);
+  const [impl, first, retry] = calls;
+  assert.deepEqual([impl.model, first.model, first.effort, retry.model], [null, 'opus', 'high', 'opus']);
+  for (const c of [first, retry]) {
+    assert.equal(c.resume, null);
+    assert.notEqual(c.sessionId, impl.sessionId);
+    assert.deepEqual(c.addDirs, []);
+    assert.match(c.prompt, /^# weather\/offline-forecast S-2: Review\n/);
+    assert.ok(c.prompt.includes(`session: ${c.sessionId}`));
+  }
+  assert.notEqual(first.sessionId, retry.sessionId);
+  const dir = join(w.p.dir, 'steps', 'S-2');
+  const failure = readFileSync(join(dir, 'failure-1.md'), 'utf8');
+  assert.match(failure, /S-2 failed\n\n.*: review\.md fails k review check \(1 problem\)\n\nExit code 0, session .*\n\nk review check:\n\n- line 6: AC-1 has no row: one row per AC and E\n$/);
+  assert.match(retry.prompt, /`kirunak\/tasks\/offline-forecast\/steps\/S-2\/in\/failure-1\.md`: the last attempt failed/);
+  assert.equal(readFileSync(join(dir, 'in', 'failure-1.md'), 'utf8'), failure);
 });
