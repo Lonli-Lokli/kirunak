@@ -266,7 +266,7 @@ const VERBS = {
     if (!['brief', 'start', 'finish', 'fail'].includes(sub)) throw usage(`unknown step verb ${sub}`);
     if (flags['dry-run']) return { text: `would ${sub} ${id} ${step}` };
     if (sub === 'brief') {
-      const r = steps.brief({ ws, id, step });
+      const r = await steps.brief({ ws, id, step, session: session(flags) });
       return { path: r.path, text: r.path };
     }
     if (sub === 'start') {
