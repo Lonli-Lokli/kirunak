@@ -1,0 +1,426 @@
+#!/usr/bin/env node
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { kirunakHome } from '../lib/home.mjs';
+
+// PreToolUse (approval.md §2): refuses the model's write to what only the owner's commands write, and the owner's
+// verbs run through the Bash tool. A guard against mistakes, not against a deliberate bypass; it fails open.
+// It imports nothing but node: modules and lib/home.mjs, because it runs on every Edit, Write and Bash call.
+
+const OWNER_VERBS = new Set(['approve', 'accept', 'hold', 'resume', 'queue']);
+const OWNER_SKILLS = new Set(['k-approve', 'k-accept', 'k-hold', 'k-resume']);
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const TICK = /^\s*[-*+]\s+\[[xX]\]/gm;
+const STAMP = /^(applied|declined):/gm;
+const GLOB = /[*?[]/;
+
+const count = (text, re) => (text.match(re) ?? []).length;
+
+const frozen = (id, slug, date) =>
+  `kirunak: ${id} is frozen since ${date}: propose an amendment in kirunak/tasks/${slug}/amendments/A-<n>.md ` +
+  `(\`k amend new ${id}\`) and ask the owner to run \`k approve ${id} --amendment A-<n>\``;
+const ownerOnly = (id = '<id>') =>
+  `kirunak: only the owner's own command writes this: ask them to type \`! k approve ${id}\` / \`! k accept ${id}\``;
+const ownerVerb = (verb) =>
+  `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`;
+const INTAKE = 'kirunak: intake.md is append-only: record the question or answer with `k intake question|answer`';
+const TICKS = 'kirunak: the owner ticks the checklist: leave its items as `- [ ]`';
+
+// Where a path sits in a repo's kirunak/ folder; the repo is the directory that holds it.
+function locate(path) {
+  const m = /^(.*)\/kirunak\/(approvals|tasks)(?:\/(.*))?$/.exec(path);
+  return m ? { root: m[1] || '/', area: m[2], rest: m[3] ?? '' } : null;
+}
+
+function record(root, slug) {
+  const file = join(root, 'kirunak', 'approvals', `${slug}.json`);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+// The record of `slug`, or for a glob slug (`tasks/*/task.md`) the first record it matches.
+function recordOf(root, slug) {
+  if (!GLOB.test(slug)) {
+    const rec = record(root, slug);
+    return rec && { slug, rec };
+  }
+  const re = new RegExp(`^${slug.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}\\.json$`);
+  let names = [];
+  try {
+    names = readdirSync(join(root, 'kirunak', 'approvals'));
+  } catch {
+    return null;
+  }
+  const name = names.find((n) => re.test(n));
+  return name ? { slug: name.slice(0, -5), rec: record(root, name.slice(0, -5)) } : null;
+}
+
+const idOf = (root, slug, rec) => (typeof rec?.task === 'string' ? rec.task : `${basename(root)}/${slug}`);
+
+function frozenReason(root, found) {
+  const date = typeof found.rec.approved === 'string' ? found.rec.approved.slice(0, 10) : 'its approval';
+  return frozen(idOf(root, found.slug, found.rec), found.slug, date);
+}
+
+/**
+ * The reason a change to `path` is refused, or null. `change` is { before, after } for an Edit or Write (the text
+ * replaced and the text written), null for a shell write whose text is unknown. `removing` also guards a folder
+ * that holds protected files (rm -r, mv).
+ */
+function verdict(path, change, removing = false) {
+  const at = locate(path);
+  if (!at) {
+    return removing && basename(path) === 'kirunak' && existsSync(join(path, 'approvals')) ? ownerOnly() : null;
+  }
+  const { root, area, rest } = at;
+  if (area === 'approvals') {
+    const slug = rest.split('/')[0].replace(/\.json$/, '');
+    return ownerOnly(slug && !GLOB.test(slug) ? idOf(root, slug, record(root, slug)) : undefined);
+  }
+  const [slug, ...under] = rest.split('/');
+  const file = under.join('/');
+  if (!slug) return removing && existsSync(join(root, 'kirunak', 'approvals')) ? ownerOnly() : null;
+  if (!file) {
+    if (!removing) return null;
+    const found = recordOf(root, slug);
+    if (found) return frozenReason(root, found);
+    const held = ['done.json', 'hold.md'].some((f) => existsSync(join(root, 'kirunak', 'tasks', slug, f)));
+    return held ? ownerOnly(idOf(root, slug)) : null;
+  }
+  if (file === 'done.json' || file === 'hold.md') return ownerOnly(idOf(root, slug, record(root, slug)));
+  if (file === 'task.md') {
+    const found = recordOf(root, slug);
+    return found ? frozenReason(root, found) : null;
+  }
+  if (!change) return null;
+  if (file === 'intake.md') return INTAKE;
+  if (file === 'checklist.md') return count(change.after, TICK) > count(change.before, TICK) ? TICKS : null;
+  if (/^amendments\/[^/]+$/.test(file) && count(change.after, STAMP) > count(change.before, STAMP)) {
+    return ownerOnly(idOf(root, slug, record(root, slug)));
+  }
+  return null;
+}
+
+function changeOf(tool, ti) {
+  const s = (v) => (typeof v === 'string' ? v : '');
+  if (tool === 'Edit') return { before: s(ti.old_string), after: s(ti.new_string) };
+  if (tool === 'MultiEdit') {
+    const edits = Array.isArray(ti.edits) ? ti.edits : [];
+    return { before: edits.map((e) => s(e?.old_string)).join('\n'), after: edits.map((e) => s(e?.new_string)).join('\n') };
+  }
+  if (tool === 'NotebookEdit') return { before: '', after: s(ti.new_source) };
+  return { before: '', after: s(ti.content) };
+}
+
+// ---- Bash: a small segment parser ----
+
+/** [cmd] without the bodies of its here-documents: their lines are text, not commands. The opening line stays. */
+function withoutHeredocs(cmd) {
+  const kept = [];
+  let end = null;
+  for (const line of cmd.split('\n')) {
+    if (end !== null) {
+      if (line.trim() === end) end = null;
+      continue;
+    }
+    kept.push(line);
+    end = line.match(/(?<!<)<<(?!<)-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/)?.[1] ?? null;
+  }
+  return kept.join('\n');
+}
+
+/**
+ * The command's simple commands, split at ; & && | || ( ) and newlines outside quotes. Each is a list of tokens:
+ * a word with its quotes removed (a string), or a redirection ({ op: '>' | '>>' | '2>' | '&>' | '<' | ... }).
+ * Text inside quotes is never a command, so `git commit -m "k approve later"` is one word.
+ */
+export function segments(command) {
+  const cmd = withoutHeredocs(String(command ?? ''));
+  const out = [];
+  let tokens = [];
+  let word = null;
+  let quote = null;
+  const end = () => {
+    if (word !== null) tokens.push(word);
+    word = null;
+  };
+  const cut = () => {
+    end();
+    if (tokens.length) out.push(tokens);
+    tokens = [];
+  };
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    const next = cmd[i + 1];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === '\\' && quote === '"' && next !== undefined && '"\\$`'.includes(next)) word += cmd[++i];
+      else word += c;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      word ??= '';
+    } else if (c === '\\') {
+      if (next === '\n') i++;
+      else word = (word ?? '') + (cmd[++i] ?? '');
+    } else if (c === '#' && word === null) {
+      while (i + 1 < cmd.length && cmd[i + 1] !== '\n') i++;
+    } else if (c === '>' || (c === '&' && next === '>')) {
+      let op = c;
+      if (c === '>' && word !== null && /^\d+$/.test(word)) {
+        op = word + op;
+        word = null;
+      } else {
+        end();
+      }
+      if (c === '&') op += cmd[++i];
+      if (cmd[i + 1] === '>' || cmd[i + 1] === '|') op += cmd[++i];
+      if (cmd[i + 1] === '&') op += cmd[++i];
+      tokens.push({ op });
+    } else if (c === '<') {
+      end();
+      let op = '<';
+      while (cmd[i + 1] === '<') op += cmd[++i];
+      if (cmd[i + 1] === '(') {
+        cut();
+        continue;
+      }
+      if (op === '<<' && cmd[i + 1] === '-') i++;
+      tokens.push({ op });
+    } else if (';&|()\n'.includes(c)) {
+      cut();
+    } else if (c === ' ' || c === '\t') {
+      end();
+    } else {
+      word = (word ?? '') + c;
+    }
+  }
+  cut();
+  return out;
+}
+
+const WRAPPERS = new Set(['then', 'do', 'else', 'if', 'elif', 'while', 'until', '!', '{', 'time', 'nohup', 'exec', 'env',
+  'sudo', 'npx', 'command', 'builtin', 'nice']);
+
+/** One segment's words past assignments and wrappers, and the targets of its output redirections. */
+function parse(tokens) {
+  const words = [];
+  const redirected = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (typeof t === 'string') {
+      words.push(t);
+      continue;
+    }
+    const operand = typeof tokens[i + 1] === 'string' ? tokens[++i] : null;
+    if (operand === null || !t.op.includes('>')) continue;
+    if (t.op.endsWith('&') && /^(\d+|-)$/.test(operand)) continue; // >&2 duplicates a descriptor
+    redirected.push(operand);
+  }
+  let w = words;
+  for (;;) {
+    if (w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0])) w = w.slice(1);
+    else if (w.length && WRAPPERS.has(w[0])) {
+      w = w.slice(1);
+      while (w[0]?.startsWith('-')) w = w.slice(1);
+    } else break;
+  }
+  return { words: w, redirected };
+}
+
+const base = (word) => (word ?? '').split('/').pop();
+const options = (words) => words.filter((w) => w && !w.startsWith('-'));
+
+/** The words after `k` when the segment runs kirunak's CLI (`k`, `k.mjs`, `node <path>/k.mjs`), else null. */
+function kArgs(words) {
+  let w = words;
+  if (['node', 'nodejs'].includes(base(w[0]))) {
+    w = w.slice(1);
+    while (w[0]?.startsWith('-')) w = w.slice(1);
+  }
+  return ['k', 'k.mjs'].includes(base(w[0])) ? w.slice(1) : null;
+}
+
+function ownerVerbOf(args) {
+  if (args.includes('--dry-run')) return null;
+  const [verb, sub] = options(args);
+  if (verb === 'queue' && sub === 'show') return null;
+  if (OWNER_VERBS.has(verb)) return verb;
+  if (verb === 'amend' && sub === 'decline') return 'amend decline';
+  return null;
+}
+
+function absolute(path, dir) {
+  let p = path;
+  const home = process.env.HOME || homedir();
+  if (p === '~' || p.startsWith('~/')) p = home + p.slice(1);
+  p = p.replace(/^\$\{?HOME\}?(?=\/|$)/, home);
+  return resolve(dir, p);
+}
+
+const isDir = (abs) => {
+  try {
+    return statSync(abs).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+// cp/mv's target: a folder takes each source's name.
+function into(target, sources, dir) {
+  const abs = absolute(target, dir);
+  if (!target.endsWith('/') && !(locate(abs) && isDir(abs))) return [abs];
+  return [abs, ...sources.map((s) => join(abs, basename(s)))];
+}
+
+const WRITE_API = /\b(writeFileSync|appendFileSync|writeFile|appendFile|rmSync|unlinkSync|unlink|renameSync|rename|copyFileSync|cpSync|createWriteStream|truncateSync)\b/;
+
+/** What one segment writes and removes: { writes: [abs], removes: [abs] }, and the `cd` it makes. */
+function effects(words, redirected, dir) {
+  const writes = redirected.map((p) => absolute(p, dir));
+  const removes = [];
+  const verb = base(words[0]);
+  const args = words.slice(1);
+  const plain = options(args);
+  const all = (list) => list.map((p) => absolute(p, dir));
+  if (verb === 'tee' || ['touch', 'truncate', 'mkdir'].includes(verb)) writes.push(...all(plain));
+  else if (['sed', 'gsed', 'perl'].includes(verb) && args.some((a) => /^-[A-Za-z]*i/.test(a) || a.startsWith('--in-place'))) {
+    writes.push(...all(plain));
+  } else if (['rm', 'rmdir', 'unlink', 'shred'].includes(verb)) removes.push(...all(plain));
+  else if (['cp', 'rsync', 'install', 'ditto', 'ln'].includes(verb) && plain.length >= 2) {
+    writes.push(...into(plain.at(-1), plain.slice(0, -1), dir));
+  } else if (verb === 'mv' && plain.length >= 2) {
+    removes.push(...all(plain.slice(0, -1)));
+    writes.push(...into(plain.at(-1), plain.slice(0, -1), dir));
+  } else if (verb === 'git') {
+    let at = dir;
+    let i = 0;
+    while (i < args.length && args[i].startsWith('-')) {
+      if (args[i] === '-C') at = absolute(args[++i] ?? '.', at);
+      else if (args[i] === '-c') i++;
+      i++;
+    }
+    const sub = args[i];
+    const paths = options(args.slice(i + 1)).map((p) => absolute(p, at));
+    if (sub === 'checkout' || sub === 'restore') writes.push(...paths);
+    else if (sub === 'rm' || sub === 'mv') removes.push(...paths);
+  } else if (['node', 'nodejs', 'bun', 'deno'].includes(verb)) {
+    const code = args.filter((a) => WRITE_API.test(a)).join('\n');
+    for (const m of code.matchAll(/[^\s'"`(),]*kirunak\/(?:approvals|tasks)\/[^\s'"`(),]*/g)) writes.push(absolute(m[0], dir));
+  }
+  return { writes, removes };
+}
+
+function shell(command, cwd) {
+  let dir = cwd;
+  for (const tokens of segments(command)) {
+    const { words, redirected } = parse(tokens);
+    const k = kArgs(words);
+    if (k) {
+      const verb = ownerVerbOf(k);
+      if (verb) return ownerVerb(verb);
+    }
+    if (words[0] === 'cd') {
+      dir = absolute(words[1] ?? '~', dir);
+      continue;
+    }
+    const { writes, removes } = effects(words, redirected, dir);
+    for (const p of writes) {
+      const reason = verdict(p, null);
+      if (reason) return reason;
+    }
+    for (const p of removes) {
+      const reason = verdict(p, null, true);
+      if (reason) return reason;
+    }
+  }
+  return null;
+}
+
+/** The reason to refuse the tool call described by the hook's `input`, or null to allow it. */
+export function decide(input) {
+  const tool = input?.tool_name;
+  const ti = input?.tool_input ?? {};
+  const cwd = typeof input?.cwd === 'string' ? input.cwd : process.cwd();
+  if (EDIT_TOOLS.has(tool)) {
+    const path = ti.file_path ?? ti.notebook_path;
+    if (typeof path !== 'string' || !path.includes('kirunak/')) return null;
+    return verdict(absolute(path, cwd), changeOf(tool, ti));
+  }
+  if (tool === 'Skill') {
+    const name = String(ti.skill ?? '').split(':').pop();
+    return OWNER_SKILLS.has(name) ? ownerVerb(name.slice(2)) : null;
+  }
+  if (tool === 'Bash') return shell(String(ti.command ?? ''), cwd);
+  return null;
+}
+
+// Every refusal, and every call KIRUNAK_FREEZE_OFF let through, goes to freeze.log; a refusal also to events.jsonl.
+function log(input, reason, off) {
+  const home = kirunakHome();
+  const ti = input.tool_input ?? {};
+  const time = new Date().toISOString();
+  const tool = input.tool_name ?? null;
+  const entry = {
+    time,
+    kind: off ? 'allowed' : 'refusal',
+    ...(off ? { why: 'KIRUNAK_FREEZE_OFF=1' } : {}),
+    tool,
+    target: String(ti.command ?? ti.file_path ?? ti.notebook_path ?? ti.skill ?? '').slice(0, 300),
+    reason,
+    session: input.session_id ?? null,
+    agent: input.agent_type ?? input.agent_id ?? null,
+    cwd: input.cwd ?? null,
+  };
+  try {
+    mkdirSync(home, { recursive: true });
+    appendFileSync(join(home, 'freeze.log'), JSON.stringify(entry) + '\n');
+  } catch {
+    // the log is a record, never a reason to fail
+  }
+  if (off) return;
+  try {
+    appendFileSync(join(home, 'events.jsonl'), JSON.stringify({ time, kind: 'refusal', tool, reason }) + '\n');
+  } catch {
+    // the same
+  }
+}
+
+async function main() {
+  let raw = '';
+  for await (const chunk of process.stdin) raw += chunk;
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!input || typeof input !== 'object') return;
+  const reason = decide(input);
+  if (!reason) return;
+  const off = process.env.KIRUNAK_FREEZE_OFF === '1';
+  log(input, reason, off);
+  if (off) return;
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+  }));
+}
+
+function isMain() {
+  try {
+    return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
+  main().catch(() => {
+    process.exitCode = 0; // fails open
+  });
+}

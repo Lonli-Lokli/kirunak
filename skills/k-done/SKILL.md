@@ -1,0 +1,23 @@
+---
+name: k-done
+description: Close a finished kirunak task so the next one starts in a fresh session. Use ONLY when the owner says the task is done, by typing /k-done or in their own words. Never on your own judgement, and never because tests are green or a build succeeded (a build can still have bugs the owner finds on a device).
+---
+
+# k-done: closing a task
+
+The owner says when a task is done. You record nothing yourself: the acceptance is a line the owner types.
+
+1. **Say what is done, in a few lines**: the task id, the commits (short hash and subject), the builds made. List
+   anything uncommitted, unpushed or unverified, and ask whether it belongs to the task. Commit only if the owner
+   says so.
+2. **Ask for the acceptance**: "Type `! k accept <id>` to record it." (With the kirunak mod: `/k-accept <id>`.)
+   Before a review exists, the owner adds `--checklist-open "<why>"`. The task is done only when the command
+   succeeds and `kirunak/tasks/<slug>/done.json` exists. If it refuses (an unticked checklist item, no review
+   verdict), say what it named and stop. Never run `k accept` yourself.
+3. **Write the handoff and release**: run `k handoff <id> --json`. For each target, write the handoff there: the
+   state now, what is open, the next step, the owner's decisions with their dates, and where things are; nothing
+   git or the code already records. The command has already released what kirunak and the workspace's plugins
+   could; it lists each line. Then stop what this session started that no plugin knows of (background commands,
+   agents still running), or say why one keeps running.
+4. **End with two lines**: where the handoff is, and "Type /clear to start the next task fresh." A session cannot
+   clear itself. If the owner would rather go on here, that is their call.
