@@ -9,7 +9,7 @@ import * as queue from '../lib/queue.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask } from '../lib/task.mjs';
-import { gitCommitAll, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
+import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 // Commits in the test repos must not inherit an owner variable from the shell that runs the tests.
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
@@ -351,6 +351,34 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
   assert.equal(done.verdict, 'needs owner (AC-3, E-1)');
   assert.equal(done.checklistOpen, 'the age line is read at the next release');
   assert.deepEqual(done.openItems, ['AC-3 On a phone: restart offline (review.md)', 'E-1 Read: the age line (review.md)']);
+});
+
+test('k waiting and k accept --dry-run make every check of the owner\'s verbs and write nothing', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  const waiting = () => JSON.parse(run(['waiting', '--json']).stdout);
+  assert.deepEqual(waiting(), { approve: [{ id: ID, title: waiting().approve[0].title, why: null }], accept: [] });
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(taskDir(weather));
+  generate(ws, ID);
+  gitCommitAll(weather, 'review and checklist');
+  const head = headOf(weather);
+  const w = waiting();
+  assert.deepEqual(w.approve, []);
+  assert.deepEqual(w.accept.map((x) => x.id), [ID]);
+  assert.match(w.accept[0].why, /checklist\.md has 2 unticked item\(s\)/);
+  const dry = run(['accept', ID, '--dry-run']);
+  assert.deepEqual([dry.status, /checklist\.md has 2 unticked item\(s\)/.test(dry.stderr)], [1, true]);
+  const open = run(['accept', ID, '--dry-run', '--checklist-open', 'read on the phone later']);
+  assert.equal(open.stdout, `would accept ${ID} (review.md, verdict: needs owner (AC-3, E-1)), with 2 checklist item(s) open\n`);
+  const file = join(taskDir(weather), 'checklist.md');
+  writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
+  gitCommitAll(weather, 'ticked');
+  assert.equal(waiting().accept[0].why, null);
+  assert.match(run(['waiting']).stdout, /^nothing to approve\nto accept:\n {2}weather\/offline-forecast {2}ready\n$/);
+  assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), sh(weather, 'git', ['log', '-1', '--format=%s']).trim()], [false, 'ticked']);
+  assert.notEqual(headOf(weather), head);
 });
 
 test('accept refuses a not met verdict, --checklist-open or not: the way out is an amendment or a new review', async () => {
