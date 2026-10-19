@@ -1,0 +1,108 @@
+import type { On, PromptOrigin } from 'claude-code'
+import { describe, expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+
+const PRESENTATION = { isFullscreen: false, columns: 120 }
+const ID = 'weather/offline-forecast'
+
+// The world beneath the mod: the commands it registers, the k runs it makes (each answered with `answer`), its
+// session's id, and a k that exists.
+function world(on: On, answer = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' }) {
+  const registered: string[] = []
+  const runs: string[][] = []
+  on('command.register', ($, e) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('fs.exists', () => ({ value: true }))
+  on('process.run', ($, e) => {
+    runs.push([...e.argv])
+    return { value: { ...answer, isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return { registered, runs }
+}
+
+const run = ($: Engine, command: string, args: string, origin: PromptOrigin) =>
+  $.command.run({ command, args, origin, presentation: PRESENTATION })
+
+describe('the owner\'s commands', () => {
+  test('registers /k-approve, /k-accept, /k-hold and /k-start, and never /k-done', async ($, on) => {
+    const w = world(on)
+    await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start'])
+  })
+
+  const others: PromptOrigin[] = [
+    { kind: 'sdk' },
+    { kind: 'plugin', name: 'other' },
+    { kind: 'peer' },
+    { kind: 'unclassified' },
+    { kind: 'peer-send-message' },
+    { kind: 'task-notification' },
+    { kind: 'scheduled-trigger' },
+    { kind: 'auto-continuation' },
+  ]
+  for (const origin of others) {
+    test(`from ${origin.kind}: refused with a line, and k never runs`, async ($, on) => {
+      const w = world(on)
+      for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start']) {
+        const { text } = await run($, command, `${ID} because`, origin)
+        expect(text).toMatch(new RegExp(`^/${command} runs only from your own prompt or from Remote Control; this one came from .*${origin.kind === 'plugin' ? 'the plugin other' : origin.kind}, so nothing ran\\.$`))
+      }
+      expect(w.runs).toEqual([])
+    })
+  }
+
+  for (const kind of ['composer', 'bridge'] as const) {
+    test(`from ${kind}: each verb runs k with --via mod and prints the state line`, async ($, on) => {
+      const w = world(on)
+      expect((await run($, 'k-accept', ID, { kind })).text).toBe(`${ID}: done`)
+      await run($, 'k-approve', `${ID} --amendment A-2 --first`, { kind })
+      await run($, 'k-hold', `${ID} waiting for the phone test`, { kind })
+      await run($, 'k-start', ID, { kind })
+      expect(w.runs.map(argv => argv[0])).toEqual(['node', 'node', 'node', 'node'])
+      expect(w.runs.every(argv => /\/mods\/kirunak\/\.\.\/\.\.\/bin\/k\.mjs$/.test(argv[1] ?? ''))).toBe(true)
+      expect(w.runs.map(argv => argv.slice(2))).toEqual([
+        ['accept', ID, '--via', 'mod'],
+        ['approve', ID, '--amendment', 'A-2', '--first', '--via', 'mod'],
+        ['hold', ID, '--why', 'waiting for the phone test', '--via', 'mod'],
+        ['start', ID, '--via', 'mod', '--session', 'sess-1'],
+      ])
+    })
+  }
+
+  test('quoted values reach k whole', async ($, on) => {
+    const w = world(on)
+    await run($, 'k-accept', `${ID} --checklist-open "checked on the phone"`, { kind: 'bridge' })
+    await run($, 'k-hold', `${ID} --why='the owner is away'`, { kind: 'composer' })
+    expect(w.runs.map(argv => argv.slice(2))).toEqual([
+      ['accept', ID, '--checklist-open', 'checked on the phone', '--via', 'mod'],
+      ['hold', ID, '--why', 'the owner is away', '--via', 'mod'],
+    ])
+  })
+
+  test('a flag of its own, --via, a bad id, an open quote or a hold with no reason: a line, and k never runs', async ($, on) => {
+    const w = world(on)
+    const cases: [string, string, RegExp][] = [
+      ['k-accept', `${ID} --via shell`, /--via is the mod's own\. Nothing ran\./],
+      ['k-accept', `${ID} --first`, /\/k-accept takes no --first\. Nothing ran\./],
+      ['k-approve', `${ID} --amendment`, /--amendment needs a value\. Nothing ran\./],
+      ['k-approve', 'not-an-id', /not a task id: not-an-id\. Nothing ran\./],
+      ['k-start', '', /which task\? give its id, <repo>\/<slug>\. Nothing ran\./],
+      ['k-start', `${ID} extra`, /unexpected extra\. Nothing ran\./],
+      ['k-hold', `${ID} "open`, /a quote is left open\. Nothing ran\./],
+      ['k-hold', ID, /why\? \/k-hold <id> <why>\. Nothing ran\. Usage: \/k-hold <id> <why>$/],
+    ]
+    for (const [command, args, want] of cases) {
+      expect((await run($, command, args, { kind: 'composer' })).text).toMatch(want)
+    }
+    expect(w.runs).toEqual([])
+  })
+
+  test('k\'s refusal is the output, under the command\'s name', async ($, on) => {
+    world(on, { exitCode: 1, stdout: '', stderr: `k: ${ID}: the latest review is not met (AC-2)\n` })
+    expect((await run($, 'k-accept', ID, { kind: 'composer' })).text).toBe(`/k-accept refused:\nk: ${ID}: the latest review is not met (AC-2)`)
+  })
+})
