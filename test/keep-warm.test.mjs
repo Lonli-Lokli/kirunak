@@ -45,6 +45,8 @@ test('the wait for a guard job: its own estimate left, or the queue ahead of it'
   assert.equal(jobWait(status, ['kirunak:x'], now), 75);
   assert.equal(jobWait(status, ['c'], now), null);
   assert.equal(jobWait({ held: null, queued: [] }, ['a'], now), null);
+  const orphan = { held: { session: 'kirunak:t', since: at(10), estimateMinutes: 10, orphan: true }, queued: [{ session: 'kirunak:t', estimateMinutes: 20 }] };
+  assert.equal(jobWait(orphan, ['kirunak:t'], now), 30, 'a dead k run\'s job of the same task is ahead of its own, not it');
 });
 
 test('a two-hour heavy job: a keep-alive at expires_at − 10 min, every 50 minutes, each recorded with its weight; the resume hits', async () => {
