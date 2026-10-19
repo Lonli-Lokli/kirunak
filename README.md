@@ -140,7 +140,8 @@ task is started by hand, one task per session:
    grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
    owner ticks them.
 6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>` (with the
-   mod, `/k-accept <id>`, also from the phone). It refuses
+   mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what you can accept, and `/k-accept 1` takes
+   the first). It refuses
    unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
    task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict.

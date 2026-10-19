@@ -68,6 +68,8 @@ What it shows and does, each from the skill's table of shapes:
 | a line above the prompt | `ui.render` on `AbovePrompt`: `kirunak · task · step · lock holder · queue place`; nothing while the session has no task | the same |
 | toasts: a heavy job ended, a review is ready, a cache kept warm, a step waits for the owner, an edit refused | `$.ui.toast(text)` for each new line of those kinds | `events.jsonl`, followed with `tail -n 0 -F` through `$.process.spawn` for the session's life; kinds `build-ended` (`k run`, as a heavy job's record is saved), `review-ready` (`k step finish` of a review step), `keep-alive`, `awaiting owner`, `refusal` (the freeze hook; a workspace's own hooks may append it too) |
 | `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id> <why>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind` `'composer'` or `'bridge'` (`approval.md` §5, the owner's answer of 2026-10-19) and call `$.process.run(['node', K, verb, id, ...flags, '--via', 'mod'])`, returning the state line as `{ text }` | the core verbs |
+| `/k-accept`, `/k-approve` with no id; `/k-accept <n>` | the same hooks: with no id they list what waits for that verb, numbered, each `ready` or what the verb would refuse; `<n>` takes the n-th id of the list last shown in this session (owner's ask, 2026-10-19: "see what I can accept instead of typing manually") | `k waiting --json`: the proposed tasks with `k approve --dry-run`'s problems, the reviewed and awaiting-owner ones with what `k accept` refuses (its `dryRun` makes every check and writes nothing) |
+| the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
 
@@ -107,8 +109,22 @@ As built, where the build chose (each judgement unless marked):
 - **Numbers** (2026-10-19, Claude Code 2.1.303, this Mac): a `claude -p "/k-accept <id>"` with the mod took 1.28 to
   1.53 s and printed the refusal for `sdk`, against 1.40 to 1.62 s with a ten-line mod, so the load adds nothing
   measurable; each 30 s tick runs `k list --json --all` (0.08 s, 22 KB) and `k status --json` (0.07 s).
+- **Picking by number** (judgement): the number is resolved against the ids the owner was last shown, kept by the
+  module, so a list that changed since cannot move a number onto another task; with no list shown since the module
+  loaded, the line asks for the list first. The list and the pick keep the origin rule (nothing is listed for another
+  origin), and `k` checks the task again as it runs. Buttons in the pane were not built: a `ui.press` carries the
+  plugin, the element and the surface, never who pressed (2.1.303's `UiPressArgument`), so a press cannot be held to
+  the owner-only rule a command's `origin` gives. The typeahead is the terminal's prompt box; Remote Control's input
+  is not known to raise it.
+- **Remote Control says so**: an answer to a command whose origin is `bridge` ends `(typed in Remote Control)`,
+  since the transcript keeps neither a command's origin nor, for the phone's, its arguments (measured 2026-10-19:
+  a `/k-accept` from the phone is recorded with `args: ""`).
+- **A mod loaded through a link** (a mods folder's, while developing) runs the `k` of the folder the link names: K is
+  taken from `$.plugin.root`'s real path (`$.fs.stat(..., { resolve: true })`), since the root is the link's path.
 - **Not yet:** an openspec refusal toasts once the workspace's openspec hook appends a `refusal` line to
-  `events.jsonl` (gulnya's does not). The phone check of `build-order.md` slice 6 waits for the owner.
+  `events.jsonl` (gulnya's does not). The phone check of `build-order.md` slice 6: a `/k-accept` from Remote Control
+  passed the origin check on 2026-10-19 (its answer was the line after it, "there is no k at" the link's path); the
+  `(typed in Remote Control)` note makes the next one say which origin it was.
 
 ## 5. Requirements this file satisfies
 

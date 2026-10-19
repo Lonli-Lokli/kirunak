@@ -121,7 +121,8 @@ under 100 ms).
    `--no-queue`;
 4. prints the state line (`ready, queue place 3`) and appends `events.jsonl` (the mod's toast).
 
-`k accept <id>`: refuses unless the latest review (`review.md`, `review-2.md`, ...) counts, that is it passes
+`k accept <id> --dry-run` makes every check below and writes nothing, so it says what `k accept` would refuse (`k
+waiting` lists it for every reviewed task, for the mod, `boards.md` §4). `k accept <id>`: refuses unless the latest review (`review.md`, `review-2.md`, ...) counts, that is it passes
 `k review check` and the review step whose output it is has `finished` in `progress.md` with the file's hash, so a
 review changed after its step finished is refused and the way out is a new review (`review.md` §2), and every
 `checklist.md` item is ticked or the owner passes `--checklist-open "<why>"` (recorded in `done.json` with the items
