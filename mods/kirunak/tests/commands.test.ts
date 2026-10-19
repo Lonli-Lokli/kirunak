@@ -10,11 +10,11 @@ const run = ($: Engine, command: string, args: string, origin: PromptOrigin) =>
   $.command.run({ command, args, origin, presentation: PRESENTATION })
 
 describe('the owner\'s commands', () => {
-  test('registers /k-approve, /k-accept, /k-hold and /k-start, and never /k-done; a -p run reads nothing', async ($, on) => {
+  test('registers /k-approve, /k-accept, /k-hold, /k-start and /kirunak, and never /k-done; a -p run reads nothing', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await w.clock.advance(60_000)
-    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start'])
+    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start', 'kirunak'])
     expect([w.reads, w.tails.length]).toEqual([0, 0])
   })
 
