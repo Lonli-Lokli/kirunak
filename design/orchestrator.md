@@ -174,7 +174,10 @@ last thing written. The reviewer's brief differs (`review.md` §2).
   `maxAgents: 2`; judgement: a laptop runs one build beside two headless sessions, not three; a number to check
   against memory pressure on the machine in slice 2). `k run` refuses to start a step past the cap and says who
   runs. `maxHeavy: 1` is the lock itself. A pid file whose process is dead is removed on the next pass (as the
-  default guard treats a dead owner).
+  default guard treats a dead owner). Counting and reserving are one step across processes, inside a short mutex
+  (`running/.admit`): an admitted step's reservation, `running/<k-run-pid>-<n>.json`, counts as running while that
+  `k run` lives, becomes the run's pid file by a rename when the run starts (a resume takes a slot as a start does),
+  and is removed if the step never starts, by the `k run`'s end or its stop.
 
 ## 5. The cache keeper (R11, D9)
 

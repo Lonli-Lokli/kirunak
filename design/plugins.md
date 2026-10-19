@@ -111,7 +111,8 @@ export default {
 ```
 workspace              the pointer (§3)
 machine.json           the limits, when the owner overrides the config's
-running/<pid>.json     one file per live step process: task, step, session id, since (machineGuard)
+running/<pid>.json     one file per live step process: task, step, session id, since (machineGuard); <k-run-pid>-<n>.json
+                       a step admitted and not started yet
 sessions/<id>.json     a session's current task and step, context and cache (set by k start and the status line)
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)
 events.jsonl           what the front ends show as toasts: build ended, review ready, keep-alive, refusal

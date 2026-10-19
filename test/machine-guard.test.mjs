@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import machineGuardPids, { admit, register } from '../plugins/machine-guard-pids.mjs';
+import machineGuardPids, { admit, register, release } from '../plugins/machine-guard-pids.mjs';
 import pricesDefault from '../plugins/prices-default.mjs';
 import { makeWorkspace } from './helpers.mjs';
 
@@ -26,10 +26,14 @@ test('the machine guard refuses past maxAgents and says who runs', async () => {
   const b = spawn('sleep', ['5']);
   try {
     register(ws, a.pid, { task: 'weather/a', step: 'S-1', session: 's-a', since: '2026-11-03T10:00:00.000Z' });
-    assert.equal((await admit(mg)).ok, true);
-    assert.equal((await admit(mg, 1)).ok, false, 'a step this process is starting counts');
+    const first = await admit(ws, mg, { task: 'weather/c', step: 'S-3' });
+    assert.equal(first.ok, true);
+    const full = await admit(ws, mg);
+    assert.equal(full.ok, false, 'a step admitted and not started yet counts');
+    assert.match(full.why, new RegExp(`; weather/c S-3 \\(starting under k run ${process.pid} since `));
+    release(ws, first.slot);
     register(ws, b.pid, { task: 'weather/b', step: 'S-2', session: 's-b', since: '2026-11-03T10:05:00.000Z' });
-    const r = await admit(mg);
+    const r = await admit(ws, mg);
     assert.equal(r.ok, false);
     assert.equal(r.why, `2 of 2 steps run: weather/a S-1 (pid ${a.pid} since 2026-11-03T10:00:00.000Z); weather/b S-2 (pid ${b.pid} since 2026-11-03T10:05:00.000Z)`);
     assert.deepEqual((await mg.running()).map((x) => [x.pid, x.task, x.step, x.session]), [[a.pid, 'weather/a', 'S-1', 's-a'], [b.pid, 'weather/b', 'S-2', 's-b']]);
@@ -46,7 +50,40 @@ test('a dead pid is cleared on the next look', async () => {
   assert.equal(existsSync(join(home, 'running', `${pid}.json`)), true);
   assert.deepEqual(await mg.running(), []);
   assert.equal(existsSync(join(home, 'running', `${pid}.json`)), false);
-  assert.equal((await admit(mg)).ok, true);
+  assert.equal((await admit(ws, mg)).ok, true);
+});
+
+test('admitting and reserving are one step: two processes at once under a cap of 1 get one yes; a dead holder\'s reservation is not counted', async () => {
+  const { home, ws, mg } = fresh({ maxAgents: 1 });
+  const plugin = new URL('../plugins/machine-guard-pids.mjs', import.meta.url).href;
+  const child = `import guard, { admit } from ${JSON.stringify(plugin)};
+const ws = { home: process.argv[1], machine: { maxAgents: 1 } };
+while (Date.now() < Number(process.argv[2]));
+const a = await admit(ws, guard(ws).provides.machineGuard, { task: 'weather/a', step: 'S-1' });
+process.stdout.write(a.ok ? 'yes' : 'no');
+setTimeout(() => {}, 30000);`;
+  const at = Date.now() + 700;
+  const kids = [0, 1].map(() => spawn(process.execPath, ['--input-type=module', '-e', child, home, String(at)]));
+  const said = await Promise.all(kids.map((c) => new Promise((r) => c.stdout.on('data', (d) => r(String(d))))));
+  assert.deepEqual(said.sort(), ['no', 'yes']);
+  assert.equal(readdirSync(join(home, 'running')).filter((f) => /^\d+-\d+\.json$/.test(f)).length, 1);
+  await Promise.all(kids.map((c) => new Promise((r) => (c.on('exit', r), c.kill()))));
+  const mine = await admit(ws, mg);
+  assert.equal(mine.ok, true, 'the dead holder\'s reservation does not count');
+  assert.deepEqual(readdirSync(join(home, 'running')), [`${mine.slot.name}.json`], 'and is removed');
+  // A slot given to a run becomes its pid file; one never started goes.
+  const run = spawn('sleep', ['5']);
+  try {
+    register(ws, run.pid, { task: 'weather/a', step: 'S-1', session: 's' }, mine.slot);
+    assert.deepEqual(readdirSync(join(home, 'running')), [`${run.pid}.json`]);
+    assert.equal((await admit(ws, mg)).ok, false);
+  } finally {
+    await new Promise((r) => (run.on('exit', r), run.kill()));
+  }
+  const next = await admit(ws, mg);
+  assert.equal(next.ok, true);
+  release(ws, next.slot);
+  assert.deepEqual(readdirSync(join(home, 'running')), []);
 });
 
 test('the limits: the default, the config, then machine.json', () => {

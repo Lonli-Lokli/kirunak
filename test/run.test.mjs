@@ -163,8 +163,12 @@ test('needs.json heavy: the guard runs the job while running/ holds no pid of th
     }
     return 'write';
   });
+  const start = w.ws.seams.runner.start;
+  const slots = [];
+  w.ws.seams.runner.start = (step) => (slots.push(readdirSync(join(w.home, 'running')).filter((f) => /^\d+-\d+\.json$/.test(f)).length), start(step));
   const r = await watch(w);
   assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(slots, [1, 1, 1], 'every start, the resume too, holds a reserved machine slot');
   assert.equal(jobs.length, 1);
   assert.deepEqual(jobs[0].running, [], 'no process of the step while the job runs');
   assert.deepEqual(jobs[0].job, { session: 'kirunak:weather/offline-forecast', what: 'weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
