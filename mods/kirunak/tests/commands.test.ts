@@ -42,7 +42,7 @@ describe('the owner\'s commands', () => {
   for (const kind of ['composer', 'bridge'] as const) {
     test(`from ${kind}: each verb runs k with --via mod and prints the state line`, async ($, on) => {
       const w = world(on)
-      expect((await run($, 'k-accept', ID, { kind })).text).toBe(`${ID}: done`)
+      expect((await run($, 'k-accept', ID, { kind })).text).toBe(kind === 'bridge' ? `${ID}: done\n(typed in Remote Control)` : `${ID}: done`)
       await run($, 'k-approve', `${ID} --amendment A-2 --first`, { kind })
       await run($, 'k-hold', `${ID} waiting for the phone test`, { kind })
       await run($, 'k-start', ID, { kind })
