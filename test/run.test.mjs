@@ -64,6 +64,8 @@ test('pending → ready → running → done, with the run records, the briefs a
   const w = await approvedWorkspace(PLAN);
   const seen = [];
   const calls = fakeRunner(w, (step, n, w2, pid) => {
+    const rec = JSON.parse(readFileSync(join(w2.p.dir, 'steps', step.env.KIRUNAK_STEP, 'run-1.json'), 'utf8'));
+    assert.deepEqual([rec.session_id, rec.kirunak.krun, rec.kirunak.claude, rec.kirunak.ended, rec.kirunak.result], [step.sessionId, process.pid, pid, null, false], 'the record is written before the run ends');
     seen.push({ states: Object.fromEntries([...steps.load(w2.ws, w2.id).states].map(([s, v]) => [s, v.state])), pidFile: existsSync(join(w2.home, 'running', `${pid}.json`)) });
     return 'write';
   });
@@ -81,7 +83,8 @@ test('pending → ready → running → done, with the run records, the briefs a
     assert.match(c.prompt, /^# weather\/offline-forecast S-\d: /);
   }
   assert.deepEqual(calls.map((c) => c.env), [{ KIRUNAK_TASK: w.id, KIRUNAK_STEP: 'S-1' }, { KIRUNAK_TASK: w.id, KIRUNAK_STEP: 'S-2' }]);
-  assert.equal(JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'run-1.json'), 'utf8')).session_id, calls[0].sessionId);
+  const rec = JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'run-1.json'), 'utf8'));
+  assert.deepEqual([rec.session_id, rec.num_turns, rec.kirunak.exitCode, rec.kirunak.result, typeof rec.kirunak.ended], [calls[0].sessionId, 3, 0, true, 'string']);
 });
 
 test('no --model or --effort when neither the plan nor the config names one; the plan line, then models.<kind>', async () => {

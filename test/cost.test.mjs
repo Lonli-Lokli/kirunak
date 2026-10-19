@@ -29,6 +29,8 @@ const RECORDS = {
     session_id: B, num_turns: 2, is_error: false, total_cost_usd: 0.3, usage: usage(100, 50000, 0, 0, 500),
     model_usage: { 'claude-opus-5-5': { input_tokens: 100, output_tokens: 500, cache_read_input_tokens: 0, cache_creation_input_tokens: 50000 } },
   },
+  // A run written before it started, whose k run stopped: no result, so no run, calls or money.
+  'S-2/run-2.json': { session_id: B, kirunak: { krun: 1, claude: null, started: '2026-11-04T09:31:00.000Z', ended: null, result: false } },
 };
 
 // Worked by hand with the default weights (orchestrator.md §6):

@@ -129,8 +129,11 @@ claude -p
 - The result: the JSON result's documented fields `session_id`, `result`, `total_cost_usd` (with a per-model
   breakdown), `usage` ("covers the main agent loop only") with `cache_creation.ephemeral_5m_input_tokens` and
   `ephemeral_1h_input_tokens`, `model_usage` (totals including subagents), `num_turns`, `duration_ms`, `is_error`,
-  `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The runner
-  saves the whole object as `steps/S-n/run-<k>.json`; §6 derives the weight from `model_usage`.
+  `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The
+  orchestrator writes `steps/S-n/run-<k>.json` before the run starts (the session id, and under `kirunak` its own
+  pid, the claude's pid and the start) and adds the whole object to it when the run ends, with the end and the exit
+  code; §6 derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no
+  calls and no money.
 - `--permission-mode` comes from the workspace's `runner.permissionMode`, default `auto` (judgement: a headless step
   should run as the owner's interactive sessions do; a workspace whose sessions use another mode sets it). A
   behaviour to check in slice 2 before trusting it: a step that hits a prompt no one can answer must fail within the
