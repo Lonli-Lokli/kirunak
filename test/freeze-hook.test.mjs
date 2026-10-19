@@ -107,6 +107,15 @@ test('any Write under approvals/, to done.json or hold.md is denied as the owner
   assert.equal(lines(join(r.home, 'freeze.log')).length, 4);
 });
 
+test('a Write, an Edit or a shell write of cost.md is denied: it is generated from done.json', () => {
+  const r = makeRepo();
+  const file = r.task(FROZEN, 'cost.md');
+  for (const input of [write(file, '# Cost\n'), { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' } }, { tool_name: 'Bash', tool_input: { command: `echo x > ${file}` } }]) {
+    const res = run(input, r.home);
+    assert.match(res.reason ?? '', /^kirunak: cost\.md is generated from done\.json's cost, which only `k accept` records: `k cost .+ --write` writes it again$/, JSON.stringify(input));
+  }
+});
+
 test('a `- [x]` tick in checklist.md is denied; other checklist edits are allowed', () => {
   const r = makeRepo();
   const file = r.task(FROZEN, 'checklist.md');

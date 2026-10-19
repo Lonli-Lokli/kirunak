@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { accept, hashBytes, readRecord } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
+import { costMarkdown } from '../lib/cost-md.mjs';
 import { approvedWorkspace, k, sh } from './helpers.mjs';
 
 const PLAN = `---
@@ -151,7 +152,16 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   assert.equal(r.status, 0, r.stderr);
   // The accept commits done.json and cost.md, k cost's numbers; the steps' copies stay out of git.
   assert.deepEqual(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [w.p.rel('cost.md'), w.p.rel('done.json')]);
-  assert.match(readFileSync(join(w.p.dir, 'cost.md'), 'utf8'), /^# Cost of weather\/offline-forecast\n\nThe cost could not be read: .*JSON/);
+  const done = JSON.parse(readFileSync(join(w.p.dir, 'done.json'), 'utf8'));
+  assert.match(done.cost.error, /JSON/);
+  const md = readFileSync(join(w.p.dir, 'cost.md'), 'utf8');
+  assert.equal(md, costMarkdown(w.id, done.cost));
+  assert.match(md, /^# Cost of weather\/offline-forecast\n\nThe cost could not be read when the task was accepted: .*JSON/);
+  // cost.md is generated: a hand edit is undone by k cost --write.
+  writeFileSync(join(w.p.dir, 'cost.md'), 'edited by hand\n');
+  const again = k(w.home, ['cost', w.id, '--write']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(readFileSync(join(w.p.dir, 'cost.md'), 'utf8'), md);
   assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all']), /\/in\/|diff\.patch|\.gitignore/);
 });
 

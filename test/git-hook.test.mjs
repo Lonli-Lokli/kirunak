@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { check } from '../hooks/git-pre-commit.mjs';
+import { costMarkdown } from '../lib/cost-md.mjs';
 
 // D7: the git hook refuses a commit whose frozen task no longer matches its approval (approval.md §3).
 
@@ -124,6 +125,30 @@ test('done.json and hold.md need the owner\'s variable naming the task', () => {
   put(dir, `kirunak/tasks/${SLUG}/hold.md`, 'waiting\n');
   assert.equal(commit(dir).status, 1);
   assert.equal(commit(dir, { KIRUNAK_HOLDING: ID }).status, 0);
+});
+
+test('cost.md is refused unless it is the rendering of its done.json\'s cost', () => {
+  const dir = makeRepo();
+  const cost = { steps: [], total: { weight: 0, usd: 0, calls: 0, runs: 0, medianContext: null }, keeper: { keepalives: 0, misses: 0 }, interactive: { sessions: 0, usd: 0 }, comparisons: [] };
+  const text = costMarkdown(ID, cost);
+  put(dir, `kirunak/tasks/${SLUG}/cost.md`, text);
+  const none = commit(dir);
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /cost\.md is rendered from done\.json's cost, which k accept records, and there is none/);
+  put(dir, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID, cost: {} }));
+  const odd = commit(dir, { KIRUNAK_ACCEPTING: ID });
+  assert.equal(odd.status, 1, 'a cost no renderer takes is refused with a reason, not a crash');
+  assert.match(odd.stderr, /done\.json's cost is not one k accept writes, so cost\.md cannot be rendered from it/);
+  put(dir, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID, cost }));
+  assert.equal(commit(dir, { KIRUNAK_ACCEPTING: ID }).status, 0, 'the accept commits both');
+  put(dir, `kirunak/tasks/${SLUG}/cost.md`, text.replace('Keep-alives 0', 'Keep-alives 9'));
+  const edited = commit(dir, { KIRUNAK_ACCEPTING: ID });
+  assert.equal(edited.status, 1, 'not even the owner\'s variable lets a hand edit through');
+  assert.match(edited.stderr, new RegExp(`cost\\.md is generated from done\\.json; \`k cost ${ID} --write\` writes it again`));
+  git(dir, ['rm', '-q', '-f', `kirunak/tasks/${SLUG}/cost.md`]);
+  assert.equal(commit(dir).status, 0, 'a removal is anyone\'s: k cost --write brings it back');
+  put(dir, `kirunak/tasks/${SLUG}/cost.md`, text);
+  assert.equal(commit(dir).status, 0, 'and so is the rendering itself');
 });
 
 test('an amendment stamp needs the owner\'s variable; a new amendment does not', () => {

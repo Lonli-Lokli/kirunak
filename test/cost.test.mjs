@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compare, costOf, markdown, runFields } from '../lib/cost.mjs';
+import { compare, costOf, runFields, summary } from '../lib/cost.mjs';
+import { costMarkdown } from '../lib/cost-md.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
 import { k, makeWorkspace, RESULT } from './helpers.mjs';
 
@@ -82,16 +83,21 @@ test('k cost equals the formula worked by hand', async () => {
   assert.doesNotMatch(r.stdout, /against/, 'no baseline, no comparison');
 });
 
-test('cost.md, which k accept commits: the numbers k cost prints, as a table, and the baseline\'s comparisons', async () => {
+test('done.json\'s cost, the numbers as k cost shows them, and cost.md rendered from them alone', async () => {
   const w = await fixture();
   const c = await costOf(w.ws, ID);
-  const md = markdown(c);
+  const kept = summary(c, ['context per call: median 20,100 against 150,000']);
+  assert.deepEqual(kept.total, { weight: 135000, usd: 1.1, calls: 17, runs: 3, medianContext: 20100 });
+  assert.deepEqual(kept.steps.map((x) => x.step), ['S-1', 'S-2']);
+  const md = costMarkdown(ID, JSON.parse(JSON.stringify(kept)));
+  assert.equal(md, costMarkdown(ID, kept), 'the same numbers through JSON give the same file');
   assert.match(md, /^# Cost of weather\/offline-forecast\n/);
   assert.match(md, /\n\| S-1 \| 6\.99e4 \| 0\.80 \| 15 \| 2 \| 20,100 \|\n/);
   assert.match(md, /\n\| All \| 1\.35e5 \| 1\.10 \| 17 \| 3 \| 20,100 \|\n/);
-  assert.match(md, /\nKeep-alives 0, misses 0\.\n$/);
-  assert.match(markdown(c, ['context per call: median 20,100 against 150,000']), /\n## Against the baseline\n\n- context per call: median 20,100 against 150,000\n$/);
-  assert.match(markdown({ ...c, steps: [] }), /\nNo run record was found\.\n/);
+  assert.match(md, /\nKeep-alives 0, misses 0\.\n/);
+  assert.match(md, /\n## Against the baseline\n\n- context per call: median 20,100 against 150,000\n$/);
+  assert.match(costMarkdown(ID, { ...kept, steps: [] }), /\nNo run record was found\.\n/);
+  assert.equal(costMarkdown(ID, { error: 'bad' }), `# Cost of ${ID}\n\nThe cost could not be read when the task was accepted: bad\n`);
 });
 
 test('k cost --baseline prints only the comparisons, and nothing without a baseline', async () => {

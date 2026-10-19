@@ -3,12 +3,14 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { costMarkdown } from '../lib/cost-md.mjs';
 
 // The pre-commit hook (approval.md §3). It reads the index and refuses a commit when:
 // 1. a staged task.md no longer matches its approval record's hash, unless KIRUNAK_APPROVING names the task;
 // 2. it stages what only the owner's commands write (approvals/, done.json, hold.md, an amendment's stamp), unless
 //    KIRUNAK_APPROVING, KIRUNAK_ACCEPTING or KIRUNAK_HOLDING names the task;
-// 3. a staged intake.md is not an append of the committed one.
+// 3. a staged intake.md is not an append of the committed one;
+// 4. a staged cost.md is not the rendering of its done.json's cost (`k cost <id> --write` writes it again).
 // The owner's commands set those variables on the one `git commit` they run. A mistake guard, not a lock.
 
 const TASK = /^kirunak\/tasks\/([^/]+)\/task\.md$/;
@@ -16,6 +18,7 @@ const INTAKE = /^kirunak\/tasks\/([^/]+)\/intake\.md$/;
 const OWNED = /^kirunak\/tasks\/([^/]+)\/(done\.json|hold\.md)$/;
 const RECORD = /^kirunak\/approvals\/(?:.*\/)?([^/]+?)(?:\.json)?$/;
 const AMENDMENT = /^kirunak\/tasks\/([^/]+)\/amendments\/[^/]+$/;
+const COST = /^kirunak\/tasks\/([^/]+)\/cost\.md$/;
 const STAMP = /^(applied|declined):/gm;
 const OWNER_VARS = ['KIRUNAK_APPROVING', 'KIRUNAK_ACCEPTING', 'KIRUNAK_HOLDING'];
 
@@ -61,6 +64,23 @@ export function check({ staged, show, env = process.env }) {
     } else if ((m = AMENDMENT.exec(path))) {
       if (stamps(read(`:${path}`)) > stamps(read(`HEAD:${path}`)) && !byOwner(m[1])) {
         problems.push(`kirunak: ${path}: its applied:/declined: stamp is written by the owner's command only`);
+      }
+    } else if ((m = COST.exec(path))) {
+      const bytes = read(`:${path}`);
+      if (!bytes) continue;
+      const where = `kirunak/tasks/${m[1]}/done.json`;
+      let done = null;
+      try {
+        done = JSON.parse((read(`:${where}`) ?? read(`HEAD:${where}`)).toString('utf8'));
+      } catch {}
+      let rendered = null;
+      try {
+        rendered = done?.cost ? costMarkdown(done.task, done.cost) : null;
+      } catch {}
+      if (!done?.cost) problems.push(`kirunak: ${path}: cost.md is rendered from done.json's cost, which k accept records, and there is none`);
+      else if (rendered == null) problems.push(`kirunak: ${path}: done.json's cost is not one k accept writes, so cost.md cannot be rendered from it`);
+      else if (bytes.toString('utf8') !== rendered) {
+        problems.push(`kirunak: ${path}: cost.md is generated from done.json; \`k cost ${done.task} --write\` writes it again`);
       }
     } else if (INTAKE.test(path)) {
       const before = read(`HEAD:${path}`);

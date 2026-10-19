@@ -23,7 +23,7 @@ kirunak/
                                   keeps kirunak's own files out of git (in/, diff.patch, the run records)
   tasks/<slug>/evidence/          what steps produce for the reviewer: reports, measurements, screenshots (R14)
   tasks/<slug>/done.json          the owner's acceptance record (R15)
-  tasks/<slug>/cost.md            the task's cost at acceptance, written by `k accept` (R12, orchestrator.md §6)
+  tasks/<slug>/cost.md            the task's cost at acceptance, generated from done.json (R12, orchestrator.md §6)
   approvals/<slug>.json           the approval record: the task's hash, the date, who, how (D7)
 ```
 
@@ -122,12 +122,13 @@ parser of about a hundred lines with no dependency.
   (the owner's command, `approval.md` §4). `review`, `verdict` and `head` are the review it took as that file states
   them, `reviewHash` its bytes' hash (the one its step finished with, `review.md` §2). With `--checklist-open "<why>"`
   it adds `"checklistOpen": "<why>"` and `"openItems": [text]`, the items left open: those unticked in
-  `checklist.md` and the review's rows with no item there, each as `k checklist` words it.
-- `cost.md`: the numbers `k cost` prints, as a table per step and in total, with the baseline's comparisons when
-  the workspace has one, written by `k accept` and committed with `done.json` (`orchestrator.md` §6). The run
-  records it is read from stay on disk and out of git: the step folder's `.gitignore` names `in/`, `diff.patch`,
-  `run-<k>.json`, `keep-<k>.json` and a heavy job's `heavy-<k>.json` and log; the brief and the step's outputs are
-  the session's to commit.
+  `checklist.md` and the review's rows with no item there, each as `k checklist` words it. `k accept` adds `"cost"`,
+  the task's numbers (`orchestrator.md` §6).
+- `cost.md`: generated, never written by hand: the rendering of `done.json`'s `cost` as a table per step and in
+  total, with the baseline's comparisons, committed with `done.json` by `k accept` and written again by `k cost <id>
+  --write`; the git hook refuses any other text (`approval.md` §3). The run records the numbers are read from stay
+  on disk and out of git: the step folder's `.gitignore` names `in/`, `diff.patch`, `run-<k>.json`, `keep-<k>.json`
+  and a heavy job's `heavy-<k>.json` and log; the brief and the step's outputs are the session's to commit.
 
 ## 4. States and who moves a task
 
