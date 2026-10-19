@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
@@ -204,6 +204,24 @@ test('k run refuses a step past the machine cap and says who runs; a task not qu
   }
   writeFileSync(w.ws.queue, '');
   await assert.rejects(run({ ws: w.ws, id: w.id }), /weather\/offline-forecast is not in the queue/);
+});
+
+test('one k run per task: a second refuses, naming the pid, and starts nothing; a lock whose k run is dead is taken over', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w);
+  const lock = join(w.home, 'k-run', `${encodeURIComponent(w.id)}.json`);
+  const first = run({ ws: w.ws, id: w.id });
+  await assert.rejects(run({ ws: w.ws, id: w.id }), new RegExp(`has a k run already \\(pid ${process.pid}\\)`));
+  await first;
+  assert.equal(calls.length, 1, 'the second k run started nothing');
+  assert.ok(!existsSync(lock), 'the lock goes when k run ends');
+  const dead = spawnSync('true').pid;
+  writeFileSync(lock, JSON.stringify({ pid: dead, task: w.id }));
+  const lines = [];
+  await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.equal(calls.length, 2);
+  assert.ok(lines.includes(`${w.id} took over the lock of k run ${dead}, which no longer runs`), lines.join('\n'));
+  assert.ok(!existsSync(lock));
 });
 
 // The keeper in k run: a clock whose sleep moves time on at once, and runs whose records show a 1-hour cache.

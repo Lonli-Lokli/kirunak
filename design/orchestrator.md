@@ -86,7 +86,8 @@ pending  →  ready  →  running  →  done
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready and nothing
   runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
-  owner can predict).
+  owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid) while it runs,
+  a second refuses and names that pid, and a lock whose `k run` is dead is taken over.
 
 ## 3. The runner: headless `claude -p` (`plugins.md` seam `runner`)
 
