@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
@@ -373,6 +373,82 @@ echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,
   const r = await run({ ws: w.ws, id: w.id });
   assert.deepEqual([jobs, calls.length, calls[0].resume], [['a long build'], 1, first], 'the job again, then a resume of the first conversation');
   assert.equal(r.ended['S-1'], 'done');
+});
+
+// The real k run in a child, with a fake claude on PATH that copies `ask` (if any) to the step's needs.json.
+function childRun(w, ask = null) {
+  const bin = mkdtempSync(join(tmpdir(), 'kirunak-asking-claude-'));
+  if (ask) writeFileSync(join(bin, 'needs.json'), ask);
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh
+sid=""; for a in "$@"; do [ "$prev" = "--session-id" ] && sid="$a"; prev="$a"; done
+cat > /dev/null
+[ -f "${bin}/needs.json" ] && mkdir -p "${stepFile(w, '')}" && cp "${bin}/needs.json" "${stepFile(w, 'needs.json')}"
+echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":2,\\"session_id\\":\\"$sid\\",\\"total_cost_usd\\":0.1}"
+`);
+  chmodSync(join(bin, 'claude'), 0o755);
+  const child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'ignore'] });
+  let said = '';
+  child.stdout.on('data', (d) => (said += d));
+  return { bin, child, said: () => said, exited: new Promise((r) => child.on('exit', (code, signal) => r({ code, signal }))) };
+}
+
+test('k run stopped while a resume waits for a machine slot, its job done, leaves the step waiting; the next k run runs the job again and resumes', async () => {
+  const w = await approvedWorkspace(PLAN);
+  // The job lowers the machine's cap to none, so the resume after it waits for a slot.
+  const full = join(mkdtempSync(join(tmpdir(), 'kirunak-full-')), 'machine.json');
+  writeFileSync(full, JSON.stringify({ maxAgents: 0 }));
+  const { child, said, exited } = childRun(w, JSON.stringify({ heavy: { what: 'a build', command: ['cp', full, join(w.home, 'machine.json')], maxMinutes: 1 }, then: 'resume' }));
+  await until(() => existsSync(join(w.p.dir, 'progress.md')) && /S-1 heavy job ended/.test(progress(w)), 'the job never ended');
+  child.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  assert.doesNotMatch(progress(w), /failed|resumed/, 'nothing failed, and nothing resumed yet');
+  assert.ok(existsSync(stepFile(w, 'needs.json')), 'the request stays until a claude resumes it');
+  assert.match(said(), /S-1 waits for its job again: the next k run runs it/);
+  rmSync(join(w.home, 'machine.json'));
+  const first = JSON.parse(readFileSync(stepFile(w, 'run-1.json'), 'utf8')).session_id;
+  const jobs = [];
+  w.ws.seams.resourceGuard = jobGuard(jobs);
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.deepEqual([jobs, calls.length, calls[0].resume, r.ended['S-1']], [['a build'], 1, first, 'done'], 'the job again, then a resume of the first conversation');
+  assert.equal(progress(w).match(/resumed/g).length, 1);
+  assert.match(progress(w), /S-1 heavy job ended: .*\n.*S-1 heavy job ended: .*\n.*S-1 resumed \(session /);
+});
+
+test('k run stopped while the owner\'s answer waits for a machine slot leaves the step waiting for the owner; the next k run resumes it', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, (step, n) => (n > 1 ? 'write' : (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing')));
+  assert.equal((await watch(w)).stopped, 'S-1 waits for the owner: Three days or a week?');
+  writeFileSync(join(w.home, 'machine.json'), JSON.stringify({ maxAgents: 0 }));
+  const { child, said, exited } = childRun(w);
+  await until(() => /S-1 starts/.test(said()), 'the resume never started');
+  child.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  assert.doesNotMatch(progress(w), /failed|resumed/);
+  assert.ok(existsSync(stepFile(w, 'needs.json')), 'the question stays until a claude reads the answer');
+  assert.match(said(), /S-1 still waits for the owner: the next k run resumes it/);
+  rmSync(join(w.home, 'machine.json'));
+  assert.deepEqual((await watch(w)).states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal(calls[1].resume, calls[0].sessionId);
+  assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; /);
+  assert.match(progress(w), /S-1 resumed \(session [^)]+\): the owner answered\n/);
+  assert.equal(progress(w).match(/resumed/g).length, 1);
+});
+
+test('a k run that died while a resume waited for its slot leaves the step waiting: the next k run runs the job again and resumes', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const dead = spawnSync('true').pid;
+  const at = new Date().toISOString();
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: sid, total_cost_usd: 0.1, kirunak: { krun: dead, krunStart: at, claude: dead, claudeStart: at, started: at, ended: at, exitCode: 0, result: true } }));
+  put(w, 'steps/S-1/needs.json', HEAVY('tests'));
+  const jobs = [];
+  w.ws.seams.resourceGuard = jobGuard(jobs);
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.deepEqual([jobs, calls.length, calls[0].resume, r.ended['S-1']], [['tests'], 1, sid, 'done']);
+  assert.doesNotMatch(progress(w), /failed/);
 });
 
 test('a step a dead k run left running is failed, its claude killed, and retried; a step started by hand is left alone', async () => {

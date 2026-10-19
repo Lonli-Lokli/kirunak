@@ -108,9 +108,12 @@ pending  →  ready  →  running  →  done
   lock whose `k run` is dead, or whose pid is now another process or recorded no start, is taken over. A `k run`
   stopped by Ctrl-C, a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives;
   the guard ends a heavy job), fails each step whose run it killed (`running`) with `k run was stopped (<signal>)`,
-  a stop's failure that the step does not count, releases its lock and exits with the signal's code. A step waiting
-  for its job is left `waiting-heavy`, its `needs.json` and `started` line kept: the next `k run` runs the job again
-  and resumes the same conversation, as after a crash.
+  a stop's failure that the step does not count, releases its lock and exits with the signal's code. A resume's
+  `needs.json` is moved to `needs-<k>.json` only as its claude starts (nothing awaited between the move and the
+  spawn), and `progress.md` says `resumed` then, so a step waiting for its job, or whose job has ended and whose
+  resume waits for a machine slot, is left `waiting-heavy`, its `needs.json` and `started` line kept: the next
+  `k run` runs the job again and resumes the same conversation, as after a crash (the price, one rerun of a finished
+  job in that window). A resume of the owner's answer that waits for a slot is left `waiting-owner` the same way.
 
 ## 3. The runner: headless `claude -p` (`plugins.md` seam `runner`)
 
