@@ -292,12 +292,12 @@ head: HEAD
 ${verdict}
 `;
 
-test('accept: refuses without a review verdict, even with --checklist-open; writes done.json, leaves the queue', async () => {
+test('accept: refuses with no review, even with --checklist-open; writes done.json, leaves the queue', async () => {
   const { ws, weather, hub, home } = await makeWorkspace();
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /never approved/);
   await approve({ ws, id: ID, now: NOV5 });
-  assert.throws(() => accept({ ws, id: ID }), /no review verdict: the plan's review step writes kirunak\/tasks\/offline-forecast\/review\.md/);
-  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /no review verdict/);
+  assert.throws(() => accept({ ws, id: ID }), /has no review, so it cannot be accepted: add a review step to plan\.md and run it$/);
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /has no review/);
   reviewsRan(taskDir(weather));
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: pass', false));
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /review\.md is not a review k accept takes:\n {2}line 13: verdict: pass is not verdict: met/);
@@ -339,6 +339,19 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
   assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit', 'checklistOpen']);
   assert.equal(done.via, 'shell');
   assert.equal(done.checklistOpen, 'the age line is read at the next release');
+});
+
+test('accept refuses a not met verdict, --checklist-open or not: the way out is an amendment or a new review', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  reviewsRan(taskDir(weather));
+  const notMet = REVIEW('verdict: not met (AC-2)', false).replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | not met | a fixed 24-hour format |');
+  writeFileSync(join(taskDir(weather), 'review.md'), notMet);
+  gitCommitAll(weather, 'review');
+  const way = new RegExp(`review\\.md ends verdict: not met \\(AC-2\\), which k accept never takes: amend the task \\(k amend new ${ID}\\) and review again, or run a new review$`);
+  assert.throws(() => accept({ ws, id: ID }), way);
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'AC-2 later' }), way);
+  assert.equal(existsSync(join(taskDir(weather), 'done.json')), false);
 });
 
 // Rows the owner should check, spelled as no verdict, a cited line past its file, and the last line met anyway.

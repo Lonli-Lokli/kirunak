@@ -118,7 +118,11 @@ under 100 ms).
 `k accept <id>`: refuses unless the latest review (`review.md`, `review-2.md`, ...) counts, that is it passes
 `k review check` and the review step whose output it is has `finished` in `progress.md` (`review.md` §2), and every
 `checklist.md` item is ticked or the owner passes `--checklist-open "<why>"` (recorded in `done.json`); a refusal
-names each problem. It writes `done.json`, commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
+names each problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses
+`verdict: not met (<ids>)` whatever the flags, `--checklist-open` included, which waives checklist items and never a
+criterion: the way out is an amendment (`k amend new <id>`, approved, then a new review) or a new review after a
+fix. It refuses a task with no review: a task closes only through a review step of `plan.md` that ran. It writes
+`done.json`, commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
 
 Why `!`: the shortcuts documentation says a `!` line is "Run a command directly, add its output to the session, and
 have Claude respond to it", shell mode "Doesn't require Claude to interpret or approve the command", and the

@@ -76,7 +76,11 @@ verdict is misspelt never leaves an empty checklist:
 ```
 
 The owner ticks items; the freeze hook refuses an agent's tick (`approval.md` §2). `k accept` refuses while an item
-is unticked unless the owner passes `--checklist-open "<why>"`, which `done.json` records.
+is unticked unless the owner passes `--checklist-open "<why>"`, which `done.json` records. It takes only a latest
+review that counts (§2) and ends `verdict: met` or `verdict: needs owner (<ids>)`. A `not met` verdict is refused
+whatever the flags (`--checklist-open` waives checklist items, never a criterion); the way out is an amendment and a
+new review, or a new review after a fix. A task with no review cannot be accepted: its plan needs a review step,
+run.
 
 ## 4. Done only through `k-done` (R15, D12)
 
@@ -89,8 +93,8 @@ owner finds on a device). Its steps:
    anything uncommitted, unpushed or unverified and ask whether it belongs to the task; commit only if the owner
    says so.
 2. **Record the acceptance**: ask the owner to type `! k accept <id>` (or `/k-accept <id>` with the mod); the task
-   is done only when `done.json` exists. If `k accept` refuses (an unticked checklist item, no review verdict), say
-   what it named and stop. The skill never runs `k accept` itself: the hook refuses it from the Bash tool.
+   is done only when `done.json` exists. If `k accept` refuses (an unticked checklist item, a review that does not
+   count, a `not met` verdict, no review), say what it named and stop. The skill never runs `k accept` itself: the hook refuses it from the Bash tool.
 3. **Write the handoff and release**: run `k handoff <id> --session <session_id> --json`. It merges every loaded
    `handoff` plugin (`plugins.md` §2): `targets` say where the handoff goes and what it must hold (the state now,
    what is open, the next step, the owner's decisions with their dates, where things are; nothing git already
