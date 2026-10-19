@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { join } from 'node:path';
 import { refuse } from '../lib/errors.mjs';
 import { kirunakHome } from '../lib/home.mjs';
+import { onStop } from '../lib/stop.mjs';
 
 // The core's default `resourceGuard` (plugins.md §2): one heavy job at a time on this machine. The lock is
 // guard/lock, a directory made with mkdir (atomic) holding owner.json; waiting jobs queue first in, first out in
@@ -40,7 +41,11 @@ export function alive(pid) {
   }
 }
 
+// A pid of 0 or 1 would name this process's own group or every process: never a job's group.
+const isGroup = (pid) => Number.isInteger(pid) && pid > 1;
+
 const groupAlive = (pid) => {
+  if (!isGroup(pid)) return false;
   try {
     process.kill(-pid, 0);
     return true;
@@ -51,6 +56,7 @@ const groupAlive = (pid) => {
 
 // TERM to the process group, then KILL after graceMs if anything of it is left.
 export async function killTree(pid, graceMs = 10000) {
+  if (!isGroup(pid)) return;
   try {
     process.kill(-pid, 'SIGTERM');
   } catch {}
@@ -64,7 +70,8 @@ export async function killTree(pid, graceMs = 10000) {
 }
 
 // Runs argv in its own process group with maxMinutes as a deadline: past it, the group is killed, exit code 124.
-export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10000 } = {}) {
+// onSpawn(pid) is called as soon as the group exists.
+export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10000, onSpawn } = {}) {
   return new Promise((resolve) => {
     let log = '';
     const keep = (b) => {
@@ -82,6 +89,7 @@ export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10
     } catch (e) {
       return end({ exitCode: 127, log: e.message });
     }
+    if (child.pid) onSpawn?.(child.pid);
     const closed = new Promise((r) => child.on('close', r));
     let killing = null;
     const timer = maxMinutes > 0 ? setTimeout(() => (killing = killTree(child.pid, killAfterMs)), maxMinutes * 60000) : null;
@@ -133,7 +141,24 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
     }
   }
 
-  // The head of the queue takes the lock, or takes it over when its owner's process is dead.
+  // owner.json is replaced whole, so a reader never sees half of it.
+  const writeOwner = (P, owner) => {
+    writeFileSync(`${P.owner}.tmp`, JSON.stringify(owner) + '\n');
+    renameSync(`${P.owner}.tmp`, P.owner);
+  };
+
+  // A lock without owner.json is dead after 10 s; one removed since it was seen is no lock at all.
+  const stale = (P) => {
+    try {
+      return Date.now() - statSync(P.lock).mtimeMs > 10000;
+    } catch (e) {
+      if (e.code === 'ENOENT') return true;
+      throw e;
+    }
+  };
+
+  // The head of the queue takes the lock, or takes it over when its owner's process is dead. A dead owner's job that
+  // still runs is returned as { orphan: pid } first: nobody will collect its result, and it must end before the take.
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
@@ -144,8 +169,9 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       if (live[0].id !== me.id) return false;
       if (existsSync(P.lock)) {
         const owner = readJson(P.owner);
-        const dead = owner ? !alive(owner.pid) : Date.now() - statSync(P.lock).mtimeMs > 10000;
+        const dead = owner ? !alive(owner.pid) : stale(P);
         if (!dead) return false;
+        if (groupAlive(owner?.job)) return { orphan: owner.job };
         rmSync(P.lock, { recursive: true, force: true });
       }
       try {
@@ -153,7 +179,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       } catch {
         return false;
       }
-      writeFileSync(P.owner, JSON.stringify({ session: me.session, what: me.what, pid: me.pid, since: new Date().toISOString(), id: me.id }) + '\n');
+      writeOwner(P, { session: me.session, what: me.what, pid: me.pid, since: new Date().toISOString(), id: me.id });
       writeQueue(P, live.slice(1));
       return true;
     });
@@ -180,15 +206,53 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           const P = at();
           const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, since: new Date().toISOString() };
           await edit(P, () => appendFileSync(P.queue, JSON.stringify(me) + '\n'));
-          while (!(await tryTake(P, me))) await sleep(pollMs);
+          for (;;) {
+            const t = await tryTake(P, me);
+            if (t === true) break;
+            if (t?.orphan) await killTree(t.orphan, killAfterMs);
+            else await sleep(pollMs);
+          }
           const started = Date.now();
           let r = { exitCode: 1, log: '' };
-          try {
-            r = await runCommand(job, { killAfterMs });
-          } finally {
+          let pid = null;
+          let finished;
+          const done = new Promise((res) => (finished = res));
+          const release = () => {
             if (readJson(P.owner)?.id === me.id) rmSync(P.lock, { recursive: true, force: true });
-            const minutes = Math.round(((Date.now() - started) / 60000) * 100) / 100;
-            appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: job.what, session: job.session, minutes, exitCode: r.exitCode }) + '\n');
+          };
+          // k run stopped (Ctrl-C, TERM, a closed terminal): end the job's group, then wait for the release below.
+          const unstop = onStop(async () => {
+            await killTree(pid, killAfterMs);
+            await done;
+          });
+          // A crash or a second Ctrl-C leaves no time to wait: TERM the job and keep the lock while it runs, so the
+          // next take ends what is left of it; with nothing running, release now (outside the mutex: takes allow it).
+          const onExit = () => {
+            if (!groupAlive(pid)) return release();
+            try {
+              process.kill(-pid, 'SIGTERM');
+            } catch {}
+          };
+          process.on('exit', onExit);
+          try {
+            r = await runCommand(job, {
+              killAfterMs,
+              onSpawn: (p) => {
+                pid = p;
+                const owner = readJson(P.owner);
+                if (owner?.id === me.id) writeOwner(P, { ...owner, job: p });
+              },
+            });
+          } finally {
+            process.off('exit', onExit);
+            try {
+              await edit(P, release);
+              const minutes = Math.round(((Date.now() - started) / 60000) * 100) / 100;
+              appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: job.what, session: job.session, minutes, exitCode: r.exitCode }) + '\n');
+            } finally {
+              unstop();
+              finished();
+            }
           }
           return r;
         },

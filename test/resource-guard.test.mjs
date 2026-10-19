@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import resourceGuardLocal, { alive } from '../plugins/resource-guard-local.mjs';
@@ -14,6 +15,30 @@ function guard(opts = {}) {
 const sh = (script) => ['/bin/sh', '-c', script];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logOf = (home) => readFileSync(join(home, 'guard', 'log.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+const GUARD = new URL('../plugins/resource-guard-local.mjs', import.meta.url).href;
+const ownerOf = (home) => {
+  try {
+    return JSON.parse(readFileSync(join(home, 'guard', 'lock', 'owner.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+};
+const groupAlive = (pid) => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+async function until(ok, ms = 5000) {
+  const end = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > end) throw new Error('timed out');
+    await sleep(10);
+  }
+}
 
 // The pid of a child that has exited.
 async function deadPid() {
@@ -105,4 +130,73 @@ test('claims: one holder at a time, released by its holder, every resource ever 
   assert.equal(g.release('phone', 'kirunak:a'), true);
   assert.deepEqual(g.resources(), [{ id: 'phone', name: 'phone', state: 'free' }]);
   assert.equal(g.claim('phone', 'kirunak:b', 'other test').by, 'kirunak:b');
+});
+
+test('a k run stopped by SIGINT ends its job\'s process group and frees the lock within a second', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'kirunak-guard-'));
+  const src = `import g from ${JSON.stringify(GUARD)};
+g({ home: ${JSON.stringify(home)} }, { pollMs: 20 }).provides.resourceGuard.run({ session: 's', what: 'build', maxMinutes: 1, cwd: ${JSON.stringify(home)}, command: ['/bin/sh', '-c', 'sleep 30 & sleep 30'] });`;
+  const run = spawn(process.execPath, ['--input-type=module', '-e', src], { stdio: 'ignore' });
+  const exited = new Promise((r) => run.on('exit', (code, signal) => r({ code, signal })));
+  await until(() => ownerOf(home)?.job);
+  const { pid, job } = ownerOf(home);
+  assert.equal(pid, run.pid, 'pid stays the k run\'s; job is the command\'s');
+  assert.equal(groupAlive(job), true);
+  const t0 = Date.now();
+  run.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  assert.ok(Date.now() - t0 < 1000, `stopped in ${Date.now() - t0} ms`);
+  assert.equal(groupAlive(job), false, 'the job and its background child are gone');
+  assert.equal(existsSync(join(home, 'guard', 'lock')), false);
+  assert.equal(logOf(home)[0].what, 'build');
+});
+
+test('a dead owner\'s job that still runs is ended before the lock is taken over', async () => {
+  const { home, g } = guard({ killAfterMs: 500 });
+  const orphan = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  mkdirSync(join(home, 'guard', 'lock'), { recursive: true });
+  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 'gone', what: 'build', pid: await deadPid(), job: orphan.pid, since: new Date().toISOString() }));
+  const r = await g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh(`kill -0 ${orphan.pid} 2>/dev/null && echo orphan-alive || echo orphan-gone`) });
+  assert.equal(r.exitCode, 0);
+  assert.match(r.log, /orphan-gone/);
+  assert.equal(groupAlive(orphan.pid), false);
+});
+
+test('a lock removed between the waiter\'s checks counts as no lock', async () => {
+  const { home, g } = guard();
+  const lock = join(home, 'guard', 'lock');
+  mkdirSync(lock, { recursive: true });
+  const real = fs.existsSync;
+  // The holder releases just after the waiter saw the lock, before it reads owner.json and the lock's age.
+  fs.existsSync = (p) => {
+    const there = real(p);
+    if (p === lock && there) {
+      fs.existsSync = real;
+      syncBuiltinESMExports();
+      rmSync(lock, { recursive: true });
+    }
+    return there;
+  };
+  syncBuiltinESMExports();
+  try {
+    const r = await g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('echo ok') });
+    assert.equal(r.exitCode, 0);
+  } finally {
+    fs.existsSync = real;
+    syncBuiltinESMExports();
+  }
+});
+
+test('the lock is released inside the queue mutex', async () => {
+  const { home, g } = guard();
+  let done = false;
+  const running = g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('sleep 0.2') }).then((x) => ((done = true), x));
+  await until(() => ownerOf(home)?.job);
+  mkdirSync(join(home, 'guard', 'queue.edit'));
+  await sleep(600);
+  assert.equal(done, false);
+  assert.equal(existsSync(join(home, 'guard', 'lock')), true, 'not released while another holds the mutex');
+  rmSync(join(home, 'guard', 'queue.edit'), { recursive: true });
+  assert.equal((await running).exitCode, 0);
+  assert.equal(existsSync(join(home, 'guard', 'lock')), false);
 });
