@@ -86,11 +86,13 @@ repo. The `kirunak/` folder in a repo is created by the intake, nothing by hand.
 
 A slice 1 deliverable, written with the slice, when the setup it describes exists (the owner's request): a brief
 `README.md` at this repo's root, minimal and focused on a solo developer or a small team building with AI coding
-agents (Claude Code). Two parts and nothing else: **what kirunak is** (a few sentences: tasks the owner approves and
-agents cannot rewrite, an intake that leaves nothing to guess, a review against every criterion, a board; files in
-git, no server), and **setup** (the steps of "What the owner wires" above as commands: `npm link`, a workspace module
+agents (Claude Code). Its parts: **what kirunak is** (a few sentences: tasks the owner approves and agents cannot
+rewrite, an intake that leaves nothing to guess, a review against every criterion, a board, small commits; files in
+git, no server), **setup** (the steps of "What the owner wires" above as commands: `npm link`, a workspace module
 with its repos and queue, `k init --workspace`, `k install`, `k install --git` per repo, then a first
-`/k-intake`). It names no workspace, person or machine, points at `REQUIREMENTS.md` and `design/` for the rest, and
+`/k-intake`), **change size** (the owner's request, 2026-10-19: what SLAP is for, how it is calculated, a few worked
+examples, and `.slapignore` for the files left out; `change-size.md` has the rest), and **working a task** (by hand
+until the orchestrator lands). It names no workspace, person or machine, points at `REQUIREMENTS.md` and `design/` for the rest, and
 ends with one line naming the MIT licence (`LICENSE`). Judgement: everything else a reader needs is in the design files, and a
 long README goes stale first.
 

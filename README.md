@@ -15,6 +15,7 @@ is done.
 - **A review against every criterion**, by someone who did not do the work, and an owner's checklist of what needs a
   device or a person. A task is done when the owner says so (`/k-done`).
 - **A board**: `k list` in the terminal and a generated page (`k board`).
+- **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
 
@@ -65,6 +66,45 @@ You need Node 22 or later, git and Claude Code.
 
 The state kirunak keeps on this machine (the pointer, logs, the board) is in `~/.kirunak`, or wherever
 `KIRUNAK_HOME` points.
+
+## Change size
+
+Small changes are reviewed better and ship more safely, so every commit is measured and one larger than M is
+refused, an agent's or your own. An agent's work then arrives in pieces a person can read in one sitting.
+
+The measure is SLAP, from the lines added plus deleted (L) and the files changed (F), rounded to a whole number:
+
+```text
+SLAP = √L × √F_adj        F_adj = F × min(1, (L/F) / 5) + ln(1 + max(0, L/F − 50))
+```
+
+The first part of `F_adj` weighs less a file with only a few changed lines (a rename, a sweep across many files); the
+second adds weight once the files average more than 50 changed lines (one large file). The tiers: S up to 10, M 11 to
+35, L 36 to 70, XL 71 and over.
+
+| The commit | SLAP | Tier |
+| --- | --- | --- |
+| 10 lines in 1 file | 3 | S |
+| 45 lines, one in each of 45 files | 20 | M |
+| 120 lines in 4 files | 22 | M |
+| 207 lines in 1 file | 35 | M, the most one file can take |
+| 210 lines in 1 file | 36 | L, refused |
+| 300 lines in 5 files | 47 | L, refused |
+| 1,500 lines in 1 file | 111 | XL, refused |
+
+At most M is about 207 changed lines in one file, 250 over 5 files, 126 over 10 and 79 over 20: spreading a change
+over more files lowers the limit.
+
+**What counts** is everything the repo's `.slapignore` does not list. It takes gitignore patterns from the repo's
+root and names what is not read as code: lock files, build output, generated files, prose such as Markdown, tables.
+`k install --git` writes a starter. A file deleted whole is never counted. A binary file the list does not name
+refuses the commit, and the message names the pattern to add. Only the owner changes the list: they edit it and type
+`! k slapignore approve <repo>`. Until then the git hook refuses a commit with a changed `.slapignore`, and the Claude
+Code hook refuses an agent's edit of it.
+
+`k slap --staged` measures what you are about to commit, and `k slap <range>` a stretch of history. Over M, split
+the commit: `git restore --staged <file>` takes a file out, `git add -p` stages part of one. The check runs in git's
+prepare-commit-msg hook, so `--no-verify` does not skip it; merges, reverts and cherry-picks are not measured.
 
 ## Working a task
 
