@@ -196,6 +196,59 @@ test('needs.json owner: the task stops with the question; the next k run resumes
   assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; read kirunak\/tasks\/offline-forecast\/notes\.md/);
 });
 
+// A guard whose job only records what it was asked to run.
+const jobGuard = (jobs) => ({ run: (job) => (jobs.push(job.what), { exitCode: 0, log: 'ok\n' }), status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [] });
+const HEAVY = (what) => JSON.stringify({ heavy: { what, command: ['npm', 'test'], maxMinutes: 10 }, then: 'resume' });
+const stepFile = (w, f) => join(w.p.dir, 'steps', 'S-1', f);
+
+test('a failed run\'s needs.json is moved aside and named in its failure: the retry is not failed by it and runs no job for it', async () => {
+  // A malformed request fails the run; the retry does the step right.
+  const a = await approvedWorkspace(PLAN);
+  fakeRunner(a, (step, n) => (n === 1 ? (put(a, 'steps/S-1/needs.json', '{"heavy": '), 'nothing') : 'write'));
+  const ra = await watch(a);
+  assert.deepEqual(ra.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal((progress(a).match(/S-1 failed/g) || []).length, 1);
+  assert.match(readFileSync(stepFile(a, 'failure-1.md'), 'utf8'), /Its needs\.json is now kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; a retry starts without it\./);
+  assert.equal(readFileSync(stepFile(a, 'needs-1.json'), 'utf8'), '{"heavy": ');
+  // A valid request, then an error: the retry writes every output and no job runs.
+  const b = await approvedWorkspace(PLAN);
+  const jobs = [];
+  b.ws.seams.resourceGuard = jobGuard(jobs);
+  const calls = fakeRunner(b, (step, n) => (n === 1 ? (put(b, 'steps/S-1/needs.json', HEAVY('tests nobody asked for')), 'exit 1') : 'write'));
+  const rb = await watch(b);
+  assert.deepEqual(rb.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(jobs, []);
+  assert.deepEqual(calls.map((c) => c.resume ?? null), [null, null, null], 'no conversation was resumed');
+});
+
+test('a step stopped while it waited for its job starts again without the request', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  put(w, 'steps/S-1/needs.json', HEAVY('tests'));
+  steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'k run was stopped (SIGINT)' });
+  const jobs = [];
+  w.ws.seams.resourceGuard = jobGuard(jobs);
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.equal(r.ended['S-1'], 'done');
+  assert.deepEqual([jobs, calls.length, calls[0].resume], [[], 1, null]);
+  assert.ok(existsSync(stepFile(w, 'needs-1.json')) && !existsSync(stepFile(w, 'needs.json')));
+});
+
+test('every needs-<k>.json takes its number from one index: heavy, the owner, heavy again, three files', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const jobs = [];
+  w.ws.seams.resourceGuard = jobGuard(jobs);
+  const asks = { 1: HEAVY('first tests'), 2: JSON.stringify({ owner: 'Three days or a week?' }), 3: HEAVY('second tests') };
+  fakeRunner(w, (step, n) => (step.env.KIRUNAK_STEP === 'S-1' && asks[n] ? (put(w, 'steps/S-1/needs.json', asks[n]), 'nothing') : 'write'));
+  assert.equal((await watch(w)).stopped, 'S-1 waits for the owner: Three days or a week?');
+  assert.deepEqual((await watch(w)).states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(jobs, ['first tests', 'second tests']);
+  const read = (k) => JSON.parse(readFileSync(stepFile(w, `needs-${k}.json`), 'utf8'));
+  assert.deepEqual([read(1).heavy.what, read(2).owner, read(3).heavy.what], ['first tests', 'Three days or a week?', 'second tests']);
+});
+
 test('k run refuses a step past the machine cap and says who runs; a task not queued does not run', async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);

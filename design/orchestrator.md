@@ -81,10 +81,12 @@ pending  →  ready  →  running  →  done
 - `waiting-owner`: `needs.json` has `{ "owner": "<question>" }`: the orchestrator stops the task, appends the
   question to `progress.md` and `events.jsonl`, and `k list` shows `awaiting owner`. The owner answers in a session
   (`k intake answer` if it changes the task: then an amendment) or by editing `notes.md`; `k run` resumes.
-- `failed` is retried once with a fresh conversation and the failure's report as an extra input; a second failure
-  stops the task and marks the step `[escalate]` in `plan.md` for the owner's session. When the workspace names
-  `models.escalate`, the mark says which model and effort the owner's session should hand the step to. Judgement: a
-  step that went wrong twice needs a person or a stronger model, and the orchestrator must not loop.
+- `failed` is retried once with a fresh conversation and the failure's report as an extra input; a `needs.json` the
+  failed run left is moved to `steps/S-n/needs-<k>.json` first (one index for every request, answered or not), and
+  the report names it, so the retry never reads it. A second failure stops the task and marks the step `[escalate]`
+  in `plan.md` for the owner's session. When the workspace names `models.escalate`, the mark says which model and
+  effort the owner's session should hand the step to. Judgement: a step that went wrong twice needs a person or a
+  stronger model, and the orchestrator must not loop.
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready and nothing
   runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
