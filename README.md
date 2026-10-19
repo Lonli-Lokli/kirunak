@@ -68,12 +68,15 @@ You need Node 22 or later, git and Claude Code.
 
 5. Optional: load the mod, `mods/kirunak/`, so the owner's verbs are slash commands (`/k-approve`, `/k-accept`,
    `/k-hold`, `/k-start`) that also work from the phone through Remote Control, with a pane (`/kirunak`), a line
-   above the prompt and toasts. Name its folder in the `env` block of `~/.claude/settings.json` and start a new
-   session:
+   above the prompt and toasts. Add this checkout as a marketplace, install the mod from it and start a new session:
 
-   ```json
-   "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/code/kirunak/mods/kirunak" }
+   ```sh
+   claude plugin marketplace add ~/code/kirunak
+   claude plugin install kirunak@kirunak
    ```
+
+   (Or name its folder in the `env` block of `~/.claude/settings.json`:
+   `"CLAUDE_CODE_PLUGIN_DIRS": "~/code/kirunak/mods/kirunak"`.)
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
    model included, gets a line saying so and nothing runs (`design/approval.md` §5). That rule is a file of this
