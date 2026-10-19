@@ -451,6 +451,20 @@ test('a k run that died while a resume waited for its slot leaves the step waiti
   assert.doesNotMatch(progress(w), /failed/);
 });
 
+test('the attempt after a stop reads the step\'s last own failure report; a stop writes none', async () => {
+  for (const order of [['own', 'stop'], ['stop', 'own', 'stop']]) {
+    const w = await approvedWorkspace(PLAN);
+    for (const x of order) {
+      await steps.start({ ws: w.ws, id: w.id, step: 'S-1' });
+      steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: x === 'own' ? 'the cache test does not build' : steps.STOPPED.bySignal('SIGINT') });
+    }
+    assert.deepEqual([readdirSync(stepFile(w, '')).filter((f) => /^failure-/.test(f)), steps.historyOf(progress(w), 'S-1').failures], [['failure-1.md'], 1], order.join(', '));
+    const calls = fakeRunner(w);
+    assert.equal((await run({ ws: w.ws, id: w.id })).ended['S-1'], 'done');
+    assert.match(calls[0].prompt, /kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-1\.md \(the last attempt failed: read why first\)/, order.join(', '));
+  }
+});
+
 test('a step a dead k run left running is failed, its claude killed, and retried; a step started by hand is left alone', async () => {
   const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
   const sid = randomUUID();

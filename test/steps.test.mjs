@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { hold } from '../lib/approval.mjs';
@@ -107,22 +107,40 @@ test('a second failure marks the step [escalate], with models.escalate when the 
   assert.deepEqual(statesOf(w), { 'S-1': 'ready', 'S-2': 'pending' });
 });
 
-test('a stop of k run is not one of the step\'s two failures, and its retry reads no failure report', async () => {
+test('a stop of k run is not one of the step\'s two failures and writes no report; the retry after it reads the last own one', async () => {
   const w = await approvedWorkspace(PLAN);
   const failOnce = async (why) => (await steps.start({ ws: w.ws, id: w.id, step: 'S-1' }), steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why }));
-  // Stopped twice while it ran: retried, not escalated, and no retry is told the last attempt failed.
+  const dir = join(w.p.dir, 'steps', 'S-1');
+  const reports = () => (existsSync(dir) ? readdirSync(dir).filter((f) => /^failure-/.test(f)) : []);
+  // Stopped twice while it ran: retried, not escalated, no report written, and no retry is told an attempt failed.
   for (const why of [steps.STOPPED.bySignal('SIGINT'), steps.STOPPED.orphan]) {
-    assert.deepEqual([(await failOnce(why)).escalated, statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').retry], [null, 'ready', false], why);
+    const r = await failOnce(why);
+    assert.deepEqual([r.escalated, r.report, statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').retry], [null, null, 'ready', false], why);
   }
-  // One failure of its own, then a stop: still retried.
+  assert.deepEqual(reports(), []);
+  // One failure of its own, then a stop: still retried, and the retry still reads the own failure's report.
   assert.equal((await failOnce('the cache test does not build')).escalated, null);
   assert.equal(steps.load(w.ws, w.id).states.get('S-1').retry, true);
   assert.equal((await failOnce(steps.STOPPED.bySignal('SIGTERM'))).escalated, null);
-  assert.deepEqual([statesOf(w)['S-1'], steps.historyOf(progress(w), 'S-1').failures], ['ready', 1]);
+  assert.deepEqual([statesOf(w)['S-1'], steps.historyOf(progress(w), 'S-1').failures, steps.load(w.ws, w.id).states.get('S-1').retry], ['ready', 1, true]);
+  assert.deepEqual(reports(), ['failure-1.md']);
   // A second failure of its own escalates, the stops between them aside.
   assert.notEqual((await failOnce('still')).escalated, null);
   assert.equal(statesOf(w)['S-1'], 'escalated');
   assert.equal(steps.isStop('k run was stopped by hand, it said'), false);
+});
+
+test('k step fail refuses a stop\'s words, so a failure given by hand always counts', async () => {
+  const w = await approvedWorkspace(PLAN);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
+  for (const why of ['k run was stopped (SIGINT)', '  the k run   that started it stopped ']) {
+    const r = k(w.home, ['step', 'fail', w.id, 'S-1', '--why', why]);
+    assert.equal(r.status, 1, why);
+    assert.match(r.stderr, /is k run's own reason for a stop; say what went wrong/);
+  }
+  assert.doesNotMatch(progress(w), /failed/);
+  assert.equal(k(w.home, ['step', 'fail', w.id, 'S-1', '--why', 'k run was stopped, then the build broke']).status, 0);
+  assert.equal(steps.historyOf(progress(w), 'S-1').failures, 1);
 });
 
 test('a step starts only on a task that may run: approved, queued, not on hold, a plan that passes', async () => {

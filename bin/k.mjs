@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { KError, usage } from '../lib/errors.mjs';
+import { KError, refuse, usage } from '../lib/errors.mjs';
 import { expandHome, kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, allTaskIds, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
@@ -277,7 +277,10 @@ const VERBS = {
       steps.finish({ ws, id, step });
       return { text: `${id} ${step}: done` };
     }
-    const r = steps.fail({ ws, id, step, why: need(flags.why, '--why "<why>"') });
+    const why = need(flags.why, '--why "<why>"');
+    // A stop's words are k run's own: such a failure would not count, a way around the two failures.
+    if (steps.isStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is k run's own reason for a stop; say what went wrong`);
+    const r = steps.fail({ ws, id, step, why });
     return { ...r, text: `${id} ${step}: failed, ${r.report}${r.escalated ? '; marked [escalate] in plan.md' : ''}` };
   },
 
