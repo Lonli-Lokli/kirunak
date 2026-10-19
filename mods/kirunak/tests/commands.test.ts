@@ -1,37 +1,21 @@
-import type { On, PromptOrigin } from 'claude-code'
+import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-const PRESENTATION = { isFullscreen: false, columns: 120 }
-const ID = 'weather/offline-forecast'
+import { ID, world } from './world'
 
-// The world beneath the mod: the commands it registers, the k runs it makes (each answered with `answer`), its
-// session's id, and a k that exists.
-function world(on: On, answer = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' }) {
-  const registered: string[] = []
-  const runs: string[][] = []
-  on('command.register', ($, e) => {
-    registered.push(e.name)
-    return { value: { command: e.name } }
-  })
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'sess-1' }))
-  on('fs.exists', () => ({ value: true }))
-  on('process.run', ($, e) => {
-    runs.push([...e.argv])
-    return { value: { ...answer, isStdoutTruncated: false, isStderrTruncated: false } }
-  })
-  return { registered, runs }
-}
+const PRESENTATION = { isFullscreen: false, columns: 120 }
 
 const run = ($: Engine, command: string, args: string, origin: PromptOrigin) =>
   $.command.run({ command, args, origin, presentation: PRESENTATION })
 
 describe('the owner\'s commands', () => {
-  test('registers /k-approve, /k-accept, /k-hold and /k-start, and never /k-done', async ($, on) => {
+  test('registers /k-approve, /k-accept, /k-hold and /k-start, and never /k-done; a -p run reads nothing', async ($, on) => {
     const w = world(on)
-    await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await w.clock.advance(60_000)
     expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start'])
+    expect([w.reads, w.tails.length]).toEqual([0, 0])
   })
 
   const others: PromptOrigin[] = [
@@ -102,7 +86,7 @@ describe('the owner\'s commands', () => {
   })
 
   test('k\'s refusal is the output, under the command\'s name', async ($, on) => {
-    world(on, { exitCode: 1, stdout: '', stderr: `k: ${ID}: the latest review is not met (AC-2)\n` })
+    world(on, { verb: { exitCode: 1, stdout: '', stderr: `k: ${ID}: the latest review is not met (AC-2)\n` } })
     expect((await run($, 'k-accept', ID, { kind: 'composer' })).text).toBe(`/k-accept refused:\nk: ${ID}: the latest review is not met (AC-2)`)
   })
 })
