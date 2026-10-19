@@ -87,7 +87,10 @@ pending  →  ready  →  running  →  done
   runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
   owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid) while it runs,
-  a second refuses and names that pid, and a lock whose `k run` is dead is taken over.
+  a second refuses and names that pid, and a lock whose `k run` is dead is taken over. A `k run` stopped by Ctrl-C,
+  a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives; the guard ends a heavy
+  job), fails each step it had in flight with `k run was stopped (<signal>)`, so the step is retried once, releases
+  its lock and exits with the signal's code.
 
 ## 3. The runner: headless `claude -p` (`plugins.md` seam `runner`)
 

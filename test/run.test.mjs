@@ -1,14 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
+import { alive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, fakeClaude, k } from './helpers.mjs';
+import { approvedWorkspace, fakeClaude, k, KIRUNAK } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -225,6 +227,33 @@ test('one k run per task: a second refuses, naming the pid, and starts nothing; 
   assert.equal(calls.length, 2);
   assert.ok(lines.includes(`${w.id} took over the lock of k run ${dead}, which no longer runs`), lines.join('\n'));
   assert.ok(!existsSync(lock));
+});
+
+const until = async (ok, what) => {
+  for (const t0 = Date.now(); !ok(); await new Promise((r) => setTimeout(r, 20))) assert.ok(Date.now() - t0 < 10000, what);
+};
+
+test('k run stopped by a signal kills its claude, fails the step, frees the lock and exits with the signal; the next k run retries the step', async () => {
+  const w = await approvedWorkspace(PLAN);
+  // The real k run in a child, with a fake claude on PATH that says its pid and sleeps.
+  const bin = mkdtempSync(join(tmpdir(), 'kirunak-sleepy-claude-'));
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho $$ > "${bin}/pid"\nexec sleep 30\n`);
+  chmodSync(join(bin, 'claude'), 0o755);
+  const child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: 'ignore' });
+  const exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
+  const pidOf = () => (existsSync(join(bin, 'pid')) ? Number(readFileSync(join(bin, 'pid'), 'utf8')) : 0);
+  await until(pidOf, 'the fake claude never started');
+  const claude = pidOf();
+  child.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  await until(() => !alive(claude), 'the fake claude is still running');
+  assert.match(progress(w), /S-1 failed: k run was stopped \(SIGINT\)\n$/);
+  assert.deepEqual(readdirSync(join(w.home, 'running')), []);
+  assert.deepEqual(readdirSync(join(w.home, 'k-run')), [], 'the lock is released');
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.equal(r.ended['S-1'], 'done');
+  assert.match(calls[0].prompt, /steps\/S-1\/failure-1\.md \(the last attempt failed/);
 });
 
 // The keeper in k run: a clock whose sleep moves time on at once, and runs whose records show a 1-hour cache.
