@@ -112,7 +112,8 @@ pending  →  ready  →  running  →  done
   lock whose `k run` is dead, or whose pid is now another process or recorded no start, is taken over. A `k run`
   stopped by Ctrl-C, a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives;
   the guard ends a heavy job), fails each step whose run it killed (`running`) with `k run was stopped (<signal>)`,
-  a stop's failure that the step does not count, releases its lock and exits with the signal's code. A resume's
+  a stop's failure that the step does not count, releases the device claims its steps hold, releases its lock and
+  exits with the signal's code. A resume's
   `needs.json` is moved to `needs-<k>.json` only as its claude starts (nothing awaited between the move and the
   spawn), and `progress.md` says `resumed` then, so a step waiting for its job, or whose job has ended and whose
   resume waits for a machine slot, is left `waiting-heavy`, its `needs.json` and `started` line kept: the next
@@ -188,7 +189,8 @@ last thing written. The reviewer's brief differs (`review.md` §2).
   itself waits in the queue, not a model. The owner's interactive session, if it started `k run` as a background
   command, is woken only when `k run` ends or prints a keep-alive (§5).
 - Device claims go through the same seam (`claim`, `release`), named in the plan step (`device: <id>`, an id from
-  the guard's `resources()`) and released when the step ends however it ends.
+  the guard's `resources()`) and released when the step ends however it ends, a stop of `k run` included (a step
+  still in flight, a resume waiting for its slot among them, gives its device back before `k run` exits).
 - The machine guard: `running/<pid>.json` per live step process; `limits()` from the workspace (default
   `maxAgents: 2`; judgement: a laptop runs one build beside two headless sessions, not three; a number to check
   against memory pressure on the machine in slice 2). `k run` refuses to start a step past the cap and says who

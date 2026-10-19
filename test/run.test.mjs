@@ -447,6 +447,22 @@ test('k run stopped while the owner\'s answer waits for a machine slot leaves th
   assert.equal(progress(w).match(/resumed/g).length, 1);
 });
 
+test('k run stopped releases the device its step holds: a resume waiting for a machine slot leaves the device free', async () => {
+  const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ndevice: ios.low'));
+  fakeRunner(w, () => (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));
+  await run({ ws: w.ws, id: w.id });
+  const device = () => w.ws.seams.resourceGuard.resources().find((x) => x.id === 'ios.low')?.state;
+  assert.equal(device(), 'free');
+  // No slot is free, so the resume waits for one holding its device, past any end of its own before the exit.
+  writeFileSync(join(w.home, 'machine.json'), JSON.stringify({ maxAgents: 0 }));
+  const { child, said, exited } = childRun(w);
+  await until(() => device() === `claimed by kirunak:${w.id}`, 'the resume never claimed its device');
+  child.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  assert.equal(device(), 'free');
+  assert.match(said(), /S-1 still waits for the owner: the next k run resumes it/);
+});
+
 test('a k run that died while a resume waited for its slot leaves the step waiting: the next k run runs the job again and resumes', async () => {
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
