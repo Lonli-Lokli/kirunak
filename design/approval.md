@@ -95,11 +95,13 @@ reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuse
    the variables, so not even an accept commits a hand edit: "cost.md is generated from done.json; `k cost <id>
    --write` writes it again" (a removal passes: the command brings it back).
 
-`k approve`, `k accept` and `k hold` set those variables on the one `git commit` they run. Evidence that the mod's
-route needs nothing more: `$.process.run` "Git runs with repo hooks off" (Claude Code's plugin-authoring types,
-2.1.302, the `process.run` doc), so the mod's commit bypasses this hook anyway, and the command validates before it
-commits. Judgement: the variable is a mistake guard in the spirit of D7; a model that sets it has read this file and
-chosen to.
+`k approve`, `k accept` and `k hold` set those variables on the one `git commit` they run. The mod's route takes the
+same hooks (review N49, settled 2026-10-19): `$.process.run` says "Git runs with repo hooks off", and measured on
+Claude Code 2.1.303 that means only a `git` it starts itself (`argv[0]` git, given `-c core.hooksPath=/dev/null` on
+the command line); a `git` started by `sh` or `node` under it ran the repo's `prepare-commit-msg` in a probe repo.
+The mod runs `node k <verb>`, so its commit gets this hook and the `SLAP:` line as a `!` commit does. A mod must
+therefore never commit with `$.process.run(['git', ...])`. Judgement: the variable is a mistake guard in the spirit
+of D7; a model that sets it has read this file and chosen to.
 
 It also runs `k verify --staged` logic for every task whose record is in HEAD and whose `task.md` is unchanged:
 nothing to do, so the hook costs one `git diff --cached` on a commit that touches no kirunak file (number to check:
@@ -178,7 +180,7 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
 So: **yes, the mod's `/k-approve <id>` and `/k-accept <id>` replace `!` as the owner's commands** (D14), in the mod
 slice (`boards.md` §4, `build-order.md` slice 6). The hook calls `$.process.run(['node', K, 'approve', id,
 '--via', 'mod'])` and prints the state line; the core function is the same as §4's, so the record's `via` is the only
-difference. `!` stays as the route for a session without the mod (a `claude -p` step never approves anything).
+difference, and its commit runs under the repo's git hooks (§3). `!` stays as the route for a session without the mod (a `claude -p` step never approves anything).
 `bridge` (Claude Code's Remote Control from the phone) is also the owner's own gesture, and the owner accepted it on
 2026-10-19 (`README.md`, question 2: "Yes, allow phone", knowing that anyone holding the unlocked phone with Remote
 Control open could approve too). So the hooks of `/k-approve`, `/k-accept` and `/k-hold` run on `composer` and

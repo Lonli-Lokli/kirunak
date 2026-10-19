@@ -66,6 +66,19 @@ You need Node 22 or later, git and Claude Code.
 
 4. In Claude Code, start your first task with `/k-intake`. When `k check` passes, type `! k approve <id>`.
 
+5. Optional: load the mod, `mods/kirunak/`, so the owner's verbs are slash commands (`/k-approve`, `/k-accept`,
+   `/k-hold`, `/k-start`) that also work from the phone through Remote Control, with a pane (`/kirunak`), a line
+   above the prompt and toasts. Name its folder in the `env` block of `~/.claude/settings.json` and start a new
+   session:
+
+   ```json
+   "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/absolute/path/to/kirunak/mods/kirunak" }
+   ```
+
+   Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
+   model included, gets a line saying so and nothing runs (`design/approval.md` §5). `npm run test:mod` runs its
+   tests.
+
 The state kirunak keeps on this machine (the pointer, logs, the board) is in `~/.kirunak`, or wherever
 `KIRUNAK_HOME` points.
 
@@ -124,7 +137,8 @@ task is started by hand, one task per session:
 5. The plan's review step writes `review.md` in a fresh conversation, and `k review check <id>` holds it to the
    grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
    owner ticks them.
-6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>`. It refuses
+6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>` (with the
+   mod, `/k-accept <id>`, also from the phone). It refuses
    unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
    task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict.
