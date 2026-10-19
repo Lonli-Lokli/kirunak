@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
@@ -55,6 +55,22 @@ export const groupAlive = (pid) => {
     return false;
   }
 };
+
+// ps's elapsed time, [[dd-]hh:]mm:ss (the same on macOS and Linux, whatever the locale), in seconds.
+const elapsed = (s) => {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(s.trim());
+  return m ? ((Number(m[1] || 0) * 24 + Number(m[2] || 0)) * 60 + Number(m[3])) * 60 + Number(m[4]) : null;
+};
+
+// A pid read from a file may name another process by now (pids are reused). True only while pid runs and started
+// within slackMs of startIso: now less its elapsed time is its start. No start recorded, or no such process, is false.
+export function isStill(pid, startIso, slackMs = 5000) {
+  const recorded = Date.parse(startIso);
+  if (!isGroup(pid) || Number.isNaN(recorded)) return false;
+  const ps = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
+  const s = ps.status === 0 ? elapsed(ps.stdout) : null;
+  return s !== null && Math.abs(Date.now() - s * 1000 - recorded) <= slackMs;
+}
 
 // TERM to the process group, then KILL after graceMs if anything of it is left.
 export async function killTree(pid, graceMs = 10000) {
@@ -161,6 +177,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
 
   // The head of the queue takes the lock, or takes it over when its owner's process is dead. A dead owner's job that
   // still runs is returned as { orphan: pid } first: nobody will collect its result, and it must end before the take.
+  // It is that job only while it started at jobStart; a pid that names another process by now is left alone.
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
@@ -173,7 +190,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
         const owner = readJson(P.owner);
         const dead = owner ? !alive(owner.pid) : stale(P);
         if (!dead) return false;
-        if (groupAlive(owner?.job)) return { orphan: owner.job };
+        if (groupAlive(owner?.job) && isStill(owner.job, owner.jobStart)) return { orphan: owner.job };
         rmSync(P.lock, { recursive: true, force: true });
       }
       try {
@@ -242,7 +259,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
               onSpawn: (p) => {
                 pid = p;
                 const owner = readJson(P.owner);
-                if (owner?.id === me.id) writeOwner(P, { ...owner, job: p });
+                if (owner?.id === me.id) writeOwner(P, { ...owner, job: p, jobStart: new Date().toISOString() });
               },
             });
           } finally {

@@ -44,15 +44,17 @@ own implementations live in the workspace's repo, beside its config (D2).
   names both modules, never a silent override.
 - Judgement on the default guard: kirunak must work alone, on a machine with no lock of its own (R10). The default
   keeps `$KIRUNAK_HOME/guard/lock` (a directory made with `mkdir`, which is atomic, holding `owner.json`: session,
-  what, pid, job, since; pid is the waiting kirunak process, job the command's process group) and a
-  first-in-first-out queue file `guard/queue` beside it. `run` waits its turn, runs the command with the job's
-  `maxMinutes` as a deadline (past it, TERM to the process group, then KILL after 10 s, exit code 124), and releases
-  however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first (`lib/stop.mjs`),
-  and one that crashes keeps the lock while its job runs. A lock whose pid is dead is taken over on the next try,
-  after whatever is left of its job's group is ended (TERM, then KILL); a group this user cannot signal is not its
-  job's and is left alone. `claim` and `release` record claims in
-  `guard/claims.json` (resource, by, why, until); `resources()` lists what was ever claimed. Every job appends one
-  line to `guard/log.jsonl` (what, session, minutes, exit code).
+  what, pid, job, jobStart, since; pid is the waiting kirunak process, job the command's process group and jobStart
+  its start) and a first-in-first-out queue file `guard/queue` beside it. `run` waits its turn, runs the command with
+  the job's `maxMinutes` as a deadline (past it, TERM to the process group, then KILL after 10 s, exit code 124), and
+  releases however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first
+  (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A lock whose pid is dead is taken over on
+  the next try, after whatever is left of its job's group is ended (TERM, then KILL). A pid read from a file can name
+  another process by now (pids are reused), so the group is ended only while `job` is still the process that started
+  at `jobStart` (`isStill`: now less the elapsed time `ps -o etime=` prints, within 5 s of it); a group this user
+  cannot signal, a job with no `jobStart`, or one that started at another time is left alone. `claim` and `release`
+  record claims in `guard/claims.json` (resource, by, why, until); `resources()` lists what was ever claimed. Every
+  job appends one line to `guard/log.jsonl` (what, session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected
   wait, and only the guard knows the queue. The default estimates from its own log: the median length of the last
   ten jobs with the same `what`, or 15 minutes with no history (judgement; the number is one to check,
