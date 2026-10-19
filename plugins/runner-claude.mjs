@@ -90,12 +90,13 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
         },
 
         // One turn on the conversation, so its cache's lifetime starts again (orchestrator.md §5); the step's own
-        // flags (add-dirs, model) come in `step`, since a resume does not remember them. → { exitCode, result, usage }:
-        // the whole result, which the orchestrator saves as the step's keep-<k>.json.
-        async keepAlive(sessionId, cwd, step = {}) {
+        // flags (add-dirs, model) come in `step`, since a resume does not remember them. → { pid, done: Promise<{
+        // exitCode, result, usage }> }, so the orchestrator can hold it to a deadline and kill it; the whole result is
+        // saved as the step's keep-<k>.json.
+        keepAlive(sessionId, cwd, step = {}) {
           const args = claudeArgs({ ...step, resume: sessionId, prompt: KEEP_ALIVE_PROMPT, maxTurns: 1, maxBudgetUsd: null, permissionMode: step.permissionMode || mode() });
-          const { exitCode, result, usage } = await spawnClaude(bin, args, { cwd, env: step.env }).done;
-          return { exitCode, result, usage };
+          const run = spawnClaude(bin, args, { cwd, env: step.env });
+          return { pid: run.pid, done: run.done.then(({ exitCode, result, usage }) => ({ exitCode, result, usage })) };
         },
       },
     },

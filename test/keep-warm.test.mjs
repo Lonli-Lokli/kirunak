@@ -16,6 +16,9 @@ function fakeClock() {
   return { now: () => new Date(t), sleep: async (ms) => ((t += ms), await new Promise(setImmediate)), advance: (m) => (t += m * 60000) };
 }
 
+// A keep-alive's handle, as the runner returns it, already ended with `r`.
+const ended = (r) => ({ pid: null, done: Promise.resolve(r) });
+
 // A step's run: 12 calls, its writes to the 1-hour cache.
 const RUN = { session_id: 's-1', num_turns: 12, usage: { input_tokens: 2000, cache_creation_input_tokens: 150000, cache_read_input_tokens: 900000, output_tokens: 6000, cache_creation: { ephemeral_1h_input_tokens: 150000 } } };
 // A keep-alive: one call that read the context.
@@ -55,7 +58,7 @@ test('a two-hour heavy job: a keep-alive at expires_at − 5 min each time, each
   const r = await keepWarm({
     ws: w, session: 's-1', until, clock, out: (l) => lines.push(l),
     expectedWait: () => 120 - (clock.now() - T0) / 60000,
-    keepAlive: async () => (calls.push(clock.now().toISOString()), calls.length === 2 && finish(), { exitCode: 0, result: KEEP }),
+    keepAlive: () => (calls.push(clock.now().toISOString()), calls.length === 2 && finish(), ended({ exitCode: 0, result: KEEP })),
   });
   assert.deepEqual(calls, [at(55), at(110)]);
   assert.equal(r.kept, 2);
@@ -78,7 +81,7 @@ test('a wait over the break-even is skipped once and kept no more; the resume af
   const clock = fakeClock();
   track(w, { session: 's-1', task: 'weather/x', step: 'S-1', result: RUN, end: clock.now(), waitsFor: 'heavy', willResume: true });
   let kept = 0;
-  const r = await keepWarm({ ws: w, session: 's-1', until: new Promise(() => {}), clock, expectedWait: () => 2000, keepAlive: async () => (kept++, { result: KEEP }) });
+  const r = await keepWarm({ ws: w, session: 's-1', until: new Promise(() => {}), clock, expectedWait: () => 2000, keepAlive: () => (kept++, ended({ result: KEEP })) });
   assert.equal(kept, 0);
   assert.match(r.ended, /over the break-even, 950 min/);
   clock.advance(120);
@@ -96,7 +99,7 @@ test('a wait just over the break-even is decided again at the keep-alive time, a
   const calls = [];
   await keepWarm({
     ws: w, session: 's-1', until, clock, expectedWait: () => 1000 - (clock.now() - T0) / 60000,
-    keepAlive: async () => (calls.push(clock.now().toISOString()), finish(), { exitCode: 0, result: KEEP }),
+    keepAlive: () => (calls.push(clock.now().toISOString()), finish(), ended({ exitCode: 0, result: KEEP })),
   });
   assert.deepEqual(calls, [at(55)], '945 minutes left at the keep-alive time: under 950');
   assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.expectedWaitMin]), [['skip', 1000], ['keepalive', 945]]);
@@ -108,7 +111,7 @@ test('a keep-alive that wrote the context again is a miss too; one with no resul
   track(w, { session: 's-1', task: 'weather/x', step: 'S-1', result: RUN, end: clock.now(), waitsFor: 'heavy', willResume: true });
   const cold = { ...KEEP, usage: { ...KEEP.usage, cache_creation_input_tokens: 152000, cache_read_input_tokens: 0 } };
   let n = 0;
-  const r = await keepWarm({ ws: w, session: 's-1', until: new Promise(() => {}), clock, expectedWait: () => 300, keepAlive: async () => (++n === 1 ? { exitCode: 0, result: cold } : { exitCode: 1, result: null }) });
+  const r = await keepWarm({ ws: w, session: 's-1', until: new Promise(() => {}), clock, expectedWait: () => 300, keepAlive: () => ended(++n === 1 ? { exitCode: 0, result: cold } : { exitCode: 1, result: null }) });
   assert.deepEqual([r.kept, r.ended], [1, 'the keep-alive failed']);
   assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.reason]), [
     ['keepalive', 'heavy: 300 min expected, under 950 min'],

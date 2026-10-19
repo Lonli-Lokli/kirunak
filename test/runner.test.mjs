@@ -69,10 +69,12 @@ test('a run that prints no result ends with its exit code and no result', async 
   assert.equal(missing.exitCode, 127);
 });
 
-test('keepAlive: one turn on the conversation with the step\'s flags, returning its whole result', async () => {
+test('keepAlive: one turn on the conversation with the step\'s flags, its handle\'s done the whole result', async () => {
   const fake = fakeClaude();
   const runner = runnerClaude({}, { bin: fake.bin }).provides.runner;
-  const { exitCode, result, usage } = await runner.keepAlive('abc-session', fake.dir, { addDirs: ['/w/hub'] });
+  const handle = runner.keepAlive('abc-session', fake.dir, { addDirs: ['/w/hub'] });
+  assert.ok(Number.isInteger(handle.pid), 'a pid, so a deadline can kill it');
+  const { exitCode, result, usage } = await handle.done;
   assert.equal(exitCode, 0);
   assert.equal(usage.cache_read_input_tokens, 600000);
   assert.equal(result.session_id, '7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f', 'the record keep-<k>.json is');

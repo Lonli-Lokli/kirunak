@@ -238,7 +238,7 @@ test('a heavy job past the cache\'s lifetime: k run keeps the conversation warm,
   });
   withCache(w);
   const keeps = [];
-  w.ws.seams.runner.keepAlive = async (sid, cwd, flags) => (keeps.push({ sid, cwd, flags, at: clock.now().toISOString() }), release(), { exitCode: 0, result: KEPT(sid) });
+  w.ws.seams.runner.keepAlive = (sid, cwd, flags) => (keeps.push({ sid, cwd, flags, at: clock.now().toISOString() }), release(), { pid: null, done: Promise.resolve({ exitCode: 0, result: KEPT(sid) }) });
   const lines = [];
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, out: (l) => lines.push(l) });
   assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
@@ -249,6 +249,35 @@ test('a heavy job past the cache\'s lifetime: k run keeps the conversation warm,
   assert.ok(lines.some((l) => l.startsWith(`${w.id} keep-alive: session ${sid}`)), 'k run prints the keep-alive');
   assert.ok(!existsSync(join(w.home, 'sessions', `${sid}.json`)), 'a conversation that ended is no longer tracked');
   assert.match(k(w.home, ['cost', w.id]).stdout, /keep-alives 1, misses 0/);
+});
+
+test('a keep-alive that never ends is killed at its deadline, and the step resumes once the job ends', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const clock = keeperClock();
+  let release;
+  const job = new Promise((r) => (release = r));
+  w.ws.seams.resourceGuard = {
+    run: () => job.then(() => ({ exitCode: 0, log: 'ok\n' })),
+    status: () => ({ held: { session: 'kirunak:weather/offline-forecast', what: 'tests', since: clock.now().toISOString(), estimateMinutes: 90 }, queued: [], estimateMinutes: 90 }),
+    claim() {}, release() {}, resources: () => [],
+  };
+  const calls = fakeRunner(w, (step, n) => {
+    if (n > 1) return 'write';
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 120 }, then: 'resume' }));
+    return 'nothing';
+  });
+  withCache(w);
+  let ended = 'still running';
+  w.ws.seams.runner.keepAlive = () => {
+    const child = spawn('sleep', ['30'], { detached: true });
+    const done = new Promise((r) => child.on('exit', (code, signal) => ((ended = signal), release(), r({ exitCode: 143, result: null }))));
+    return { pid: child.pid, done };
+  };
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, keepAliveMinutes: 0.002 });
+  assert.equal(ended, 'SIGTERM', 'the keep-alive was killed at its deadline');
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal(calls[1].resume, calls[0].sessionId);
+  assert.deepEqual(readLines(w.home)[0].reason, 'the keep-alive did not end within 0.002 minutes');
 });
 
 test('a conversation that waits for the owner is skipped, never kept; after a long wait its resume misses', async () => {
