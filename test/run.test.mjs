@@ -411,7 +411,7 @@ test('a heavy job past the cache\'s lifetime: k run keeps the conversation warm,
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, out: (l) => lines.push(l) });
   assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
   const sid = calls[0].sessionId;
-  assert.deepEqual(keeps.map((x) => [x.sid, x.cwd, x.at, x.flags.env.KIRUNAK_STEP, x.flags.disallowedTools]), [[sid, w.p.root, '2026-11-03T12:55:00.000Z', 'S-1', ['Agent']]]);
+  assert.deepEqual(keeps.map((x) => [x.sid, x.cwd, x.at, x.flags.env.KIRUNAK_STEP, x.flags.disallowedTools]), [[sid, w.p.root, '2026-11-03T12:50:00.000Z', 'S-1', ['Agent']]]);
   assert.equal(JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'keep-1.json'), 'utf8')).session_id, sid);
   assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.session, l.task, l.step]), [['keepalive', sid, w.id, 'S-1'], ['hit', sid, w.id, 'S-1']]);
   assert.ok(lines.some((l) => l.startsWith(`${w.id} keep-alive: session ${sid}`)), 'k run prints the keep-alive');

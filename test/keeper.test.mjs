@@ -19,10 +19,11 @@ test('the break-even comes from the prices seam: 19 intervals at 1h, 11.5 at 5m'
 
 test('the threshold is 950 minutes at 50-minute intervals, 52 under the 5-minute cache; a changed price moves it', async () => {
   const hour = await ruleFor(wsWith(), '1h');
-  assert.deepEqual([hour.breakEven, hour.intervalMinutes, hour.thresholdMinutes, hour.marginMinutes], [19, 50, 950, 5]);
+  assert.deepEqual([hour.breakEven, hour.intervalMinutes, hour.thresholdMinutes, hour.marginMinutes], [19, 50, 950, 10]);
   const five = await ruleFor(wsWith(), '5m');
   assert.deepEqual([five.breakEven, five.intervalMinutes, Math.round(five.thresholdMinutes), five.marginMinutes], [11.5, 4.5, 52, 0.5]);
-  assert.equal((await ruleFor(wsWith(undefined, { intervalMinutes: 55 }), '1h')).thresholdMinutes, 1045, '17.4 hours at 55 minutes');
+  const at55 = await ruleFor(wsWith(undefined, { intervalMinutes: 55 }), '1h');
+  assert.deepEqual([at55.thresholdMinutes, at55.marginMinutes], [1045, 5], '17.4 hours at 55 minutes, a keep-alive 5 minutes before the expiry');
   const dearer = await ruleFor(wsWith(prices({ ...BASE, write1h: 3 })), '1h');
   assert.deepEqual([dearer.breakEven, dearer.thresholdMinutes], [29, 1450]);
   const cheaperReads = await ruleFor(wsWith(prices({ ...BASE, cacheRead: 0.05 })), '1h');
@@ -39,7 +40,7 @@ test('the decision table', async () => {
   const keep = decide(conv(), NOW, rule);
   assert.equal(keep.action, 'keepalive');
   assert.equal(keep.kind, 'keepalive');
-  assert.equal(keep.at.toISOString(), min(35), 'at expires_at − 5 min');
+  assert.equal(keep.at.toISOString(), min(30), 'at expires_at − 10 min, every 50 minutes');
   assert.equal(decide(conv({ waitsFor: 'k run', expectedWaitMin: 949 }), NOW, rule).action, 'keepalive', 'just under the threshold');
 
   const owner = decide(conv({ waitsFor: 'owner', willResume: false, expectedWaitMin: null }), NOW, rule);

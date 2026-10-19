@@ -47,7 +47,7 @@ test('the wait for a guard job: its own estimate left, or the queue ahead of it'
   assert.equal(jobWait({ held: null, queued: [] }, ['a'], now), null);
 });
 
-test('a two-hour heavy job: a keep-alive at expires_at − 5 min each time, each recorded with its weight; the resume hits', async () => {
+test('a two-hour heavy job: a keep-alive at expires_at − 10 min, every 50 minutes, each recorded with its weight; the resume hits', async () => {
   const w = ws();
   const clock = fakeClock();
   track(w, { session: 's-1', task: 'weather/x', step: 'S-1', result: RUN, end: clock.now(), waitsFor: 'heavy', willResume: true });
@@ -60,14 +60,14 @@ test('a two-hour heavy job: a keep-alive at expires_at − 5 min each time, each
     expectedWait: () => 120 - (clock.now() - T0) / 60000,
     keepAlive: () => (calls.push(clock.now().toISOString()), calls.length === 2 && finish(), ended({ exitCode: 0, result: KEEP })),
   });
-  assert.deepEqual(calls, [at(55), at(110)]);
+  assert.deepEqual(calls, [at(50), at(100)]);
   assert.equal(r.kept, 2);
   const file = readSession(w.home, 's-1');
-  assert.deepEqual([file.lastCall, file.expiresAt, file.context], [at(110), at(170), 152123]);
+  assert.deepEqual([file.lastCall, file.expiresAt, file.context], [at(100), at(160), 152123]);
   const kept = readLines(w.home);
-  assert.deepEqual(kept.map((l) => [l.kind, l.task, l.step, l.ts]), [['keepalive', 'weather/x', 'S-1', at(55)], ['keepalive', 'weather/x', 'S-1', at(110)]]);
+  assert.deepEqual(kept.map((l) => [l.kind, l.task, l.step, l.ts]), [['keepalive', 'weather/x', 'S-1', at(50)], ['keepalive', 'weather/x', 'S-1', at(100)]]);
   assert.equal(Math.round(kept[0].costWeight * 10) / 10, 0.6 * (3 + 2 * 120 + 0.1 * 152000 + 5 * 2), 'the keep-alive record\'s own weight');
-  assert.equal(kept[0].expectedWaitMin, 65);
+  assert.equal(kept[0].expectedWaitMin, 70);
   assert.equal(lines.length, 2);
   assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"keep-alive"/);
   clock.advance(5);
@@ -98,11 +98,11 @@ test('a wait just over the break-even is decided again at the keep-alive time, a
   const until = new Promise((r) => (finish = r));
   const calls = [];
   await keepWarm({
-    ws: w, session: 's-1', until, clock, expectedWait: () => 1000 - (clock.now() - T0) / 60000,
+    ws: w, session: 's-1', until, clock, expectedWait: () => 995 - (clock.now() - T0) / 60000,
     keepAlive: () => (calls.push(clock.now().toISOString()), finish(), ended({ exitCode: 0, result: KEEP })),
   });
-  assert.deepEqual(calls, [at(55)], '945 minutes left at the keep-alive time: under 950');
-  assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.expectedWaitMin]), [['skip', 1000], ['keepalive', 945]]);
+  assert.deepEqual(calls, [at(50)], '945 minutes left at the keep-alive time: under 950');
+  assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.expectedWaitMin]), [['skip', 995], ['keepalive', 945]]);
 });
 
 test('a keep-alive that wrote the context again is a miss too; one with no result stops the keeping', async () => {

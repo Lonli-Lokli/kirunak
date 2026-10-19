@@ -32,13 +32,13 @@ async function setup({ expiresAt = at(40), task = true, held = null } = {}) {
   return w;
 }
 
-test('a session whose task\'s heavy job is in the guard: k keep ends at expires_at − 5 min, recording the keep-alive', async () => {
+test('a session whose task\'s heavy job is in the guard: k keep ends at expires_at − 10 min, recording the keep-alive', async () => {
   const w = await setup({ held: { session: 'kirunak:weather/offline-forecast', what: 'tests', since: at(-10), estimateMinutes: 90 } });
   const r = await keep({ ws: w.ws, session: 'sess-1', clock: fakeClock() });
-  assert.deepEqual([r.action, r.kind, r.at.toISOString()], ['keepalive', 'keepalive', at(35)]);
-  assert.match(r.text, /this wake-up reads it again\. While the wait goes on \(heavy, about 45 min\), run `k keep --session sess-1` in the background again/);
+  assert.deepEqual([r.action, r.kind, r.at.toISOString()], ['keepalive', 'keepalive', at(30)]);
+  assert.match(r.text, /this wake-up reads it again\. While the wait goes on \(heavy, about 50 min\), run `k keep --session sess-1` in the background again/);
   const [line] = readLines(w.home);
-  assert.deepEqual([line.ts, line.session, line.task, line.kind, line.context, line.ttl, line.expectedWaitMin, line.costWeight], [at(35), 'sess-1', w.id, 'keepalive', 200000, '1h', 45, 20000]);
+  assert.deepEqual([line.ts, line.session, line.task, line.kind, line.context, line.ttl, line.expectedWaitMin, line.costWeight], [at(30), 'sess-1', w.id, 'keepalive', 200000, '1h', 50, 20000]);
   assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"keep-alive".*"session":"sess-1"/);
 });
 
@@ -57,7 +57,7 @@ test('a step of its task under k run: the wait is the budget minutes it has left
   register(w.ws, process.pid, { task: w.id, step: 'S-1', session: 'x', since: at(-10) });
   const r = await keep({ ws: w.ws, session: 'sess-1', clock: fakeClock(), dryRun: true });
   assert.deepEqual([r.action, r.conversation.waitsFor, r.conversation.expectedWaitMin], ['keepalive', 'k run', 30]);
-  assert.equal(r.text, `would end at ${at(35)} for a keep-alive (k run: 30 min expected, under 950 min)`);
+  assert.equal(r.text, `would end at ${at(30)} for a keep-alive (k run: 30 min expected, under 950 min)`);
   assert.deepEqual(readLines(w.home), []);
 });
 
