@@ -44,13 +44,15 @@ export function alive(pid) {
 // A pid of 0 or 1 would name this process's own group or every process: never a job's group.
 const isGroup = (pid) => Number.isInteger(pid) && pid > 1;
 
+// A group this user cannot signal (EPERM) is no job's or claude's of kirunak's and could not be killed anyway: not
+// alive. alive() keeps EPERM as alive, since a pid it answers for is only waited for, never killed.
 export const groupAlive = (pid) => {
   if (!isGroup(pid)) return false;
   try {
     process.kill(-pid, 0);
     return true;
-  } catch (e) {
-    return e.code === 'EPERM';
+  } catch {
+    return false;
   }
 };
 

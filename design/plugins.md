@@ -49,7 +49,8 @@ own implementations live in the workspace's repo, beside its config (D2).
   `maxMinutes` as a deadline (past it, TERM to the process group, then KILL after 10 s, exit code 124), and releases
   however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first (`lib/stop.mjs`),
   and one that crashes keeps the lock while its job runs. A lock whose pid is dead is taken over on the next try,
-  after whatever is left of its job's group is ended (TERM, then KILL). `claim` and `release` record claims in
+  after whatever is left of its job's group is ended (TERM, then KILL); a group this user cannot signal is not its
+  job's and is left alone. `claim` and `release` record claims in
   `guard/claims.json` (resource, by, why, until); `resources()` lists what was ever claimed. Every job appends one
   line to `guard/log.jsonl` (what, session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected

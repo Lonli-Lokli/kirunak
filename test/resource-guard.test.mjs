@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -160,6 +160,22 @@ test('a dead owner\'s job that still runs is ended before the lock is taken over
   assert.equal(r.exitCode, 0);
   assert.match(r.log, /orphan-gone/);
   assert.equal(groupAlive(orphan.pid), false);
+});
+
+test('a dead owner\'s job pid that names a group this user cannot signal is not waited on', async (t) => {
+  // A root-owned group leader stands in for a job pid reused since the owner died.
+  const rows = spawnSync('ps', ['-axo', 'pid=,pgid=,uid='], { encoding: 'utf8' }).stdout.trim().split('\n').map((l) => l.trim().split(/\s+/));
+  const other = rows.find(([pid, pgid, uid]) => pid === pgid && uid === '0' && Number(pid) > 1);
+  if (!other || process.getuid() === 0) return t.skip('no group leader of another user');
+  const { home, g } = guard({ killAfterMs: 300 });
+  const lock = join(home, 'guard', 'lock');
+  mkdirSync(lock, { recursive: true });
+  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ session: 'gone', what: 'build', pid: await deadPid(), job: Number(other[0]), jobStart: new Date().toISOString(), since: new Date().toISOString() }));
+  const running = g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('echo ran') });
+  const r = await Promise.race([running, sleep(1000).then(() => null)]);
+  if (!r) rmSync(lock, { recursive: true, force: true });
+  await running;
+  assert.equal(r?.exitCode, 0, `the job waited behind group ${other[0]}`);
 });
 
 test('a lock removed between the waiter\'s checks counts as no lock', async () => {
