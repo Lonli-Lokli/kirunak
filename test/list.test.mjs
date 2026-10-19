@@ -160,7 +160,7 @@ test('format: one line per row, places right-aligned, columns padded', async () 
   assert.match(lines[0], /^ 1  in progress\s+weather\/hourly-chart\s+An hourly chart for today\s+S-2 started \(opus, session 7c1\)$/);
   assert.match(lines[1], /^ 3  ready\s+hub\/sync-notes/);
   assert.match(lines[2], /^ {4}draft\s+hub\/release-notes/);
-  assert.match(lines[4], /verdict: needs owner \(AC-2\), checklist 2 open$/);
+  assert.match(lines[4], /S-2 finished \(review\.md\), verdict: needs owner \(AC-2\), checklist 2 open$/);
   const col = (l) => l.indexOf('weather/') >= 0 ? l.indexOf('weather/') : l.indexOf('hub/');
   assert.equal(new Set(lines.map(col)).size, 1, 'the id column lines up');
   assert.equal(format([]), 'no tasks');
