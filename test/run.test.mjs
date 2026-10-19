@@ -279,6 +279,21 @@ test('a step a dead k run left running is failed, its claude killed, and retried
   assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'running' });
 });
 
+test('a heavy step a dead k run left running is failed and run again; its started line names its k run', async () => {
+  const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
+  const dead = spawnSync('true').pid;
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${dead}` });
+  const jobs = [];
+  w.ws.seams.resourceGuard = { run: (job) => (jobs.push(job.what), put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
+  fakeRunner(w);
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.ok(lines.includes(`${w.id} S-2 failed: the k run that started it (pid ${dead}) stopped`), lines.join('\n'));
+  assert.deepEqual(jobs, ['Restart keeps it']);
+  assert.equal(r.states['S-2'], 'done');
+  assert.match(progress(w), new RegExp(`S-2 started \\(heavy: Restart keeps it, k run ${process.pid}\\)`));
+});
+
 // The keeper in k run: a clock whose sleep moves time on at once, and runs whose records show a 1-hour cache.
 function keeperClock() {
   let t = Date.parse('2026-11-03T12:00:00Z');
