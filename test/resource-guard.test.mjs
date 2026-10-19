@@ -181,6 +181,7 @@ test('isStill answers for the process that started at the recorded time only', a
   const p = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
   const start = new Date().toISOString();
   assert.equal(isStill(p.pid, start), true);
+  assert.equal(isStill(p.pid, new Date(Date.now() + 30000).toISOString()), true, 'a start recorded 30 s late still matches');
   assert.equal(isStill(p.pid, new Date(Date.now() - 3600000).toISOString()), false);
   assert.equal(isStill(p.pid, undefined), false);
   const gone = new Promise((r) => p.on('exit', r));

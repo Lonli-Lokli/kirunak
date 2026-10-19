@@ -51,7 +51,7 @@ own implementations live in the workspace's repo, beside its config (D2).
   (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A lock whose pid is dead is taken over on
   the next try, after whatever is left of its job's group is ended (TERM, then KILL). A pid read from a file can name
   another process by now (pids are reused), so the group is ended only while `job` is still the process that started
-  at `jobStart` (`isStill`: now less the elapsed time `ps -o etime=` prints, within 5 s of it); a group this user
+  at `jobStart` (`isStill`: now less the elapsed time `ps -o etime=` prints, within a minute of it); a group this user
   cannot signal, a job with no `jobStart`, or one that started at another time is left alone. `claim` and `release`
   record claims in `guard/claims.json` (resource, by, why, until); `resources()` lists what was ever claimed. Every
   job appends one line to `guard/log.jsonl` (what, session, minutes, exit code).

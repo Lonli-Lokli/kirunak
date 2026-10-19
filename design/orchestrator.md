@@ -73,7 +73,7 @@ pending  →  ready  →  running  →  done
   and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that is dead
   kills that step's claude if it still runs (nobody will collect its result) and fails the step: `the k run that
   started it stopped`. The claude is the record's pid (and its `running/` file's) only while that pid still started
-  when the record's `claudeStart` (or the file's `since`) says, within 5 s (pids are reused); any other process now
+  when the record's `claudeStart` (or the file's `since`) says, within a minute (pids are reused); any other process now
   holding the pid, or a record with no start, is left running and named (`pid N is not the claude of that run`),
   and the step still fails. A step started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],

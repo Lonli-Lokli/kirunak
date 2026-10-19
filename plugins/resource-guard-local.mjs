@@ -64,7 +64,9 @@ const elapsed = (s) => {
 
 // A pid read from a file may name another process by now (pids are reused). True only while pid runs and started
 // within slackMs of startIso: now less its elapsed time is its start. No start recorded, or no such process, is false.
-export function isStill(pid, startIso, slackMs = 5000) {
+// A minute of slack: a start recorded late by a fork or a write on a loaded machine must still match, and a pid is
+// not reused within a minute of the start of the process that held it.
+export function isStill(pid, startIso, slackMs = 60000) {
   const recorded = Date.parse(startIso);
   if (!isGroup(pid) || Number.isNaN(recorded)) return false;
   const ps = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
