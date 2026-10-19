@@ -73,8 +73,13 @@ export function check({ staged, show, env = process.env }) {
       try {
         done = JSON.parse((read(`:${where}`) ?? read(`HEAD:${where}`)).toString('utf8'));
       } catch {}
+      let rendered = null;
+      try {
+        rendered = done?.cost ? costMarkdown(done.task, done.cost) : null;
+      } catch {}
       if (!done?.cost) problems.push(`kirunak: ${path}: cost.md is rendered from done.json's cost, which k accept records, and there is none`);
-      else if (bytes.toString('utf8') !== costMarkdown(done.task, done.cost)) {
+      else if (rendered == null) problems.push(`kirunak: ${path}: done.json's cost is not one k accept writes, so cost.md cannot be rendered from it`);
+      else if (bytes.toString('utf8') !== rendered) {
         problems.push(`kirunak: ${path}: cost.md is generated from done.json; \`k cost ${done.task} --write\` writes it again`);
       }
     } else if (INTAKE.test(path)) {

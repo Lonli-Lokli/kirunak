@@ -135,6 +135,10 @@ test('cost.md is refused unless it is the rendering of its done.json\'s cost', (
   const none = commit(dir);
   assert.equal(none.status, 1);
   assert.match(none.stderr, /cost\.md is rendered from done\.json's cost, which k accept records, and there is none/);
+  put(dir, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID, cost: {} }));
+  const odd = commit(dir, { KIRUNAK_ACCEPTING: ID });
+  assert.equal(odd.status, 1, 'a cost no renderer takes is refused with a reason, not a crash');
+  assert.match(odd.stderr, /done\.json's cost is not one k accept writes, so cost\.md cannot be rendered from it/);
   put(dir, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID, cost }));
   assert.equal(commit(dir, { KIRUNAK_ACCEPTING: ID }).status, 0, 'the accept commits both');
   put(dir, `kirunak/tasks/${SLUG}/cost.md`, text.replace('Keep-alives 0', 'Keep-alives 9'));

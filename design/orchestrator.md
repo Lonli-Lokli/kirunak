@@ -281,15 +281,15 @@ week: the numbers R11 asks for, and the ones to compare with the workspace's bas
 - **The run records stay out of git; their numbers go into `done.json`, and `cost.md` is generated from them.**
   `run-<k>.json` and `keep-<k>.json` are read on disk while the task runs (`k run`'s resumes and stopped runs, `k
   cost`), and a run's record is complete only after its step's `k step finish`, so nothing commits them: the step
-  folder's `.gitignore` leaves them out, with a heavy job's `heavy-<k>.json` and its whole log (the owner,
-  2026-10-19), beside a review's copies (`review.md` §1); numbered names only, so a step's own `run-summary.json` is
-  the step's. `k accept` records the task's cost in `done.json` as `cost`: per step and in total the weight, USD,
-  calls, runs and median context, rounded as `k cost` shows them, with the keeper's counts and the baseline's
-  comparisons, or `{ "error": why }` when they cannot be read, which never stops the accept. It commits `cost.md`
-  with it, rendered from those numbers alone (`lib/cost-md.mjs`), so a later change of prices or baseline never
-  changes it (the owner, 2026-10-19: "Json is not human friendly at all", then "Can we make it generated? We know
-  rules"). `k cost <id> --write` writes it again; the git hook refuses a `cost.md` that is not that rendering
-  (`approval.md` §3), and the freeze hook a hand edit (§2).
+  folder's `.gitignore` leaves them out, with a heavy job's `heavy-<k>.json` and its whole log (the owner, 2026-10-19),
+  beside a review's copies (`review.md` §1); numbered names only, so a step's own `run-summary.json` is the step's. `k
+  accept` records the task's cost in `done.json` as `cost`: per step and in total the weight, USD, calls, runs and
+  median context (tokens to whole numbers, USD to four places), with the keeper's counts and the baseline's comparisons,
+  or `{ "error": why }` when they cannot be read, which never stops the accept. It commits `cost.md` with it, rendered
+  from those numbers alone (`lib/cost-md.mjs`), so a later change of prices or baseline never changes it (the owner,
+  2026-10-19: "Json is not human friendly at all", then "Can we make it generated? We know rules"). `k cost <id>
+  --write` writes it again; the git hook refuses a `cost.md` that is not that rendering (`approval.md` §3), and the
+  freeze hook a hand edit (§2).
 - **The baseline is the workspace's.** A workspace that wants R12's comparison supplies `baseline` in its config
   (`plugins.md` §3): a JSON file it measured before kirunak, in the same weight unit:
 

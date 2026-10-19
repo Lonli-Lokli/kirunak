@@ -247,7 +247,13 @@ const VERBS = {
       const p = taskPaths(ws, id);
       const done = existsSync(join(p.dir, 'done.json')) ? JSON.parse(readFileSync(join(p.dir, 'done.json'), 'utf8')) : null;
       if (!done?.cost) throw new KError(`${id}: cost.md is rendered from done.json's cost, which k accept records; ${done ? 'this accept recorded none' : `${id} is not accepted`}`, 1);
-      writeFileSync(join(p.dir, 'cost.md'), costMarkdown(done.task ?? id, done.cost));
+      let md;
+      try {
+        md = costMarkdown(done.task ?? id, done.cost);
+      } catch {
+        throw new KError(`${id}: done.json's cost is not one k accept writes, so cost.md cannot be rendered from it`, 1);
+      }
+      writeFileSync(join(p.dir, 'cost.md'), md);
       return { text: `${id}: cost.md written from done.json` };
     }
     const c = await cost.costOf(ws, id);
