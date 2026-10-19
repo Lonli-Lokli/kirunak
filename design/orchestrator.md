@@ -70,12 +70,14 @@ pending  →  ready  →  running  →  done
 - `running`: `k step start <id> S-n` appends to `progress.md`, writes `running/<pid>.json` (machine guard), and
   the runner starts. The process is the only thing alive. When it exits, the orchestrator checks `outputs:`; all
   present and exit 0 → `done` (`k step finish`), else `failed` with the reason. A `k run` that takes a task's lock
-  and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that is dead
-  kills that step's claude if it still runs (nobody will collect its result) and fails the step: `the k run that
-  started it stopped`. The claude is the record's pid (and its `running/` file's) only while that pid still started
-  when the record's `claudeStart` (or the file's `since`) says, within a minute (pids are reused); any other process now
-  holding the pid, or a record with no start, is left running and named (`pid N is not the claude of that run`),
-  and the step still fails. A step started by hand has neither: `k run` names it and leaves it.
+  and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that no longer
+  runs (dead, or its pid now another process than the one that started at the record's `krunStart`; a heavy step's
+  line records no start, so its `k run` counts as gone) kills that step's claude if it still runs (nobody will
+  collect its result) and fails the step: `the k run that started it stopped`. The claude is the record's pid (and
+  its `running/` file's) only while that pid still started when the record's `claudeStart` (or the file's `since`)
+  says, within a minute (pids are reused); any other process now holding the pid, or a record with no start, is left
+  running and named (`pid N is not the claude of that run`), and the step still fails. A step started by hand has
+  neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
@@ -101,13 +103,14 @@ pending  →  ready  →  running  →  done
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready and nothing
   runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
-  owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid; the id
-  URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a lock whose `k run`
-  is dead is taken over. A `k run` stopped by Ctrl-C, a TERM or a closed terminal kills every process it started
-  (its steps' runs and keep-alives; the guard ends a heavy job), fails each step whose run it killed (`running`)
-  with `k run was stopped (<signal>)`, a stop's failure that the step does not count, releases its lock and exits
-  with the signal's code. A step waiting for its job is left `waiting-heavy`, its `needs.json` and `started` line
-  kept: the next `k run` runs the job again and resumes the same conversation, as after a crash.
+  owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid and its start,
+  `pidStart`; the id URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a
+  lock whose `k run` is dead, or whose pid is now another process or recorded no start, is taken over. A `k run`
+  stopped by Ctrl-C, a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives;
+  the guard ends a heavy job), fails each step whose run it killed (`running`) with `k run was stopped (<signal>)`,
+  a stop's failure that the step does not count, releases its lock and exits with the signal's code. A step waiting
+  for its job is left `waiting-heavy`, its `needs.json` and `started` line kept: the next `k run` runs the job again
+  and resumes the same conversation, as after a crash.
 
 ## 3. The runner: headless `claude -p` (`plugins.md` seam `runner`)
 
@@ -151,9 +154,10 @@ claude -p
   `ephemeral_1h_input_tokens`, `model_usage` (totals including subagents), `num_turns`, `duration_ms`, `is_error`,
   `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The
   orchestrator writes `steps/S-n/run-<k>.json` before the run starts (the session id, and under `kirunak` its own
-  pid `krun`, the claude's pid `claude` with its start `claudeStart` once it starts, and the start `started`) and
-  adds the whole object to it when the run ends, with the end and the exit code; §6 derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no
-  calls and no money.
+  pid `krun` with its start `krunStart`, the claude's pid `claude` with its start `claudeStart` once it starts, and
+  the start `started`) and adds the whole object to it when the run ends, with the end and the exit code; §6
+  derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no calls and no
+  money.
 - `--permission-mode` comes from the workspace's `runner.permissionMode`, default `auto` (judgement: a headless step
   should run as the owner's interactive sessions do; a workspace whose sessions use another mode sets it). A
   behaviour to check in slice 2 before trusting it: a step that hits a prompt no one can answer must fail within the
@@ -181,11 +185,12 @@ last thing written. The reviewer's brief differs (`review.md` §2).
 - The machine guard: `running/<pid>.json` per live step process; `limits()` from the workspace (default
   `maxAgents: 2`; judgement: a laptop runs one build beside two headless sessions, not three; a number to check
   against memory pressure on the machine in slice 2). `k run` refuses to start a step past the cap and says who
-  runs. `maxHeavy: 1` is the lock itself. A pid file whose process is dead is removed on the next pass (as the
-  default guard treats a dead owner). Counting and reserving are one step across processes, inside a short mutex
-  (`running/.admit`): an admitted step's reservation, `running/<k-run-pid>-<n>.json`, counts as running while that
-  `k run` lives, becomes the run's pid file by a rename when the run starts (a resume takes a slot as a start does),
-  and is removed if the step never starts, by the `k run`'s end or its stop.
+  runs. `maxHeavy: 1` is the lock itself. A pid file whose process is dead, or whose pid is now another process than
+  the one that started at its `since`, is removed on the next pass (as the default guard treats a dead owner).
+  Counting and reserving are one step across processes, inside a short mutex (`running/.admit`): an admitted step's
+  reservation, `running/<k-run-pid>-<n>.json`, counts as running while that `k run` lives (its pid still the process
+  that started at the file's `pidStart`), becomes the run's pid file by a rename when the run starts (a resume takes
+  a slot as a start does), and is removed if the step never starts, by the `k run`'s end or its stop.
 
 ## 5. The cache keeper (R11, D9)
 

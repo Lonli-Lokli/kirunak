@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { kirunakHome } from '../lib/home.mjs';
-import { alive } from './resource-guard-local.mjs';
+import { OWN_START, stillRuns } from './resource-guard-local.mjs';
 
 // The core's default `machineGuard` (plugins.md §2, orchestrator.md §4): one file per live step process,
-// running/<pid>.json (task, step, session, since), and one per step admitted and not started yet,
-// running/<k-run-pid>-<n>.json; the limits from the config, or from machine.json when the owner overrides them there.
-// A file whose process is dead is removed on the next look.
+// running/<pid>.json (task, step, session, since: the process's start), and one per step admitted and not started
+// yet, running/<k-run-pid>-<n>.json (with pidStart, the k run's start); the limits from the config, or from
+// machine.json when the owner overrides them there. A file whose process is dead, or whose pid is now another process
+// than the one that started at the start it records, is removed on the next look.
 
 export const DEFAULT_LIMITS = { maxAgents: 2, maxHeavy: 1 };
 
@@ -56,11 +57,11 @@ function reservations(ws) {
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
     const m = /^(\d+)-\d+\.json$/.exec(f);
     if (!m) continue;
-    if (!alive(Number(m[1]))) {
+    const r = readJson(join(dir, f)) || {};
+    if (!stillRuns(Number(m[1]), r.pidStart)) {
       rmSync(join(dir, f), { force: true });
       continue;
     }
-    const r = readJson(join(dir, f)) || {};
     out.push({ pid: Number(m[1]), task: r.task ?? null, step: r.step ?? null, since: r.since ?? null });
   }
   return out;
@@ -100,7 +101,7 @@ export async function admit(ws, mg, { task = null, step = null } = {}) {
     const running = await mg.running();
     if (running.length + starting.length < limits.maxAgents) {
       const slot = { name: `${process.pid}-${++seq}`, held: true };
-      writeFileSync(join(runningDir(ws), `${slot.name}.json`), JSON.stringify({ pid: process.pid, task, step, since: new Date().toISOString() }) + '\n');
+      writeFileSync(join(runningDir(ws), `${slot.name}.json`), JSON.stringify({ pid: process.pid, pidStart: OWN_START, task, step, since: new Date().toISOString() }) + '\n');
       return { ok: true, limits, running, slot };
     }
     const who = [
@@ -130,11 +131,11 @@ export default function machineGuardPids(ws) {
             const m = /^(\d+)\.json$/.exec(f);
             if (!m) continue;
             const pid = Number(m[1]);
-            if (!alive(pid)) {
+            const r = readJson(join(dir, f)) || {};
+            if (!stillRuns(pid, r.since)) {
               unregister(ws, pid);
               continue;
             }
-            const r = readJson(join(dir, f)) || {};
             out.push({ pid, task: r.task ?? null, step: r.step ?? null, session: r.session ?? null, since: r.since ?? null });
           }
           return out.sort((a, b) => String(a.since).localeCompare(String(b.since)));

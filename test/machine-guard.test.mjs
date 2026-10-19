@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import machineGuardPids, { admit, register, release } from '../plugins/machine-guard-pids.mjs';
@@ -25,17 +25,18 @@ test('the machine guard refuses past maxAgents and says who runs', async () => {
   const a = spawn('sleep', ['5']);
   const b = spawn('sleep', ['5']);
   try {
-    register(ws, a.pid, { task: 'weather/a', step: 'S-1', session: 's-a', since: '2026-11-03T10:00:00.000Z' });
+    const [aSince, bSince] = [new Date().toISOString(), new Date(Date.now() + 1).toISOString()];
+    register(ws, a.pid, { task: 'weather/a', step: 'S-1', session: 's-a', since: aSince });
     const first = await admit(ws, mg, { task: 'weather/c', step: 'S-3' });
     assert.equal(first.ok, true);
     const full = await admit(ws, mg);
     assert.equal(full.ok, false, 'a step admitted and not started yet counts');
     assert.match(full.why, new RegExp(`; weather/c S-3 \\(starting under k run ${process.pid} since `));
     release(ws, first.slot);
-    register(ws, b.pid, { task: 'weather/b', step: 'S-2', session: 's-b', since: '2026-11-03T10:05:00.000Z' });
+    register(ws, b.pid, { task: 'weather/b', step: 'S-2', session: 's-b', since: bSince });
     const r = await admit(ws, mg);
     assert.equal(r.ok, false);
-    assert.equal(r.why, `2 of 2 steps run: weather/a S-1 (pid ${a.pid} since 2026-11-03T10:00:00.000Z); weather/b S-2 (pid ${b.pid} since 2026-11-03T10:05:00.000Z)`);
+    assert.equal(r.why, `2 of 2 steps run: weather/a S-1 (pid ${a.pid} since ${aSince}); weather/b S-2 (pid ${b.pid} since ${bSince})`);
     assert.deepEqual((await mg.running()).map((x) => [x.pid, x.task, x.step, x.session]), [[a.pid, 'weather/a', 'S-1', 's-a'], [b.pid, 'weather/b', 'S-2', 's-b']]);
   } finally {
     a.kill();
@@ -51,6 +52,26 @@ test('a dead pid is cleared on the next look', async () => {
   assert.deepEqual(await mg.running(), []);
   assert.equal(existsSync(join(home, 'running', `${pid}.json`)), false);
   assert.equal((await admit(ws, mg)).ok, true);
+});
+
+test('a pid file or a reservation whose pid is now another process, or that recorded no start, is cleared on the next look', async () => {
+  const { home, ws, mg } = fresh({ maxAgents: 1 });
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  mkdirSync(join(home, 'running'));
+  try {
+    for (const start of [new Date(Date.now() - 3600000).toISOString(), undefined]) {
+      writeFileSync(join(home, 'running', `${other.pid}.json`), JSON.stringify({ pid: other.pid, task: 'weather/a', step: 'S-1', session: 's', since: start }));
+      assert.deepEqual(await mg.running(), [], `since ${start}`);
+      assert.equal(existsSync(join(home, 'running', `${other.pid}.json`)), false);
+      writeFileSync(join(home, 'running', `${other.pid}-1.json`), JSON.stringify({ pid: other.pid, pidStart: start, task: 'weather/b', step: 'S-2', since: start }));
+      const a = await admit(ws, mg);
+      assert.equal(a.ok, true, `the reservation does not count (pidStart ${start})`);
+      assert.deepEqual(readdirSync(join(home, 'running')), [`${a.slot.name}.json`], 'and is removed');
+      release(ws, a.slot);
+    }
+  } finally {
+    other.kill();
+  }
 });
 
 test('admitting and reserving are one step: two processes at once under a cap of 1 get one yes; a dead holder\'s reservation is not counted', async () => {

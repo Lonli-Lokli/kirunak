@@ -437,6 +437,46 @@ test('a heavy step a dead k run left running is failed and run again; its starte
   assert.match(progress(w), new RegExp(`S-2 started \\(heavy: Restart keeps it, k run ${process.pid}\\)`));
 });
 
+test('a step whose k run\'s pid is now another process is failed and retried, as is a heavy step, whose line records no start', async () => {
+  const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  try {
+    const sid = randomUUID();
+    const hourAgo = new Date(Date.now() - 3600000).toISOString();
+    await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+    put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: other.pid, krunStart: hourAgo, claude: null, claudeStart: null, started: hourAgo, ended: null, result: false } }));
+    await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${other.pid}` });
+    w.ws.seams.resourceGuard = { run: () => (put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
+    const calls = fakeRunner(w);
+    const lines = [];
+    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    for (const s of ['S-1', 'S-2']) assert.ok(lines.includes(`${w.id} ${s} failed: the k run that started it (pid ${other.pid}) stopped`), lines.join('\n'));
+    assert.equal(calls.length, 1, 'S-1 is retried');
+    assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+    assert.equal(alive(other.pid), true, 'the process that holds the pid now is left alone');
+  } finally {
+    other.kill();
+  }
+});
+
+test('a task lock whose pid is now another process, or that recorded no start, is taken over', async () => {
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  try {
+    for (const pidStart of [new Date(Date.now() - 3600000).toISOString(), undefined]) {
+      const w = await approvedWorkspace(PLAN);
+      const calls = fakeRunner(w);
+      mkdirSync(join(w.home, 'k-run'), { recursive: true });
+      writeFileSync(join(w.home, 'k-run', `${encodeURIComponent(w.id)}.json`), JSON.stringify({ pid: other.pid, pidStart, task: w.id }));
+      const lines = [];
+      await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+      assert.equal(calls.length, 1, `pidStart ${pidStart}`);
+      assert.ok(lines.includes(`${w.id} took over the lock of k run ${other.pid}, which no longer runs`), lines.join('\n'));
+    }
+  } finally {
+    other.kill();
+  }
+});
+
 // The keeper in k run: a clock whose sleep moves time on at once, and runs whose records show a 1-hour cache.
 function keeperClock() {
   let t = Date.parse('2026-11-03T12:00:00Z');

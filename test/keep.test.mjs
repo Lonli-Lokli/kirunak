@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { keep, readLines, updateSession } from '../lib/keeper.mjs';
-import { register } from '../plugins/machine-guard-pids.mjs';
 import { approvedWorkspace, k } from './helpers.mjs';
 
 const PLAN = `---
@@ -54,7 +53,8 @@ test('a session whose task waits for the owner is skipped at once', async () => 
 
 test('a step of its task under k run: the wait is the budget minutes it has left; --dry-run records nothing', async () => {
   const w = await setup();
-  register(w.ws, process.pid, { task: w.id, step: 'S-1', session: 'x', since: at(-10) });
+  // A step of the task running for 10 minutes on the fake clock (the real guard holds a pid to its real start).
+  w.ws.seams.machineGuard = { ...w.ws.seams.machineGuard, running: () => [{ pid: process.pid, task: w.id, step: 'S-1', session: 'x', since: at(-10) }] };
   const r = await keep({ ws: w.ws, session: 'sess-1', clock: fakeClock(), dryRun: true });
   assert.deepEqual([r.action, r.conversation.waitsFor, r.conversation.expectedWaitMin], ['keepalive', 'k run', 30]);
   assert.equal(r.text, `would end at ${at(30)} for a keep-alive (k run: 30 min expected, under 950 min)`);
