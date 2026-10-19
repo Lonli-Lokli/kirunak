@@ -31,13 +31,15 @@ const readJson = (p, fallback = null) => {
   }
 };
 
+// A pid this user cannot signal (EPERM) is not alive: nothing of kirunak's runs as another user, so it is never ours,
+// and waiting for it would be waiting for ever.
 export function alive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
-  } catch (e) {
-    return e.code === 'EPERM';
+  } catch {
+    return false;
   }
 }
 
@@ -45,7 +47,7 @@ export function alive(pid) {
 const isGroup = (pid) => Number.isInteger(pid) && pid > 1;
 
 // A group this user cannot signal (EPERM) is no job's or claude's of kirunak's and could not be killed anyway: not
-// alive. alive() keeps EPERM as alive, since a pid it answers for is only waited for, never killed.
+// alive, as alive() says of a single pid.
 export const groupAlive = (pid) => {
   if (!isGroup(pid)) return false;
   try {
@@ -73,6 +75,12 @@ export function isStill(pid, startIso, slackMs = 60000) {
   const s = ps.status === 0 ? elapsed(ps.stdout) : null;
   return s !== null && Math.abs(Date.now() - s * 1000 - recorded) <= slackMs;
 }
+
+// This process's start, written beside its pid wherever kirunak writes that pid to a file, for isStill to read.
+export const OWN_START = new Date(Date.now() - process.uptime() * 1000).toISOString();
+
+// A pid of kirunak's read from a file: alive, and still the process that started at startIso. No start is dead.
+export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso);
 
 // TERM to the process group, then KILL after graceMs if anything of it is left.
 export async function killTree(pid, graceMs = 10000) {
@@ -179,18 +187,19 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
 
   // The head of the queue takes the lock, or takes it over when its owner's process is dead. A dead owner's job that
   // still runs is returned as { orphan: pid } first: nobody will collect its result, and it must end before the take.
-  // It is that job only while it started at jobStart; a pid that names another process by now is left alone.
+  // It is that job only while it started at jobStart; a pid that names another process by now is left alone. A waiter
+  // or an owner is alive only while its pid is still the process that started at its pidStart.
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
       // A dead waiter's line goes; a line someone removed (a handoff's release) comes back at the end.
-      const live = all.filter((e) => e && alive(e.pid));
+      const live = all.filter((e) => e && stillRuns(e.pid, e.pidStart));
       if (!live.some((e) => e.id === me.id)) live.push(me);
       if (live.length !== all.length) writeQueue(P, live);
       if (live[0].id !== me.id) return false;
       if (existsSync(P.lock)) {
         const owner = readJson(P.owner);
-        const dead = owner ? !alive(owner.pid) : stale(P);
+        const dead = owner ? !stillRuns(owner.pid, owner.pidStart) : stale(P);
         if (!dead) return false;
         if (groupAlive(owner?.job) && isStill(owner.job, owner.jobStart)) return { orphan: owner.job };
         rmSync(P.lock, { recursive: true, force: true });
@@ -200,7 +209,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       } catch {
         return false;
       }
-      writeOwner(P, { session: me.session, what: me.what, pid: me.pid, since: new Date().toISOString(), id: me.id });
+      writeOwner(P, { session: me.session, what: me.what, pid: me.pid, pidStart: me.pidStart, since: new Date().toISOString(), id: me.id });
       writeQueue(P, live.slice(1));
       return true;
     });
@@ -225,7 +234,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       resourceGuard: {
         async run(job) {
           const P = at();
-          const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, since: new Date().toISOString() };
+          const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() };
           await edit(P, () => appendFileSync(P.queue, JSON.stringify(me) + '\n'));
           for (;;) {
             const t = await tryTake(P, me);
@@ -284,8 +293,8 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           const owner = readJson(P.owner);
           const minutesSince = (iso) => (Date.now() - Date.parse(iso)) / 60000;
           const job = ({ session, what, since }) => ({ session, what, since, estimateMinutes: estimate(P, what) });
-          const h = owner && alive(owner.pid) ? job(owner) : null;
-          const queued = readQueue(P).filter((e) => e && alive(e.pid)).map(job);
+          const h = owner && stillRuns(owner.pid, owner.pidStart) ? job(owner) : null;
+          const queued = readQueue(P).filter((e) => e && stillRuns(e.pid, e.pidStart)).map(job);
           const left = h ? Math.max(0, h.estimateMinutes - minutesSince(h.since)) : 0;
           return { held: h, queued, estimateMinutes: Math.round((left + queued.reduce((s, q) => s + q.estimateMinutes, 0)) * 100) / 100 };
         },

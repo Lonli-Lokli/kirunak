@@ -5,7 +5,7 @@ import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import resourceGuardLocal, { alive, isStill } from '../plugins/resource-guard-local.mjs';
+import resourceGuardLocal, { alive, isStill, OWN_START } from '../plugins/resource-guard-local.mjs';
 
 function guard(opts = {}) {
   const home = mkdtempSync(join(tmpdir(), 'kirunak-guard-'));
@@ -90,7 +90,7 @@ test('a dead owner\'s lock is taken over; a live owner\'s is waited for', async 
   assert.match(r.log, /ok/);
 
   mkdirSync(lock, { recursive: true });
-  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ session: 'other', what: 'build', pid: process.pid, since: new Date().toISOString() }));
+  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ session: 'other', what: 'build', pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() }));
   let done = false;
   const waiting = g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('echo ok') }).then((x) => ((done = true), x));
   await sleep(200);
@@ -113,8 +113,8 @@ test('the estimate: the median of the last ten jobs with the same what, 15 minut
   const lines = [...Array(12)].map((_, i) => ({ what: 'tests', minutes: i + 1, exitCode: 0 }));
   writeFileSync(join(home, 'guard', 'log.jsonl'), [...lines, { what: 'build', minutes: 100, exitCode: 0 }].map((x) => JSON.stringify(x) + '\n').join(''));
   mkdirSync(join(home, 'guard', 'lock'));
-  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 'a', what: 'tests', pid: process.pid, since: new Date().toISOString() }));
-  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'q', session: 'b', what: 'lint', pid: process.pid, since: new Date().toISOString() }) + '\n');
+  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 'a', what: 'tests', pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() }));
+  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'q', session: 'b', what: 'lint', pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() }) + '\n');
   const st = g.status();
   assert.equal(st.held.estimateMinutes, 7.5, 'the last ten are 3..12');
   assert.equal(st.queued[0].estimateMinutes, 15);
@@ -204,6 +204,34 @@ test('a dead owner\'s job pid that names a group this user cannot signal is not 
   if (!r) rmSync(lock, { recursive: true, force: true });
   await running;
   assert.equal(r?.exitCode, 0, `the job waited behind group ${other[0]}`);
+});
+
+test('a pid of another user is not alive: it is never kirunak\'s, so nothing waits for it', (t) => {
+  const rows = spawnSync('ps', ['-axo', 'pid=,uid='], { encoding: 'utf8' }).stdout.trim().split('\n').map((l) => l.trim().split(/\s+/));
+  const root = rows.find(([pid, uid]) => uid === '0' && Number(pid) > 1);
+  if (!root || process.getuid() === 0) return t.skip('no process of another user');
+  assert.equal(alive(Number(root[0])), false);
+});
+
+test('an owner or a waiter whose pid is now another process, or that recorded no start, is dead: the lock is taken over at once', async () => {
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  try {
+    for (const pidStart of [new Date(Date.now() - 3600000).toISOString(), undefined]) {
+      const { home, g } = guard();
+      mkdirSync(join(home, 'guard', 'lock'), { recursive: true });
+      writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ id: 'o', session: 'gone', what: 'build', pid: other.pid, pidStart, since: new Date().toISOString() }));
+      writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'q', session: 'gone too', what: 'lint', pid: other.pid, pidStart, since: new Date().toISOString() }) + '\n');
+      assert.deepEqual(g.status(), { held: null, queued: [], estimateMinutes: 0 }, `pidStart ${pidStart}`);
+      const running = g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('echo ran') });
+      const r = await Promise.race([running, sleep(1000).then(() => null)]);
+      if (!r) rmSync(join(home, 'guard'), { recursive: true, force: true });
+      await running;
+      assert.equal(r?.exitCode, 0, `the job waited behind pid ${other.pid} (pidStart ${pidStart})`);
+      assert.equal(alive(other.pid), true, 'the process is left alone');
+    }
+  } finally {
+    other.kill();
+  }
 });
 
 test('a lock removed between the waiter\'s checks counts as no lock', async () => {
