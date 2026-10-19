@@ -143,11 +143,15 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   writeFileSync(join(w.p.dir, 'progress.md'), progress.replace(/ \(review\.md sha256:[0-9a-f]+\)/, ''));
   assert.throws(() => accept({ ws: w.ws, id: w.id }), /S-2 finished without recording review\.md's hash, so nothing shows the file is as it wrote it: run a new review/);
   writeFileSync(join(w.p.dir, 'progress.md'), progress);
+  // A baseline that does not parse: the cost says so, and the accept goes on.
+  writeFileSync(join(w.hub, 'kirunak', 'baseline.json'), '{ not json');
+  const module = join(w.hub, 'kirunak', 'workspace.mjs');
+  writeFileSync(module, readFileSync(module, 'utf8').replace("plugins: ['./plugins/checklist.mjs'],", "plugins: ['./plugins/checklist.mjs'],\n  baseline: './baseline.json',"));
   const r = k(w.home, ['accept', w.id]);
   assert.equal(r.status, 0, r.stderr);
   // The accept commits done.json and cost.md, k cost's numbers; the steps' copies stay out of git.
   assert.deepEqual(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [w.p.rel('cost.md'), w.p.rel('done.json')]);
-  assert.match(readFileSync(join(w.p.dir, 'cost.md'), 'utf8'), /^# Cost of weather\/offline-forecast\n[^]*No run record was found\./);
+  assert.match(readFileSync(join(w.p.dir, 'cost.md'), 'utf8'), /^# Cost of weather\/offline-forecast\n\nThe cost could not be read: .*JSON/);
   assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all']), /\/in\/|diff\.patch|\.gitignore/);
 });
 
