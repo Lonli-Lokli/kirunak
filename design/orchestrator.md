@@ -104,8 +104,10 @@ pending  →  ready  →  running  →  done
   owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid; the id
   URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a lock whose `k run`
   is dead is taken over. A `k run` stopped by Ctrl-C, a TERM or a closed terminal kills every process it started
-  (its steps' runs and keep-alives; the guard ends a heavy job), fails each step it had in flight with `k run was
-  stopped (<signal>)`, so the step is retried once, releases its lock and exits with the signal's code.
+  (its steps' runs and keep-alives; the guard ends a heavy job), fails each step whose run it killed (`running`)
+  with `k run was stopped (<signal>)`, a stop's failure that the step does not count, releases its lock and exits
+  with the signal's code. A step waiting for its job is left `waiting-heavy`, its `needs.json` and `started` line
+  kept: the next `k run` runs the job again and resumes the same conversation, as after a crash.
 
 ## 3. The runner: headless `claude -p` (`plugins.md` seam `runner`)
 

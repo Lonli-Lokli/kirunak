@@ -9,7 +9,7 @@ import { readLines } from '../lib/keeper.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
-import { alive } from '../plugins/resource-guard-local.mjs';
+import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
 import { approvedWorkspace, fakeClaude, k, KIRUNAK } from './helpers.mjs';
 
@@ -226,12 +226,12 @@ test('a failed run\'s needs.json is moved aside and named in its failure: the re
   assert.deepEqual(calls.map((c) => c.resume ?? null), [null, null, null], 'no conversation was resumed');
 });
 
-test('a step stopped while it waited for its job starts again without the request', async () => {
+test('a step failed by hand while it waited for its job starts again without the request', async () => {
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
   put(w, 'steps/S-1/needs.json', HEAVY('tests'));
-  steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'k run was stopped (SIGINT)' });
+  steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'the tests it asked for are not the ones it needs' });
   const jobs = [];
   w.ws.seams.resourceGuard = jobGuard(jobs);
   const calls = fakeRunner(w);
@@ -336,6 +336,43 @@ test('k run stopped by a signal kills its claude, fails the step, frees the lock
   const r = await run({ ws: w.ws, id: w.id });
   assert.equal(r.ended['S-1'], 'done');
   assert.doesNotMatch(calls[0].prompt, /failure-1\.md|the last attempt failed/, 'a stop is not the attempt\'s failure');
+});
+
+test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', async () => {
+  const w = await approvedWorkspace(PLAN);
+  // The real k run --watch in a child, with a fake claude on PATH that asks for a long job.
+  const bin = mkdtempSync(join(tmpdir(), 'kirunak-heavy-claude-'));
+  const jobPid = join(bin, 'job.pid');
+  const needs = JSON.stringify({ heavy: { what: 'a long build', command: ['/bin/sh', '-c', `echo $$ > ${jobPid}; sleep 30`], maxMinutes: 1 }, then: 'resume' });
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh
+sid=""; for a in "$@"; do [ "$prev" = "--session-id" ] && sid="$a"; prev="$a"; done
+cat > /dev/null
+mkdir -p "${stepFile(w, '')}" && printf '%s' '${needs}' > "${stepFile(w, 'needs.json')}"
+echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":2,\\"session_id\\":\\"$sid\\",\\"total_cost_usd\\":0.1}"
+`);
+  chmodSync(join(bin, 'claude'), 0o755);
+  const child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id, '--watch'], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'ignore'] });
+  let said = '';
+  child.stdout.on('data', (d) => (said += d));
+  const exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
+  const owner = join(w.home, 'guard', 'lock', 'owner.json');
+  await until(() => existsSync(jobPid) && existsSync(owner) && JSON.parse(readFileSync(owner, 'utf8')).job, 'the job never started');
+  const job = Number(readFileSync(jobPid, 'utf8'));
+  child.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  assert.equal(groupAlive(job), false, 'the guard ended the job');
+  assert.equal(existsSync(join(w.home, 'guard', 'lock')), false);
+  assert.deepEqual(readdirSync(join(w.home, 'k-run')), [], 'the lock is released');
+  assert.doesNotMatch(progress(w), /failed/);
+  assert.ok(existsSync(stepFile(w, 'needs.json')), 'the request stays for the next k run');
+  assert.match(said, /S-1 waits for its job again: the next k run runs it/);
+  const first = JSON.parse(readFileSync(stepFile(w, 'run-1.json'), 'utf8')).session_id;
+  const jobs = [];
+  w.ws.seams.resourceGuard = jobGuard(jobs);
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.deepEqual([jobs, calls.length, calls[0].resume], [['a long build'], 1, first], 'the job again, then a resume of the first conversation');
+  assert.equal(r.ended['S-1'], 'done');
 });
 
 test('a step a dead k run left running is failed, its claude killed, and retried; a step started by hand is left alone', async () => {
