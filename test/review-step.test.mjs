@@ -146,3 +146,24 @@ test('k run runs a review in a fresh conversation on models.review; a review tha
   assert.match(retry.prompt, /`kirunak\/tasks\/offline-forecast\/steps\/S-2\/in\/failure-1\.md`: the last attempt failed/);
   assert.equal(readFileSync(join(dir, 'in', 'failure-1.md'), 'utf8'), failure);
 });
+
+test('an output check that throws fails the step, so the retry and [escalate] apply, never leaving it running', async () => {
+  const w = await approvedWorkspace(PLAN);
+  w.ws.seams.runner = {
+    start(step) {
+      const child = spawn('sleep', ['0.05'], { detached: true });
+      const done = new Promise((resolve) => child.on('exit', () => {
+        if (step.env.KIRUNAK_STEP === 'S-1') for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
+        else mkdirSync(join(w.p.dir, 'review.md'), { recursive: true });
+        resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });
+      }));
+      return { pid: child.pid, sessionId: step.sessionId, done };
+    },
+    keepAlive: () => null,
+  };
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.match(r.stopped, /^S-2 is marked \[escalate\]/);
+  const progress = readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
+  assert.equal((progress.match(/S-2 failed: kirunak stopped the step: EISDIR/g) || []).length, 2);
+  assert.ok(!/S-2 finished/.test(progress));
+});
