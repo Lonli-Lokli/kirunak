@@ -77,7 +77,11 @@ pending  →  ready  →  running  →  done
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
   conversation (§3) with the prompt "the job ended; read steps/S-n/heavy-<k>.json and continue". Between the two,
-  no process of the step exists (R9), and the cache keeper decides whether to keep its cache warm (§5).
+  no process of the step exists (R9), and the cache keeper decides whether to keep its cache warm (§5). The
+  conversation resumed is the one the step's `started` line names, with a run record of `k run`. A step started by
+  hand has none: `k run` runs its job and says that its session resumes itself, naming `heavy-<k>.json`; it never
+  starts a new conversation with only the resume prompt. A question such a step asks the owner stops the task the
+  same way, the `needs.json` left for the session that wrote it.
 - `waiting-owner`: `needs.json` has `{ "owner": "<question>" }`: the orchestrator stops the task, appends the
   question to `progress.md` and `events.jsonl`, and `k list` shows `awaiting owner`. The owner answers in a session
   (`k intake answer` if it changes the task: then an amendment) or by editing `notes.md`; `k run` resumes.

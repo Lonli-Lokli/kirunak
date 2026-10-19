@@ -249,6 +249,29 @@ test('every needs-<k>.json takes its number from one index: heavy, the owner, he
   assert.deepEqual([read(1).heavy.what, read(2).owner, read(3).heavy.what], ['first tests', 'Three days or a week?', 'second tests']);
 });
 
+test('a step started by hand that asks for a job: k run runs it and starts no claude; one that asks the owner: k run stops', async () => {
+  const w = await approvedWorkspace(PLAN);
+  // Started by hand with its own session id, after an earlier k run's conversation that left a record.
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: 'an-earlier-run', num_turns: 2, kirunak: { krun: spawnSync('true').pid, claude: null, started: new Date().toISOString(), ended: new Date().toISOString(), result: true } }));
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: randomUUID() });
+  put(w, 'steps/S-1/needs.json', HEAVY('weather unit tests'));
+  const jobs = [];
+  w.ws.seams.resourceGuard = jobGuard(jobs);
+  const calls = fakeRunner(w);
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual([jobs, calls.length], [['weather unit tests'], 0]);
+  assert.ok(lines.includes(`${w.id} S-1 was started by hand: its session resumes itself; the job's record is steps/S-1/heavy-1.json`), lines.join('\n'));
+  assert.ok(existsSync(stepFile(w, 'needs-1.json')) && !existsSync(stepFile(w, 'needs.json')));
+  assert.match(progress(w), /S-1 heavy job ended: exit 0 after [\d.]+ min \(steps\/S-1\/heavy-1\.json\); started by hand, its session resumes itself\n$/);
+  assert.equal(r.states['S-1'], 'running');
+  put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+  const again = await run({ ws: w.ws, id: w.id });
+  assert.equal(again.stopped, 'S-1 was started by hand: its session resumes itself; its question is steps/S-1/needs.json');
+  assert.equal(calls.length, 0);
+  assert.ok(existsSync(stepFile(w, 'needs.json')), 'the question stays for the session that asked it');
+});
+
 test('k run refuses a step past the machine cap and says who runs; a task not queued does not run', async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);
