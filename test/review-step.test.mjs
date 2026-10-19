@@ -151,14 +151,18 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all']), /\/in\/|diff\.patch|\.gitignore/);
 });
 
-test('a step folder keeps its run and keep-alive records out of git', async () => {
+test('a step folder keeps its run, keep-alive and heavy job records out of git, and a file of the step\'s own in', async () => {
   const w = await implemented();
   steps.runRecord(w.p, 'S-1', 'impl-1').ended({ exitCode: 0, result: { type: 'result', session_id: 'impl-1' } });
   steps.saveKeep(w.p, 'S-1', { type: 'result', session_id: 'impl-1' });
+  steps.saveHeavy(w.p, 'S-1', { what: 'unit tests', command: ['npm', 'test'], exitCode: 0, minutes: 1, log: 'ok\n' });
   const dir = join(w.p.dir, 'steps', 'S-1');
+  writeFileSync(join(dir, 'run-notes.json'), '{}\n');
   const files = readdirSync(dir);
-  assert.ok(files.some((f) => /^run-\d+\.json$/.test(f)) && files.some((f) => /^keep-\d+\.json$/.test(f)), files.join(' '));
-  assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', dir]), /run-|keep-|\.gitignore/);
+  for (const re of [/^run-\d+\.json$/, /^keep-\d+\.json$/, /^heavy-\d+\.json$/, /^heavy-\d+\.log$/]) assert.ok(files.some((f) => re.test(f)), `${re} in ${files.join(' ')}`);
+  const status = sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', dir]);
+  assert.doesNotMatch(status, /run-\d|keep-|heavy-|\.gitignore/);
+  assert.match(status, /steps\/S-1\/run-notes\.json/, 'only numbered records are kirunak\'s');
 });
 
 test('k run runs a review in a fresh conversation on models.review, denied the implementer\'s account; a review that fails the grammar fails, and the retry reads why', async () => {
