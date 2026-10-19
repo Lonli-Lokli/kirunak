@@ -130,8 +130,8 @@ are a state field agents rewrite; a state read from files that only named comman
 | ready | approval record with a matching hash; no step started in `progress.md` | the owner: `k approve` |
 | blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces | the plan |
 | in progress | a step started in `progress.md`; no `review.md` verdict | `k step start` (the orchestrator or a session) |
-| in review | `review.md` exists without a `verdict:` line | `k review start` |
-| reviewed | `review.md` has a verdict; no `done.json` | the review step |
+| in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it | `k review start` |
+| reviewed | the latest review passes the grammar and its review step finished in `progress.md`; no `done.json` | the review step |
 | awaiting owner | `checklist.md` has an unticked item, or reviewed | `k checklist` |
 | done | `done.json` exists | the owner: `k accept` (through `/k-done`) |
 | on hold | `hold.md` exists (why, date) and no `done.json` | the owner: `k hold` / `k resume` |

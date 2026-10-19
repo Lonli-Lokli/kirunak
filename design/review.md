@@ -59,6 +59,10 @@ verdict: not met (AC-2)
 - The review is a file the reviewer writes (an agent step), so the freeze hook allows it; `k review check` runs as
   the step's output check (`outputs: review.md`), and a review that fails the grammar fails the step.
 - A second review after fixes is a new step (`S-review-2`), a new file `review-2.md`; `k list` reads the latest.
+- A review counts only while it passes the grammar and the review step whose output it is has `finished` in
+  `progress.md`: a review file whose step failed, escalated or never ran, or one no review step names, is not a
+  review. Until then `k list` shows the task `in review`; it checks the grammar without git (it runs no git
+  command, `boards.md` §1), so a cited path missing at head shows at `k review check`.
 
 ## 3. The owner's checklist (R15)
 

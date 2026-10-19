@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { hashBytes } from '../lib/approval.mjs';
 import { format, rows } from '../lib/list.mjs';
-import { makeWorkspace } from './helpers.mjs';
+import { makeWorkspace, reviewsRan } from './helpers.mjs';
 
 const taskText = (id, title, { q = false } = {}) => `---
 id: ${id}
@@ -50,6 +50,7 @@ function addTask(repoRoot, id, title, opts = {}) {
 
 const REVIEW = `---
 task: weather/reviewed-task
+head: abc1234
 ---
 
 | id | verdict | evidence |
@@ -69,10 +70,10 @@ async function fixture() {
   });
   addTask(w.hub, 'hub/sync-notes', 'Sync notes across devices', { approved: '2026-11-04T09:00:00Z' });
   addTask(w.hub, 'hub/release-notes', 'Release notes in every language', { q: true });
-  addTask(w.weather, 'weather/reviewed-task', 'A reviewed task', {
+  reviewsRan(addTask(w.weather, 'weather/reviewed-task', 'A reviewed task', {
     approved: '2026-11-01T09:00:00Z',
     files: { 'review.md': REVIEW, 'checklist.md': '- [x] AC-1 seen\n- [ ] AC-2 on a phone\n- [ ] E-1 read\n' },
-  });
+  }));
   addTask(w.weather, 'weather/settings-backup', 'Settings backup', {
     approved: '2026-10-20T09:00:00Z',
     files: { 'done.json': JSON.stringify({ task: 'weather/settings-backup', accepted: '2026-11-01', by: 'owner', via: 'shell', commit: 'def5678' }) },

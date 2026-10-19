@@ -77,3 +77,11 @@ export async function approvedWorkspace(plan) {
   writeFileSync(join(p.dir, 'plan.md'), plan);
   return { ...w, p, id: 'weather/offline-forecast' };
 }
+
+// plan.md with a review step per file (S-2 writes the first, S-3 the second, ...) and progress.md where each one
+// finished: what makes a review in the grammar one that k accept, k checklist and the task's state take.
+export function reviewsRan(taskDir, files = ['review.md']) {
+  const steps = files.map((f, i) => `### S-${i + 2} Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff, evidence/\noutputs: ${f}\n`);
+  writeFileSync(join(taskDir, 'plan.md'), ['### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n', ...steps].join('\n'));
+  writeFileSync(join(taskDir, 'progress.md'), files.map((_, i) => `2026-11-06 1${i}:00 S-${i + 2} finished\n`).join(''));
+}
