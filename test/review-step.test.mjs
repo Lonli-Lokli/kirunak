@@ -7,7 +7,7 @@ import { accept, hashBytes, readRecord } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
-import { approvedWorkspace, k, sh } from './helpers.mjs';
+import { approvedWorkspace, events, k, sh } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -119,9 +119,12 @@ test('a review step finishes only when its review passes k review check', async 
   const bad = k(w.home, ['step', 'finish', w.id, 'S-2']);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /S-2: review\.md fails k review check:\n {2}line 6: AC-1 has no row: one row per AC and E\n$/);
+  const ready = () => events(w.home).filter((l) => l.kind === 'review-ready');
+  assert.deepEqual(ready(), [], 'neither the implementer\'s finish nor a refused one says a review is ready');
   put(w, 'review.md', review(rows));
   assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status, 0);
   assert.equal(steps.load(w.ws, w.id).states.get('S-2').state, 'done');
+  assert.deepEqual(ready().map(({ time, ...e }) => e), [{ kind: 'review-ready', task: w.id, step: 'S-2', file: 'review.md' }], 'the mod toasts it');
 });
 
 test('a review step finishes with its file\'s hash; k accept and k checklist take the review only as it was then', async () => {
