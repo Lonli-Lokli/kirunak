@@ -131,6 +131,20 @@ test('the front matter: the task and a head that is a commit', async () => {
   assert.deepEqual(problems(w.check(review(w.head).replace(/^head: .*\n/m, ''))), ['the front matter names no head, the commit the cited paths are read at']);
 });
 
+test('the head is a commit id, never a name that moves on after the review: HEAD, a branch, or a ref spelled like an id', async () => {
+  const w = await reviewed();
+  const full = sh(w.weather, 'git', ['rev-parse', 'HEAD']).trim();
+  assert.deepEqual(problems(w.check(review(full))), [], 'the full 40-character id');
+  assert.deepEqual(problems(w.check(review(w.head.toUpperCase()))), [], 'in capitals');
+  for (const name of ['HEAD', 'master', 'HEAD~1', `${w.head}^`, w.head.slice(0, 6)]) {
+    const want = [`head ${name} is not a commit id: write the reviewed commit's hash, 7 to 40 hex characters`];
+    assert.deepEqual(problems(w.check(review(w.head).replace(`head: ${w.head}`, `head: ${name}`))), want, name);
+    assert.deepEqual(problems(checkReview(review(name), { task: parseTask(sh(w.weather, 'cat', [w.p.task])), id: ID, p: w.p, atHead: false })), want, `${name}, without git`);
+  }
+  sh(w.weather, 'git', ['branch', 'abcdef1']);
+  assert.deepEqual(problems(w.check(review('abcdef1'))), ['head abcdef1 is not a commit of the repo'], 'a branch named like an id');
+});
+
 test('k review check reads the latest review, or the one named, and exits 1 on a problem', async () => {
   const w = await reviewed();
   const none = k(w.home, ['review', 'check', ID]);

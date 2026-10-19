@@ -25,7 +25,7 @@ function folder(setup) {
 
 const REVIEW = '| id | verdict | evidence |\n| --- | --- | --- |\n| AC-1 | met | test X (a.test.mjs:1) |\n';
 // A review in the grammar (what reads git aside), E-1's row as given.
-const SOUND = (last, e1 = 'met | file task.md:1') => `---\ntask: weather/offline-forecast\nhead: HEAD\n---\n
+const SOUND = (last, e1 = 'met | file task.md:1') => `---\ntask: weather/offline-forecast\nhead: 9ab1c2d\n---\n
 | id | verdict | evidence |\n| --- | --- | --- |\n| AC-1 | met | test X (a.test.mjs:1) |\n| AC-2 | met | file task.md:1 |
 | AC-3 | met | file task.md:1 |\n| E-1 | ${e1} |\n\n${last}\n`;
 

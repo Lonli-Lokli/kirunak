@@ -56,7 +56,9 @@ session: 3e4f…
 verdict: not met (AC-2)
 ```
 
-- Grammar `k review check` enforces: one row per AC and E of the frozen task (none missing, none extra); verdict ∈
+- Grammar `k review check` enforces: `head` is the reviewed commit's id, 7 to 40 hex characters, of a commit in the
+  repo (a name such as `HEAD` or a branch moves on after the review, and `k accept` compares the code with it); one
+  row per AC and E of the frozen task (none missing, none extra); verdict ∈
   `met | not met | needs device | needs owner`; a `met` row's evidence starts with `test <Name>`, `file
   <path>:<line>`, `measure <path>`, or `screenshot <path>`, and the path exists at `head` (a test name must appear
   in the file named in parentheses; a `file` line must be within the file's length; `k step finish` commits the

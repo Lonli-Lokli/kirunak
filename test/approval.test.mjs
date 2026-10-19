@@ -276,10 +276,12 @@ test('decline stamps declined: with the date and why, commits it, and the amendm
   assert.equal(newAmendment({ ws, id: ID, now: NOV7 }).n, 2);
 });
 
-// A review of the invented task: AC-3 for a device, E-1 for the owner, or every row met.
-const REVIEW = (verdict, needs = true) => `---
+const headOf = (repo) => sh(repo, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+
+// A review of the invented task at the commit head: AC-3 for a device, E-1 for the owner, or every row met.
+const REVIEW = (head, verdict, needs = true) => `---
 task: ${ID}
-head: HEAD
+head: ${head}
 ---
 
 | id | verdict | evidence |
@@ -299,9 +301,10 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
   assert.throws(() => accept({ ws, id: ID }), /has no review, so it cannot be accepted: add a review step to plan\.md and run it$/);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /has no review/);
   reviewsRan(taskDir(weather));
-  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: pass', false));
+  const reviewed = headOf(weather);
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(reviewed, 'verdict: pass', false));
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /review\.md is not a review k accept takes:\n {2}line 13: verdict: pass is not verdict: met/);
-  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: met', false));
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(reviewed, 'verdict: met', false));
   reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   const head = sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
@@ -316,7 +319,7 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
   assert.equal(done.commit, head);
   assert.equal(done.review, 'review.md');
   assert.equal(done.verdict, 'met');
-  assert.equal(done.head, 'HEAD', 'the head as the review states it');
+  assert.equal(done.head, reviewed, 'the head as the review states it');
   assert.equal(done.reviewHash, hashBytes(readFileSync(join(taskDir(weather), 'review.md'))));
   assert.equal(subject(weather), `kirunak: accept ${ID}`);
   assert.equal(subject(hub), `kirunak: queue remove ${ID}`);
@@ -328,7 +331,7 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
 test('accept with a review: every item the owner checks is ticked, or it refuses naming them; --checklist-open is recorded', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
-  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: needs owner (AC-3, E-1)'));
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: needs owner (AC-3, E-1)'));
   reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   assert.throws(() => accept({ ws, id: ID }), new RegExp(`2 unticked item\\(s\\), 2 not in checklist\\.md yet \\(k checklist ${ID} writes them from review\\.md\\):\n {2}- \\[ \\] AC-3 On a phone: restart offline \\(review\\.md\\)\n {2}- \\[ \\] E-1`));
@@ -353,7 +356,7 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
 test('accept refuses a not met verdict, --checklist-open or not: the way out is an amendment or a new review', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
-  const notMet = REVIEW('verdict: not met (AC-2)', false).replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | not met | a fixed 24-hour format |');
+  const notMet = REVIEW(headOf(weather), 'verdict: not met (AC-2)', false).replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | not met | a fixed 24-hour format |');
   writeFileSync(join(taskDir(weather), 'review.md'), notMet);
   reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
@@ -367,8 +370,8 @@ test('accept refuses code committed after the review head, naming it; commits in
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
   const dir = taskDir(weather);
-  const reviewed = sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
-  writeFileSync(join(dir, 'review.md'), REVIEW('verdict: met', false).replace('head: HEAD', `head: ${reviewed}`));
+  const reviewed = headOf(weather);
+  writeFileSync(join(dir, 'review.md'), REVIEW(reviewed, 'verdict: met', false));
   reviewsRan(dir);
   writeFileSync(join(dir, 'notes.md'), 'the review is in\n');
   gitCommitAll(weather, 'review and notes');
@@ -378,6 +381,12 @@ test('accept refuses code committed after the review head, naming it; commits in
   gitCommitAll(weather, 'a fix after the review');
   const later = new RegExp(`the code changed after review\\.md's head ${reviewed}, so the review never saw src/a\\.ts, src/b\\.ts, src/c\\.ts, src/d\\.ts, src/e\\.ts and 1 more: run a new review \\(a review step whose output is review-2\\.md\\)$`);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'nothing open' }), later);
+  // A head named HEAD would be the code as it is at accept, so the check would pass for nothing: not a review.
+  writeFileSync(join(dir, 'review.md'), REVIEW('HEAD', 'verdict: met', false));
+  reviewsRan(dir);
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'nothing open' }), /not a review k accept takes:\n {2}line 1: head HEAD is not a commit id/);
+  writeFileSync(join(dir, 'review.md'), REVIEW(reviewed, 'verdict: met', false));
+  reviewsRan(dir);
   sh(weather, 'git', ['rm', '-q', ...code]);
   sh(weather, 'git', ['commit', '-q', '-m', 'the fix taken back']);
   assert.equal(accept({ ws, id: ID, now: NOV7 }).state, 'done');
@@ -385,29 +394,31 @@ test('accept refuses code committed after the review head, naming it; commits in
 });
 
 // Rows the owner should check, spelled as no verdict, a cited line past its file, and the last line met anyway.
-const MISSPELT = REVIEW('verdict: met')
-  .replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | met | file nowhere.ts:999 |')
-  .replace('needs device | On a phone', 'Needs device | On a phone')
-  .replace('needs owner | Read', 'needs owner: the wording | Read');
+const MISSPELT = (head) =>
+  REVIEW(head, 'verdict: met')
+    .replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | met | file nowhere.ts:999 |')
+    .replace('needs device | On a phone', 'Needs device | On a phone')
+    .replace('needs owner | Read', 'needs owner: the wording | Read');
 
 test('accept refuses a review that fails the grammar, and one no finished review step wrote, whatever the flags', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
   const dir = taskDir(weather);
+  const reviewed = headOf(weather);
   reviewsRan(dir);
-  writeFileSync(join(dir, 'review.md'), MISSPELT);
+  writeFileSync(join(dir, 'review.md'), MISSPELT(reviewed));
   gitCommitAll(weather, 'review');
   const r = () => accept({ ws, id: ID, checklistOpen: 'nothing to check' });
   assert.throws(r, /not a review k accept takes:\n {2}line 9: AC-2: nowhere\.ts does not exist at head\n {2}line 10: AC-3: the verdict Needs device is not one of/);
   assert.throws(r, /line 11: E-1: the verdict needs owner: the wording is not one of/);
   // Rows met without evidence, every attempt of the review step failed, and the step escalated.
   const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((x) => `| ${x} | met | it works |`).join('\n');
-  writeFileSync(join(dir, 'review.md'), `---\ntask: ${ID}\nhead: HEAD\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`);
+  writeFileSync(join(dir, 'review.md'), `---\ntask: ${ID}\nhead: ${reviewed}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`);
   writeFileSync(join(dir, 'plan.md'), readFileSync(join(dir, 'plan.md'), 'utf8').replace('Review [review]', 'Review [review] [escalate]'));
   writeFileSync(join(dir, 'progress.md'), '2026-11-06 10:00 S-2 failed: k review check\n2026-11-06 11:00 S-2 failed: k review check\n2026-11-06 11:00 S-2 escalated\n');
   assert.throws(r, /line 9: AC-2: met without evidence[^]*\n {2}S-2, the review step that writes review\.md, has not finished \(escalated\)$/);
   // In the grammar now, but still no finished step wrote it; nor any step at all once the plan has none.
-  writeFileSync(join(dir, 'review.md'), REVIEW('verdict: met', false));
+  writeFileSync(join(dir, 'review.md'), REVIEW(reviewed, 'verdict: met', false));
   assert.throws(() => accept({ ws, id: ID }), /takes:\n {2}S-2, the review step that writes review\.md, has not finished \(escalated\)$/);
   writeFileSync(join(dir, 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: review.md\n');
   assert.throws(() => accept({ ws, id: ID }), /takes:\n {2}no review step of plan\.md writes review\.md: a review is what a finished review step wrote$/);
