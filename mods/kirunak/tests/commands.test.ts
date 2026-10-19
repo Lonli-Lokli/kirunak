@@ -75,6 +75,8 @@ describe('the owner\'s commands', () => {
       ['k-approve', `${ID} --toString`, /\/k-approve takes no --toString\. Nothing ran\./],
       ['k-accept', `${ID} --first`, /\/k-accept takes no --first\. Nothing ran\./],
       ['k-approve', `${ID} --amendment`, /--amendment needs a value\. Nothing ran\./],
+      ['k-hold', `${ID} --why --dry-run`, /--why needs a value, not --dry-run\. Nothing ran\./],
+      ['k-accept', `${ID} --checklist-open=--dry-run`, /--checklist-open needs a value, not --dry-run\. Nothing ran\./],
       ['k-approve', 'not-an-id', /not a task id: not-an-id\. Nothing ran\./],
       ['k-start', '', /which task\? give its id, <repo>\/<slug>\. Nothing ran\./],
       ['k-start', `${ID} extra`, /unexpected extra\. Nothing ran\./],

@@ -29,12 +29,13 @@ export function byNumber(args: string, offered: readonly string[] | undefined): 
   return { args: id + args.slice(m[0].length) }
 }
 
-// Which tasks each command's typeahead offers, by state (lib/state.mjs).
-const FITS: Record<string, (state: string) => boolean> = {
-  'k-approve': s => s === 'proposed',
-  'k-accept': s => s === 'reviewed' || s === 'awaiting owner',
-  'k-hold': s => s !== 'done' && s !== 'on hold',
-  'k-start': s => s !== 'done' && s !== 'on hold',
+// Which tasks each command's typeahead offers, by state (lib/state.mjs); one awaiting the owner with no review asked a
+// question in progress, and is nothing to accept (review G26).
+const FITS: Record<string, (r: KirunakRow) => boolean> = {
+  'k-approve': r => r.state === 'proposed',
+  'k-accept': r => (r.state === 'reviewed' || r.state === 'awaiting owner') && r.review !== null,
+  'k-hold': r => r.state !== 'done' && r.state !== 'on hold',
+  'k-start': r => r.state !== 'done' && r.state !== 'on hold',
 }
 
 // The typeahead's rows while the person types a command's task id, from the last read's rows.
@@ -42,5 +43,5 @@ export function idSuggestions(text: string, start: number, token: string, rows: 
   const m = /^\/(k-approve|k-accept|k-hold|k-start) +$/.exec(text.slice(0, start))
   const fits = m ? FITS[m[1] as string] : undefined
   if (fits === undefined) return []
-  return rows.filter(r => fits(r.state) && r.id.startsWith(token)).map(r => ({ text: r.id, description: `${r.state}: ${r.title}` }))
+  return rows.filter(r => fits(r) && r.id.startsWith(token)).map(r => ({ text: r.id, description: `${r.state}: ${r.title}` }))
 }

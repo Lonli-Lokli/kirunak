@@ -24,11 +24,14 @@ const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success
 // The owner's verbs (boards.md §4, approval.md §5): run only on the owner's own gesture, as `node k <verb> <id>
 // --via mod`, with no model turn; the state line k prints is the command's output.
 // With no id, /k-approve and /k-accept list what waits for that verb; the ids shown, in order, are what `/k-accept <n>`
-// takes. The module's own, so a reload asks for the list again.
+// takes. The module's own, so a reload asks for the list again, and `session.end` forgets it: `/clear` and a resume
+// go on in the same process under another session, whose screen shows no such list (review G25).
 const offered: Partial<Record<'approve' | 'accept', string[]>> = {}
 
 async function offer($: EngineInterface, k: string, verb: 'approve' | 'accept'): Promise<string> {
   const r = await $.process.run(['node', k, 'waiting', '--json'])
+  // A list that could not be read leaves none to pick from, never the one before it (review G27).
+  delete offered[verb]
   if (r.exitCode !== 0) return `k waiting did not answer: ${(r.stderr || r.stdout).trim().split('\n')[0]}`
   const rows = (JSON.parse(r.stdout) as Waiting)[verb]
   offered[verb] = rows.map(row => row.id)
@@ -93,6 +96,12 @@ export const register: Register = on => {
   on('command.run', { command: 'k-accept' }, ($, e) => ownerVerb($, e, 'k-accept', 'accept')).catch(() => ({ text: FAILED('k-accept') }))
   on('command.run', { command: 'k-hold' }, ($, e) => ownerVerb($, e, 'k-hold', 'hold')).catch(() => ({ text: FAILED('k-hold') }))
   on('command.run', { command: 'k-start' }, ($, e) => ownerVerb($, e, 'k-start', 'start')).catch(() => ({ text: FAILED('k-start') }))
+
+  on('session.end', ($, e, next) => {
+    delete offered.approve
+    delete offered.accept
+    return next(e)
+  })
 
   on('command.run', { command: 'kirunak' }, async $ => {
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) {

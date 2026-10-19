@@ -77,6 +77,9 @@ export function parseArgs(argv) {
     else if (BOOLEAN.has(name)) value = true;
     else if (i + 1 < argv.length) value = argv[++i];
     else throw usage(`--${name} needs a value`);
+    // A value is never a flag: `--checklist-open --dry-run` would otherwise run for real while the freeze hook, which
+    // lets any line with the word --dry-run through, took it for a dry run (review G24).
+    if (typeof value === 'string' && value.startsWith('--')) throw usage(`--${name} needs a value, not ${value}`);
     // A repeated flag (`--git a --git b`) collects its values.
     flags[name] = name in flags && value !== true ? [flags[name], value].flat() : value;
   }
@@ -439,7 +442,8 @@ const VERBS = {
       const problems = await approvalProblems(ws, r.id);
       approve.push({ id: r.id, title: r.title, why: problems.length ? problems.join('; ') : null });
     }
-    const accept = rows.filter((x) => x.state === 'reviewed' || x.state === 'awaiting owner').map((r) => {
+    // A task awaiting the owner with no review asked a question in progress (lib/state.mjs): nothing to accept (G26).
+    const accept = rows.filter((x) => (x.state === 'reviewed' || x.state === 'awaiting owner') && x.review).map((r) => {
       try {
         approval.accept({ ws, id: r.id, dryRun: true });
         return { id: r.id, title: r.title, review: r.review, why: null };

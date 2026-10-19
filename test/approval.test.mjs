@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { accept, approve, hashBytes, hold, readRecord, resume, verify } from '../lib/approval.mjs';
@@ -353,12 +353,35 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
   assert.deepEqual(done.openItems, ['AC-3 On a phone: restart offline (review.md)', 'E-1 Read: the age line (review.md)']);
 });
 
+test('a valued flag never takes --dry-run as its value, so a line the freeze hook lets through as a dry run never runs for real (review G24)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  const head = headOf(weather);
+  for (const args of [['accept', ID, '--checklist-open', '--dry-run'], ['hold', ID, '--why', '--dry-run'], ['approve', ID, '--before', '--dry-run'], ['accept', ID, '--checklist-open=--dry-run']]) {
+    const r = k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+    assert.deepEqual([r.status, r.stderr], [2, `k: --${args[2].slice(2).split('=')[0]} needs a value, not --dry-run\n`], args.join(' '));
+  }
+  assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), existsSync(join(taskDir(weather), 'hold.md')), headOf(weather)], [false, false, head]);
+  assert.equal(k(home, ['accept', ID, '--dry-run'], { CLAUDE_CODE_SESSION_ID: '' }).stdout, `would accept ${ID} (review.md, verdict: met)\n`);
+});
+
 test('k waiting and k accept --dry-run make every check of the owner\'s verbs and write nothing', async () => {
   const { ws, home, weather } = await makeWorkspace();
   const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
   const waiting = () => JSON.parse(run(['waiting', '--json']).stdout);
   assert.deepEqual(waiting(), { approve: [{ id: ID, title: waiting().approve[0].title, why: null }], accept: [] });
   await approve({ ws, id: ID, now: NOV5 });
+  // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
+  writeFileSync(join(taskDir(weather), 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n');
+  writeFileSync(join(taskDir(weather), 'progress.md'), '2026-11-06 09:00 S-1 started\n');
+  mkdirSync(join(taskDir(weather), 'steps', 'S-1'), { recursive: true });
+  writeFileSync(join(taskDir(weather), 'steps', 'S-1', 'needs.json'), JSON.stringify({ owner: 'Three days or a week?' }));
+  assert.equal(JSON.parse(run(['list', '--json']).stdout).rows[0].state, 'awaiting owner');
+  assert.deepEqual(waiting(), { approve: [], accept: [] });
+  rmSync(join(taskDir(weather), 'steps'), { recursive: true });
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: needs owner (AC-3, E-1)'));
   reviewsRan(taskDir(weather));
   generate(ws, ID);
