@@ -21,10 +21,10 @@ test('the command of orchestrator.md §3: no --model or --effort when none is na
   ]);
 });
 
-test('deny rules go as --settings with permissions.deny, and only when there are some', () => {
+test('deny rules go as --settings with permissions.deny and auto memory off, and only when there are some', () => {
   const deny = ['Read(//w/weather/kirunak/tasks/offline-forecast/progress.md)', 'Read(~/.claude/projects/**)'];
   const args = claudeArgs({ ...BASE, deny });
-  assert.deepEqual(args.slice(args.indexOf('--settings'), args.indexOf('--settings') + 2), ['--settings', JSON.stringify({ permissions: { deny } })]);
+  assert.deepEqual(args.slice(args.indexOf('--settings'), args.indexOf('--settings') + 2), ['--settings', JSON.stringify({ permissions: { deny }, autoMemoryEnabled: false })]);
   assert.equal(claudeArgs({ ...BASE, deny: [] }).includes('--settings'), false);
 });
 

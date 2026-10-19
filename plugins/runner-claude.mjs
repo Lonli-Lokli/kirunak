@@ -11,7 +11,8 @@ const OUTPUT_CAP = 10 * 1024 * 1024;
 
 // The argv after `claude`. step: { prompt, model, effort, permissionMode, maxTurns, maxBudgetUsd, allowedTools,
 // disallowedTools, deny, sessionId, resume, addDirs }. No --model or --effort when none is named, so Claude Code's own
-// default applies. `deny` (permission rules, a review's) goes as --settings' permissions.deny, which adds to the
+// default applies. `deny` (permission rules, a review's) goes as --settings' permissions.deny, with auto memory off (the repo's memory is shared with the implementing
+// sessions and loads before any rule applies); the deny list adds to the
 // other settings' rules. A new run reads its brief on stdin; a resumed one takes its prompt as the argument after -p.
 export function claudeArgs(step) {
   const args = ['-p'];
@@ -24,7 +25,7 @@ export function claudeArgs(step) {
   if (step.maxBudgetUsd) args.push('--max-budget-usd', String(step.maxBudgetUsd));
   for (const t of step.allowedTools || []) args.push('--allowedTools', t);
   for (const t of step.disallowedTools ?? ['Agent']) args.push('--disallowedTools', t);
-  if (step.deny?.length) args.push('--settings', JSON.stringify({ permissions: { deny: step.deny } }));
+  if (step.deny?.length) args.push('--settings', JSON.stringify({ permissions: { deny: step.deny }, autoMemoryEnabled: false }));
   if (!step.resume) args.push('--session-id', step.sessionId);
   for (const d of step.addDirs || []) args.push('--add-dir', d);
   if (step.resume) args.push('--resume', step.resume);

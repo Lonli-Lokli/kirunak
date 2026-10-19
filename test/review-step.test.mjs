@@ -186,6 +186,7 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   ];
   for (const c of [first, retry]) {
     assert.deepEqual(c.deny, deny);
+    assert.ok(c.deny.filter((r) => !r.startsWith('Read(~/')).every((r) => r.startsWith('Read(//')), 'absolute paths only');
     assert.equal(c.deny.some((r) => r.includes('/steps/S-2')), false, 'its own folder stays readable');
   }
   const dir = join(w.p.dir, 'steps', 'S-2');

@@ -19,8 +19,9 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   is defined as those files, every other step's folder (its brief, report, failure reports and run records, which
   hold the implementer's last message) and the session transcripts under `~/.claude/projects/`, and the brief says
   so. `k run` gives a review step's run (and its keep-alives) deny rules for them, `Read` rules on their absolute
-  paths, passed as `--settings` (`permissions.deny`, which adds to the other settings' rules); the review's own
-  folder and its `in/` stay readable. Claude Code applies `Read` rules to its file tools (Read, Grep, Glob, best
+  paths, passed as `--settings` (`permissions.deny`, which adds to the other settings' rules), with auto memory off
+  (`autoMemoryEnabled: false`: the repo's memory is shared with the implementing sessions and loads before any rule
+  applies); the review's own folder and its `in/` stay readable. Claude Code applies `Read` rules to its file tools (Read, Grep, Glob, best
   effort) and to the file commands it recognises in Bash (`cat`, `head`, ...), not to a search run from a folder
   above or a script that opens files itself: Bash stays a hole, which the brief names (judgement: the deny rules
   stop the easy reads; a worktree at head without the task folder would close the hole and is not built).
