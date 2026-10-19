@@ -213,8 +213,10 @@ starter. R23 and "at most M" came with the owner's amendment of the same week. D
 
 - Files: `mods/kirunak/` (boards.md §4), `claude plugin validate` and `claude plugin test` green, `tsc -p`.
 - Tests (`*.test.ts`): the pane renders rows from a `k list --json` fixture; `/k-approve` with origin `sdk`,
-  `plugin`, `unclassified` refused and nothing run; with `composer` the verb runs and the state line prints; a
-  `build-ended` event line toasts; `/k-done` is not registered by the mod.
+  `plugin`, `peer`, `unclassified` refused and nothing run; with `composer` or `bridge` the verb runs and the state
+  line prints; a `build-ended` event line toasts; `/k-done` is not registered by the mod.
+- On the phone: a `/k-accept` typed in Remote Control arrives as `bridge` and runs (the owner's answer of
+  2026-10-19, `README.md` question 2).
 - Numbers: the mod's load time at session start; the clock hook's cost (it must spawn `k` no more than every 30 s).
 
 ## Slice 7, later and not detailed here: R17, R18

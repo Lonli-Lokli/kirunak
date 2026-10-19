@@ -256,6 +256,50 @@ test('while ps cannot answer, a live owner\'s lock is waited for, and a dead own
   }
 });
 
+test('while ps cannot answer, status() names a dead owner\'s job as the holder, and the wait on it is said once', async () => {
+  const job = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  const { home, g } = guard({ killAfterMs: 300 });
+  const lock = join(home, 'guard', 'lock');
+  mkdirSync(lock, { recursive: true });
+  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ id: 'o', session: 'owner', what: 'build', since: start, pid: await deadPid(), pidStart: start, job: job.pid, jobStart: start }));
+  const said = [];
+  let running;
+  const restore = fakePs('fails');
+  try {
+    assert.deepEqual(g.status().held, { session: 'owner', what: 'build', since: start, estimateMinutes: 15, orphan: true });
+    running = g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('echo ran'), say: (l) => said.push(l) });
+    await sleep(1000);
+    const [line, ...more] = logOf(home);
+    assert.deepEqual({ ...line, ts: typeof line.ts }, { ts: 'string', what: 'wait', session: 's', pid: job.pid, reason: 'ps gave no answer' });
+    assert.deepEqual(more, [], 'one line however many polls');
+    assert.deepEqual(said, [`waits: the lock's holder is gone, but ps gave no answer for its job (pid ${job.pid}), so that job is believed to run`]);
+    assert.equal(g.status().held.orphan, true, 'held still');
+  } finally {
+    restore();
+  }
+  try {
+    assert.equal((await running).exitCode, 0);
+    assert.equal(g.status().held, null);
+    assert.deepEqual(logOf(home).map((x) => [x.what, typeof x.minutes]), [['wait', 'undefined'], ['x', 'number']], 'the wait line is no job');
+  } finally {
+    job.kill();
+  }
+});
+
+test('a dead owner\'s job that ps says is another process by now holds nothing', async () => {
+  const job = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const { home, g } = guard();
+  mkdirSync(join(home, 'guard', 'lock'), { recursive: true });
+  const hourAgo = new Date(Date.now() - 3600000).toISOString();
+  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ id: 'o', session: 'owner', what: 'build', since: hourAgo, pid: await deadPid(), pidStart: hourAgo, job: job.pid, jobStart: hourAgo }));
+  try {
+    assert.equal(g.status().held, null);
+  } finally {
+    job.kill();
+  }
+});
+
 test('a dead owner\'s job pid that names a group this user cannot signal is not waited on', async (t) => {
   // A root-owned group leader stands in for a job pid reused since the owner died.
   const rows = spawnSync('ps', ['-axo', 'pid=,pgid=,uid='], { encoding: 'utf8' }).stdout.trim().split('\n').map((l) => l.trim().split(/\s+/));

@@ -66,7 +66,7 @@ What it shows and does, each from the skill's table of shapes:
 | the current task, its AC and E with review state, the queue, the lock | a pane: `$.ui.open({ id: 'kirunak', title })` drawn by a `ui.render` hook on `Pane` | `k status --json` and `k list --json --repo <cwd's repo>` through `$.process.run`, every 30 s on `$.clock`, and at once on `events.jsonl` change |
 | a line above the prompt | `ui.render` on `AbovePrompt`: `task · step · lock holder · queue place` | the same |
 | toasts: a build ended, a review is ready, a cache kept warm, an openspec change refused | `$.ui.toast(text)` from the clock hook when `events.jsonl` has a new line of those kinds | `events.jsonl` (the k verbs and the keeper append it; a workspace's own hooks may append to it too, such as a freeze hook's refusals) |
-| `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind === 'composer'` (`approval.md` §5) and call `$.process.run(['node', K, verb, id, '--via', 'mod'])`, returning the state line as `{ text }` | the core verbs |
+| `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind` `'composer'` or `'bridge'` (`approval.md` §5, the owner's answer of 2026-10-19) and call `$.process.run(['node', K, verb, id, '--via', 'mod'])`, returning the state line as `{ text }` | the core verbs |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
 
 - The current task of a session is `sessions/<session_id>.json`, written by `k start <id>` (also a `k-start`
@@ -75,7 +75,7 @@ What it shows and does, each from the skill's table of shapes:
   too (a session may say which task it works on).
 - Tests: `claude plugin test mods/kirunak` with a `*.test.ts` per behaviour the skill asks for: the pane renders a
   task's rows; `/k-approve` with origin `sdk` or `plugin` is refused with a line and runs nothing; with `composer`
-  it runs the verb; a toast appears for a `build-ended` event line.
+  or `bridge` it runs the verb; a toast appears for a `build-ended` event line.
 
 ## 5. Requirements this file satisfies
 

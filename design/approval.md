@@ -162,7 +162,8 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
   fetched 2026-10-18), another plugin's `$.command.run` (`plugin`), or `claude -p "/k-approve"` from the Bash tool,
   which is a new process with origin `sdk` (and under `-p` the mods folder's hot reload is off, plugin-authoring
   SKILL.md "What happens when the turn ends"). So a `command.run` hook that answers only when `e.origin.kind ===
-  'composer'` and refuses every other origin with a line answers the owner's Enter and nothing else.
+  'composer'` and refuses every other origin with a line answers the owner's Enter and nothing else, and, since the
+  owner's answer of 2026-10-19, `bridge` (the last paragraph of this section).
 - Two caveats the build must keep: (1) "Registering a name again replaces it" (3167): another plugin could take
   `/k-approve`; that is a deliberate act, out of D7's scope, and `k plugins`/`/plugins` shows what is loaded.
   (2) The mod must be loaded in the owner's session: installed from a folder marketplace, or named in
@@ -173,8 +174,12 @@ So: **yes, the mod's `/k-approve <id>` and `/k-accept <id>` replace `!` as the o
 slice (`boards.md` §4, `build-order.md` slice 6). The hook calls `$.process.run(['node', K, 'approve', id,
 '--via', 'mod'])` and prints the state line; the core function is the same as §4's, so the record's `via` is the only
 difference. `!` stays as the route for a session without the mod (a `claude -p` step never approves anything).
-`bridge` (Claude Code's Remote Control from the phone) is also the owner's own gesture; whether to accept it is
-the owner's call (`README.md`, questions), default refused, consistent with D13.
+`bridge` (Claude Code's Remote Control from the phone) is also the owner's own gesture, and the owner accepted it on
+2026-10-19 (`README.md`, question 2: "Yes, allow phone", knowing that anyone holding the unlocked phone with Remote
+Control open could approve too). So the hooks of `/k-approve`, `/k-accept` and `/k-hold` run on `composer` and
+`bridge` and refuse every other kind (`sdk`, `plugin`, `peer` and the rest) with a line, running nothing; `/k-start`
+takes the same rule (judgement: one rule for the four). D13 is unchanged: a command typed in Remote Control is the
+owner's gesture, a page is not.
 
 ## 6. A frozen openspec's instructions, once slice 1 exists (D11, R20)
 

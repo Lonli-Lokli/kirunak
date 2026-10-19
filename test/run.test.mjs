@@ -184,7 +184,9 @@ test('needs.json heavy: the guard runs the job while running/ holds no pid of th
   assert.deepEqual(slots, [1, 1, 1], 'every start, the resume too, holds a reserved machine slot');
   assert.equal(jobs.length, 1);
   assert.deepEqual(jobs[0].running, [], 'no process of the step while the job runs');
-  assert.deepEqual(jobs[0].job, { session: 'kirunak:weather/offline-forecast', what: 'weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
+  const { say, ...job } = jobs[0].job;
+  assert.deepEqual(job, { session: 'kirunak:weather/offline-forecast', what: 'weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
+  assert.equal(typeof say, 'function', 'the guard may say through k run');
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.equal(calls[1].prompt, 'the job ended; read kirunak/tasks/offline-forecast/steps/S-1/heavy-1.json and continue');
   assert.equal(calls[1].maxTurns, 97, 'the step keeps one budget across the resume');
@@ -545,11 +547,12 @@ test('a heavy step a dead k run left running is failed and run again; its starte
   const dead = spawnSync('true').pid;
   await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${dead}` });
   const jobs = [];
-  w.ws.seams.resourceGuard = { run: (job) => (jobs.push(job.what), put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
+  w.ws.seams.resourceGuard = { run: (job) => (jobs.push(job.what), job.say('waits: a line of the guard\'s'), put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
   fakeRunner(w);
   const lines = [];
   const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
   assert.ok(lines.includes(`${w.id} S-2 failed: the k run that started it (pid ${dead}) stopped`), lines.join('\n'));
+  assert.ok(lines.includes(`${w.id} S-2 waits: a line of the guard's`), 'the guard says through k run');
   assert.deepEqual(jobs, ['Restart keeps it']);
   assert.equal(r.states['S-2'], 'done');
   assert.match(progress(w), new RegExp(`S-2 started \\(heavy: Restart keeps it, k run ${process.pid}\\)`));
@@ -645,6 +648,39 @@ test('while ps cannot answer, a step whose k run is dead and whose claude may st
     assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 0, 'S-1 is not started again');
   } finally {
     restore();
+    claude.kill();
+  }
+});
+
+test('under --watch, a step left running while ps cannot answer keeps the watch alive and is decided once ps answers', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
+  const dead = spawnSync('true').pid;
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  const calls = fakeRunner(w);
+  const lines = [];
+  const restore = fakePs('fails');
+  let restored = false;
+  try {
+    const running = run({ ws: w.ws, id: w.id, watch: true, intervalMs: 50, out: (l) => lines.push(l) });
+    assert.equal(await Promise.race([running, new Promise((r) => setTimeout(r, 2000)).then(() => 'waiting')]), 'waiting', lines.join('\n'));
+    const left = `${w.id} S-1 is left running: ps gave no answer for pid ${claude.pid}, so its claude is believed to run`;
+    assert.equal(lines.filter((l) => l === left).length, 1, 'said once, not once a pass');
+    assert.equal(alive(claude.pid), true, 'not killed while ps cannot tell');
+    restore();
+    restored = true;
+    const r = await running;
+    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; its claude (pid ${claude.pid}) was killed`), lines.join('\n'));
+    assert.equal(groupAlive(claude.pid), false, 'killed once ps could tell it was that claude');
+    assert.match(progress(w), /S-1 failed: the k run that started it stopped\n/);
+    assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 1, 'S-1 is retried in the same k run');
+    assert.deepEqual(r.states, BOTH, 'the night goes on: S-2 after it, up to the owner\'s step');
+  } finally {
+    if (!restored) restore();
     claude.kill();
   }
 });

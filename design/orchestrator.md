@@ -80,8 +80,9 @@ pending  →  ready  →  running  →  done
   says, within a minute (pids are reused); any other process now holding the pid, or a record with no start, is left
   running and named (`pid N is not the claude of that run`), and the step still fails. A pid whose start `ps` cannot
   tell (it did not start or failed, `plugins.md` §2) is believed to be what the file says: such a `k run` still runs,
-  and a step whose claude may still run is left `running`, nothing killed or failed (`ps gave no answer for pid N`),
-  for a later `k run` to decide. A step started by hand has neither: `k run` names it and leaves it.
+  and a step whose claude may still run is left `running`, nothing killed or failed (`ps gave no answer for pid N`,
+  said once), for a later `k run` to decide; under `--watch`, for its next pass, which asks again about those steps
+  alone and decides each as at a start once `ps` answers. A step started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
@@ -106,8 +107,9 @@ pending  →  ready  →  running  →  done
   last own report, if it has one since the last escalation. `k step fail --why` refuses a stop's words: a failure
   given by hand is the step's own.
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
-  as a background command of their session. `--watch` passes every 30 s and exits when no step is ready and nothing
-  runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
+  as a background command of their session. `--watch` passes every 30 s and exits when no step is ready, nothing
+  runs and no step is left undecided because `ps` could not answer (above; with `ps` broken for good it waits in
+  view, and Ctrl-C ends it). Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
   owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid and its start,
   `pidStart`; the id URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a
