@@ -164,7 +164,8 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
   terminal, as the engine stamped it (never presumed from an unstamped command)" (9224 to 9232). The other kinds are
   `bridge`, `sdk`, `task-notification`, `scheduled-trigger`, `peer`, `projects-relay`, `channel`, `coordinator`,
   `observer`, `observer-activity`, `auto-continuation`, `unclassified`, and `{ kind: 'plugin', name }` for another
-  plugin's `$.command.run` (1836 to 1843, 9233 to 9310). The model has no kind of its own: its routes are the Skill
+  plugin's `$.command.run` (1836 to 1843, 9233 to 9310); 2.1.303 adds `peer-send-message` (another session's
+  SendMessage) and `slack-ping`, both refused by the allow-list. The model has no kind of its own: its routes are the Skill
   tool (a skill, which is a model turn; the tools reference lists no `SlashCommand` tool, `tools-reference.md`,
   fetched 2026-10-18), another plugin's `$.command.run` (`plugin`), or `claude -p "/k-approve"` from the Bash tool,
   which is a new process with origin `sdk` (and under `-p` the mods folder's hot reload is off, plugin-authoring
@@ -175,7 +176,11 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
   `/k-approve`; that is a deliberate act, out of D7's scope, and `k plugins`/`/plugins` shows what is loaded.
   (2) The mod must be loaded in the owner's session: installed from a folder marketplace, or named in
   `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (plugin-authoring reference.md,
-  "`--plugin-dir`"); hot reloading from the dev-mods folder is for developing it.
+  "`--plugin-dir`"); hot reloading from the dev-mods folder is for developing it. (3) The gate is a file of the loaded
+  checkout (`mods/kirunak/hooks/commands.ts`), which a session watching that folder reloads on save, as the freeze
+  hook is (`hooks/kirunak-freeze.mjs`): a model that edits either has changed the gate with no tool call refused.
+  D7's class, a mistake guard; sessions build kirunak in worktrees and the merge is what reaches it (review N62,
+  for the owner: whether the freeze hook should refuse writes under the loaded checkout).
 
 So: **yes, the mod's `/k-approve <id>` and `/k-accept <id>` replace `!` as the owner's commands** (D14), in the mod
 slice (`boards.md` §4, `build-order.md` slice 6). The hook calls `$.process.run(['node', K, 'approve', id,

@@ -54,8 +54,9 @@ command except `git show` for a staged hash when asked).
 ## 4. The mod: the working view (D14)
 
 A Claude Code plugin in the kirunak repo, `mods/kirunak/` (judgement: it is specific to Claude Code but to no
-workspace, so it ships with kirunak, D2), installed by the owner from a folder marketplace or
-`CLAUDE_CODE_PLUGIN_DIRS` (`approval.md` §5). The shape is the one Claude Code's `plugin-authoring` skill describes
+workspace, so it ships with kirunak, D2), installed by the owner from a folder marketplace whose entry's `source` is a
+relative path, or named in `CLAUDE_CODE_PLUGIN_DIRS` (`approval.md` §5): both run the checkout's own folder. Never a
+copied install (a git, npm or archive source), where K below is missing and every read and verb fails (review D-4). The shape is the one Claude Code's `plugin-authoring` skill describes
 (2.1.302; built on 2.1.303): `.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`,
 `types/index.d.ts` for its `$.state`. Built 2026-10-19 (slice 6).
 
@@ -92,7 +93,9 @@ As built, where the build chose (each judgement unless marked):
 - **K** is the checkout's own `bin/k.mjs` (`$.plugin.root/../../bin/k.mjs`), so the mod and the CLI it runs are one
   version. An owner's verb may run 10 minutes (the most `$.process.run` allows), since its commit runs the repo's git
   hooks (`approval.md` §3); the command waits for a running turn to end (no `immediate`), so it never commits beside
-  the model.
+  the model. A `$.process.run` child carries no `CLAUDE_CODE_SESSION_ID` of its session (measured, review N63: absent,
+  or a parent process's), so the mod names the session by flag on `k start` and `k status`, and any verb it runs later
+  that reads one (`k handoff`, `k keep`, `k step`) must do the same.
 - **Reads.** One at a time; reads asked for while one runs make one more after it. A failed read keeps the last rows
   on screen under its reason. Only the start and the 30 s tick (re)start the tail, so a tail that ends cannot loop.
 - **The pane opens** on `/k-start`, on `/kirunak`, and unasked at the start only when the session already has a task

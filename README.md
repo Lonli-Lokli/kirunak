@@ -76,8 +76,10 @@ You need Node 22 or later, git and Claude Code.
    ```
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
-   model included, gets a line saying so and nothing runs (`design/approval.md` §5). `npm run test:mod` runs its
-   tests.
+   model included, gets a line saying so and nothing runs (`design/approval.md` §5). That rule is a file of this
+   checkout, which the session reloads when it changes, so it guards against mistakes, not against an edit of the
+   checkout itself. Load the folder itself, never a copy: the mod runs this checkout's `bin/k.mjs`.
+   `npm run test:mod` runs its tests.
 
 The state kirunak keeps on this machine (the pointer, logs, the board) is in `~/.kirunak`, or wherever
 `KIRUNAK_HOME` points.
