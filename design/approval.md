@@ -115,9 +115,10 @@ under 100 ms).
    `--no-queue`;
 4. prints the state line (`ready, queue place 3`) and appends `events.jsonl` (the mod's toast).
 
-`k accept <id>`: refuses unless `review.md` has a verdict and every `checklist.md` item is ticked or the owner passes
-`--checklist-open "<why>"` (recorded in `done.json`); writes `done.json`, commits with `KIRUNAK_ACCEPTING`, removes
-the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
+`k accept <id>`: refuses unless the latest review (`review.md`, `review-2.md`, ...) counts, that is it passes
+`k review check` and the review step whose output it is has `finished` in `progress.md` (`review.md` §2), and every
+`checklist.md` item is ticked or the owner passes `--checklist-open "<why>"` (recorded in `done.json`); a refusal
+names each problem. It writes `done.json`, commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
 
 Why `!`: the shortcuts documentation says a `!` line is "Run a command directly, add its output to the session, and
 have Claude respond to it", shell mode "Doesn't require Claude to interpret or approve the command", and the

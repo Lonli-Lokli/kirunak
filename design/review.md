@@ -62,11 +62,13 @@ verdict: not met (AC-2)
 - A review counts only while it passes the grammar and the review step whose output it is has `finished` in
   `progress.md`: a review file whose step failed, escalated or never ran, or one no review step names, is not a
   review. Until then `k list` shows the task `in review`; it checks the grammar without git (it runs no git
-  command, `boards.md` §1), so a cited path missing at head shows at `k review check`.
+  command, `boards.md` §1), so a cited path missing at head shows at `k review check`, `k checklist` and `k accept`.
 
 ## 3. The owner's checklist (R15)
 
-`k checklist <id>` generates `checklist.md` from the latest review's `needs device` and `needs owner` rows:
+`k checklist <id>` generates `checklist.md` from the latest review's `needs device` and `needs owner` rows, once
+that review counts (§2); it refuses one that does not and names each problem, so a row the owner should check whose
+verdict is misspelt never leaves an empty checklist:
 
 ```markdown
 - [ ] E-2 On a phone: turn the network off mid-download; the forecast shows the hours it has (review-2.md)
