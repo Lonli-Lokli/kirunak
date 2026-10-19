@@ -25,6 +25,8 @@ const ownerOnly = (id = '<id>') =>
   `kirunak: only the owner's own command writes this: ask them to type \`! k approve ${id}\` / \`! k accept ${id}\``;
 const ownerVerb = (verb) =>
   `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`;
+const GENERATED = (id = '<id>') =>
+  `kirunak: cost.md is generated from done.json's cost, which only \`k accept\` records: \`k cost ${id} --write\` writes it again`;
 const INTAKE = 'kirunak: intake.md is append-only: record the question or answer with `k intake question|answer`';
 const TICKS = 'kirunak: the owner ticks the checklist: leave its items as `- [ ]`';
 const SLAPIGNORE = 'kirunak: .slapignore is the owner\'s (R23): say which pattern to add or remove and why, and ask the ' +
@@ -100,6 +102,7 @@ function verdict(path, change, removing = false) {
     return held ? ownerOnly(idOf(root, slug)) : null;
   }
   if (file === 'done.json' || file === 'hold.md') return ownerOnly(idOf(root, slug, record(root, slug)));
+  if (file === 'cost.md') return GENERATED(idOf(root, slug, record(root, slug)));
   if (file === 'task.md') {
     const found = recordOf(root, slug);
     return found ? frozenReason(root, found) : null;

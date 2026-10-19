@@ -49,6 +49,7 @@ It refuses, with the reason that says what to do instead:
 | --- | --- | --- |
 | Edit/Write of `kirunak/tasks/<slug>/task.md` when `kirunak/approvals/<slug>.json` exists in that repo | R5: frozen | "frozen since <date>: propose an amendment in `kirunak/tasks/<slug>/amendments/A-<n>.md` (`k amend new <id>`) and ask the owner to run `k approve <id> --amendment A-<n>`" |
 | Any write under `kirunak/approvals/`, to `done.json`, `hold.md`, or an amendment's `applied:`/`declined:` stamp (an Edit whose new text adds one) | D7: only the owner | "only the owner's own command writes this: ask them to type `! k approve <id>` / `! k accept <id>`" |
+| Any write to `kirunak/tasks/<slug>/cost.md` (Edit, Write, or a Bash command that writes there) | generated from `done.json`'s `cost`, which only `k accept` records (`orchestrator.md` §6) | "cost.md is generated from done.json's cost, which only `k accept` records: `k cost <id> --write` writes it again" |
 | A Bash command that writes there (redirection, `tee`, `sed -i`, `cp`/`mv`/`rm` into it, `git checkout`/`restore` of it), found by a small segment parser (split on `;`, `&&`, `\|\|`, `\|` and newlines, then the write targets of each segment) | the same | the same |
 | A Bash command running `k approve`, `k accept`, `k amend decline`, `k hold`, `k resume`, `k queue` (or `k.mjs` with those verbs) | the owner's verbs | "`k <verb>` is the owner's: it runs only from the owner's own prompt (`!`) or the mod" |
 | Edit/Write of `kirunak/tasks/<slug>/intake.md` | append-only through `k intake` | "record the question or answer with `k intake question|answer`" |
@@ -89,7 +90,10 @@ reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuse
 2. a staged file under `kirunak/approvals/`, a `done.json`, a `hold.md`, or an amendment stamp, without
    `KIRUNAK_APPROVING` / `KIRUNAK_ACCEPTING` / `KIRUNAK_HOLDING` naming the task: "written by the owner's command only";
 3. a staged `intake.md` that is not an append of the committed one (the old text must be a prefix of the new):
-   "intake.md is append-only; use `k intake`".
+   "intake.md is append-only; use `k intake`";
+4. a staged `cost.md` that is not the rendering of its `done.json`'s `cost` (in the index, else in HEAD), whatever
+   the variables, so not even an accept commits a hand edit: "cost.md is generated from done.json; `k cost <id>
+   --write` writes it again" (a removal passes: the command brings it back).
 
 `k approve`, `k accept` and `k hold` set those variables on the one `git commit` they run. Evidence that the mod's
 route needs nothing more: `$.process.run` "Git runs with repo hooks off" (Claude Code's plugin-authoring types,
@@ -120,11 +124,12 @@ under 100 ms).
 review changed after its step finished is refused and the way out is a new review (`review.md` §2), and every
 `checklist.md` item is ticked or the owner passes `--checklist-open "<why>"` (recorded in `done.json` with the items
 it leaves open; `cost.md`, the task's cost, is committed with it, `orchestrator.md` §6); a refusal names each
-problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses `verdict: not met (<ids>)` whatever the flags, `--checklist-open` included, which
-waives checklist items and never a criterion: the way out is an amendment (`k amend new <id>`, approved, then a
-new review) or a new review after a fix. It refuses a task with no review: a task closes only through a review step
-of `plan.md` that ran. It refuses code committed after the review: when `git diff --name-only <review head> HEAD`, leaving out the task's own folder as
-the reviewer's diff does, names a file, the review never saw it; the refusal names a few such files, no flag waives
+problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses `verdict: not
+met (<ids>)` whatever the flags, `--checklist-open` included, which waives checklist items and never a criterion: the
+way out is an amendment (`k amend new <id>`, approved, then a new review) or a new review after a fix. It refuses a
+task with no review: a task closes only through a review step of `plan.md` that ran. It refuses code committed after
+the review: when `git diff --name-only <review head> HEAD`, leaving out the task's own folder as the reviewer's diff
+does, names a file, the review never saw it; the refusal names a few such files, no flag waives
 it, and the way out is a new review. It writes `done.json` with the review it took (file, verdict, head, hash,
 `task-files.md` §3), commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done`
 skill asks the owner to type (`review.md` §4).
