@@ -69,7 +69,10 @@ pending  →  ready  →  running  →  done
   but what happened (`progress.md`, `steps/<step>/run-<k>.json`).
 - `running`: `k step start <id> S-n` appends to `progress.md`, writes `running/<pid>.json` (machine guard), and
   the runner starts. The process is the only thing alive. When it exits, the orchestrator checks `outputs:`; all
-  present and exit 0 → `done` (`k step finish`), else `failed` with the reason.
+  present and exit 0 → `done` (`k step finish`), else `failed` with the reason. A `k run` that takes a task's lock
+  and finds a step `running` whose run record names a `k run` that is dead kills that step's claude if it still
+  runs (nobody will collect its result) and fails the step: `the k run that started it stopped`. A step started by
+  hand has no run record of its session: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same

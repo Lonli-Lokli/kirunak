@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -254,6 +255,28 @@ test('k run stopped by a signal kills its claude, fails the step, frees the lock
   const r = await run({ ws: w.ws, id: w.id });
   assert.equal(r.ended['S-1'], 'done');
   assert.match(calls[0].prompt, /steps\/S-1\/failure-1\.md \(the last attempt failed/);
+});
+
+test('a step a dead k run left running is failed, its claude killed, and retried; a step started by hand is left alone', async () => {
+  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const claude = spawn('sleep', ['30'], { detached: true });
+  const gone = new Promise((r) => claude.on('exit', (code, signal) => r(signal)));
+  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid });
+  const dead = spawnSync('true').pid;
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, started: new Date().toISOString(), ended: null, result: false } }));
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-2' });
+  const calls = fakeRunner(w);
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.equal(await gone, 'SIGTERM', 'the claude nobody would collect is killed');
+  assert.ok(!existsSync(join(w.home, 'running', `${claude.pid}.json`)));
+  assert.match(progress(w), /S-1 failed: the k run that started it stopped\n/);
+  assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; its claude (pid ${claude.pid}) was killed`), lines.join('\n'));
+  assert.ok(lines.includes(`${w.id} S-2 is running by hand`));
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1'], 'S-1 is retried, S-2 left alone');
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'running' });
 });
 
 // The keeper in k run: a clock whose sleep moves time on at once, and runs whose records show a 1-hour cache.

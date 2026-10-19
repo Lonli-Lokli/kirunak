@@ -44,7 +44,7 @@ export function alive(pid) {
 // A pid of 0 or 1 would name this process's own group or every process: never a job's group.
 const isGroup = (pid) => Number.isInteger(pid) && pid > 1;
 
-const groupAlive = (pid) => {
+export const groupAlive = (pid) => {
   if (!isGroup(pid)) return false;
   try {
     process.kill(-pid, 0);
