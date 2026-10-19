@@ -1,0 +1,14 @@
+{
+  "name": "kirunak",
+  "owner": {
+    "name": "kirunak"
+  },
+  "description": "kirunak's Claude Code plugins, run from this checkout",
+  "plugins": [
+    {
+      "name": "kirunak",
+      "source": "./mods/kirunak",
+      "description": "kirunak's working view in Claude Code: the owner's /k-approve, /k-accept, /k-hold and /k-start, a pane, a line above the prompt and toasts"
+    }
+  ]
+}
