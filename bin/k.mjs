@@ -23,6 +23,7 @@ import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
+import { costMarkdown } from '../lib/cost-md.mjs';
 import * as keeper from '../lib/keeper.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
@@ -30,7 +31,7 @@ import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch', 'write']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -44,6 +45,7 @@ Plan      k plan check <id> | k run <id> [--once|--watch]: start every ready ste
 Review    k review check <id> [<review-n.md>]: the latest review against the frozen task and the code at its head
           k checklist <id>: checklist.md, the latest review's needs device and needs owner rows, for the owner to tick
 Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
+          k cost <id> --write: cost.md again, rendered from the numbers k accept recorded in done.json
 Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
           k keeper report: keep-alives, misses, hits and skips per task and per week
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
@@ -240,6 +242,14 @@ const VERBS = {
   async cost({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
     if (!existsSync(taskPaths(ws, id).task)) throw new KError(`unknown task ${id}`, 1);
+    // cost.md again from done.json's cost, which only k accept writes: the same numbers give the same file.
+    if (flags.write) {
+      const p = taskPaths(ws, id);
+      const done = existsSync(join(p.dir, 'done.json')) ? JSON.parse(readFileSync(join(p.dir, 'done.json'), 'utf8')) : null;
+      if (!done?.cost) throw new KError(`${id}: cost.md is rendered from done.json's cost, which k accept records; ${done ? 'this accept recorded none' : `${id} is not accepted`}`, 1);
+      writeFileSync(join(p.dir, 'cost.md'), costMarkdown(done.task ?? id, done.cost));
+      return { text: `${id}: cost.md written from done.json` };
+    }
     const c = await cost.costOf(ws, id);
     const baseline = baselineOf(ws);
     const comparisons = baseline ? cost.compare(c, baseline) : [];
@@ -338,17 +348,18 @@ const VERBS = {
   async accept({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
     if (flags['dry-run']) return { text: `would accept ${id}` };
-    // cost.md, read before the accept, which commits it with done.json; a cost that cannot be read (the records, or a
-    // baseline that does not parse) says why and never stops the accept.
-    let costMd;
+    // The task's cost, read before the accept, which records it in done.json and commits cost.md rendered from it; a
+    // cost that cannot be read (the records, or a baseline that does not parse) is recorded as why and never stops
+    // the accept.
+    let taskCost;
     try {
       const c = await cost.costOf(ws, id);
       const b = baselineOf(ws);
-      costMd = cost.markdown(c, b ? cost.compare(c, b) : []);
+      taskCost = cost.summary(c, b ? cost.compare(c, b) : []);
     } catch (e) {
-      costMd = `# Cost of ${id}\n\nThe cost could not be read: ${e.message}\n`;
+      taskCost = { error: e.message };
     }
-    const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: costMd });
+    const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: taskCost });
     return { ...r, text: `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}` };
   },
 
