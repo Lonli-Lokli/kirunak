@@ -5,11 +5,12 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { KError, usage } from '../lib/errors.mjs';
+import { KError, refuse, usage } from '../lib/errors.mjs';
 import { expandHome, kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, allTaskIds, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask, removedIds } from '../lib/task.mjs';
+import { checkPlan, parsePlan } from '../lib/plan.mjs';
 import { isCommitted } from '../lib/git.mjs';
 import * as approval from '../lib/approval.mjs';
 import * as amend from '../lib/amend.mjs';
@@ -21,9 +22,15 @@ import * as handoff from '../lib/handoff.mjs';
 import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
+import * as cost from '../lib/cost.mjs';
+import * as keeper from '../lib/keeper.mjs';
+import * as steps from '../lib/steps.mjs';
+import * as orchestrator from '../lib/run.mjs';
+import * as review from '../lib/review.mjs';
+import * as checklist from '../lib/checklist.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -32,6 +39,13 @@ Setup     k init --workspace <module> | k install [--settings <file>] [--skills 
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
+Plan      k plan check <id> | k run <id> [--once|--watch]: start every ready step; --watch until none is ready
+          k step brief|start|finish <id> S-n [--session <id>] | k step fail <id> S-n --why "..."
+Review    k review check <id> [<review-n.md>]: the latest review against the frozen task and the code at its head
+          k checklist <id>: checklist.md, the latest review's needs device and needs owner rows, for the owner to tick
+Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --baseline only the comparisons
+Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
+          k keeper report: keep-alives, misses, hits and skips per task and per week
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
@@ -149,6 +163,18 @@ const VERBS = {
       say(existsSync(join(homedir(), '.claude', 'skills', s, 'SKILL.md')), `skill ${s} is linked (k install)`);
     }
     try {
+      const st = await ws.seams.resourceGuard.status();
+      say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what})` : 'free'}, ${st.queued.length} queued`);
+    } catch (e) {
+      say(false, `resource guard: status() did not answer: ${e.message}`);
+    }
+    const limits = await ws.seams.machineGuard.limits();
+    say(true, `machine: at most ${limits.maxAgents} steps at once, ${limits.maxHeavy} heavy job`);
+    for (const model of ['opus', 'sonnet', 'haiku', 'fable']) {
+      const w = await ws.seams.prices.weights(model);
+      say(true, `prices ${model}: ${Object.entries(w).map(([k, v]) => `${k} ${+v.toFixed(4)}`).join(', ')}`);
+    }
+    try {
       say(true, `claude ${execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 10000 }).trim()}`);
     } catch {
       say(false, 'claude --version did not answer (needed from slice 2, the runner)');
@@ -196,6 +222,96 @@ const VERBS = {
     const p = taskPaths(ws, id);
     const r = checkTaskDir(p.dir, (await aspectsOf(ws)).map((a) => a.id), id);
     return report(id, r.problems, '');
+  },
+
+  async plan({ ws, pos }) {
+    const sub = need(pos[0], 'plan verb: check');
+    if (sub !== 'check') throw usage(`unknown plan verb ${sub}`);
+    const id = need(pos[1], 'task id');
+    const p = taskPaths(ws, id);
+    if (!existsSync(p.task)) throw new KError(`unknown task ${id}: ${p.task} does not exist`, 1);
+    const plan = join(p.dir, 'plan.md');
+    if (!existsSync(plan)) throw new KError(`${id} has no plan: ${p.rel('plan.md')}`, 1);
+    const problems = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p);
+    return report(`${id} plan`, problems, '');
+  },
+
+  async cost({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    if (!existsSync(taskPaths(ws, id).task)) throw new KError(`unknown task ${id}`, 1);
+    const c = await cost.costOf(ws, id);
+    const baseline = ws.baseline && existsSync(ws.baseline) ? JSON.parse(readFileSync(ws.baseline, 'utf8')) : null;
+    const comparisons = baseline ? cost.compare(c, baseline) : [];
+    if (flags.baseline) return { comparisons, text: comparisons.join('\n') };
+    return { ...c, comparisons, text: [cost.format(c), ...(comparisons.length ? ['', ...comparisons] : [])].join('\n') };
+  },
+
+  async keep({ ws, flags }) {
+    const s = need(session(flags), '--session <id> (or $CLAUDE_CODE_SESSION_ID)');
+    const { conversation, ...r } = await keeper.keep({ ws, session: s, dryRun: !!flags['dry-run'] });
+    return r;
+  },
+
+  async keeper({ ws, pos }) {
+    const sub = need(pos[0], 'keeper verb: report');
+    if (sub !== 'report') throw usage(`unknown keeper verb ${sub}`);
+    const r = await keeper.report(ws);
+    return { ...r, text: keeper.formatReport(r) };
+  },
+
+  async step({ ws, pos, flags }) {
+    const sub = need(pos[0], 'step verb: brief|start|finish|fail');
+    const id = need(pos[1], 'task id');
+    const step = need(pos[2], 'the step, S-n');
+    if (!['brief', 'start', 'finish', 'fail'].includes(sub)) throw usage(`unknown step verb ${sub}`);
+    if (flags['dry-run']) return { text: `would ${sub} ${id} ${step}` };
+    if (sub === 'brief') {
+      const r = await steps.brief({ ws, id, step, session: session(flags) });
+      return { path: r.path, text: r.path };
+    }
+    if (sub === 'start') {
+      await steps.start({ ws, id, step, session: session(flags) });
+      return { text: `${id} ${step}: started` };
+    }
+    if (sub === 'finish') {
+      steps.finish({ ws, id, step });
+      return { text: `${id} ${step}: done` };
+    }
+    const why = need(flags.why, '--why "<why>"');
+    // A stop's words are k run's own: such a failure would not count, a way around the two failures.
+    if (steps.isStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is k run's own reason for a stop; say what went wrong`);
+    const r = steps.fail({ ws, id, step, why });
+    return { ...r, text: `${id} ${step}: failed, ${r.report}${r.escalated ? '; marked [escalate] in plan.md' : ''}` };
+  },
+
+  async run({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    if (flags.once && flags.watch) throw usage('--once or --watch, not both');
+    if (flags['dry-run']) {
+      const t = steps.load(ws, id);
+      const problems = steps.gate(t);
+      const states = [...t.states].map(([k, v]) => `${k} ${v.state}${v.why ? ` (${v.why})` : ''}`);
+      return { problems, code: problems.length ? 1 : 0, text: [...problems, ...states].join('\n') };
+    }
+    const r = await orchestrator.run({ ws, id, watch: !!flags.watch, out: flags.json ? () => {} : (line) => console.log(line) });
+    const states = Object.entries(r.states).map(([k, v]) => `${k} ${v}`).join(', ');
+    return { ...r, code: r.refused.length && !flags.watch ? 1 : 0, text: `${id}: ${states}` };
+  },
+
+  async review({ ws, pos }) {
+    const sub = need(pos[0], 'review verb: check');
+    if (sub !== 'check') throw usage(`unknown review verb ${sub}`);
+    const id = need(pos[1], 'task id');
+    const r = review.check(ws, id, pos[2] || null);
+    return report(`${id} ${r.file}`, r.problems, '');
+  },
+
+  async checklist({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    if (flags['dry-run']) return { text: `would write ${taskPaths(ws, id).rel('checklist.md')}` };
+    const r = checklist.generate(ws, id);
+    const items = r.items.map((x) => `- [${x.ticked ? 'x' : ' '}] ${x.text}`);
+    return { ...r, text: [`${r.path}: ${r.items.length} item${r.items.length === 1 ? '' : 's'} from ${r.review}`, ...items].join('\n') };
   },
 
   async verify({ ws, pos }) {

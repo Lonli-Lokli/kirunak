@@ -69,24 +69,53 @@ pending  →  ready  →  running  →  done
   but what happened (`progress.md`, `steps/<step>/run-<k>.json`).
 - `running`: `k step start <id> S-n` appends to `progress.md`, writes `running/<pid>.json` (machine guard), and
   the runner starts. The process is the only thing alive. When it exits, the orchestrator checks `outputs:`; all
-  present and exit 0 → `done` (`k step finish`), else `failed` with the reason.
+  present and exit 0 → `done` (`k step finish`), else `failed` with the reason. A `k run` that takes a task's lock
+  and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that no longer
+  runs (dead, or its pid now another process than the one that started at the record's `krunStart`; a heavy step's
+  line records no start, so its `k run` counts as gone) kills that step's claude if it still runs (nobody will
+  collect its result) and fails the step: `the k run that started it stopped`. The claude is the record's pid (and
+  its `running/` file's) only while that pid still started when the record's `claudeStart` (or the file's `since`)
+  says, within a minute (pids are reused); any other process now holding the pid, or a record with no start, is left
+  running and named (`pid N is not the claude of that run`), and the step still fails. A step started by hand has
+  neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
   conversation (§3) with the prompt "the job ended; read steps/S-n/heavy-<k>.json and continue". Between the two,
-  no process of the step exists (R9), and the cache keeper decides whether to keep its cache warm (§5).
+  no process of the step exists (R9), and the cache keeper decides whether to keep its cache warm (§5). The
+  conversation resumed is the one the step's `started` line names, with a run record of `k run`. A step started by
+  hand has none: `k run` runs its job and says that its session resumes itself, naming `heavy-<k>.json`; it never
+  starts a new conversation with only the resume prompt. A question such a step asks the owner stops the task the
+  same way, the `needs.json` left for the session that wrote it.
 - `waiting-owner`: `needs.json` has `{ "owner": "<question>" }`: the orchestrator stops the task, appends the
   question to `progress.md` and `events.jsonl`, and `k list` shows `awaiting owner`. The owner answers in a session
   (`k intake answer` if it changes the task: then an amendment) or by editing `notes.md`; `k run` resumes.
-- `failed` is retried once with a fresh conversation and the failure's report as an extra input; a second failure
-  stops the task and marks the step `[escalate]` in `plan.md` for the owner's session. When the workspace names
-  `models.escalate`, the mark says which model and effort the owner's session should hand the step to. Judgement: a
-  step that went wrong twice needs a person or a stronger model, and the orchestrator must not loop.
+- `failed` is retried once with a fresh conversation and the failure's report as an extra input; a `needs.json` the
+  failed run left is moved to `steps/S-n/needs-<k>.json` first (one index for every request, answered or not), and
+  the report names it, so the retry never reads it. A second failure stops the task and marks the step `[escalate]`
+  in `plan.md` for the owner's session. When the workspace names `models.escalate`, the mark says which model and
+  effort the owner's session should hand the step to. Judgement: a step that went wrong twice needs a person or a
+  stronger model, and the orchestrator must not loop. Only the step's own failures count: one written because
+  `k run` stopped (`k run was stopped (<signal>)`, or `the k run that started it stopped` after a crash) is not one
+  of the two (nothing went wrong in the step; a person starts every `k run` again, so this does not loop either). A
+  stop writes no failure report, its `failed` line the whole record, and the attempt after a stop reads the step's
+  last own report, if it has one since the last escalation. `k step fail --why` refuses a stop's words: a failure
+  given by hand is the step's own.
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready and nothing
   runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
-  owner can predict).
+  owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid and its start,
+  `pidStart`; the id URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a
+  lock whose `k run` is dead, or whose pid is now another process or recorded no start, is taken over. A `k run`
+  stopped by Ctrl-C, a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives;
+  the guard ends a heavy job), fails each step whose run it killed (`running`) with `k run was stopped (<signal>)`,
+  a stop's failure that the step does not count, releases its lock and exits with the signal's code. A resume's
+  `needs.json` is moved to `needs-<k>.json` only as its claude starts (nothing awaited between the move and the
+  spawn), and `progress.md` says `resumed` then, so a step waiting for its job, or whose job has ended and whose
+  resume waits for a machine slot, is left `waiting-heavy`, its `needs.json` and `started` line kept: the next
+  `k run` runs the job again and resumes the same conversation, as after a crash (the price, one rerun of a finished
+  job in that window). A resume of the owner's answer that waits for a slot is left `waiting-owner` the same way.
 
 ## 3. The runner: headless `claude -p` (`plugins.md` seam `runner`)
 
@@ -128,8 +157,12 @@ claude -p
 - The result: the JSON result's documented fields `session_id`, `result`, `total_cost_usd` (with a per-model
   breakdown), `usage` ("covers the main agent loop only") with `cache_creation.ephemeral_5m_input_tokens` and
   `ephemeral_1h_input_tokens`, `model_usage` (totals including subagents), `num_turns`, `duration_ms`, `is_error`,
-  `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The runner
-  saves the whole object as `steps/S-n/run-<k>.json`; §6 derives the weight from `model_usage`.
+  `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The
+  orchestrator writes `steps/S-n/run-<k>.json` before the run starts (the session id, and under `kirunak` its own
+  pid `krun` with its start `krunStart`, the claude's pid `claude` with its start `claudeStart` once it starts, and
+  the start `started`) and adds the whole object to it when the run ends, with the end and the exit code; §6
+  derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no calls and no
+  money.
 - `--permission-mode` comes from the workspace's `runner.permissionMode`, default `auto` (judgement: a headless step
   should run as the owner's interactive sessions do; a workspace whose sessions use another mode sets it). A
   behaviour to check in slice 2 before trusting it: a step that hits a prompt no one can answer must fail within the
@@ -157,8 +190,12 @@ last thing written. The reviewer's brief differs (`review.md` §2).
 - The machine guard: `running/<pid>.json` per live step process; `limits()` from the workspace (default
   `maxAgents: 2`; judgement: a laptop runs one build beside two headless sessions, not three; a number to check
   against memory pressure on the machine in slice 2). `k run` refuses to start a step past the cap and says who
-  runs. `maxHeavy: 1` is the lock itself. A pid file whose process is dead is removed on the next pass (as the
-  default guard treats a dead owner).
+  runs. `maxHeavy: 1` is the lock itself. A pid file whose process is dead, or whose pid is now another process than
+  the one that started at its `since`, is removed on the next pass (as the default guard treats a dead owner).
+  Counting and reserving are one step across processes, inside a short mutex (`running/.admit`): an admitted step's
+  reservation, `running/<k-run-pid>-<n>.json`, counts as running while that `k run` lives (its pid still the process
+  that started at the file's `pidStart`), becomes the run's pid file by a rename when the run starts (a resume takes
+  a slot as a start does), and is removed if the step never starts, by the `k run`'s end or its stop.
 
 ## 5. The cache keeper (R11, D9)
 
@@ -180,7 +217,11 @@ the context size, the TTL and when the cache expires, what the conversation wait
 - A miss, recorded where it is seen: for an interactive session, a `SessionStart` hook with `source: "resume"`
   receives `context_tokens`, `prompt_cache_likely_expired` and `estimated_cache_write_usd` (hooks.md): the hook
   `hooks/kirunak-session.mjs` appends `{ kind: "miss" | "hit", ... }` to `keeper.jsonl`. For a headless step, the
-  first resumed call's `cache_creation` against `cache_read_input_tokens` in the run record says which it was.
+  first resumed call's `cache_creation` against `cache_read_input_tokens` in the run record says which it was; k run
+  records it as the resumed run starts, once it holds its machine slot and its device, so a resume that never starts
+  records nothing, and the hook records nothing (the step's env carries `KIRUNAK_STEP`, its session file says
+  `kind: "headless"`), so a keep-alive or a resume is counted once. A wait for a slot is not kept warm: it is
+  recorded once as a `skip` with the guard's reason.
 
 **When it keeps warm.** The rule, with the weights from the `prices` seam (the default: cache read 0.1, 1-hour
 write 2, 5-minute write 1.25, `plugins.md` §2):
@@ -206,9 +247,14 @@ write 2, 5-minute write 1.25, `plugins.md` §2):
 
 **How it keeps warm.** For a headless conversation: `claude -p --resume <session_id> --max-turns 1
 --output-format json "keep-alive: reply with the word ok"` with the same flags as the step (§3); the run record
-goes to `steps/S-n/keep-<k>.json`, so the keep-alive's cost is in the step's total. For the owner's interactive
+goes to `steps/S-n/keep-<k>.json`, so the keep-alive's cost is in the step's total. It goes at
+`expires_at − (TTL − interval)`, one per interval: 10 minutes before a 1-hour cache's expiry at the default
+`keeper.intervalMinutes` of 50, 30 s before a 5-minute cache's at 4.5. One turn has 5 minutes: a
+keep-alive still running then is killed with its tree, and the keeping ends. One that wrote more than it read came
+after the expiry, and the next would too: it is recorded as a miss, and the keeping ends with a `skip` saying why.
+For the owner's interactive
 session: a background command the session itself started, whose end wakes the session: `k keep --session <name>`,
-run with the Bash tool's `run_in_background`, ends at `expires_at − 5 min` when the expected wait justifies it, and
+run with the Bash tool's `run_in_background`, ends at that same time when the expected wait justifies it, and
 the session's wake-up turn is the keep-alive. Judgement: the keeper never injects a turn into an interactive session
 any other way; there is no documented way, and a background command's end is the one wake-up a session already
 gets.

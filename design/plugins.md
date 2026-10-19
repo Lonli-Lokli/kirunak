@@ -24,10 +24,10 @@ own implementations live in the workspace's repo, beside its config (D2).
 | Seam | Policy | Contract (every function may be async) | Default in core | What a workspace may supply |
 | --- | --- | --- | --- | --- |
 | `checklist` | many, merged in load order | `aspects(task) → [{ id, title, question, edgeCases: [string], sources: [string], appliesWhen?: (task) → boolean }]` | none: the core refuses `k intake` with no checklist loaded | its aspects, from its own rules (`intake.md` §3) |
-| `storage` | one | `repos() → [{ name, root }]`, `queuePath() → path`, `read(path)`, `write(path, text)`, `exists(path)`, `hash(path) → "sha256:…"`, `commit(root, paths, message, env?) → sha`, `head(root) → sha`, `diff(root, base, head) → patch`, `changedSince(root, sha) → [path]` | `storage-git.mjs`: files on disk, git for commit, hash, diff | none needed; the config names the repos (§3) |
+| `storage` | one | `repos() → [{ name, root }]`, `queuePath() → path`, `read(path)`, `write(path, text)`, `exists(path)`, `hash(path) → "sha256:…"`, `commit(root, paths, message, env?) → sha`, `head(root) → sha`, `diff(root, base, head, exclude?) → patch` (leaving out the paths in `exclude`), `changedSince(root, sha) → [path]` | `storage-git.mjs`: files on disk, git for commit, hash, diff | none needed; the config names the repos (§3) |
 | `resourceGuard` | one | `run(job: { session, what, maxMinutes, command: [argv], cwd }) → { exitCode, log }`, `status() → { held: {session, what, since} \| null, queued: [...] , estimateMinutes }`, `claim(resource, by, why, hours?)`, `release(resource, by)`, `resources() → [{ id, name, state }]` | `resource-guard-local.mjs`: one job at a time, a lock in the state folder (§4) | a plugin over a lock and device claims it already has |
-| `machineGuard` | one | `limits() → { maxAgents, maxHeavy }`, `running() → [{ pid, task, step, since }]` | `machine-guard-pids.mjs`: pid files under the state folder (§4); limits from the config, default `{ maxAgents: 2, maxHeavy: 1 }` | the default, with its own limits |
-| `runner` | one | `start(step: { brief, cwd, model, effort, maxTurns, allowedTools, disallowedTools, resume? }) → { pid, sessionId, done: Promise<{ exitCode, result, usage }> }`, `keepAlive(sessionId, cwd) → usage` | `runner-claude.mjs`: headless `claude -p` (`orchestrator.md` §3) | the default |
+| `machineGuard` | one | `limits() → { maxAgents, maxHeavy }`, `running() → [{ pid, task, step, session, since }]` (session and since name a step's run; `since` is its process's start, within seconds) | `machine-guard-pids.mjs`: pid files under the state folder (§4); limits from the config, default `{ maxAgents: 2, maxHeavy: 1 }` | the default, with its own limits |
+| `runner` | one | `start(step: { brief, prompt, cwd, sessionId, resume?, model, effort, maxTurns, maxBudgetUsd, permissionMode, allowedTools, disallowedTools, addDirs, env }) → { pid, sessionId, done: Promise<{ exitCode, result, usage }> }`, `keepAlive(sessionId, cwd, step) → { pid, done: Promise<{ exitCode, result, usage }> }`; `pid` leads its own process group, since the orchestrator ends a run by killing `-pid` (past its time, on a stop, and a dead `k run`'s left-over claude), and `start` returns it as soon as the process exists, since its start is recorded beside it | `runner-claude.mjs`: headless `claude -p` (`orchestrator.md` §3) | the default |
 | `handoff` | many, merged in load order | `targets({ task, session, cwd }) → [{ where, what }]`, `release({ task, session, cwd }) → [{ resource, line }]` | `handoff-notes.mjs`: the handoff goes to the task's `handoff.md`; releases the session's own kirunak state (its `sessions/` file, the default guard's claims and queue line) | where its sessions keep handoffs, and what else a session holds that must be let go |
 | `frontend` | many | `onChange(event)`, `render?(tasks, status) → text` | `board-html.mjs` (D10), `list.mjs` | the phone artifact (a step, D13) and the mod (D14) ship with kirunak (`boards.md`); a workspace may add its own |
 | `tracker` | many | `push(task, state)`, `pull() → [{ id, state }]` | none | later: Linear, It's a Plan, GitHub Issues (R18) |
@@ -43,12 +43,22 @@ own implementations live in the workspace's repo, beside its config (D2).
   `handoff`, `frontend` and `tracker` compose. Loading a second implementation of a one-policy seam is an error that
   names both modules, never a silent override.
 - Judgement on the default guard: kirunak must work alone, on a machine with no lock of its own (R10). The default
-  keeps `$KIRUNAK_HOME/guard/lock` (a directory made with `mkdir`, which is atomic, holding `owner.json`: session,
-  what, pid, since) and a first-in-first-out queue file `guard/queue` beside it. `run` waits its turn, runs the
-  command with the job's `maxMinutes` as a deadline (past it, TERM to the process group, then KILL after 10 s, exit
-  code 124), and releases however the job ends. A lock whose pid is dead is taken over on the next try. `claim` and
-  `release` record claims in `guard/claims.json` (resource, by, why, until); `resources()` lists what was ever
-  claimed. Every job appends one line to `guard/log.jsonl` (what, session, minutes, exit code).
+  keeps `$KIRUNAK_HOME/guard/lock` (a directory made with `mkdir`, which is atomic, holding `owner.json`: id,
+  session, what, pid, pidStart, job, jobStart, since; pid is the waiting kirunak process and pidStart its start, job
+  the command's process group and jobStart its start) and a first-in-first-out queue file `guard/queue` beside it,
+  one line per waiting process with the same id, pid and pidStart. `run` waits its turn, runs the command with
+  the job's `maxMinutes` as a deadline (past it, TERM to the process group, then KILL after 10 s, exit code 124), and
+  releases however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first
+  (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from a file can name another
+  process by now (pids are reused): a pid is the same process only while it started when the file says (`isStill`:
+  now less the elapsed time `ps -o etime=` prints, within a minute of it), and a pid this user cannot signal is never
+  kirunak's. So an owner or a queue line is alive only while its pid is still the process that started at its
+  `pidStart`; one with no `pidStart` is dead. A dead waiter's line goes, and a lock whose owner is dead is taken over
+  on the next try, after whatever is left of its job's group is ended (TERM, then KILL), but only while `job` is
+  still the process that started at `jobStart`; a group this user cannot signal, a job with no `jobStart`, or one
+  that started at another time is left alone. `claim` and `release` record claims in `guard/claims.json` (resource,
+  by, why, until); `resources()` lists what was ever claimed. Every job appends one line to `guard/log.jsonl` (what,
+  session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected
   wait, and only the guard knows the queue. The default estimates from its own log: the median length of the last
   ten jobs with the same `what`, or 15 minutes with no history (judgement; the number is one to check,
@@ -108,7 +118,8 @@ export default {
 ```
 workspace              the pointer (§3)
 machine.json           the limits, when the owner overrides the config's
-running/<pid>.json     one file per live step process: task, step, session id, since (machineGuard)
+running/<pid>.json     one file per live step process: task, step, session id, since, the process's start (machineGuard);
+                       <k-run-pid>-<n>.json a step admitted and not started yet, with pidStart, that k run's start
 sessions/<id>.json     a session's current task and step, context and cache (set by k start and the status line)
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)
 events.jsonl           what the front ends show as toasts: build ended, review ready, keep-alive, refusal

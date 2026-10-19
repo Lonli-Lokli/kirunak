@@ -56,8 +56,10 @@ You need Node 22 or later, git and Claude Code.
    k doctor
    ```
 
-   `k install` adds one PreToolUse hook to `~/.claude/settings.json` (keeping yours) and links the `k-intake` and
-   `k-done` skills into `~/.claude/skills/`. `--print` shows what it would do and writes nothing. A repo that already
+   `k install` adds a PreToolUse hook and a SessionStart hook to `~/.claude/settings.json` (keeping yours) and links
+   the `k-intake` and `k-done` skills into `~/.claude/skills/`. It also prints one line to add to your status line
+   command, so the cache keeper sees each session's context and cache; it never edits your status line itself.
+   `--print` shows what it would do and writes nothing. A repo that already
    has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
    `.slapignore`, the files left out of a commit's size (R21), when the repo has none: read it, type
    `! k slapignore approve ~/code/app`, and commit it.
@@ -119,8 +121,12 @@ task is started by hand, one task per session:
    `k list` shows the task as in progress once `progress.md` has a line such as `S-1 started`.
 4. A change to what the task asks for is an amendment: `k amend new <id>`, then the owner types
    `! k approve <id> --amendment A-n`.
-5. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>`. Until the
-   review lands (slice 4) there is no verdict to read, so the owner adds `--checklist-open "<why>"`, and it is
-   recorded.
+5. The plan's review step writes `review.md` in a fresh conversation, and `k review check <id>` holds it to the
+   grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
+   owner ticks them.
+6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>`. It refuses
+   unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
+   task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
+   open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict.
 
 MIT licence: `LICENSE`.

@@ -1,0 +1,24 @@
+{
+  "cwd": "/work/weather",
+  "session_id": "5f0c9a1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b",
+  "transcript_path": "/home/someone/.claude/projects/weather/5f0c9a1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b.jsonl",
+  "model": { "id": "claude-opus-5-5", "display_name": "Opus" },
+  "version": "2.1.290",
+  "cost": { "total_cost_usd": 1.2345, "total_duration_ms": 3600000, "total_api_duration_ms": 420000 },
+  "context_window": {
+    "total_input_tokens": 182340,
+    "context_window_size": 1000000,
+    "used_percentage": 18,
+    "current_usage": { "input_tokens": 340, "output_tokens": 900, "cache_creation_input_tokens": 2000, "cache_read_input_tokens": 180000 }
+  },
+  "prompt_cache": {
+    "warm": true,
+    "caching_observed": true,
+    "ttl": "1h",
+    "expires_at": 1793710800,
+    "requests": 41,
+    "misses": 1,
+    "hit_ratio": 0.93,
+    "recache_tokens_if_cold": 182340
+  }
+}

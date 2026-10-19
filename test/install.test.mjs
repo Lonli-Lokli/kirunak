@@ -45,7 +45,9 @@ test('the block is written with the absolute path, and every other hook and key 
   });
   assert.ok(json.hooks.PreToolUse[1].hooks[0].command.split(' ')[1].startsWith('/'), 'an absolute path');
   assert.deepEqual(json.hooks.PreToolUse[0], h.settings.hooks.PreToolUse[0]);
-  assert.deepEqual(json.hooks.SessionStart, h.settings.hooks.SessionStart);
+  assert.deepEqual(json.hooks.SessionStart, [...h.settings.hooks.SessionStart, {
+    matcher: 'resume', hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`, timeout: 10 }],
+  }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
   for (const s of ['k-intake', 'k-done']) {
@@ -53,8 +55,10 @@ test('the block is written with the absolute path, and every other hook and key 
     assert.ok(lstatSync(link).isSymbolicLink());
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
-  assert.equal(actions.length, 3);
+  assert.equal(actions.length, 5);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
+  assert.match(actions[3], /added the kirunak SessionStart hook/);
+  assert.ok(actions[4].endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
 });
 
 test('a missing settings file is created; a second run changes nothing', () => {
@@ -69,6 +73,22 @@ test('a missing settings file is created; a second run changes nothing', () => {
   assert.match(actions[0], /already has the kirunak PreToolUse hook/);
   assert.match(actions[1], /already links to/);
   assert.equal(JSON.parse(first).hooks.PreToolUse.length, 1);
+  assert.equal(JSON.parse(first).hooks.SessionStart.length, 1);
+  assert.match(actions.at(-2), /already has the kirunak SessionStart hook/);
+});
+
+test('the SessionStart block from an older checkout is updated; a status line that runs the tracker is left alone', () => {
+  const h = home();
+  const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
+  json.hooks.SessionStart.push({ matcher: 'resume', hooks: [{ type: 'command', command: 'node /old/place/hooks/kirunak-session.mjs', timeout: 10 }] });
+  json.statusLine = { type: 'command', command: 'node /old/place/hooks/statusline-track.mjs; ~/bin/line.sh', refreshInterval: 30 };
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  const { actions } = install(h);
+  const after = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
+  assert.equal(after.hooks.SessionStart.length, 2);
+  assert.equal(after.hooks.SessionStart[1].hooks[0].command, `node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`);
+  assert.deepEqual(after.statusLine, json.statusLine, 'k install never writes the status line');
+  assert.match(actions.at(-1), /already runs kirunak's tracker/);
 });
 
 test('its own block from an older checkout is updated, never added twice', () => {
@@ -115,6 +135,9 @@ test('--print writes nothing and prints everything with the paths filled in', ()
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`));
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-intake')} -> ${join(h.kirunakRoot, 'skills', 'k-intake')}`));
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`));
+  assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"resume"`));
+  assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`));
+  assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`));
   assert.ok(!all.includes('<kirunak>'));
   const real = install({ settingsPath, skillsDir: h.skillsDir, print: true }).actions.join('\n');
   assert.ok(real.includes(join(resolve(KIRUNAK), 'hooks', 'kirunak-freeze.mjs')), 'the default root is this checkout');

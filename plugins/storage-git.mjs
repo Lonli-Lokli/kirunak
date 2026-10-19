@@ -22,7 +22,7 @@ export default function storageGit(ws) {
         hash: (path) => 'sha256:' + createHash('sha256').update(readFileSync(path)).digest('hex'),
         commit: (root, paths, message, env) => g.commit(root, paths, message, env),
         head: (root) => g.head(root),
-        diff: (root, base, head) => g.diff(root, base, head),
+        diff: (root, base, head, exclude) => g.diff(root, base, head, exclude),
         changedSince: (root, sha) => g.changedSince(root, sha),
       },
     },

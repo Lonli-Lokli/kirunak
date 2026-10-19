@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,4 +43,45 @@ export async function makeWorkspace({ finished = true } = {}) {
   process.env.KIRUNAK_HOME = home;
   const ws = await loadWorkspace(join(home, 'workspace'));
   return { root, home, ws, weather: join(root, 'weather'), hub: join(root, 'hub'), modulePath };
+}
+
+// `k <args>` as the command, in a child with the given $KIRUNAK_HOME: { status, stdout, stderr }.
+export const k = (home, args, env = {}) =>
+  spawnSync(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, KIRUNAK_HOME: home, ...env } });
+
+export const RESULT = readFileSync(join(FIXTURES, 'run', 'result.json'), 'utf8');
+
+// A fake `claude`: it records its argv, stdin, cwd and the step's variables, and prints the fixture result.
+export function fakeClaude(result = RESULT) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-fake-claude-')));
+  const bin = join(dir, 'claude');
+  writeFileSync(join(dir, 'result.json'), result);
+  writeFileSync(bin, `#!${process.execPath}
+const fs = require('fs');
+const calls = fs.existsSync(${JSON.stringify(join(dir, 'calls.json'))}) ? JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, 'calls.json'))}, 'utf8')) : [];
+calls.push({ argv: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8'), cwd: process.cwd(), task: process.env.KIRUNAK_TASK, step: process.env.KIRUNAK_STEP });
+fs.writeFileSync(${JSON.stringify(join(dir, 'calls.json'))}, JSON.stringify(calls));
+process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}, 'utf8'));
+`);
+  chmodSync(bin, 0o755);
+  return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
+}
+
+// The invented workspace with its task approved (and so queued) and the given plan.md.
+export async function approvedWorkspace(plan) {
+  const w = await makeWorkspace();
+  const { approve } = await import('../lib/approval.mjs');
+  const { taskPaths } = await import('../lib/workspace.mjs');
+  await approve({ ws: w.ws, id: 'weather/offline-forecast' });
+  const p = taskPaths(w.ws, 'weather/offline-forecast');
+  writeFileSync(join(p.dir, 'plan.md'), plan);
+  return { ...w, p, id: 'weather/offline-forecast' };
+}
+
+// plan.md with a review step per file (S-2 writes the first, S-3 the second, ...) and progress.md where each one
+// finished: what makes a review in the grammar one that k accept, k checklist and the task's state take.
+export function reviewsRan(taskDir, files = ['review.md']) {
+  const steps = files.map((f, i) => `### S-${i + 2} Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff, evidence/\noutputs: ${f}\n`);
+  writeFileSync(join(taskDir, 'plan.md'), ['### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n', ...steps].join('\n'));
+  writeFileSync(join(taskDir, 'progress.md'), files.map((_, i) => `2026-11-06 1${i}:00 S-${i + 2} finished\n`).join(''));
 }

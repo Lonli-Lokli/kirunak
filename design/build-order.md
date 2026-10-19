@@ -182,8 +182,8 @@ starter. R23 and "at most M" came with the owner's amendment of the same week. D
   runner's `keepAlive`.
 - Tests: the break-even from the prices seam (19 intervals at 1h, 11.5 at 5m; threshold minutes 950 at 50-minute
   intervals; a changed price moves it); the decision table (will resume and wait under threshold → keepalive at
-  `expires_at − 5 min`; waits for the owner → skip; expired → miss); the session file written from a statusline
-  JSON fixture; the report sums per task.
+  `expires_at − (TTL − interval)`, 10 minutes before the expiry at 50-minute intervals; waits for the owner → skip;
+  expired → miss); the session file written from a statusline JSON fixture; the report sums per task.
 - Numbers: a keep-alive's weight measured at about `0.1 × C` (its run record); two keep-alives 50 minutes apart on
   one conversation: the second's `cache_read_input_tokens` equals the context (the TTL did reset); misses per task
   against the baseline's miss rate; whether `-p` runs on the account get the 1-hour TTL (prompt-caching.md says so
