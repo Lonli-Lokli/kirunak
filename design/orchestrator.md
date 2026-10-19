@@ -72,7 +72,10 @@ pending  →  ready  →  running  →  done
   present and exit 0 → `done` (`k step finish`), else `failed` with the reason. A `k run` that takes a task's lock
   and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that is dead
   kills that step's claude if it still runs (nobody will collect its result) and fails the step: `the k run that
-  started it stopped`. A step started by hand has neither: `k run` names it and leaves it.
+  started it stopped`. The claude is the record's pid (and its `running/` file's) only while that pid still started
+  when the record's `claudeStart` (or the file's `since`) says, within 5 s (pids are reused); any other process now
+  holding the pid, or a record with no start, is left running and named (`pid N is not the claude of that run`),
+  and the step still fails. A step started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
@@ -143,8 +146,8 @@ claude -p
   `ephemeral_1h_input_tokens`, `model_usage` (totals including subagents), `num_turns`, `duration_ms`, `is_error`,
   `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The
   orchestrator writes `steps/S-n/run-<k>.json` before the run starts (the session id, and under `kirunak` its own
-  pid, the claude's pid and the start) and adds the whole object to it when the run ends, with the end and the exit
-  code; §6 derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no
+  pid `krun`, the claude's pid `claude` with its start `claudeStart` once it starts, and the start `started`) and
+  adds the whole object to it when the run ends, with the end and the exit code; §6 derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no
   calls and no money.
 - `--permission-mode` comes from the workspace's `runner.permissionMode`, default `auto` (judgement: a headless step
   should run as the owner's interactive sessions do; a workspace whose sessions use another mode sets it). A

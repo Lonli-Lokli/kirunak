@@ -69,6 +69,7 @@ test('pending → ready → running → done, with the run records, the briefs a
   const calls = fakeRunner(w, (step, n, w2, pid) => {
     const rec = JSON.parse(readFileSync(join(w2.p.dir, 'steps', step.env.KIRUNAK_STEP, 'run-1.json'), 'utf8'));
     assert.deepEqual([rec.session_id, rec.kirunak.krun, rec.kirunak.claude, rec.kirunak.ended, rec.kirunak.result], [step.sessionId, process.pid, pid, null, false], 'the record is written before the run ends');
+    assert.ok(Math.abs(Date.now() - Date.parse(rec.kirunak.claudeStart)) < 10000, 'the claude\'s start is recorded beside its pid');
     seen.push({ states: Object.fromEntries([...steps.load(w2.ws, w2.id).states].map(([s, v]) => [s, v.state])), pidFile: existsSync(join(w2.home, 'running', `${pid}.json`)) });
     return 'write';
   });
@@ -345,7 +346,7 @@ test('a step a dead k run left running is failed, its claude killed, and retried
   const gone = new Promise((r) => claude.on('exit', (code, signal) => r(signal)));
   register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid });
   const dead = spawnSync('true').pid;
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, started: new Date().toISOString(), ended: null, result: false } }));
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, claudeStart: new Date().toISOString(), started: new Date().toISOString(), ended: null, result: false } }));
   await steps.start({ ws: w.ws, id: w.id, step: 'S-2' });
   const calls = fakeRunner(w);
   const lines = [];
@@ -357,6 +358,31 @@ test('a step a dead k run left running is failed, its claude killed, and retried
   assert.ok(lines.includes(`${w.id} S-2 is running by hand`));
   assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1'], 'S-1 is retried, S-2 left alone');
   assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'running' });
+});
+
+test('a dead k run\'s claude pid that a later process holds is left running; the step still fails and is retried', async () => {
+  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const hourAgo = new Date(Date.now() - 3600000).toISOString();
+  register(w.ws, other.pid, { task: w.id, step: 'S-1', session: sid, since: hourAgo });
+  const dead = spawnSync('true').pid;
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: other.pid, claudeStart: hourAgo, started: hourAgo, ended: null, result: false } }));
+  put(w, 'steps/S-2/report.md');
+  const calls = fakeRunner(w);
+  const lines = [];
+  try {
+    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.equal(alive(other.pid), true, 'a process that is not that claude is not killed');
+    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; pid ${other.pid} is not the claude of that run, so it was left running`), lines.join('\n'));
+    assert.match(progress(w), /S-1 failed: the k run that started it stopped\n/);
+    assert.ok(!existsSync(join(w.home, 'running', `${other.pid}.json`)), 'the dead step\'s running file goes');
+    assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 1, 'S-1 is retried');
+    assert.equal(r.states['S-1'], 'done');
+  } finally {
+    other.kill();
+  }
 });
 
 test('a heavy step a dead k run left running is failed and run again; its started line names its k run', async () => {
