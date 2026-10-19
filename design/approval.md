@@ -162,7 +162,8 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
   fetched 2026-10-18), another plugin's `$.command.run` (`plugin`), or `claude -p "/k-approve"` from the Bash tool,
   which is a new process with origin `sdk` (and under `-p` the mods folder's hot reload is off, plugin-authoring
   SKILL.md "What happens when the turn ends"). So a `command.run` hook that answers only when `e.origin.kind ===
-  'composer'` and refuses every other origin with a line answers the owner's Enter and nothing else.
+  'composer'` and refuses every other origin with a line answers the owner's Enter and nothing else, and, since the
+  owner's answer of 2026-10-19, `bridge` (the last paragraph of this section).
 - Two caveats the build must keep: (1) "Registering a name again replaces it" (3167): another plugin could take
   `/k-approve`; that is a deliberate act, out of D7's scope, and `k plugins`/`/plugins` shows what is loaded.
   (2) The mod must be loaded in the owner's session: installed from a folder marketplace, or named in
