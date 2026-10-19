@@ -107,6 +107,24 @@ test('a second failure marks the step [escalate], with models.escalate when the 
   assert.deepEqual(statesOf(w), { 'S-1': 'ready', 'S-2': 'pending' });
 });
 
+test('a stop of k run is not one of the step\'s two failures, and its retry reads no failure report', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const failOnce = async (why) => (await steps.start({ ws: w.ws, id: w.id, step: 'S-1' }), steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why }));
+  // Stopped twice while it ran: retried, not escalated, and no retry is told the last attempt failed.
+  for (const why of [steps.STOPPED.bySignal('SIGINT'), steps.STOPPED.orphan]) {
+    assert.deepEqual([(await failOnce(why)).escalated, statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').retry], [null, 'ready', false], why);
+  }
+  // One failure of its own, then a stop: still retried.
+  assert.equal((await failOnce('the cache test does not build')).escalated, null);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').retry, true);
+  assert.equal((await failOnce(steps.STOPPED.bySignal('SIGTERM'))).escalated, null);
+  assert.deepEqual([statesOf(w)['S-1'], steps.historyOf(progress(w), 'S-1').failures], ['ready', 1]);
+  // A second failure of its own escalates, the stops between them aside.
+  assert.notEqual((await failOnce('still')).escalated, null);
+  assert.equal(statesOf(w)['S-1'], 'escalated');
+  assert.equal(steps.isStop('k run was stopped by hand, it said'), false);
+});
+
 test('a step starts only on a task that may run: approved, queued, not on hold, a plan that passes', async () => {
   const w = await approvedWorkspace(PLAN.replace('covers: all\n', 'covers: E-1\n'));
   assert.match(k(w.home, ['step', 'start', w.id, 'S-1']).stderr, /cannot run a step:\n  plan\.md line 1: AC-3 is covered by no step/);

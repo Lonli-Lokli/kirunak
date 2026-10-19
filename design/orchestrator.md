@@ -93,7 +93,10 @@ pending  →  ready  →  running  →  done
   the report names it, so the retry never reads it. A second failure stops the task and marks the step `[escalate]`
   in `plan.md` for the owner's session. When the workspace names `models.escalate`, the mark says which model and
   effort the owner's session should hand the step to. Judgement: a step that went wrong twice needs a person or a
-  stronger model, and the orchestrator must not loop.
+  stronger model, and the orchestrator must not loop. Only the step's own failures count: one written because
+  `k run` stopped (`k run was stopped (<signal>)`, or `the k run that started it stopped` after a crash) is not one
+  of the two, and the attempt after it is fresh, with no failure report (nothing went wrong in the step; a person
+  starts every `k run` again, so this does not loop either).
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready and nothing
   runs. Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front

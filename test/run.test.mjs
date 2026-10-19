@@ -335,7 +335,7 @@ test('k run stopped by a signal kills its claude, fails the step, frees the lock
   const calls = fakeRunner(w);
   const r = await run({ ws: w.ws, id: w.id });
   assert.equal(r.ended['S-1'], 'done');
-  assert.match(calls[0].prompt, /steps\/S-1\/failure-1\.md \(the last attempt failed/);
+  assert.doesNotMatch(calls[0].prompt, /failure-1\.md|the last attempt failed/, 'a stop is not the attempt\'s failure');
 });
 
 test('a step a dead k run left running is failed, its claude killed, and retried; a step started by hand is left alone', async () => {
