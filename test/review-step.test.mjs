@@ -143,7 +143,7 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   assert.equal(accept({ ws: w.ws, id: w.id }).state, 'done');
 });
 
-test('k run runs a review in a fresh conversation on models.review; a review that fails the grammar fails, and the retry reads why', async () => {
+test('k run runs a review in a fresh conversation on models.review, denied the implementer\'s account; a review that fails the grammar fails, and the retry reads why', async () => {
   const w = await approvedWorkspace(PLAN);
   w.ws.models = { review: { model: 'opus', effort: 'high' } };
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
@@ -176,6 +176,18 @@ test('k run runs a review in a fresh conversation on models.review; a review tha
     assert.ok(c.prompt.includes(`session: ${c.sessionId}`));
   }
   assert.notEqual(first.sessionId, retry.sessionId);
+  // The review may not read the task's progress, notes or plan, another step's folder, or the transcripts; its own
+  // folder and in/ stay readable. The implementing step runs without deny rules.
+  assert.equal(impl.deny, undefined);
+  const S1 = join(w.p.dir, 'steps', 'S-1');
+  const deny = [
+    ...['progress.md', 'notes.md', 'plan.md'].map((f) => `Read(/${join(w.p.dir, f)})`),
+    `Read(/${S1})`, `Read(/${S1}/**)`, 'Read(~/.claude/projects)', 'Read(~/.claude/projects/**)',
+  ];
+  for (const c of [first, retry]) {
+    assert.deepEqual(c.deny, deny);
+    assert.equal(c.deny.some((r) => r.includes('/steps/S-2')), false, 'its own folder stays readable');
+  }
   const dir = join(w.p.dir, 'steps', 'S-2');
   const failure = readFileSync(join(dir, 'failure-1.md'), 'utf8');
   assert.match(failure, /S-2 failed\n\n.*: review\.md fails k review check \(1 problem\)\n\nExit code 0, session .*\n\nk review check:\n\n- line 6: AC-1 has no row: one row per AC and E\n$/);

@@ -21,6 +21,13 @@ test('the command of orchestrator.md §3: no --model or --effort when none is na
   ]);
 });
 
+test('deny rules go as --settings with permissions.deny, and only when there are some', () => {
+  const deny = ['Read(//w/weather/kirunak/tasks/offline-forecast/progress.md)', 'Read(~/.claude/projects/**)'];
+  const args = claudeArgs({ ...BASE, deny });
+  assert.deepEqual(args.slice(args.indexOf('--settings'), args.indexOf('--settings') + 2), ['--settings', JSON.stringify({ permissions: { deny } })]);
+  assert.equal(claudeArgs({ ...BASE, deny: [] }).includes('--settings'), false);
+});
+
 test('a resume takes the prompt after -p, the same flags, --resume and no new session id', () => {
   const args = claudeArgs({ ...BASE, resume: 'abc-session', prompt: 'the job ended; read x and continue', addDirs: ['/w/hub'] });
   assert.deepEqual(args, [

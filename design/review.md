@@ -16,7 +16,14 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   plan (R13: "not the implementer's account"). `k step brief` for a `review` step copies the three into
   `steps/S-review/in/` and the brief names only that folder, and the runner adds `--add-dir` for nothing else.
   The repo itself is readable (the diff must be read against the code), which is why "the implementer's account"
-  is defined as those files and the step reports, and the brief says so.
+  is defined as those files, every other step's folder (its brief, report, failure reports and run records, which
+  hold the implementer's last message) and the session transcripts under `~/.claude/projects/`, and the brief says
+  so. `k run` gives a review step's run (and its keep-alives) deny rules for them, `Read` rules on their absolute
+  paths, passed as `--settings` (`permissions.deny`, which adds to the other settings' rules); the review's own
+  folder and its `in/` stay readable. Claude Code applies `Read` rules to its file tools (Read, Grep, Glob, best
+  effort) and to the file commands it recognises in Bash (`cat`, `head`, ...), not to a search run from a folder
+  above or a script that opens files itself: Bash stays a hole, which the brief names (judgement: the deny rules
+  stop the easy reads; a worktree at head without the task folder would close the hole and is not built).
 - The reviewer's brief: the task's AC, E and O lines verbatim; "write `review.md` in the grammar below; a row per
   AC and E; `met` only with evidence you verified yourself: a test you can name and whose assertion you read, a
   file and line, a measurement in `evidence/`, a screenshot in `evidence/`; when you cannot verify (a device, the

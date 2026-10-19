@@ -10,8 +10,9 @@ export const KEEP_ALIVE_PROMPT = 'keep-alive: reply with the word ok';
 const OUTPUT_CAP = 10 * 1024 * 1024;
 
 // The argv after `claude`. step: { prompt, model, effort, permissionMode, maxTurns, maxBudgetUsd, allowedTools,
-// disallowedTools, sessionId, resume, addDirs }. No --model or --effort when none is named, so Claude Code's own
-// default applies. A new run reads its brief on stdin; a resumed one takes its prompt as the argument after -p.
+// disallowedTools, deny, sessionId, resume, addDirs }. No --model or --effort when none is named, so Claude Code's own
+// default applies. `deny` (permission rules, a review's) goes as --settings' permissions.deny, which adds to the
+// other settings' rules. A new run reads its brief on stdin; a resumed one takes its prompt as the argument after -p.
 export function claudeArgs(step) {
   const args = ['-p'];
   if (step.resume && step.prompt) args.push(step.prompt);
@@ -23,6 +24,7 @@ export function claudeArgs(step) {
   if (step.maxBudgetUsd) args.push('--max-budget-usd', String(step.maxBudgetUsd));
   for (const t of step.allowedTools || []) args.push('--allowedTools', t);
   for (const t of step.disallowedTools ?? ['Agent']) args.push('--disallowedTools', t);
+  if (step.deny?.length) args.push('--settings', JSON.stringify({ permissions: { deny: step.deny } }));
   if (!step.resume) args.push('--session-id', step.sessionId);
   for (const d of step.addDirs || []) args.push('--add-dir', d);
   if (step.resume) args.push('--resume', step.resume);
@@ -81,7 +83,7 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
       runner: {
         // start(step) → { pid, sessionId, done: Promise<{ exitCode, result, usage, stderr }> }. step adds to the
         // seam's fields: prompt (the brief's text, or the resume prompt), sessionId, maxBudgetUsd, permissionMode,
-        // addDirs and env (KIRUNAK_TASK, KIRUNAK_STEP).
+        // addDirs, deny (a review's) and env (KIRUNAK_TASK, KIRUNAK_STEP).
         start(step) {
           const sessionId = step.resume || step.sessionId || randomUUID();
           const args = claudeArgs({ ...step, prompt: step.prompt ?? step.brief, sessionId, permissionMode: step.permissionMode || mode() });
