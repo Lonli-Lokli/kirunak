@@ -119,8 +119,8 @@ under 100 ms).
 `k review check` and the review step whose output it is has `finished` in `progress.md` with the file's hash, so a
 review changed after its step finished is refused and the way out is a new review (`review.md` §2), and every
 `checklist.md` item is ticked or the owner passes `--checklist-open "<why>"` (recorded in `done.json` with the items
-it leaves open); a refusal names each problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the
-checklist is done. It refuses `verdict: not met (<ids>)` whatever the flags, `--checklist-open` included, which
+it leaves open; `cost.md`, the task's cost, is committed with it, `orchestrator.md` §6); a refusal names each
+problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses `verdict: not met (<ids>)` whatever the flags, `--checklist-open` included, which
 waives checklist items and never a criterion: the way out is an amendment (`k amend new <id>`, approved, then a
 new review) or a new review after a fix. It refuses a task with no review: a task closes only through a review step
 of `plan.md` that ran. It refuses code committed after the review: when `git diff --name-only <review head> HEAD`, leaving out the task's own folder as

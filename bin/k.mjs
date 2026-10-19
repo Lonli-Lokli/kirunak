@@ -92,6 +92,7 @@ function place(flags) {
 }
 
 const session = (flags) => flags.session || process.env.CLAUDE_CODE_SESSION_ID || null;
+const baselineOf = (ws) => (ws.baseline && existsSync(ws.baseline) ? JSON.parse(readFileSync(ws.baseline, 'utf8')) : null);
 
 // What `k approve` would refuse, without writing anything (the --dry-run the model may run).
 async function approvalProblems(ws, id, amendmentId) {
@@ -240,7 +241,7 @@ const VERBS = {
     const id = need(pos[0], 'task id');
     if (!existsSync(taskPaths(ws, id).task)) throw new KError(`unknown task ${id}`, 1);
     const c = await cost.costOf(ws, id);
-    const baseline = ws.baseline && existsSync(ws.baseline) ? JSON.parse(readFileSync(ws.baseline, 'utf8')) : null;
+    const baseline = baselineOf(ws);
     const comparisons = baseline ? cost.compare(c, baseline) : [];
     if (flags.baseline) return { comparisons, text: comparisons.join('\n') };
     return { ...c, comparisons, text: [cost.format(c), ...(comparisons.length ? ['', ...comparisons] : [])].join('\n') };
@@ -337,7 +338,17 @@ const VERBS = {
   async accept({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
     if (flags['dry-run']) return { text: `would accept ${id}` };
-    const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell' });
+    // cost.md, read before the accept, which commits it with done.json; a cost that cannot be read (the records, or a
+    // baseline that does not parse) says why and never stops the accept.
+    let costMd;
+    try {
+      const c = await cost.costOf(ws, id);
+      const b = baselineOf(ws);
+      costMd = cost.markdown(c, b ? cost.compare(c, b) : []);
+    } catch (e) {
+      costMd = `# Cost of ${id}\n\nThe cost could not be read: ${e.message}\n`;
+    }
+    const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: costMd });
     return { ...r, text: `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}` };
   },
 

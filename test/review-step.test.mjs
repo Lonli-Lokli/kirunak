@@ -71,6 +71,9 @@ test('the review brief copies the three inputs into in/ and names only that fold
   const patch = readFileSync(join(dir, 'in', 'diff.patch'), 'utf8');
   assert.match(patch, /\+the cache keeps three days/);
   assert.equal(patch, readFileSync(join(dir, 'diff.patch'), 'utf8'));
+  const untracked = sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', dir]);
+  assert.doesNotMatch(untracked, /\/in\/|diff\.patch|\.gitignore/, 'the copies stay out of git');
+  assert.match(untracked, /steps\/S-2\/brief\.md/, 'the step\'s own files do not');
 
   const text = readFileSync(join(dir, 'brief.md'), 'utf8');
   const task = readFileSync(w.p.task, 'utf8').split('\n');
@@ -140,7 +143,30 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   writeFileSync(join(w.p.dir, 'progress.md'), progress.replace(/ \(review\.md sha256:[0-9a-f]+\)/, ''));
   assert.throws(() => accept({ ws: w.ws, id: w.id }), /S-2 finished without recording review\.md's hash, so nothing shows the file is as it wrote it: run a new review/);
   writeFileSync(join(w.p.dir, 'progress.md'), progress);
-  assert.equal(accept({ ws: w.ws, id: w.id }).state, 'done');
+  // A baseline that does not parse: the cost says so, and the accept goes on.
+  writeFileSync(join(w.hub, 'kirunak', 'baseline.json'), '{ not json');
+  const module = join(w.hub, 'kirunak', 'workspace.mjs');
+  writeFileSync(module, readFileSync(module, 'utf8').replace("plugins: ['./plugins/checklist.mjs'],", "plugins: ['./plugins/checklist.mjs'],\n  baseline: './baseline.json',"));
+  const r = k(w.home, ['accept', w.id]);
+  assert.equal(r.status, 0, r.stderr);
+  // The accept commits done.json and cost.md, k cost's numbers; the steps' copies stay out of git.
+  assert.deepEqual(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [w.p.rel('cost.md'), w.p.rel('done.json')]);
+  assert.match(readFileSync(join(w.p.dir, 'cost.md'), 'utf8'), /^# Cost of weather\/offline-forecast\n\nThe cost could not be read: .*JSON/);
+  assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all']), /\/in\/|diff\.patch|\.gitignore/);
+});
+
+test('a step folder keeps its run, keep-alive and heavy job records out of git, and a file of the step\'s own in', async () => {
+  const w = await implemented();
+  steps.runRecord(w.p, 'S-1', 'impl-1').ended({ exitCode: 0, result: { type: 'result', session_id: 'impl-1' } });
+  steps.saveKeep(w.p, 'S-1', { type: 'result', session_id: 'impl-1' });
+  steps.saveHeavy(w.p, 'S-1', { what: 'unit tests', command: ['npm', 'test'], exitCode: 0, minutes: 1, log: 'ok\n' });
+  const dir = join(w.p.dir, 'steps', 'S-1');
+  writeFileSync(join(dir, 'run-notes.json'), '{}\n');
+  const files = readdirSync(dir);
+  for (const re of [/^run-\d+\.json$/, /^keep-\d+\.json$/, /^heavy-\d+\.json$/, /^heavy-\d+\.log$/]) assert.ok(files.some((f) => re.test(f)), `${re} in ${files.join(' ')}`);
+  const status = sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', dir]);
+  assert.doesNotMatch(status, /run-\d|keep-|heavy-|\.gitignore/);
+  assert.match(status, /steps\/S-1\/run-notes\.json/, 'only numbered records are kirunak\'s');
 });
 
 test('k run runs a review in a fresh conversation on models.review, denied the implementer\'s account; a review that fails the grammar fails, and the retry reads why', async () => {

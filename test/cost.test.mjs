@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compare, costOf, runFields } from '../lib/cost.mjs';
+import { compare, costOf, markdown, runFields } from '../lib/cost.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
 import { k, makeWorkspace, RESULT } from './helpers.mjs';
 
@@ -80,6 +80,18 @@ test('k cost equals the formula worked by hand', async () => {
   assert.match(r.stdout, /weather\/offline-forecast: weight 1\.35e5, 1\.10 USD, 17 calls, median context 20,100/);
   assert.match(r.stdout, /S-1 +weight +6\.99e4 +0\.80 USD +15 calls {2}2 runs/);
   assert.doesNotMatch(r.stdout, /against/, 'no baseline, no comparison');
+});
+
+test('cost.md, which k accept commits: the numbers k cost prints, as a table, and the baseline\'s comparisons', async () => {
+  const w = await fixture();
+  const c = await costOf(w.ws, ID);
+  const md = markdown(c);
+  assert.match(md, /^# Cost of weather\/offline-forecast\n/);
+  assert.match(md, /\n\| S-1 \| 6\.99e4 \| 0\.80 \| 15 \| 2 \| 20,100 \|\n/);
+  assert.match(md, /\n\| All \| 1\.35e5 \| 1\.10 \| 17 \| 3 \| 20,100 \|\n/);
+  assert.match(md, /\nKeep-alives 0, misses 0\.\n$/);
+  assert.match(markdown(c, ['context per call: median 20,100 against 150,000']), /\n## Against the baseline\n\n- context per call: median 20,100 against 150,000\n$/);
+  assert.match(markdown({ ...c, steps: [] }), /\nNo run record was found\.\n/);
 });
 
 test('k cost --baseline prints only the comparisons, and nothing without a baseline', async () => {
