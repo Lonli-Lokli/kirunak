@@ -143,7 +143,22 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   writeFileSync(join(w.p.dir, 'progress.md'), progress.replace(/ \(review\.md sha256:[0-9a-f]+\)/, ''));
   assert.throws(() => accept({ ws: w.ws, id: w.id }), /S-2 finished without recording review\.md's hash, so nothing shows the file is as it wrote it: run a new review/);
   writeFileSync(join(w.p.dir, 'progress.md'), progress);
-  assert.equal(accept({ ws: w.ws, id: w.id }).state, 'done');
+  const r = k(w.home, ['accept', w.id]);
+  assert.equal(r.status, 0, r.stderr);
+  // The accept commits done.json and cost.md, k cost's numbers; the steps' copies stay out of git.
+  assert.deepEqual(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [w.p.rel('cost.md'), w.p.rel('done.json')]);
+  assert.match(readFileSync(join(w.p.dir, 'cost.md'), 'utf8'), /^# Cost of weather\/offline-forecast\n[^]*No run record was found\./);
+  assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all']), /\/in\/|diff\.patch|\.gitignore/);
+});
+
+test('a step folder keeps its run and keep-alive records out of git', async () => {
+  const w = await implemented();
+  steps.runRecord(w.p, 'S-1', 'impl-1').ended({ exitCode: 0, result: { type: 'result', session_id: 'impl-1' } });
+  steps.saveKeep(w.p, 'S-1', { type: 'result', session_id: 'impl-1' });
+  const dir = join(w.p.dir, 'steps', 'S-1');
+  const files = readdirSync(dir);
+  assert.ok(files.some((f) => /^run-\d+\.json$/.test(f)) && files.some((f) => /^keep-\d+\.json$/.test(f)), files.join(' '));
+  assert.doesNotMatch(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', dir]), /run-|keep-|\.gitignore/);
 });
 
 test('k run runs a review in a fresh conversation on models.review, denied the implementer\'s account; a review that fails the grammar fails, and the retry reads why', async () => {

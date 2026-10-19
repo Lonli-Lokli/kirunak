@@ -278,6 +278,12 @@ week: the numbers R11 asks for, and the ones to compare with the workspace's bas
   with the default weights, in units of one base input token of the reference model. It prints per step and per
   task: weight, `total_cost_usd` (list price, client-side, cost-tracking.md), calls (`num_turns`), misses, and the
   median context per call.
+- **The run records stay out of git; their summary goes in.** `run-<k>.json` and `keep-<k>.json` are read on disk
+  while the task runs (`k run`'s resumes and stopped runs, `k cost`), and a run's record is complete only after its
+  step's `k step finish`, so nothing commits them: the step folder's `.gitignore` leaves them out, beside a review's
+  copies (`review.md` §1). `k accept` writes `cost.md`, `k cost`'s numbers as a table with the baseline's
+  comparisons, and commits it with `done.json` (the owner, 2026-10-19: "Json is not human friendly at all"); a
+  cost that cannot be read is said in the file and never stops the accept.
 - **The baseline is the workspace's.** A workspace that wants R12's comparison supplies `baseline` in its config
   (`plugins.md` §3): a JSON file it measured before kirunak, in the same weight unit:
 
