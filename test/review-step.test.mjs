@@ -92,6 +92,19 @@ test('the review brief copies the three inputs into in/ and names only that fold
   assert.match(readFileSync(join(dir, 'brief.md'), 'utf8'), /`kirunak\/tasks\/offline-forecast\/steps\/S-2\/in\/failure-1\.md`: the last attempt failed/);
 });
 
+test('a review\'s diff leaves out the task folder: committed notes, a step\'s report and progress are not in in/diff.patch', async () => {
+  const w = await implemented();
+  writeFileSync(join(w.weather, 'docs', 'offline.md'), 'the cache keeps three days\n');
+  sh(w.weather, 'git', ['add', '-A']);
+  sh(w.weather, 'git', ['commit', '-qm', 'the work and the implementer\'s account']);
+  const committed = sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']);
+  for (const f of ['notes.md', 'steps/S-1/report.md', 'progress.md']) assert.ok(committed.includes(`kirunak/tasks/offline-forecast/${f}`), f);
+  assert.equal(k(w.home, ['step', 'brief', w.id, 'S-2', '--session', 'rev-1']).status, 0);
+  const patch = readFileSync(join(w.p.dir, 'steps', 'S-2', 'in', 'diff.patch'), 'utf8');
+  assert.match(patch, /\+the cache keeps three days/);
+  assert.doesNotMatch(patch, /a dead end|the implementer says it all works|S-1 started|kirunak\/tasks\/offline-forecast/);
+});
+
 test('a review step finishes only when its review passes k review check', async () => {
   const w = await implemented();
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);

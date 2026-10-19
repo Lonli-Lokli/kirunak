@@ -10,9 +10,10 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   whose `needs:` step shares a session id. Judgement: a fresh conversation is the only separation the tool can
   prove; the same model with a different prompt is still separate in what it has read, which is the point.
 - Its inputs are exactly: `task` (the frozen file), `diff` (`steps/S-review/diff.patch`, from the task's base
-  commit recorded at `k approve` to HEAD), and `evidence/` (the files the steps produced: test reports, measurement
-  tables, screenshots, logs). Not `progress.md`, not `notes.md`, not any step's `report.md`, not the plan (R13:
-  "not the implementer's account"). `k step brief` for a `review` step copies the three into
+  commit recorded at `k approve` to HEAD, leaving out the task's own folder `kirunak/tasks/<slug>`, whose task.md
+  and evidence reach the reviewer through `in/`), and `evidence/` (the files the steps produced: test reports,
+  measurement tables, screenshots, logs). Not `progress.md`, not `notes.md`, not any step's `report.md`, not the
+  plan (R13: "not the implementer's account"). `k step brief` for a `review` step copies the three into
   `steps/S-review/in/` and the brief names only that folder, and the runner adds `--add-dir` for nothing else.
   The repo itself is readable (the diff must be read against the code), which is why "the implementer's account"
   is defined as those files and the step reports, and the brief says so.
