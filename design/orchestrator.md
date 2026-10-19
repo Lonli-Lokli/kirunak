@@ -228,7 +228,9 @@ write 2, 5-minute write 1.25, `plugins.md` §2):
 goes to `steps/S-n/keep-<k>.json`, so the keep-alive's cost is in the step's total. It goes at
 `expires_at − (TTL − interval)`, one per interval: 10 minutes before a 1-hour cache's expiry at the default
 `keeper.intervalMinutes` of 50, 30 s before a 5-minute cache's at 4.5. One turn has 5 minutes: a
-keep-alive still running then is killed with its tree, and the keeping ends. For the owner's interactive
+keep-alive still running then is killed with its tree, and the keeping ends. One that wrote more than it read came
+after the expiry, and the next would too: it is recorded as a miss, and the keeping ends with a `skip` saying why.
+For the owner's interactive
 session: a background command the session itself started, whose end wakes the session: `k keep --session <name>`,
 run with the Bash tool's `run_in_background`, ends at that same time when the expected wait justifies it, and
 the session's wake-up turn is the keep-alive. Judgement: the keeper never injects a turn into an interactive session
