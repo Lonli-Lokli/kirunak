@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { accept } from '../lib/approval.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
-import { k, makeWorkspace, reviewsRan } from './helpers.mjs';
+import { approvedWorkspace, k, makeWorkspace, reviewsRan } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
 
@@ -58,6 +59,23 @@ test('k checklist lists exactly the needs device and needs owner rows of the lat
     '- [ ] AC-3 Both phone platforms keep the last forecast across a restart. (review-2.md)',
     '- [ ] E-1 Read: the age line reads naturally (evidence/S-4-wording.md) (review-2.md)',
   ].join('\n') + '\n', 'from the latest review only, each unticked: the owner checks it again');
+});
+
+test('k checklist run again keeps the owner\'s tick and words on an item line, and the lines that are not items', async () => {
+  const w = await approvedWorkspace('');
+  const file = join(w.p.dir, 'checklist.md');
+  const rows = [ROWS[0], '| AC-2 | met | file docs/offline.md:1 |', ROWS[2], ROWS[3]];
+  writeFileSync(join(w.p.dir, 'review.md'), reviewText(rows, 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(w.p.dir);
+  assert.equal(k(w.home, ['checklist', ID]).status, 0);
+  // The owner ticks AC-3 with a word on where it was done, and adds a note of their own.
+  const owned = readFileSync(file, 'utf8').replace(/- \[ \] (AC-3 .*\(review\.md\))\n/, '- [x] $1, done on the Pixel 7, 7 Nov\n') + '\nAsk about E-1 before the release.\n';
+  assert.match(owned, /^- \[x\] AC-3 .*\(review\.md\), done on the Pixel 7, 7 Nov\n- \[ \] E-1 .*\n\nAsk about E-1/);
+  writeFileSync(file, owned);
+  const r = k(w.home, ['checklist', ID]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(file, 'utf8'), owned, 'the tick, the owner\'s words and the note survive');
+  assert.throws(() => accept({ ws: w.ws, id: ID }), /checklist\.md has 1 unticked item\(s\):\n {2}- \[ \] E-1 Read: /, 'the annotated line counts as AC-3\'s, ticked');
 });
 
 test('k checklist on a review with every row met writes an empty checklist', async () => {

@@ -79,7 +79,10 @@ verdict is misspelt never leaves an empty checklist:
 - [ ] E-3 Read: the age line reads naturally (evidence/S-4-wording.md)
 ```
 
-The owner ticks items; the freeze hook refuses an agent's tick (`approval.md` §2). `k accept` refuses while an item
+The owner ticks items; the freeze hook refuses an agent's tick (`approval.md` §2). Run again, `k checklist` keeps
+what the owner wrote: a line that begins with an item's text is that item's, its tick and the owner's words after
+the text kept (`- [x] E-2 ... (review-2.md), done on the old phone`), and every line that is not an item stays, after
+the items, in its order; an item line from an older review goes. `k accept` refuses while an item
 is unticked unless the owner passes `--checklist-open "<why>"`, which `done.json` records with the text of each item
 left open (unticked, or a row with no item yet), beside the review it took. It takes only a latest
 review that counts (§2) and ends `verdict: met` or `verdict: needs owner (<ids>)`. A `not met` verdict is refused
