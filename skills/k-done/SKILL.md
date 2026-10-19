@@ -13,7 +13,7 @@ The owner says when a task is done. You record nothing yourself: the acceptance 
 2. **Ask for the acceptance**: "Type `! k accept <id>` to record it." (With the kirunak mod: `/k-accept <id>`.)
    The task is done only when the command succeeds and `kirunak/tasks/<slug>/done.json` exists. If it refuses (an
    unticked checklist item, a review that fails `k review check`, whose step has not finished or that was changed
-   after it finished, a `not met` verdict, no review), say what it named and stop. The owner may accept with checklist items open by adding
+   after it finished, a `not met` verdict, code committed after the review, no review), say what it named and stop. The owner may accept with checklist items open by adding
    `--checklist-open "<why>"`, which is recorded; it never accepts a `not met` verdict or a task with no review.
    Never run `k accept` yourself.
 3. **Write the handoff and release**: run `k handoff <id> --json`. For each target, write the handoff there: the

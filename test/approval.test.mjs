@@ -355,6 +355,26 @@ test('accept refuses a not met verdict, --checklist-open or not: the way out is 
   assert.equal(existsSync(join(taskDir(weather), 'done.json')), false);
 });
 
+test('accept refuses code committed after the review head, naming it; commits in the task folder alone are not code', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  const dir = taskDir(weather);
+  const reviewed = sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  writeFileSync(join(dir, 'review.md'), REVIEW('verdict: met', false).replace('head: HEAD', `head: ${reviewed}`));
+  reviewsRan(dir);
+  writeFileSync(join(dir, 'notes.md'), 'the review is in\n');
+  gitCommitAll(weather, 'review and notes');
+  const code = ['a', 'b', 'c', 'd', 'e', 'f'].map((x) => `src/${x}.ts`);
+  sh(weather, 'mkdir', ['-p', 'src']);
+  for (const f of code) writeFileSync(join(weather, f), 'export {};\n');
+  gitCommitAll(weather, 'a fix after the review');
+  const later = new RegExp(`the code changed after review\\.md's head ${reviewed}, so the review never saw src/a\\.ts, src/b\\.ts, src/c\\.ts, src/d\\.ts, src/e\\.ts and 1 more: run a new review \\(a review step whose output is review-2\\.md\\)$`);
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'nothing open' }), later);
+  sh(weather, 'git', ['rm', '-q', ...code]);
+  sh(weather, 'git', ['commit', '-q', '-m', 'the fix taken back']);
+  assert.equal(accept({ ws, id: ID, now: NOV7 }).state, 'done');
+});
+
 // Rows the owner should check, spelled as no verdict, a cited line past its file, and the last line met anyway.
 const MISSPELT = REVIEW('verdict: met')
   .replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | met | file nowhere.ts:999 |')

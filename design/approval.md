@@ -122,7 +122,10 @@ review changed after its step finished is refused and the way out is a new revie
 names each problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses
 `verdict: not met (<ids>)` whatever the flags, `--checklist-open` included, which waives checklist items and never a
 criterion: the way out is an amendment (`k amend new <id>`, approved, then a new review) or a new review after a
-fix. It refuses a task with no review: a task closes only through a review step of `plan.md` that ran. It writes
+fix. It refuses a task with no review: a task closes only through a review step of `plan.md` that ran. It refuses
+code committed after the review: when `git diff --name-only <review head> HEAD`, leaving out the task's own folder as
+the reviewer's diff does, names a file, the review never saw it; the refusal names a few such files, no flag waives
+it, and the way out is a new review. It writes
 `done.json`, commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
 
 Why `!`: the shortcuts documentation says a `!` line is "Run a command directly, add its output to the session, and
