@@ -15,6 +15,8 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   measurement tables, screenshots, logs). Not `progress.md`, not `notes.md`, not any step's `report.md`, not the
   plan (R13: "not the implementer's account"). `k step brief` for a `review` step copies the three into
   `steps/S-review/in/` and the brief names only that folder, and the runner adds `--add-dir` for nothing else.
+  `in/` and `diff.patch` are copies of what git holds (the review records its head), so the step folder's own
+  `.gitignore`, written with them, leaves them and itself out of git.
   The repo itself is readable (the diff must be read against the code), which is why "the implementer's account"
   is defined as those files, every other step's folder (its brief, report, failure reports and run records, which
   hold the implementer's last message) and the session transcripts under `~/.claude/projects/`, and the brief says

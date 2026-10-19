@@ -71,6 +71,9 @@ test('the review brief copies the three inputs into in/ and names only that fold
   const patch = readFileSync(join(dir, 'in', 'diff.patch'), 'utf8');
   assert.match(patch, /\+the cache keeps three days/);
   assert.equal(patch, readFileSync(join(dir, 'diff.patch'), 'utf8'));
+  const untracked = sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', dir]);
+  assert.doesNotMatch(untracked, /\/in\/|diff\.patch|\.gitignore/, 'the copies stay out of git');
+  assert.match(untracked, /steps\/S-2\/brief\.md/, 'the step\'s own files do not');
 
   const text = readFileSync(join(dir, 'brief.md'), 'utf8');
   const task = readFileSync(w.p.task, 'utf8').split('\n');
