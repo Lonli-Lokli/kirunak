@@ -199,7 +199,9 @@ the context size, the TTL and when the cache expires, what the conversation wait
 - A miss, recorded where it is seen: for an interactive session, a `SessionStart` hook with `source: "resume"`
   receives `context_tokens`, `prompt_cache_likely_expired` and `estimated_cache_write_usd` (hooks.md): the hook
   `hooks/kirunak-session.mjs` appends `{ kind: "miss" | "hit", ... }` to `keeper.jsonl`. For a headless step, the
-  first resumed call's `cache_creation` against `cache_read_input_tokens` in the run record says which it was.
+  first resumed call's `cache_creation` against `cache_read_input_tokens` in the run record says which it was; k run
+  records it as the resumed run starts, once it holds its machine slot and its device, so a resume that never starts
+  records nothing. A wait for a slot is not kept warm: it is recorded once as a `skip` with the guard's reason.
 
 **When it keeps warm.** The rule, with the weights from the `prices` seam (the default: cache read 0.1, 1-hour
 write 2, 5-minute write 1.25, `plugins.md` §2):

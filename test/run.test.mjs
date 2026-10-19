@@ -470,3 +470,41 @@ test('a conversation that waits for the owner is skipped, never kept; after a lo
   assert.deepEqual([miss.kind, miss.session, miss.context], ['miss', sid, 90900]);
   assert.equal(miss.costWeight, 2 * 90900);
 });
+
+test('a resume that waits for a machine slot past the expiry: the wait is a skip, and the resume a miss as it starts', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const clock = keeperClock();
+  const calls = fakeRunner(w, (step, n) => {
+    if (n > 1) return 'write';
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+    return 'nothing';
+  });
+  withCache(w);
+  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
+  const sid = calls[0].sessionId;
+  // Another task's step holds the one slot, and the cache expires while the resume waits for it.
+  let looks = 0;
+  const other = { pid: 1, task: 'other/task', step: 'S-1', session: 'x', since: '2026-11-03T12:05:00.000Z' };
+  w.ws.seams.machineGuard = { limits: () => ({ maxAgents: 1, maxHeavy: 1 }), running: () => (++looks === 2 && clock.advance(120), looks <= 2 ? [other] : []) };
+  clock.advance(10);
+  const again = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
+  assert.deepEqual([again.states, calls[1].resume], [{ 'S-1': 'done', 'S-2': 'done' }, sid]);
+  const [, wait, resumed] = readLines(w.home);
+  assert.deepEqual([wait.kind, wait.ts, resumed.kind, resumed.ts], ['skip', '2026-11-03T12:10:00.000Z', 'miss', '2026-11-03T14:10:00.000Z']);
+  assert.match(wait.reason, /^the resume waits for a machine slot, not kept warm meanwhile: 1 of 1 steps run: other\/task S-1/);
+  assert.equal(resumed.reason, 'the cache expired at 2026-11-03T13:00:00.000Z');
+});
+
+test('a resume whose device claim fails never starts, and records neither a hit nor a miss', async () => {
+  const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ndevice: ios.low'));
+  const clock = keeperClock();
+  let refuse = false;
+  w.ws.seams.resourceGuard = { claim: () => { if (refuse) throw new Error('ios.low is claimed by another session'); }, release() {}, run() {}, status: () => ({ held: null, queued: [] }), resources: () => [] };
+  const calls = fakeRunner(w, (step, n) => (n > 1 ? 'write' : (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing')));
+  withCache(w);
+  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
+  refuse = true;
+  await run({ ws: w.ws, id: w.id, clock });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(readLines(w.home).map((l) => l.kind), ['skip']);
+});
