@@ -4,9 +4,9 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import machineGuardPids, { admit, register, release } from '../plugins/machine-guard-pids.mjs';
+import machineGuardPids, { admit, register, release, unregister } from '../plugins/machine-guard-pids.mjs';
 import pricesDefault from '../plugins/prices-default.mjs';
-import { makeWorkspace } from './helpers.mjs';
+import { fakePs, makeWorkspace } from './helpers.mjs';
 
 const fresh = (machine) => {
   const home = mkdtempSync(join(tmpdir(), 'kirunak-machine-'));
@@ -70,6 +70,25 @@ test('a pid file or a reservation whose pid is now another process, or that reco
       release(ws, a.slot);
     }
   } finally {
+    other.kill();
+  }
+});
+
+test('while ps cannot answer, a live pid\'s file and reservation are kept and counted', async () => {
+  const { home, ws, mg } = fresh({ maxAgents: 1 });
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  register(ws, other.pid, { task: 'weather/a', step: 'S-1', session: 's', since: start });
+  const restore = fakePs('fails');
+  try {
+    assert.deepEqual((await mg.running()).map((r) => r.pid), [other.pid]);
+    assert.equal(existsSync(join(home, 'running', `${other.pid}.json`)), true);
+    unregister(ws, other.pid);
+    writeFileSync(join(home, 'running', `${other.pid}-1.json`), JSON.stringify({ pid: other.pid, pidStart: start, task: 'weather/b', step: 'S-2', since: start }));
+    assert.equal((await admit(ws, mg)).ok, false, 'the reservation counts');
+    assert.equal(existsSync(join(home, 'running', `${other.pid}-1.json`)), true);
+  } finally {
+    restore();
     other.kill();
   }
 });

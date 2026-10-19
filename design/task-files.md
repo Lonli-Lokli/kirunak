@@ -108,14 +108,19 @@ parser of about a hundred lines with no dependency.
   accepted`). The `[owner ... Q-n]` tags point here. An entry is never edited; a changed mind is a new entry.
 - `plan.md`: `orchestrator.md` §1.
 - `progress.md`: one line per event, appended by `k step start|finish|fail`, `k heavy`, `k review`: `2026-11-03
-  14:02 S-2 started (opus, session 7c1…)`. Readable, and the board's source for "where is it".
+  14:02 S-2 started (opus, session 7c1…)`. A review step's `finished` line carries its file's hash, `2026-11-07
+  10:40 S-4 finished (review.md sha256:…)` (`review.md` §2). Readable, and the board's source for "where is it".
 - `notes.md`: free text for whoever works on the task; pointers to research, dead ends. Never read by the reviewer.
 - `review.md`, `checklist.md`: `review.md` in this folder.
 - `handoff.md`: written at closing when the workspace's `handoff` seam points there (the core's default does,
   `plugins.md` §2).
 - `amendments/A-n.md`: §5 below.
-- `done.json`: `{ "task": id, "accepted": ISO date, "by": "owner", "via": "shell"|"mod", "commit": sha }`,
-  written only by `k accept` (the owner's command, `approval.md` §4).
+- `done.json`: `{ "task": id, "accepted": ISO date, "by": "owner", "via": "shell"|"mod", "commit": sha, "review":
+  "review-2.md", "verdict": "needs owner (E-3)", "head": sha, "reviewHash": "sha256:…" }`, written only by `k accept`
+  (the owner's command, `approval.md` §4). `review`, `verdict` and `head` are the review it took as that file states
+  them, `reviewHash` its bytes' hash (the one its step finished with, `review.md` §2). With `--checklist-open "<why>"`
+  it adds `"checklistOpen": "<why>"` and `"openItems": [text]`, the items left open: those unticked in
+  `checklist.md` and the review's rows with no item there, each as `k checklist` words it.
 
 ## 4. States and who moves a task
 
@@ -128,10 +133,10 @@ are a state field agents rewrite; a state read from files that only named comman
 | draft | `task.md` exists, no approval record, `k check` fails or Open questions not empty | the intake (`k intake start`) |
 | proposed | no approval record, `k check` passes, Open questions empty | the intake, when the last question closes |
 | ready | approval record with a matching hash; no step started in `progress.md` | the owner: `k approve` |
-| blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces | the plan |
+| blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces, or the plan has steps and none of kind `review` | the plan |
 | in progress | a step started in `progress.md`; no `review.md` verdict | `k step start` (the orchestrator or a session) |
-| in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it | `k review start` |
-| reviewed | the latest review passes the grammar and its review step finished in `progress.md`; no `done.json` | the review step |
+| in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it as it stands (the hash on the step's `finished` line) | `k review start` |
+| reviewed | the latest review passes the grammar and its review step finished in `progress.md` with the file's hash; no `done.json` | the review step |
 | awaiting owner | `checklist.md` has an unticked item, or reviewed | `k checklist` |
 | done | `done.json` exists | the owner: `k accept` (through `/k-done`) |
 | on hold | `hold.md` exists (why, date) and no `done.json` | the owner: `k hold` / `k resume` |

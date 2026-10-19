@@ -25,7 +25,7 @@ function folder(setup) {
 
 const REVIEW = '| id | verdict | evidence |\n| --- | --- | --- |\n| AC-1 | met | test X (a.test.mjs:1) |\n';
 // A review in the grammar (what reads git aside), E-1's row as given.
-const SOUND = (last, e1 = 'met | file task.md:1') => `---\ntask: weather/offline-forecast\nhead: HEAD\n---\n
+const SOUND = (last, e1 = 'met | file task.md:1') => `---\ntask: weather/offline-forecast\nhead: 9ab1c2d\n---\n
 | id | verdict | evidence |\n| --- | --- | --- |\n| AC-1 | met | test X (a.test.mjs:1) |\n| AC-2 | met | file task.md:1 |
 | AC-3 | met | file task.md:1 |\n| E-1 | ${e1} |\n\n${last}\n`;
 
@@ -46,12 +46,12 @@ const CASES = {
     put('review.md', REVIEW);
   },
   reviewed: ({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: met'));
+    reviewsRan(dir);
   },
   'awaiting owner': ({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: needs owner (E-1)', 'needs owner | Read: the age line'));
+    reviewsRan(dir);
     put('checklist.md', '- [ ] E-1 Read: the age line reads naturally (review.md)\n');
   },
   done: ({ put }) => put('done.json', '{"task":"weather/offline-forecast"}\n'),
@@ -77,10 +77,23 @@ test('a blocker that is done does not block', () => {
   assert.equal(stateOf(f), 'ready');
 });
 
+const REVIEW_STEP = '\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n';
+
 test('a step waiting on an input no step produces blocks', () => {
-  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task, docs/none.md\noutputs: steps/S-1/report.md\n';
+  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task, docs/none.md\noutputs: steps/S-1/report.md\n' + REVIEW_STEP;
   assert.equal(stateOf(folder(({ put }) => put('plan.md', plan))), 'blocked');
   assert.equal(stateOf(folder(({ put }) => put('plan.md', plan.replace('docs/none.md', 'intake.md')))), 'ready');
+});
+
+test('a plan with no review step blocks, a task in progress too: no step may start', () => {
+  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n';
+  assert.equal(stateOf(folder(({ put }) => put('plan.md', plan))), 'blocked');
+  const running = (text) => folder(({ put }) => {
+    put('plan.md', text);
+    put('progress.md', '2026-11-03 14:02 S-1 started (session 7c1)\n');
+  });
+  assert.equal(stateOf(running(plan)), 'blocked');
+  assert.equal(stateOf(running(plan + REVIEW_STEP)), 'in progress');
 });
 
 test('a step that asks the owner in needs.json is awaiting owner', () => {
@@ -104,16 +117,25 @@ test('the latest review wins', () => {
   assert.equal(stateOf(f), 'in review');
 });
 
-test('in review while the latest review fails the grammar or no finished review step wrote it', () => {
+test('in review while the latest review fails the grammar or no finished review step wrote it as it stands', () => {
   const id = 'weather/offline-forecast';
   assert.equal(stateOf({ ...folder(({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: met').replace(/\| met \| (test|file) [^|]*\|/g, '| met | it works |'));
+    reviewsRan(dir);
   }), id }), 'in review', 'rows met without evidence');
   assert.equal(stateOf({ ...folder(({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: met', 'Needs owner | Read: the age line'));
+    reviewsRan(dir);
   }), id }), 'in review', 'a verdict that is not one of the four');
+  assert.equal(stateOf({ ...folder(({ dir, put }) => {
+    put('review.md', SOUND('verdict: needs owner (E-1)', 'needs owner | Read: the age line'));
+    reviewsRan(dir);
+    put('review.md', SOUND('verdict: met'));
+  }), id }), 'in review', 'changed after its step finished');
+  assert.equal(stateOf({ ...folder(({ dir, put }) => {
+    reviewsRan(dir);
+    put('review.md', SOUND('verdict: met'));
+  }), id }), 'in review', 'its step finished with no hash of the file');
   assert.equal(stateOf({ ...folder(({ dir, put }) => {
     reviewsRan(dir);
     put('progress.md', '2026-11-06 10:00 S-2 failed: k review check\n2026-11-06 11:00 S-2 failed: k review check\n2026-11-06 11:00 S-2 escalated\n');

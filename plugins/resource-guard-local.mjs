@@ -65,22 +65,27 @@ const elapsed = (s) => {
 };
 
 // A pid read from a file may name another process by now (pids are reused). True only while pid runs and started
-// within slackMs of startIso: now less its elapsed time is its start. No start recorded, or no such process, is false.
+// within slackMs of startIso: now less its elapsed time is its start. No start recorded, or no such process (ps exits
+// 1), is false. Null when ps could not answer (it did not start, failed otherwise, or printed no elapsed time): the
+// pid may be that process or another, so callers neither kill it nor read it as gone.
 // A minute of slack: a start recorded late by a fork or a write on a loaded machine must still match, and a pid is
 // not reused within a minute of the start of the process that held it.
 export function isStill(pid, startIso, slackMs = 60000) {
   const recorded = Date.parse(startIso);
   if (!isGroup(pid) || Number.isNaN(recorded)) return false;
   const ps = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
+  if (ps.status === 1) return false;
   const s = ps.status === 0 ? elapsed(ps.stdout) : null;
-  return s !== null && Math.abs(Date.now() - s * 1000 - recorded) <= slackMs;
+  if (s === null) return null;
+  return Math.abs(Date.now() - s * 1000 - recorded) <= slackMs;
 }
 
 // This process's start, written beside its pid wherever kirunak writes that pid to a file, for isStill to read.
 export const OWN_START = new Date(Date.now() - process.uptime() * 1000).toISOString();
 
-// A pid of kirunak's read from a file: alive, and still the process that started at startIso. No start is dead.
-export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso);
+// A pid of kirunak's read from a file: alive, and still the process that started at startIso. No start is dead. A
+// pid whose start ps cannot tell now is believed to run, so nothing is taken over or failed on a guess.
+export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso) !== false;
 
 // TERM to the process group, then KILL after graceMs if anything of it is left.
 export async function killTree(pid, graceMs = 10000) {
@@ -187,8 +192,9 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
 
   // The head of the queue takes the lock, or takes it over when its owner's process is dead. A dead owner's job that
   // still runs is returned as { orphan: pid } first: nobody will collect its result, and it must end before the take.
-  // It is that job only while it started at jobStart; a pid that names another process by now is left alone. A waiter
-  // or an owner is alive only while its pid is still the process that started at its pidStart.
+  // It is that job only while it started at jobStart; a pid that names another process by now is left alone, and one
+  // ps cannot tell about now is waited for, neither killed nor run beside. A waiter or an owner is alive only while
+  // its pid is still the process that started at its pidStart (or ps cannot tell).
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
@@ -201,7 +207,9 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
         const owner = readJson(P.owner);
         const dead = owner ? !stillRuns(owner.pid, owner.pidStart) : stale(P);
         if (!dead) return false;
-        if (groupAlive(owner?.job) && isStill(owner.job, owner.jobStart)) return { orphan: owner.job };
+        const job = groupAlive(owner?.job) ? isStill(owner.job, owner.jobStart) : false;
+        if (job === null) return false;
+        if (job === true) return { orphan: owner.job };
         rmSync(P.lock, { recursive: true, force: true });
       }
       try {

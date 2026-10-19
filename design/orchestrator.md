@@ -43,7 +43,9 @@ outputs: review.md
   only where a step needs it.
 - `covers:` names AC and E ids (or `all`). `k plan check <id>` refuses a plan that leaves an AC or E uncovered, names
   an id the task does not have, or has a step whose `inputs:` no earlier step produces and no file in the repo
-  matches (R8, R9). `task` and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the
+  matches (R8, R9), and a plan with no step of kind `review`, since `k accept` takes only a review (`review.md` §3).
+  Every step start runs the same check (`k step start`, `k run`), so a task already running whose plan has no review
+  step is refused at its next step, naming the problem, and `k list` shows it blocked (`task-files.md` §4). `task` and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the
   task's base commit to HEAD, written by `k step start` into `steps/<step>/diff.patch`).
 - The plan changes without approval (R8): whoever plans edits it and `k plan check` guards the coverage. Judgement:
   the plan is the model's working document, the task is the owner's contract; keeping the coverage check mechanical
@@ -76,8 +78,10 @@ pending  →  ready  →  running  →  done
   collect its result) and fails the step: `the k run that started it stopped`. The claude is the record's pid (and
   its `running/` file's) only while that pid still started when the record's `claudeStart` (or the file's `since`)
   says, within a minute (pids are reused); any other process now holding the pid, or a record with no start, is left
-  running and named (`pid N is not the claude of that run`), and the step still fails. A step started by hand has
-  neither: `k run` names it and leaves it.
+  running and named (`pid N is not the claude of that run`), and the step still fails. A pid whose start `ps` cannot
+  tell (it did not start or failed, `plugins.md` §2) is believed to be what the file says: such a `k run` still runs,
+  and a step whose claude may still run is left `running`, nothing killed or failed (`ps gave no answer for pid N`),
+  for a later `k run` to decide. A step started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
@@ -110,7 +114,8 @@ pending  →  ready  →  running  →  done
   lock whose `k run` is dead, or whose pid is now another process or recorded no start, is taken over. A `k run`
   stopped by Ctrl-C, a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives;
   the guard ends a heavy job), fails each step whose run it killed (`running`) with `k run was stopped (<signal>)`,
-  a stop's failure that the step does not count, releases its lock and exits with the signal's code. A resume's
+  a stop's failure that the step does not count, releases the device claims its steps hold, releases its lock and
+  exits with the signal's code. A resume's
   `needs.json` is moved to `needs-<k>.json` only as its claude starts (nothing awaited between the move and the
   spawn), and `progress.md` says `resumed` then, so a step waiting for its job, or whose job has ended and whose
   resume waits for a machine slot, is left `waiting-heavy`, its `needs.json` and `started` line kept: the next
@@ -186,7 +191,8 @@ last thing written. The reviewer's brief differs (`review.md` §2).
   itself waits in the queue, not a model. The owner's interactive session, if it started `k run` as a background
   command, is woken only when `k run` ends or prints a keep-alive (§5).
 - Device claims go through the same seam (`claim`, `release`), named in the plan step (`device: <id>`, an id from
-  the guard's `resources()`) and released when the step ends however it ends.
+  the guard's `resources()`) and released when the step ends however it ends, a stop of `k run` included (a step
+  still in flight, a resume waiting for its slot among them, gives its device back before `k run` exits).
 - The machine guard: `running/<pid>.json` per live step process; `limits()` from the workspace (default
   `maxAgents: 2`; judgement: a laptop runs one build beside two headless sessions, not three; a number to check
   against memory pressure on the machine in slice 2). `k run` refuses to start a step past the cap and says who

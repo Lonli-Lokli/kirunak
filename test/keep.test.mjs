@@ -14,6 +14,12 @@ blocked-by: []
 covers: AC-1, AC-2, AC-3, E-1
 inputs: task, docs/offline.md
 outputs: steps/S-1/report.md
+
+### S-2 Review [review]
+needs: S-1
+covers: all
+inputs: task, diff
+outputs: review.md
 `;
 
 const T0 = Date.parse('2026-11-03T12:00:00Z');

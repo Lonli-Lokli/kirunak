@@ -11,7 +11,7 @@ import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
 import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, fakeClaude, k, KIRUNAK } from './helpers.mjs';
+import { approvedWorkspace, fakeClaude, fakePs, k, KIRUNAK } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -28,7 +28,19 @@ needs: S-1
 covers: AC-3
 inputs: task, evidence/S-1-cache-sizes.tsv
 outputs: steps/S-2/report.md
+
+### S-3 Restart offline on a phone [owner]
+needs: S-2
+
+### S-4 Review [review]
+needs: S-3
+covers: all
+inputs: task, diff, evidence/
+outputs: review.md
 `;
+
+// Where a k run that did both agent steps stops: at the owner's step, before the review.
+const BOTH = { 'S-1': 'done', 'S-2': 'done', 'S-3': 'ready', 'S-4': 'pending' };
 
 const OUTPUTS = { 'S-1': ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv'], 'S-2': ['steps/S-2/report.md'] };
 
@@ -74,10 +86,10 @@ test('pending → ready → running → done, with the run records, the briefs a
     return 'write';
   });
   const r = await watch(w);
-  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(r.states, BOTH);
   assert.deepEqual(seen, [
-    { states: { 'S-1': 'running', 'S-2': 'pending' }, pidFile: true },
-    { states: { 'S-1': 'done', 'S-2': 'running' }, pidFile: true },
+    { states: { 'S-1': 'running', 'S-2': 'pending', 'S-3': 'pending', 'S-4': 'pending' }, pidFile: true },
+    { states: { 'S-1': 'done', 'S-2': 'running', 'S-3': 'pending', 'S-4': 'pending' }, pidFile: true },
   ]);
   assert.deepEqual(readdirSync(join(w.home, 'running')), [], 'the pid files go when the runs end');
   assert.match(progress(w), /S-1 started \(default model, session [0-9a-f-]{36}\)\n.*S-1 finished\n.*S-2 started .*\n.*S-2 finished\n$/);
@@ -168,7 +180,7 @@ test('needs.json heavy: the guard runs the job while running/ holds no pid of th
   const slots = [];
   w.ws.seams.runner.start = (step) => (slots.push(readdirSync(join(w.home, 'running')).filter((f) => /^\d+-\d+\.json$/.test(f)).length), start(step));
   const r = await watch(w);
-  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(r.states, BOTH);
   assert.deepEqual(slots, [1, 1, 1], 'every start, the resume too, holds a reserved machine slot');
   assert.equal(jobs.length, 1);
   assert.deepEqual(jobs[0].running, [], 'no process of the step while the job runs');
@@ -196,7 +208,7 @@ test('needs.json owner: the task stops with the question; the next k run resumes
   assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"awaiting owner".*"question":"Three days or a week\?"/);
   assert.match(k(w.home, ['list']).stdout, /awaiting owner +weather\/offline-forecast/);
   const again = await watch(w);
-  assert.deepEqual(again.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(again.states, BOTH);
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; read kirunak\/tasks\/offline-forecast\/notes\.md/);
 });
@@ -211,7 +223,7 @@ test('a failed run\'s needs.json is moved aside and named in its failure: the re
   const a = await approvedWorkspace(PLAN);
   fakeRunner(a, (step, n) => (n === 1 ? (put(a, 'steps/S-1/needs.json', '{"heavy": '), 'nothing') : 'write'));
   const ra = await watch(a);
-  assert.deepEqual(ra.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(ra.states, BOTH);
   assert.equal((progress(a).match(/S-1 failed/g) || []).length, 1);
   assert.match(readFileSync(stepFile(a, 'failure-1.md'), 'utf8'), /Its needs\.json is now kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; a retry starts without it\./);
   assert.equal(readFileSync(stepFile(a, 'needs-1.json'), 'utf8'), '{"heavy": ');
@@ -221,7 +233,7 @@ test('a failed run\'s needs.json is moved aside and named in its failure: the re
   b.ws.seams.resourceGuard = jobGuard(jobs);
   const calls = fakeRunner(b, (step, n) => (n === 1 ? (put(b, 'steps/S-1/needs.json', HEAVY('tests nobody asked for')), 'exit 1') : 'write'));
   const rb = await watch(b);
-  assert.deepEqual(rb.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(rb.states, BOTH);
   assert.deepEqual(jobs, []);
   assert.deepEqual(calls.map((c) => c.resume ?? null), [null, null, null], 'no conversation was resumed');
 });
@@ -248,7 +260,7 @@ test('every needs-<k>.json takes its number from one index: heavy, the owner, he
   const asks = { 1: HEAVY('first tests'), 2: JSON.stringify({ owner: 'Three days or a week?' }), 3: HEAVY('second tests') };
   fakeRunner(w, (step, n) => (step.env.KIRUNAK_STEP === 'S-1' && asks[n] ? (put(w, 'steps/S-1/needs.json', asks[n]), 'nothing') : 'write'));
   assert.equal((await watch(w)).stopped, 'S-1 waits for the owner: Three days or a week?');
-  assert.deepEqual((await watch(w)).states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual((await watch(w)).states, BOTH);
   assert.deepEqual(jobs, ['first tests', 'second tests']);
   const read = (k) => JSON.parse(readFileSync(stepFile(w, `needs-${k}.json`), 'utf8'));
   assert.deepEqual([read(1).heavy.what, read(2).owner, read(3).heavy.what], ['first tests', 'Three days or a week?', 'second tests']);
@@ -428,11 +440,27 @@ test('k run stopped while the owner\'s answer waits for a machine slot leaves th
   assert.ok(existsSync(stepFile(w, 'needs.json')), 'the question stays until a claude reads the answer');
   assert.match(said(), /S-1 still waits for the owner: the next k run resumes it/);
   rmSync(join(w.home, 'machine.json'));
-  assert.deepEqual((await watch(w)).states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual((await watch(w)).states, BOTH);
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; /);
   assert.match(progress(w), /S-1 resumed \(session [^)]+\): the owner answered\n/);
   assert.equal(progress(w).match(/resumed/g).length, 1);
+});
+
+test('k run stopped releases the device its step holds: a resume waiting for a machine slot leaves the device free', async () => {
+  const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ndevice: ios.low'));
+  fakeRunner(w, () => (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));
+  await run({ ws: w.ws, id: w.id });
+  const device = () => w.ws.seams.resourceGuard.resources().find((x) => x.id === 'ios.low')?.state;
+  assert.equal(device(), 'free');
+  // No slot is free, so the resume waits for one holding its device, past any end of its own before the exit.
+  writeFileSync(join(w.home, 'machine.json'), JSON.stringify({ maxAgents: 0 }));
+  const { child, said, exited } = childRun(w);
+  await until(() => device() === `claimed by kirunak:${w.id}`, 'the resume never claimed its device');
+  child.kill('SIGINT');
+  assert.deepEqual(await exited, { code: 130, signal: null });
+  assert.equal(device(), 'free');
+  assert.match(said(), /S-1 still waits for the owner: the next k run resumes it/);
 });
 
 test('a k run that died while a resume waited for its slot leaves the step waiting: the next k run runs the job again and resumes', async () => {
@@ -484,7 +512,7 @@ test('a step a dead k run left running is failed, its claude killed, and retried
   assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; its claude (pid ${claude.pid}) was killed`), lines.join('\n'));
   assert.ok(lines.includes(`${w.id} S-2 is running by hand`));
   assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1'], 'S-1 is retried, S-2 left alone');
-  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'running' });
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'running', 'S-3': 'pending', 'S-4': 'pending' });
 });
 
 test('a dead k run\'s claude pid that a later process holds is left running; the step still fails and is retried', async () => {
@@ -542,7 +570,7 @@ test('a step whose k run\'s pid is now another process is failed and retried, as
     const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
     for (const s of ['S-1', 'S-2']) assert.ok(lines.includes(`${w.id} ${s} failed: the k run that started it (pid ${other.pid}) stopped`), lines.join('\n'));
     assert.equal(calls.length, 1, 'S-1 is retried');
-    assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+    assert.deepEqual(r.states, BOTH);
     assert.equal(alive(other.pid), true, 'the process that holds the pid now is left alone');
   } finally {
     other.kill();
@@ -564,6 +592,60 @@ test('a task lock whose pid is now another process, or that recorded no start, i
     }
   } finally {
     other.kill();
+  }
+});
+
+test('while ps cannot answer, a live k run\'s task lock refuses a second, and a step it runs is left running', async () => {
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w);
+  const lock = join(w.home, 'k-run', `${encodeURIComponent(w.id)}.json`);
+  mkdirSync(join(w.home, 'k-run'), { recursive: true });
+  writeFileSync(lock, JSON.stringify({ pid: other.pid, pidStart: start, task: w.id }));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: other.pid, krunStart: start, claude: null, claudeStart: null, started: start, ended: null, result: false } }));
+  const restore = fakePs('fails');
+  try {
+    await assert.rejects(run({ ws: w.ws, id: w.id }), new RegExp(`has a k run already \\(pid ${other.pid}\\)`));
+    assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, other.pid, 'the lock is not taken over');
+    rmSync(lock);
+    const lines = [];
+    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.ok(lines.includes(`${w.id} S-1 is running under pid ${other.pid}`), lines.join('\n'));
+    assert.equal(r.states['S-1'], 'running');
+    assert.doesNotMatch(progress(w), /S-1 failed/);
+    assert.equal(calls.length, 0, 'nothing started');
+  } finally {
+    restore();
+    other.kill();
+  }
+});
+
+test('while ps cannot answer, a step whose k run is dead and whose claude may still run is left running, its claude not killed', async () => {
+  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
+  const dead = spawnSync('true').pid;
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  const calls = fakeRunner(w);
+  const lines = [];
+  const restore = fakePs('fails');
+  try {
+    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.ok(lines.includes(`${w.id} S-1 is left running: ps gave no answer for pid ${claude.pid}, so its claude is believed to run`), lines.join('\n'));
+    assert.equal(alive(claude.pid), true, 'not killed');
+    assert.ok(existsSync(join(w.home, 'running', `${claude.pid}.json`)), 'its running file is kept');
+    assert.doesNotMatch(progress(w), /S-1 failed/);
+    assert.equal(r.states['S-1'], 'running');
+    assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 0, 'S-1 is not started again');
+  } finally {
+    restore();
+    claude.kill();
   }
 });
 
@@ -602,7 +684,7 @@ test('a heavy job past the cache\'s lifetime: k run keeps the conversation warm,
   w.ws.seams.runner.keepAlive = (sid, cwd, flags) => (keeps.push({ sid, cwd, flags, at: clock.now().toISOString() }), release(), { pid: null, done: Promise.resolve({ exitCode: 0, result: KEPT(sid) }) });
   const lines = [];
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, out: (l) => lines.push(l) });
-  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(r.states, BOTH);
   const sid = calls[0].sessionId;
   assert.deepEqual(keeps.map((x) => [x.sid, x.cwd, x.at, x.flags.env.KIRUNAK_STEP, x.flags.disallowedTools]), [[sid, w.p.root, '2026-11-03T12:50:00.000Z', 'S-1', ['Agent']]]);
   assert.equal(JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'keep-1.json'), 'utf8')).session_id, sid);
@@ -636,7 +718,7 @@ test('a keep-alive that never ends is killed at its deadline, and the step resum
   };
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, keepAliveMinutes: 0.002 });
   assert.equal(ended, 'SIGTERM', 'the keep-alive was killed at its deadline');
-  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(r.states, BOTH);
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.deepEqual(readLines(w.home)[0].reason, 'the keep-alive did not end within 0.002 minutes');
 });
@@ -658,7 +740,7 @@ test('a conversation that waits for the owner is skipped, never kept; after a lo
   assert.deepEqual(readLines(w.home).map((l) => [l.kind, l.reason]), [['skip', 'owner']]);
   clock.advance(180);
   const again = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
-  assert.deepEqual(again.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.deepEqual(again.states, BOTH);
   const [, miss] = readLines(w.home);
   assert.deepEqual([miss.kind, miss.session, miss.context], ['miss', sid, 90900]);
   assert.equal(miss.costWeight, 2 * 90900);
@@ -681,7 +763,7 @@ test('a resume that waits for a machine slot past the expiry: the wait is a skip
   w.ws.seams.machineGuard = { limits: () => ({ maxAgents: 1, maxHeavy: 1 }), running: () => (++looks === 2 && clock.advance(120), looks <= 2 ? [other] : []) };
   clock.advance(10);
   const again = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock });
-  assert.deepEqual([again.states, calls[1].resume], [{ 'S-1': 'done', 'S-2': 'done' }, sid]);
+  assert.deepEqual([again.states, calls[1].resume], [BOTH, sid]);
   const [, wait, resumed] = readLines(w.home);
   assert.deepEqual([wait.kind, wait.ts, resumed.kind, resumed.ts], ['skip', '2026-11-03T12:10:00.000Z', 'miss', '2026-11-03T14:10:00.000Z']);
   assert.match(wait.reason, /^the resume waits for a machine slot, not kept warm meanwhile: 1 of 1 steps run: other\/task S-1/);
