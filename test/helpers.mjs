@@ -68,6 +68,22 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}
   return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
 }
 
+// A fake `ps` first on PATH until the returned function is called: 'fails' exits 2, 'garbled' prints no elapsed time,
+// 'gone' says no such process (exit 1), 'missing' leaves nothing on PATH at all, so no ps.
+export function fakePs(kind) {
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-ps-'));
+  const body = { fails: 'echo "ps: cannot get process info" >&2\nexit 2', garbled: 'echo "not a time"', gone: 'exit 1' }[kind];
+  if (body) {
+    writeFileSync(join(dir, 'ps'), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(dir, 'ps'), 0o755);
+  }
+  const was = process.env.PATH;
+  process.env.PATH = kind === 'missing' ? dir : `${dir}:${was}`;
+  return () => {
+    process.env.PATH = was;
+  };
+}
+
 // The invented workspace with its task approved (and so queued) and the given plan.md.
 export async function approvedWorkspace(plan) {
   const w = await makeWorkspace();

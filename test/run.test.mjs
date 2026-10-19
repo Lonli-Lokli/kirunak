@@ -11,7 +11,7 @@ import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
 import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, fakeClaude, k, KIRUNAK } from './helpers.mjs';
+import { approvedWorkspace, fakeClaude, fakePs, k, KIRUNAK } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -592,6 +592,60 @@ test('a task lock whose pid is now another process, or that recorded no start, i
     }
   } finally {
     other.kill();
+  }
+});
+
+test('while ps cannot answer, a live k run\'s task lock refuses a second, and a step it runs is left running', async () => {
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w);
+  const lock = join(w.home, 'k-run', `${encodeURIComponent(w.id)}.json`);
+  mkdirSync(join(w.home, 'k-run'), { recursive: true });
+  writeFileSync(lock, JSON.stringify({ pid: other.pid, pidStart: start, task: w.id }));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: other.pid, krunStart: start, claude: null, claudeStart: null, started: start, ended: null, result: false } }));
+  const restore = fakePs('fails');
+  try {
+    await assert.rejects(run({ ws: w.ws, id: w.id }), new RegExp(`has a k run already \\(pid ${other.pid}\\)`));
+    assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, other.pid, 'the lock is not taken over');
+    rmSync(lock);
+    const lines = [];
+    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.ok(lines.includes(`${w.id} S-1 is running under pid ${other.pid}`), lines.join('\n'));
+    assert.equal(r.states['S-1'], 'running');
+    assert.doesNotMatch(progress(w), /S-1 failed/);
+    assert.equal(calls.length, 0, 'nothing started');
+  } finally {
+    restore();
+    other.kill();
+  }
+});
+
+test('while ps cannot answer, a step whose k run is dead and whose claude may still run is left running, its claude not killed', async () => {
+  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
+  const dead = spawnSync('true').pid;
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  const calls = fakeRunner(w);
+  const lines = [];
+  const restore = fakePs('fails');
+  try {
+    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.ok(lines.includes(`${w.id} S-1 is left running: ps gave no answer for pid ${claude.pid}, so its claude is believed to run`), lines.join('\n'));
+    assert.equal(alive(claude.pid), true, 'not killed');
+    assert.ok(existsSync(join(w.home, 'running', `${claude.pid}.json`)), 'its running file is kept');
+    assert.doesNotMatch(progress(w), /S-1 failed/);
+    assert.equal(r.states['S-1'], 'running');
+    assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 0, 'S-1 is not started again');
+  } finally {
+    restore();
+    claude.kill();
   }
 });
 

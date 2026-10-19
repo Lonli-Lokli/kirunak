@@ -78,8 +78,10 @@ pending  →  ready  →  running  →  done
   collect its result) and fails the step: `the k run that started it stopped`. The claude is the record's pid (and
   its `running/` file's) only while that pid still started when the record's `claudeStart` (or the file's `since`)
   says, within a minute (pids are reused); any other process now holding the pid, or a record with no start, is left
-  running and named (`pid N is not the claude of that run`), and the step still fails. A step started by hand has
-  neither: `k run` names it and leaves it.
+  running and named (`pid N is not the claude of that run`), and the step still fails. A pid whose start `ps` cannot
+  tell (it did not start or failed, `plugins.md` §2) is believed to be what the file says: such a `k run` still runs,
+  and a step whose claude may still run is left `running`, nothing killed or failed (`ps gave no answer for pid N`),
+  for a later `k run` to decide. A step started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same

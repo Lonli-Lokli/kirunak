@@ -52,11 +52,15 @@ own implementations live in the workspace's repo, beside its config (D2).
   (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from a file can name another
   process by now (pids are reused): a pid is the same process only while it started when the file says (`isStill`:
   now less the elapsed time `ps -o etime=` prints, within a minute of it), and a pid this user cannot signal is never
-  kirunak's. So an owner or a queue line is alive only while its pid is still the process that started at its
-  `pidStart`; one with no `pidStart` is dead. A dead waiter's line goes, and a lock whose owner is dead is taken over
-  on the next try, after whatever is left of its job's group is ended (TERM, then KILL), but only while `job` is
-  still the process that started at `jobStart`; a group this user cannot signal, a job with no `jobStart`, or one
-  that started at another time is left alone. `claim` and `release` record claims in `guard/claims.json` (resource,
+  kirunak's. `isStill` has three answers: true, false (a start that is off, no start recorded, or `ps` saying no such
+  process, exit 1), and unknown (`ps` did not start, as when a fork is refused, or exited otherwise, or printed no
+  elapsed time). Unknown is never killed and never read as gone: a live pid whose start `ps` cannot tell is believed
+  to be that process, and the wait ends when `ps` answers. So an owner or a queue line is alive only while its pid is
+  still the process that started at its `pidStart` (or `ps` cannot tell); one with no `pidStart` is dead. A dead
+  waiter's line goes, and a lock whose owner is dead is taken over on the next try, after whatever is left of its
+  job's group is ended (TERM, then KILL), but only while `job` is still the process that started at `jobStart`; a
+  group this user cannot signal, a job with no `jobStart`, or one that started at another time is left alone, and one
+  whose start `ps` cannot tell is waited for. `claim` and `release` record claims in `guard/claims.json` (resource,
   by, why, until); `resources()` lists what was ever claimed. Every job appends one line to `guard/log.jsonl` (what,
   session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected
