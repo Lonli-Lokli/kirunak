@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readRecord } from '../lib/approval.mjs';
+import { accept, hashBytes, readRecord } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { approvedWorkspace, k, sh } from './helpers.mjs';
@@ -118,6 +118,29 @@ test('a review step finishes only when its review passes k review check', async 
   put(w, 'review.md', review(rows));
   assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status, 0);
   assert.equal(steps.load(w.ws, w.id).states.get('S-2').state, 'done');
+});
+
+test('a review step finishes with its file\'s hash; k accept and k checklist take the review only as it was then', async () => {
+  const w = await implemented();
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
+  const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file docs/offline.md:1 |`).join('\n');
+  const text = `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`;
+  put(w, 'review.md', text);
+  assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status, 0);
+  const progress = readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
+  assert.match(progress, new RegExp(`S-2 finished \\(review\\.md ${hashBytes(Buffer.from(text))}\\)\n$`));
+  // Edited after: still in the grammar, but not the file its step wrote.
+  put(w, 'review.md', text.replace('| E-1 | met | file docs/offline.md:1 |', '| E-1 | met | file docs/offline.md:1, read again |'));
+  const changed = /review\.md was changed after S-2, its review step, finished: run a new review \(a review step whose output is review-2\.md\)$/;
+  assert.throws(() => accept({ ws: w.ws, id: w.id, checklistOpen: 'nothing to check' }), changed);
+  assert.match(k(w.home, ['checklist', w.id]).stderr.trim(), changed);
+  // A finished line with no hash proves nothing either.
+  put(w, 'review.md', text);
+  writeFileSync(join(w.p.dir, 'progress.md'), progress.replace(/ \(review\.md sha256:[0-9a-f]+\)/, ''));
+  assert.throws(() => accept({ ws: w.ws, id: w.id }), /S-2 finished without recording review\.md's hash, so nothing shows the file is as it wrote it: run a new review/);
+  writeFileSync(join(w.p.dir, 'progress.md'), progress);
+  assert.equal(accept({ ws: w.ws, id: w.id }).state, 'done');
 });
 
 test('k run runs a review in a fresh conversation on models.review; a review that fails the grammar fails, and the retry reads why', async () => {

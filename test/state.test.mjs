@@ -46,12 +46,12 @@ const CASES = {
     put('review.md', REVIEW);
   },
   reviewed: ({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: met'));
+    reviewsRan(dir);
   },
   'awaiting owner': ({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: needs owner (E-1)', 'needs owner | Read: the age line'));
+    reviewsRan(dir);
     put('checklist.md', '- [ ] E-1 Read: the age line reads naturally (review.md)\n');
   },
   done: ({ put }) => put('done.json', '{"task":"weather/offline-forecast"}\n'),
@@ -104,16 +104,25 @@ test('the latest review wins', () => {
   assert.equal(stateOf(f), 'in review');
 });
 
-test('in review while the latest review fails the grammar or no finished review step wrote it', () => {
+test('in review while the latest review fails the grammar or no finished review step wrote it as it stands', () => {
   const id = 'weather/offline-forecast';
   assert.equal(stateOf({ ...folder(({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: met').replace(/\| met \| (test|file) [^|]*\|/g, '| met | it works |'));
+    reviewsRan(dir);
   }), id }), 'in review', 'rows met without evidence');
   assert.equal(stateOf({ ...folder(({ dir, put }) => {
-    reviewsRan(dir);
     put('review.md', SOUND('verdict: met', 'Needs owner | Read: the age line'));
+    reviewsRan(dir);
   }), id }), 'in review', 'a verdict that is not one of the four');
+  assert.equal(stateOf({ ...folder(({ dir, put }) => {
+    put('review.md', SOUND('verdict: needs owner (E-1)', 'needs owner | Read: the age line'));
+    reviewsRan(dir);
+    put('review.md', SOUND('verdict: met'));
+  }), id }), 'in review', 'changed after its step finished');
+  assert.equal(stateOf({ ...folder(({ dir, put }) => {
+    reviewsRan(dir);
+    put('review.md', SOUND('verdict: met'));
+  }), id }), 'in review', 'its step finished with no hash of the file');
   assert.equal(stateOf({ ...folder(({ dir, put }) => {
     reviewsRan(dir);
     put('progress.md', '2026-11-06 10:00 S-2 failed: k review check\n2026-11-06 11:00 S-2 failed: k review check\n2026-11-06 11:00 S-2 escalated\n');

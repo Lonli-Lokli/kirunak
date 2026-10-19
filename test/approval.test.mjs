@@ -302,6 +302,7 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: pass', false));
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'no review yet' }), /review\.md is not a review k accept takes:\n {2}line 13: verdict: pass is not verdict: met/);
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: met', false));
+  reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   const head = sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
   const r = accept({ ws, id: ID, via: 'mod', now: NOV7 });
@@ -323,8 +324,8 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
 test('accept with a review: every item the owner checks is ticked, or it refuses naming them; --checklist-open is recorded', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
-  reviewsRan(taskDir(weather));
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW('verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   assert.throws(() => accept({ ws, id: ID }), new RegExp(`2 unticked item\\(s\\), 2 not in checklist\\.md yet \\(k checklist ${ID} writes them from review\\.md\\):\n {2}- \\[ \\] AC-3 On a phone: restart offline \\(review\\.md\\)\n {2}- \\[ \\] E-1`));
   generate(ws, ID);
@@ -344,9 +345,9 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
 test('accept refuses a not met verdict, --checklist-open or not: the way out is an amendment or a new review', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
-  reviewsRan(taskDir(weather));
   const notMet = REVIEW('verdict: not met (AC-2)', false).replace('| AC-2 | met | file docs/offline.md:1 |', '| AC-2 | not met | a fixed 24-hour format |');
   writeFileSync(join(taskDir(weather), 'review.md'), notMet);
+  reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   const way = new RegExp(`review\\.md ends verdict: not met \\(AC-2\\), which k accept never takes: amend the task \\(k amend new ${ID}\\) and review again, or run a new review$`);
   assert.throws(() => accept({ ws, id: ID }), way);

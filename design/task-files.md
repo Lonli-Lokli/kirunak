@@ -108,7 +108,8 @@ parser of about a hundred lines with no dependency.
   accepted`). The `[owner ... Q-n]` tags point here. An entry is never edited; a changed mind is a new entry.
 - `plan.md`: `orchestrator.md` §1.
 - `progress.md`: one line per event, appended by `k step start|finish|fail`, `k heavy`, `k review`: `2026-11-03
-  14:02 S-2 started (opus, session 7c1…)`. Readable, and the board's source for "where is it".
+  14:02 S-2 started (opus, session 7c1…)`. A review step's `finished` line carries its file's hash, `2026-11-07
+  10:40 S-4 finished (review.md sha256:…)` (`review.md` §2). Readable, and the board's source for "where is it".
 - `notes.md`: free text for whoever works on the task; pointers to research, dead ends. Never read by the reviewer.
 - `review.md`, `checklist.md`: `review.md` in this folder.
 - `handoff.md`: written at closing when the workspace's `handoff` seam points there (the core's default does,
@@ -130,8 +131,8 @@ are a state field agents rewrite; a state read from files that only named comman
 | ready | approval record with a matching hash; no step started in `progress.md` | the owner: `k approve` |
 | blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces | the plan |
 | in progress | a step started in `progress.md`; no `review.md` verdict | `k step start` (the orchestrator or a session) |
-| in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it | `k review start` |
-| reviewed | the latest review passes the grammar and its review step finished in `progress.md`; no `done.json` | the review step |
+| in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it as it stands (the hash on the step's `finished` line) | `k review start` |
+| reviewed | the latest review passes the grammar and its review step finished in `progress.md` with the file's hash; no `done.json` | the review step |
 | awaiting owner | `checklist.md` has an unticked item, or reviewed | `k checklist` |
 | done | `done.json` exists | the owner: `k accept` (through `/k-done`) |
 | on hold | `hold.md` exists (why, date) and no `done.json` | the owner: `k hold` / `k resume` |

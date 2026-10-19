@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hashBytes } from '../lib/approval.mjs';
 import { loadWorkspace } from '../lib/workspace.mjs';
 
 export const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
@@ -79,9 +80,11 @@ export async function approvedWorkspace(plan) {
 }
 
 // plan.md with a review step per file (S-2 writes the first, S-3 the second, ...) and progress.md where each one
-// finished: what makes a review in the grammar one that k accept, k checklist and the task's state take.
+// finished, with the hash of the file as it is now (none for a file not written yet): what makes a review in the
+// grammar one that k accept, k checklist and the task's state take, until the file changes.
 export function reviewsRan(taskDir, files = ['review.md']) {
   const steps = files.map((f, i) => `### S-${i + 2} Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff, evidence/\noutputs: ${f}\n`);
   writeFileSync(join(taskDir, 'plan.md'), ['### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n', ...steps].join('\n'));
-  writeFileSync(join(taskDir, 'progress.md'), files.map((_, i) => `2026-11-06 1${i}:00 S-${i + 2} finished\n`).join(''));
+  const hash = (f) => (existsSync(join(taskDir, f)) ? ` (${f} ${hashBytes(readFileSync(join(taskDir, f)))})` : '');
+  writeFileSync(join(taskDir, 'progress.md'), files.map((f, i) => `2026-11-06 1${i}:00 S-${i + 2} finished${hash(f)}\n`).join(''));
 }

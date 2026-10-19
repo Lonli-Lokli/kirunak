@@ -36,6 +36,7 @@ test('k checklist lists exactly the needs device and needs owner rows of the lat
   writeFileSync(join(p.dir, 'review.md'), reviewText(ROWS, ''));
   assert.match(k(w.home, ['checklist', ID]).stderr, /review\.md is not a finished review; the checklist comes from one:\n {2}line 12: the last line is the verdict: verdict: not met \(AC-2\)/);
   writeFileSync(join(p.dir, 'review.md'), reviewText(ROWS, 'verdict: not met (AC-2)'));
+  reviewsRan(p.dir, ['review.md', 'review-2.md']);
   const r = k(w.home, ['checklist', ID]);
   assert.equal(r.status, 0, r.stderr);
   const items = [
@@ -51,6 +52,7 @@ test('k checklist lists exactly the needs device and needs owner rows of the lat
   assert.match(readFileSync(file, 'utf8'), /^- \[x\] AC-3 .*\(review\.md\)\n- \[ \] E-1/, 'an unchanged item keeps the owner\'s tick');
   const second = [ROWS[0], '| AC-2 | met | file docs/offline.md:1 |', '| AC-3 | needs device | |', ROWS[3]];
   writeFileSync(join(p.dir, 'review-2.md'), reviewText(second, 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(p.dir, ['review.md', 'review-2.md']);
   assert.equal(k(w.home, ['checklist', ID]).status, 0);
   assert.equal(readFileSync(file, 'utf8'), [
     '- [ ] AC-3 Both phone platforms keep the last forecast across a restart. (review-2.md)',
@@ -62,9 +64,9 @@ test('k checklist on a review with every row met writes an empty checklist', asy
   const w = await makeWorkspace();
   const p = taskPaths(w.ws, ID);
   writeFileSync(join(p.dir, 'checklist.md'), '- [ ] E-1 from an older review (review.md)\n');
-  reviewsRan(p.dir);
   const met = ROWS.map((r) => r.replace(/\| (not met|needs device|needs owner) \|.*$/, '| met | file docs/offline.md:1 |'));
   writeFileSync(join(p.dir, 'review.md'), reviewText(met, 'verdict: met'));
+  reviewsRan(p.dir);
   const r = k(w.home, ['checklist', ID]);
   assert.equal(r.stdout, `${join(p.dir, 'checklist.md')}: 0 items from review.md\n`);
   assert.equal(readFileSync(join(p.dir, 'checklist.md'), 'utf8'), '');

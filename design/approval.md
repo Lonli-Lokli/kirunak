@@ -116,7 +116,8 @@ under 100 ms).
 4. prints the state line (`ready, queue place 3`) and appends `events.jsonl` (the mod's toast).
 
 `k accept <id>`: refuses unless the latest review (`review.md`, `review-2.md`, ...) counts, that is it passes
-`k review check` and the review step whose output it is has `finished` in `progress.md` (`review.md` §2), and every
+`k review check` and the review step whose output it is has `finished` in `progress.md` with the file's hash, so a
+review changed after its step finished is refused and the way out is a new review (`review.md` §2), and every
 `checklist.md` item is ticked or the owner passes `--checklist-open "<why>"` (recorded in `done.json`); a refusal
 names each problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses
 `verdict: not met (<ids>)` whatever the flags, `--checklist-open` included, which waives checklist items and never a

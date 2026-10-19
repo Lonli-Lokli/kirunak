@@ -60,8 +60,11 @@ verdict: not met (AC-2)
   the step's output check (`outputs: review.md`), and a review that fails the grammar fails the step.
 - A second review after fixes is a new step (`S-review-2`), a new file `review-2.md`; `k list` reads the latest.
 - A review counts only while it passes the grammar and the review step whose output it is has `finished` in
-  `progress.md`: a review file whose step failed, escalated or never ran, or one no review step names, is not a
-  review. Until then `k list` shows the task `in review`; it checks the grammar without git (it runs no git
+  `progress.md` with the file as it stands: `k step finish` of a review step records the file's hash on its line,
+  `S-review finished (review.md sha256:…)`, and a review whose bytes no longer match it was changed after its step
+  finished (a row turned `met` by hand, a verdict rewritten). A review file whose step failed, escalated or never ran,
+  one no review step names, one changed after its step finished, and one whose `finished` line records no hash are
+  not reviews; the way out is a new review (a new step and file, below). Until then `k list` shows the task `in review`; it checks the grammar without git (it runs no git
   command, `boards.md` §1), so a cited path missing at head shows at `k review check`, `k checklist` and `k accept`.
 
 ## 3. The owner's checklist (R15)
