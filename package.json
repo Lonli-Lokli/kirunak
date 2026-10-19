@@ -5,6 +5,6 @@
   "license": "MIT",
   "type": "module",
   "bin": { "k": "bin/k.mjs" },
-  "scripts": { "test": "node --test 'test/*.test.mjs'" },
+  "scripts": { "test": "node --test 'test/*.test.mjs'", "test:mod": "claude plugin validate mods/kirunak && claude plugin test mods/kirunak" },
   "engines": { "node": ">=22" }
 }

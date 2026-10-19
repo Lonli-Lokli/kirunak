@@ -1,0 +1,7 @@
+{
+  "name": "kirunak",
+  "version": "0.1.0",
+  "description": "kirunak's working view in Claude Code: the owner's /k-approve, /k-accept, /k-hold and /k-start, a pane, a line above the prompt and toasts",
+  "author": { "name": "kirunak" },
+  "license": "MIT"
+}
