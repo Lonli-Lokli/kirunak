@@ -13,6 +13,7 @@ const COMMIT_MS = 600_000
 const EVERY_MS = 30_000
 
 const PANE = 'kirunak'
+const FAILED = (name: string): string => `/${name} failed in the mod (the debug log says why); if k had started, \`k list --all\` shows whether it took.`
 // The read's value, which reads.ts writes; the scan wants the reference written in the file that reads it.
 const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
 
@@ -62,10 +63,13 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'k-approve' }, ($, e) => ownerVerb($, e, 'k-approve', 'approve'))
-  on('command.run', { command: 'k-accept' }, ($, e) => ownerVerb($, e, 'k-accept', 'accept'))
-  on('command.run', { command: 'k-hold' }, ($, e) => ownerVerb($, e, 'k-hold', 'hold'))
-  on('command.run', { command: 'k-start' }, ($, e) => ownerVerb($, e, 'k-start', 'start'))
+  // A hook that fails answers with the mod's own line instead of the engine's (review G22). The engine runs nothing
+  // for a registered command whose hook failed either way; a failure after k started cannot be ruled out, so the line
+  // says where to look.
+  on('command.run', { command: 'k-approve' }, ($, e) => ownerVerb($, e, 'k-approve', 'approve')).catch(() => ({ text: FAILED('k-approve') }))
+  on('command.run', { command: 'k-accept' }, ($, e) => ownerVerb($, e, 'k-accept', 'accept')).catch(() => ({ text: FAILED('k-accept') }))
+  on('command.run', { command: 'k-hold' }, ($, e) => ownerVerb($, e, 'k-hold', 'hold')).catch(() => ({ text: FAILED('k-hold') }))
+  on('command.run', { command: 'k-start' }, ($, e) => ownerVerb($, e, 'k-start', 'start')).catch(() => ({ text: FAILED('k-start') }))
 
   on('command.run', { command: 'kirunak' }, async $ => {
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
@@ -75,7 +79,7 @@ export const register: Register = on => {
     const opened = await $.ui.open({ id: PANE, title: 'kirunak' })
     void refresh($)
     return { text: opened.isPlaced ? 'kirunak: the pane is open.' : `kirunak: the pane waits: ${opened.reason}` }
-  })
+  }).catch(() => ({ text: 'kirunak: the pane could not be opened or closed; the debug log says why.' }))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)

@@ -41,7 +41,7 @@ type Answer = { exitCode: number; stdout: string; stderr: string }
 // The world beneath the mod: a clock, the commands it registers, its session's id, a k that exists and answers
 // `k list` and `k status` from the fixtures above (each owner verb with `verb`), events.jsonl's lines as tail would
 // print them, and the toasts and panes the mod raised.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[] } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, tails: [] as string[][], toasts: [] as string[], panes: new Set<string>() }
   on('command.register', ($, e) => {
@@ -50,7 +50,8 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-1' }))
-  on('fs.exists', () => ({ value: true }))
+  // `broken` makes the mod's first question about k fail, as a hook that throws.
+  on('fs.exists', () => (broken ? { deny: 'the disk is gone' } : { value: true }))
   on('process.run', ($, e) => {
     const [, , what] = e.argv
     let answer = verb

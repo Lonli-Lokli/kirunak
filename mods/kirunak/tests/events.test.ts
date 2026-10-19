@@ -19,6 +19,17 @@ describe('the reads and the toasts', () => {
     expect([2, 3]).toContain(w.reads)
   })
 
+  test('a tail that ended is started again by the 30 s tick, and never by a read a command asked for', async ($, on) => {
+    const w = world(on)
+    await start($, w)
+    expect(w.tails.length).toBe(1)
+    await $.command.run({ command: 'k-start', args: ID, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
+    await w.clock.settle()
+    expect([w.reads, w.tails.length]).toEqual([2, 1])
+    await w.clock.advance(30_000)
+    expect([w.reads, w.tails.length]).toEqual([3, 2])
+  })
+
   test('k list and k status run once at the start, then no more than every 30 s', async ($, on) => {
     const w = world(on)
     await start($, w)

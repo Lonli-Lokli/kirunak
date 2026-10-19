@@ -71,6 +71,8 @@ describe('the owner\'s commands', () => {
     const w = world(on)
     const cases: [string, string, RegExp][] = [
       ['k-accept', `${ID} --via shell`, /--via is the mod's own\. Nothing ran\./],
+      ['k-accept', `${ID} --constructor x`, /\/k-accept takes no --constructor\. Nothing ran\./],
+      ['k-approve', `${ID} --toString`, /\/k-approve takes no --toString\. Nothing ran\./],
       ['k-accept', `${ID} --first`, /\/k-accept takes no --first\. Nothing ran\./],
       ['k-approve', `${ID} --amendment`, /--amendment needs a value\. Nothing ran\./],
       ['k-approve', 'not-an-id', /not a task id: not-an-id\. Nothing ran\./],
@@ -82,6 +84,12 @@ describe('the owner\'s commands', () => {
     for (const [command, args, want] of cases) {
       expect((await run($, command, args, { kind: 'composer' })).text).toMatch(want)
     }
+    expect(w.runs).toEqual([])
+  })
+
+  test('a hook that fails answers with the mod\'s own line, and k never runs', async ($, on) => {
+    const w = world(on, { broken: true })
+    expect((await run($, 'k-accept', ID, { kind: 'composer' })).text).toBe('/k-accept failed in the mod (the debug log says why); if k had started, `k list --all` shows whether it took.')
     expect(w.runs).toEqual([])
   })
 

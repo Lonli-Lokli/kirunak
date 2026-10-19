@@ -73,7 +73,8 @@ export function argvFor(verb: Verb, text: string): { argv: string[] } | { proble
     }
     const eq = w.indexOf('=')
     const name = eq > 0 ? w.slice(2, eq) : w.slice(2)
-    const takes = FLAGS[verb][name]
+    // Own names only, so `--constructor` or `--toString` is no flag of the table (review G21).
+    const takes = Object.hasOwn(FLAGS[verb], name) ? FLAGS[verb][name] : undefined
     if (takes === undefined) return { problem: name === 'via' ? '--via is the mod\'s own' : `/k-${verb} takes no --${name}` }
     if (!takes) {
       if (eq > 0) return { problem: `--${name} takes no value` }

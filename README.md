@@ -72,7 +72,7 @@ You need Node 22 or later, git and Claude Code.
    session:
 
    ```json
-   "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/absolute/path/to/kirunak/mods/kirunak" }
+   "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/code/kirunak/mods/kirunak" }
    ```
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
