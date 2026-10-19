@@ -1,12 +1,17 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { KirunakBoard } from '../types'
+import type { KirunakBoard, KirunakRow } from '../types'
 import { toastFor } from './board'
 
-// kirunak's command line, from the same checkout as this mod: mods/kirunak/../../bin/k.mjs.
-export function kOf($: EngineInterface): string {
-  return `${$.plugin.root}/../../bin/k.mjs`
+// kirunak's command line, from the same checkout as this mod: mods/kirunak/../../bin/k.mjs, from the folder's real
+// path, so a mod loaded through a link (a mods folder's) still finds its checkout's k.
+export async function kOf($: EngineInterface): Promise<string> {
+  const root = await $.fs.stat($.plugin.root, { resolve: true }).then(
+    s => s.realPath ?? $.plugin.root,
+    () => $.plugin.root,
+  )
+  return `${root}/../../bin/k.mjs`
 }
 
 const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
@@ -19,7 +24,7 @@ let following = false
 let last: KirunakBoard | null = null
 
 async function readBoard($: EngineInterface): Promise<void> {
-  const k = kOf($)
+  const k = await kOf($)
   const at = await $.clock.now()
   try {
     const session = await $.session.id()
@@ -91,4 +96,9 @@ function follow($: EngineInterface, home: string): void {
 // The task the last read found for this session (k start's record), if any.
 export function sessionTask(): string | null {
   return last?.status?.session?.task ?? null
+}
+
+// The rows of the last read, for the typeahead, which must not wait on a read of its own.
+export function lastRows(): readonly KirunakRow[] {
+  return last?.rows ?? []
 }

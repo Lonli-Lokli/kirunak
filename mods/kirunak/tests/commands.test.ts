@@ -42,7 +42,7 @@ describe('the owner\'s commands', () => {
   for (const kind of ['composer', 'bridge'] as const) {
     test(`from ${kind}: each verb runs k with --via mod and prints the state line`, async ($, on) => {
       const w = world(on)
-      expect((await run($, 'k-accept', ID, { kind })).text).toBe(`${ID}: done`)
+      expect((await run($, 'k-accept', ID, { kind })).text).toBe(kind === 'bridge' ? `${ID}: done\n(typed in Remote Control)` : `${ID}: done`)
       await run($, 'k-approve', `${ID} --amendment A-2 --first`, { kind })
       await run($, 'k-hold', `${ID} waiting for the phone test`, { kind })
       await run($, 'k-start', ID, { kind })
@@ -75,6 +75,8 @@ describe('the owner\'s commands', () => {
       ['k-approve', `${ID} --toString`, /\/k-approve takes no --toString\. Nothing ran\./],
       ['k-accept', `${ID} --first`, /\/k-accept takes no --first\. Nothing ran\./],
       ['k-approve', `${ID} --amendment`, /--amendment needs a value\. Nothing ran\./],
+      ['k-hold', `${ID} --why --dry-run`, /--why needs a value, not --dry-run\. Nothing ran\./],
+      ['k-accept', `${ID} --checklist-open=--dry-run`, /--checklist-open needs a value, not --dry-run\. Nothing ran\./],
       ['k-approve', 'not-an-id', /not a task id: not-an-id\. Nothing ran\./],
       ['k-start', '', /which task\? give its id, <repo>\/<slug>\. Nothing ran\./],
       ['k-start', `${ID} extra`, /unexpected extra\. Nothing ran\./],

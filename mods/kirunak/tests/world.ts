@@ -25,7 +25,19 @@ export const ROWS: KirunakRow[] = [
   },
   { id: 'hub/sync-notes', repo: 'hub', title: 'Sync notes', state: 'ready', queue: 2, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
   { id: 'hub/old', repo: 'hub', title: 'Done before', state: 'done', queue: null, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
+  { id: 'weather/was-reviewed', repo: 'weather', title: 'Reviewed and met', state: 'reviewed', queue: null, step: null, lock: null, review: { file: 'review.md', verdict: 'met' }, checklist: null, ac: [], e: [] },
+  { id: 'hub/proposed', repo: 'hub', title: 'Asks for approval', state: 'proposed', queue: null, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
+  { id: 'weather/asks-owner', repo: 'weather', title: 'A step asked a question', state: 'awaiting owner', queue: null, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
 ]
+
+// What `k waiting --json` gives for those rows.
+export const WAITING = {
+  approve: [{ id: 'hub/proposed', title: 'Asks for approval', why: null }],
+  accept: [
+    { id: 'weather/was-reviewed', title: 'Reviewed and met', review: { file: 'review.md', verdict: 'met' }, why: null },
+    { id: ID, title: 'The last forecast stays readable offline', review: { file: 'review.md', verdict: 'needs owner (E-1)' }, why: `${ID}: checklist.md has 1 unticked item(s):\n  - [ ] E-1 On the oldest phone. (review.md)` },
+  ],
+}
 
 export const status = (task: string | null): KirunakStatus => ({
   home: '/h/.kirunak',
@@ -41,7 +53,7 @@ type Answer = { exitCode: number; stdout: string; stderr: string }
 // The world beneath the mod: a clock, the commands it registers, its session's id, a k that exists and answers
 // `k list` and `k status` from the fixtures above (each owner verb with `verb`), events.jsonl's lines as tail would
 // print them, and the toasts and panes the mod raised.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (typeof WAITING | null)[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, tails: [] as string[][], toasts: [] as string[], panes: new Set<string>() }
   on('command.register', ($, e) => {
@@ -52,12 +64,20 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
   on('session.id', () => ({ value: 'sess-1' }))
   // `broken` makes the mod's first question about k fail, as a hook that throws.
   on('fs.exists', () => (broken ? { deny: 'the disk is gone' } : { value: true }))
+  // The mod's folder, or with `linkedTo` a link to that folder.
+  on('fs.stat', ($, e) => ({ value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: linkedTo !== null, realPath: linkedTo ?? e.path } }))
+  on('prompt.autocomplete', () => ({ suggestions: [{ text: 'engine-row' }] }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('process.run', ($, e) => {
     const [, , what] = e.argv
     let answer = verb
     if (what === 'list' || what === 'status') {
       w.reads += what === 'list' ? 1 : 0
       answer = { exitCode: 0, stdout: JSON.stringify(what === 'list' ? { rows: ROWS } : status(task)), stderr: '' }
+    } else if (what === 'waiting') {
+      // Each `k waiting` takes the next answer, the last one again once they run out; null is a k that failed.
+      const next = waiting.length > 1 ? waiting.shift() : waiting[0]
+      answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
     } else {
       w.runs.push([...e.argv])
     }

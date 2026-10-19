@@ -1,0 +1,2 @@
+# Written by Claude Code when it loads a mod from its folder (its types are ignored by their own .gitignore).
+mods/*/tsconfig.json

@@ -23,8 +23,8 @@ const FLAGS: Record<Verb, Record<string, boolean>> = {
 }
 
 export const HINTS: Record<Verb, string> = {
-  approve: '<id> [--amendment A-n] [--first | --before <id> | --after <id>] [--no-queue]',
-  accept: '<id> [--checklist-open "<why>"]',
+  approve: '[<id> | <n>] [--amendment A-n] [--first | --before <id> | --after <id>] [--no-queue]',
+  accept: '[<id> | <n>] [--checklist-open "<why>"]',
   hold: '<id> <why>',
   start: '<id>',
 }
@@ -83,6 +83,8 @@ export function argvFor(verb: Verb, text: string): { argv: string[] } | { proble
     }
     const value = eq > 0 ? w.slice(eq + 1) : rest[++i]
     if (value === undefined || value === '') return { problem: `--${name} needs a value` }
+    // As k's parseArgs: a value is never a flag (review G24).
+    if (value.startsWith('--')) return { problem: `--${name} needs a value, not ${value}` }
     flags.push(`--${name}`, value)
   }
   // A hold's reason may be the rest of the line, unquoted.

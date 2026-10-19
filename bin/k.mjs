@@ -54,6 +54,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k queue remove <id>
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] | k verify [<id>] | k queue show
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
+          k waiting: what waits for the owner, to approve and to accept, and what each verb would refuse
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
@@ -76,6 +77,9 @@ export function parseArgs(argv) {
     else if (BOOLEAN.has(name)) value = true;
     else if (i + 1 < argv.length) value = argv[++i];
     else throw usage(`--${name} needs a value`);
+    // A value is never a flag: `--checklist-open --dry-run` would otherwise run for real while the freeze hook, which
+    // lets any line with the word --dry-run through, took it for a dry run (review G24).
+    if (typeof value === 'string' && value.startsWith('--')) throw usage(`--${name} needs a value, not ${value}`);
     // A repeated flag (`--git a --git b`) collects its values.
     flags[name] = name in flags && value !== true ? [flags[name], value].flat() : value;
   }
@@ -354,7 +358,10 @@ const VERBS = {
 
   async accept({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
-    if (flags['dry-run']) return { text: `would accept ${id}` };
+    if (flags['dry-run']) {
+      const r = approval.accept({ ws, id, checklistOpen: flags['checklist-open'], dryRun: true });
+      return { ...r, text: `would accept ${id} (${r.review}, verdict: ${r.verdict})${r.openItems.length ? `, with ${r.openItems.length} checklist item(s) open` : ''}` };
+    }
     // The task's cost, read before the accept, which records it in done.json and commits cost.md rendered from it; a
     // cost that cannot be read (the records, or a baseline that does not parse) is recorded as why and never stops
     // the accept.
@@ -424,6 +431,33 @@ const VERBS = {
   async list({ ws, flags }) {
     const rows = await list.rows(ws, { repo: flags.repo, all: !!flags.all });
     return { rows, text: list.format(rows) || 'no task' };
+  },
+
+  // What waits for the owner, for the mod's /k-approve and /k-accept with no id (boards.md §4): the proposed tasks
+  // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
+  async waiting({ ws }) {
+    const rows = await list.rows(ws);
+    const approve = [];
+    for (const r of rows.filter((x) => x.state === 'proposed')) {
+      const problems = await approvalProblems(ws, r.id);
+      approve.push({ id: r.id, title: r.title, why: problems.length ? problems.join('; ') : null });
+    }
+    // A task awaiting the owner with no review asked a question in progress (lib/state.mjs): nothing to accept (G26).
+    const accept = rows.filter((x) => (x.state === 'reviewed' || x.state === 'awaiting owner') && x.review).map((r) => {
+      try {
+        approval.accept({ ws, id: r.id, dryRun: true });
+        return { id: r.id, title: r.title, review: r.review, why: null };
+      } catch (e) {
+        if (!(e instanceof KError)) throw e;
+        return { id: r.id, title: r.title, review: r.review, why: e.message };
+      }
+    });
+    const line = (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : 'ready'}`;
+    const text = [
+      approve.length ? ['to approve:', ...approve.map(line)].join('\n') : 'nothing to approve',
+      accept.length ? ['to accept:', ...accept.map(line)].join('\n') : 'nothing to accept',
+    ].join('\n');
+    return { approve, accept, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the
