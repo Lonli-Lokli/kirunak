@@ -77,10 +77,23 @@ test('a blocker that is done does not block', () => {
   assert.equal(stateOf(f), 'ready');
 });
 
+const REVIEW_STEP = '\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n';
+
 test('a step waiting on an input no step produces blocks', () => {
-  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task, docs/none.md\noutputs: steps/S-1/report.md\n';
+  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task, docs/none.md\noutputs: steps/S-1/report.md\n' + REVIEW_STEP;
   assert.equal(stateOf(folder(({ put }) => put('plan.md', plan))), 'blocked');
   assert.equal(stateOf(folder(({ put }) => put('plan.md', plan.replace('docs/none.md', 'intake.md')))), 'ready');
+});
+
+test('a plan with no review step blocks, a task in progress too: no step may start', () => {
+  const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n';
+  assert.equal(stateOf(folder(({ put }) => put('plan.md', plan))), 'blocked');
+  const running = (text) => folder(({ put }) => {
+    put('plan.md', text);
+    put('progress.md', '2026-11-03 14:02 S-1 started (session 7c1)\n');
+  });
+  assert.equal(stateOf(running(plan)), 'blocked');
+  assert.equal(stateOf(running(plan + REVIEW_STEP)), 'in progress');
 });
 
 test('a step that asks the owner in needs.json is awaiting owner', () => {

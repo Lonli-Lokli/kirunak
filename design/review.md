@@ -86,7 +86,8 @@ review that counts (§2) and ends `verdict: met` or `verdict: needs owner (<ids>
 whatever the flags (`--checklist-open` waives checklist items, never a criterion); the way out is an amendment and a
 new review, or a new review after a fix. Code committed after the review's `head` is refused the same way (the
 task's own folder aside, as the reviewer's diff leaves it out): the review never saw it, and the way out is a new
-review. A task with no review cannot be accepted: its plan needs a review step, run.
+review. A task with no review cannot be accepted: its plan needs a review step, run, and `k plan check` refuses a
+plan with none, so the gap shows when the plan is written (`orchestrator.md` §1).
 
 ## 4. Done only through `k-done` (R15, D12)
 

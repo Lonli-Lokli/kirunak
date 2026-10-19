@@ -133,7 +133,7 @@ are a state field agents rewrite; a state read from files that only named comman
 | draft | `task.md` exists, no approval record, `k check` fails or Open questions not empty | the intake (`k intake start`) |
 | proposed | no approval record, `k check` passes, Open questions empty | the intake, when the last question closes |
 | ready | approval record with a matching hash; no step started in `progress.md` | the owner: `k approve` |
-| blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces | the plan |
+| blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces, or the plan has steps and none of kind `review` | the plan |
 | in progress | a step started in `progress.md`; no `review.md` verdict | `k step start` (the orchestrator or a session) |
 | in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it as it stands (the hash on the step's `finished` line) | `k review start` |
 | reviewed | the latest review passes the grammar and its review step finished in `progress.md` with the file's hash; no `done.json` | the review step |

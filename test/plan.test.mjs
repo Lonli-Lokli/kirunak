@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { checkPlan, parseBudget, parsePlan } from '../lib/plan.mjs';
 import { parseTask } from '../lib/task.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
-import { k, makeWorkspace } from './helpers.mjs';
+import { approvedWorkspace, k, makeWorkspace } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
 
@@ -71,6 +71,22 @@ test('an uncovered E fails, and so does an uncovered AC', async () => {
   assert.deepEqual(problemsOf(w, text.replace('covers: AC-3', 'covers: E-1')), ['AC-3 is covered by no step']);
 });
 
+test('a plan with no review step fails k plan check, and a task already running is told so at its next step', async () => {
+  const w = await fixture();
+  const none = PLAN.replace('### S-3 Review [review]', '### S-3 Review [agent]');
+  const problem = 'the plan has no review step, and k accept needs a review: add a step of kind review (outputs: review.md)';
+  assert.deepEqual(problemsOf(w, none), [problem]);
+  writeFileSync(join(w.p.dir, 'plan.md'), none);
+  const r = k(w.home, ['plan', 'check', ID]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, new RegExp(`line 1: ${problem.replace(/[()]/g, '\\$&')}`));
+  const a = await approvedWorkspace(none);
+  writeFileSync(join(a.p.dir, 'progress.md'), '2026-11-03 14:02 S-1 started (by hand)\n2026-11-03 15:10 S-1 finished\n');
+  const next = k(a.home, ['step', 'start', ID, 'S-2']);
+  assert.equal(next.status, 1);
+  assert.match(next.stderr, new RegExp(`cannot run a step:\n {2}plan\\.md line 1: ${problem.replace(/[()]/g, '\\$&')}`));
+});
+
 test('an unknown id fails', async () => {
   const w = await fixture();
   assert.deepEqual(problemsOf(w, PLAN.replace('AC-2, E-1', 'AC-2, E-1, E-3')), ['S-1 covers E-3, which the task does not have']);
@@ -103,6 +119,7 @@ test('the grammar: a bad header, an unknown kind, effort or field, a needs no st
     'a step is `### S-n <title> [<kind>[, <model>[, <effort>]]]`',
     'S-2 needs S-9, which the plan does not have',
     'S-2 is a heavy step with no command',
+    'the plan has no review step, and k accept needs a review: add a step of kind review (outputs: review.md)',
     'AC-3 is covered by no step',
   ]);
   assert.deepEqual(problemsOf(w, PLAN.replace('task: weather/offline-forecast', 'task: weather/other')), [

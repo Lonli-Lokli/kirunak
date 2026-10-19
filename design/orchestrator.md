@@ -43,7 +43,9 @@ outputs: review.md
   only where a step needs it.
 - `covers:` names AC and E ids (or `all`). `k plan check <id>` refuses a plan that leaves an AC or E uncovered, names
   an id the task does not have, or has a step whose `inputs:` no earlier step produces and no file in the repo
-  matches (R8, R9). `task` and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the
+  matches (R8, R9), and a plan with no step of kind `review`, since `k accept` takes only a review (`review.md` §3).
+  Every step start runs the same check (`k step start`, `k run`), so a task already running whose plan has no review
+  step is refused at its next step, naming the problem, and `k list` shows it blocked (`task-files.md` §4). `task` and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the
   task's base commit to HEAD, written by `k step start` into `steps/<step>/diff.patch`).
 - The plan changes without approval (R8): whoever plans edits it and `k plan check` guards the coverage. Judgement:
   the plan is the model's working document, the task is the owner's contract; keeping the coverage check mechanical
