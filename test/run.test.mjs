@@ -352,6 +352,44 @@ test('k run stopped by a signal kills its claude, fails the step, frees the lock
   assert.doesNotMatch(calls[0].prompt, /failure-1\.md|the last attempt failed/, 'a stop is not the attempt\'s failure');
 });
 
+test('k run --watch stopped by a signal while a step is left undecided exits with the signal and leaves that step and its claude', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const start = new Date().toISOString();
+  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
+  const dead = spawnSync('true').pid;
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  // Nothing should start; a claude that did would fail at once rather than reach the real one.
+  const bin = mkdtempSync(join(tmpdir(), 'kirunak-no-claude-'));
+  writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n');
+  chmodSync(join(bin, 'claude'), 0o755);
+  const restore = fakePs('fails');
+  let child;
+  try {
+    child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id, '--watch'], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+  } finally {
+    restore();
+  }
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  const exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
+  try {
+    await until(() => out.includes(`S-1 is left running: ps gave no answer for pid ${claude.pid}`), `no left-running line: ${out}`);
+    child.kill('SIGINT');
+    assert.deepEqual(await Promise.race([exited, new Promise((r) => setTimeout(r, 3000)).then(() => 'still running')]), { code: 130, signal: null }, out);
+    assert.equal(alive(claude.pid), true, 'the claude ps could not tell about is not killed');
+    assert.ok(existsSync(join(w.home, 'running', `${claude.pid}.json`)), 'its running file is kept');
+    assert.doesNotMatch(progress(w), /S-1 failed/);
+    assert.deepEqual(readdirSync(join(w.home, 'k-run')), [], 'the lock is released');
+  } finally {
+    child.kill('SIGKILL');
+    claude.kill();
+  }
+});
+
 test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run --watch in a child, with a fake claude on PATH that asks for a long job.
