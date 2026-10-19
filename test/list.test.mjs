@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { hashBytes } from '../lib/approval.mjs';
 import { format, rows } from '../lib/list.mjs';
-import { makeWorkspace, reviewsRan } from './helpers.mjs';
+import { k, makeWorkspace, reviewsRan } from './helpers.mjs';
 
 const taskText = (id, title, { q = false } = {}) => `---
 id: ${id}
@@ -151,6 +151,22 @@ test('the lock comes from the default guard when it is held', async () => {
   const list = await rows(ws);
   assert.equal(list[0].lock, 'weather unit tests');
   assert.match(format(list).split('\n')[0], /lock: weather unit tests/);
+});
+
+test('k status: the lock, the guard queue parsed, the home, and the session\'s task once k start recorded it', async () => {
+  const { home } = await fixture();
+  const status = (args) => JSON.parse(k(home, ['status', '--json', ...args], { CLAUDE_CODE_SESSION_ID: '' }).stdout);
+  assert.deepEqual(status([]), { lock: null, queue: [], claims: [], running: [], maxAgents: 2, home, session: null });
+  mkdirSync(join(home, 'guard', 'lock'), { recursive: true });
+  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', since: '2026-11-03T14:00:00Z' }));
+  writeFileSync(join(home, 'guard', 'queue'), '{"session":"s2","what":"hub build"}\nnot json\n');
+  const s = status(['--session', 's3']);
+  assert.equal(s.lock.what, 'weather unit tests');
+  assert.deepEqual(s.queue, [{ session: 's2', what: 'hub build' }, { line: 'not json' }]);
+  assert.deepEqual(s.session, { id: 's3', task: null, step: null, since: null });
+  assert.equal(k(home, ['start', 'weather/offline-forecast', '--session', 's3']).status, 0);
+  assert.equal(status(['--session', 's3']).session.task, 'weather/offline-forecast');
+  assert.match(k(home, ['status', '--session', 's3']).stdout, /^lock: weather unit tests \(session s1, since 2026-11-03T14:00:00Z\), 2 waiting\nrunning steps: 0 of 2\nsession s3: weather\/offline-forecast\n$/);
 });
 
 test('format: one line per row, places right-aligned, columns padded', async () => {

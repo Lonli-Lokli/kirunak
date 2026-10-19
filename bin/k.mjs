@@ -53,6 +53,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] | k verify [<id>] | k queue show
+          k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
@@ -423,6 +424,30 @@ const VERBS = {
   async list({ ws, flags }) {
     const rows = await list.rows(ws, { repo: flags.repo, all: !!flags.all });
     return { rows, text: list.format(rows) || 'no task' };
+  },
+
+  // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the
+  // home the events are in, and the session's task from sessions/<id>.json.
+  async status({ ws, flags }) {
+    const st = board.status(ws);
+    const home = ws.home || kirunakHome();
+    const parse = (l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return { line: l };
+      }
+    };
+    const s = session(flags);
+    const rec = s ? keeper.readSession(home, s) : null;
+    const out = { ...st, queue: st.queue.map(parse), home, session: s ? { id: s, task: rec?.task ?? null, step: rec?.step ?? null, since: rec?.since ?? null } : null };
+    const lock = st.lock ? `lock: ${st.lock.what} (session ${st.lock.session}, since ${st.lock.since})` : 'no lock';
+    const text = [
+      `${lock}${st.queue.length ? `, ${st.queue.length} waiting` : ''}`,
+      `running steps: ${st.running.length} of ${st.maxAgents}`,
+      ...(out.session ? [`session ${s}: ${out.session.task ?? 'no task'}`] : []),
+    ].join('\n');
+    return { ...out, text };
   },
 
   async board({ ws, flags }) {

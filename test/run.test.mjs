@@ -11,7 +11,7 @@ import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
 import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, fakeClaude, fakePs, k, KIRUNAK } from './helpers.mjs';
+import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -194,6 +194,8 @@ test('needs.json heavy: the guard runs the job while running/ holds no pid of th
   assert.deepEqual([heavy.exitCode, heavy.report, heavy.lastLines.length, heavy.lastLines[0]], [0, 'kirunak/tasks/offline-forecast/steps/S-1/heavy-1.log', 60, 'line 41']);
   assert.ok(existsSync(join(w.p.dir, 'steps', 'S-1', 'needs-1.json')) && !existsSync(join(w.p.dir, 'steps', 'S-1', 'needs.json')));
   assert.match(progress(w), /S-1 waiting for a heavy job: weather unit tests\n.*S-1 heavy job ended: exit 0 after [\d.]+ min \(steps\/S-1\/heavy-1\.json\)\n.*S-1 resumed \(session /);
+  const ended = events(w.home).filter((e) => e.kind === 'build-ended').map(({ time, minutes, ...e }) => e);
+  assert.deepEqual(ended, [{ kind: 'build-ended', task: w.id, step: 'S-1', what: 'weather unit tests', exitCode: 0 }], 'the mod toasts it');
 });
 
 test('needs.json owner: the task stops with the question; the next k run resumes the conversation', async () => {

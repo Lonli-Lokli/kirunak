@@ -218,6 +218,9 @@ starter. R23 and "at most M" came with the owner's amendment of the same week. D
 - On the phone: a `/k-accept` typed in Remote Control arrives as `bridge` and runs (the owner's answer of
   2026-10-19, `README.md` question 2).
 - Numbers: the mod's load time at session start; the clock hook's cost (it must spawn `k` no more than every 30 s).
+- Built 2026-10-19 (branch `slice-6/mod`): validate, test (20) and `tsc -p` green; the numbers are in `boards.md` §4
+  (no measurable load time; two reads of 0.08 and 0.07 s every 30 s, a test holds the cadence). The phone check
+  waits for the owner, with the mod loaded in their session.
 
 ## Slice 7, later and not detailed here: R17, R18
 

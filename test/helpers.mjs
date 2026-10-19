@@ -104,3 +104,7 @@ export function reviewsRan(taskDir, files = ['review.md']) {
   const hash = (f) => (existsSync(join(taskDir, f)) ? ` (${f} ${hashBytes(readFileSync(join(taskDir, f)))})` : '');
   writeFileSync(join(taskDir, 'progress.md'), files.map((f, i) => `2026-11-06 1${i}:00 S-${i + 2} finished${hash(f)}\n`).join(''));
 }
+
+// The lines of $KIRUNAK_HOME/events.jsonl, parsed; none when the file is not there.
+export const events = (home) =>
+  existsSync(join(home, 'events.jsonl')) ? readFileSync(join(home, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
