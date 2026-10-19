@@ -52,7 +52,8 @@ verdict: not met (AC-2)
 - Grammar `k review check` enforces: one row per AC and E of the frozen task (none missing, none extra); verdict ∈
   `met | not met | needs device | needs owner`; a `met` row's evidence starts with `test <Name>`, `file
   <path>:<line>`, `measure <path>`, or `screenshot <path>`, and the path exists at `head` (a test name must appear
-  in the file named in parentheses; a `file` line must be within the file's length). A `not met` row names what is
+  in the file named in parentheses; a `file` line must be within the file's length; `k step finish` commits the
+  evidence a step writes, `task-files.md` §1, so a path under `evidence/` is there). A `not met` row names what is
   wrong. The last line is `verdict: met` only when every row is `met`; else `verdict: not met (<ids>)` or
   `verdict: needs owner (<ids>)` when nothing is `not met`.
 - The review is a file the reviewer writes (an agent step), so the freeze hook allows it; `k review check` runs as

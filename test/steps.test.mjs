@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { hold } from '../lib/approval.mjs';
-import { approvedWorkspace, k } from './helpers.mjs';
+import { approvedWorkspace, k, sh } from './helpers.mjs';
 
 export const PLAN = `---
 task: weather/offline-forecast
@@ -130,4 +130,44 @@ test('needs.json: heavy and owner requests parse, anything else is an error a ru
   assert.match(needs({ heavy: { what: 'tests', command: 'npm test' } }).error, /heavy wants/);
   assert.match(needs('{').error, /not JSON/);
   assert.match(needs({}).error, /neither heavy nor owner/);
+});
+
+test('k step finish commits the evidence the step wrote and nothing else; a review then cites it at head; no evidence, no commit', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv', 'days\tbytes\n3\t2048\n');
+  writeFileSync(join(w.weather, 'docs', 'staged.md'), 'staged by the session\n');
+  git('add', 'docs/staged.md');
+  const before = git('rev-parse', 'HEAD');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.notEqual(git('rev-parse', 'HEAD'), before);
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD'),
+    'weather/offline-forecast S-1: the step\'s evidence\n\nkirunak/tasks/offline-forecast/evidence/S-1-cache-sizes.tsv');
+  assert.equal(git('diff', '--cached', '--name-only'), 'docs/staged.md', 'what else was staged stays staged');
+
+  const head = git('rev-parse', '--short', 'HEAD');
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
+  const rows = ['AC-1', 'AC-2', 'AC-3'].map((id) => `| ${id} | met | file docs/offline.md:1 |`);
+  rows.push('| E-1 | met | measure evidence/S-1-cache-sizes.tsv row 2 |');
+  put(w, 'review.md', `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.join('\n')}\n\nverdict: met\n`);
+  const done = k(w.home, ['step', 'finish', w.id, 'S-2']);
+  assert.equal(done.status, 0, done.stderr);
+  assert.equal(git('rev-parse', '--short', 'HEAD'), head, 'a finish with no new or changed evidence makes no commit');
+  assert.equal(git('diff', '--cached', '--name-only'), 'docs/staged.md');
+});
+
+test('a finish whose evidence commit git refuses fails with git\'s message, and the step stays running', async () => {
+  const w = await approvedWorkspace(PLAN);
+  writeFileSync(join(w.weather, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "the repo takes no commits now" >&2\nexit 1\n', { mode: 0o755 });
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /git commit in .* failed: the repo takes no commits now/);
+  assert.doesNotMatch(progress(w), /S-1 finished/);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'running');
 });

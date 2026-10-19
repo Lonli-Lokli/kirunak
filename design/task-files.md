@@ -25,6 +25,10 @@ kirunak/
   approvals/<slug>.json           the approval record: the task's hash, the date, who, how (D7)
 ```
 
+- `evidence/` is committed by `k step finish`: the files the step wrote there that are new or changed, and nothing
+  else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks; a commit git
+  refuses fails the finish. So a review's `measure` or `screenshot` row cites a path that stands at `head`
+  (`review.md` §2). Judgement: the other task files are the session's to commit with its work.
 - Judgement: one folder per task, every file named for one reader, so a `git log kirunak/tasks/x/task.md` is the
   task's whole history and `progress.md` can churn without touching it (R6).
 - Judgement: `approvals/` sits beside `tasks/`, not inside the task folder, so one hook rule covers every record
