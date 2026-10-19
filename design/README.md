@@ -35,8 +35,11 @@ Slice 1b, change size (`change-size.md`): R21, R22, built right after slice 1 an
    written by `! k accept <id>` (`review.md` §4). One word for both is possible only with the mod: a registered
    `/k-done` writes the record on the owner's Enter and then runs the handoff skill under another name through
    `$.command.run`. Keep two words, or one once the mod exists?
-2. **Approval from Remote Control.** The mod can tell the owner's phone (`bridge`) from an agent; D13 says never
-   from a page. Accept `bridge` for `/k-approve`, or `composer` only (the design's default)?
+2. **Approval from Remote Control. Answered 2026-10-19: yes.** Asked "once the mod exists, should a `/k-accept`
+   typed on the phone through Remote Control count? Yes or no?", the owner chose "Yes, allow phone", after reading
+   that anyone holding the unlocked phone with Remote Control open could approve too. So the mod's commands accept
+   `composer` and `bridge` and refuse every other origin (`approval.md` §5, `boards.md` §4, `build-order.md` slice
+   6). D13 still holds: the phone page has no control.
 3. **Headless steps on a subscription.** `claude -p` without `--bare` runs on the plan and counts against its limit,
    with the 1-hour cache; `--bare` would need an API key, lose the hooks and CLAUDE.md, and get a 5-minute cache.
    The design assumes a subscription.
