@@ -115,8 +115,12 @@ parser of about a hundred lines with no dependency.
 - `handoff.md`: written at closing when the workspace's `handoff` seam points there (the core's default does,
   `plugins.md` §2).
 - `amendments/A-n.md`: §5 below.
-- `done.json`: `{ "task": id, "accepted": ISO date, "by": "owner", "via": "shell"|"mod", "commit": sha }`,
-  written only by `k accept` (the owner's command, `approval.md` §4).
+- `done.json`: `{ "task": id, "accepted": ISO date, "by": "owner", "via": "shell"|"mod", "commit": sha, "review":
+  "review-2.md", "verdict": "needs owner (E-3)", "head": sha, "reviewHash": "sha256:…" }`, written only by `k accept`
+  (the owner's command, `approval.md` §4). `review`, `verdict` and `head` are the review it took as that file states
+  them, `reviewHash` its bytes' hash (the one its step finished with, `review.md` §2). With `--checklist-open "<why>"`
+  it adds `"checklistOpen": "<why>"` and `"openItems": [text]`, the items left open: those unticked in
+  `checklist.md` and the review's rows with no item there, each as `k checklist` words it.
 
 ## 4. States and who moves a task
 

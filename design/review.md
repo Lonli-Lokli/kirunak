@@ -64,8 +64,9 @@ verdict: not met (AC-2)
   `S-review finished (review.md sha256:…)`, and a review whose bytes no longer match it was changed after its step
   finished (a row turned `met` by hand, a verdict rewritten). A review file whose step failed, escalated or never ran,
   one no review step names, one changed after its step finished, and one whose `finished` line records no hash are
-  not reviews; the way out is a new review (a new step and file, below). Until then `k list` shows the task `in review`; it checks the grammar without git (it runs no git
-  command, `boards.md` §1), so a cited path missing at head shows at `k review check`, `k checklist` and `k accept`.
+  not reviews; the way out is a new review (a new step and file, below). Until then `k list` shows the task
+  `in review`; it checks the grammar without git (it runs no git command, `boards.md` §1), so a cited path missing
+  at head shows at `k review check`, `k checklist` and `k accept`.
 
 ## 3. The owner's checklist (R15)
 
@@ -79,7 +80,8 @@ verdict is misspelt never leaves an empty checklist:
 ```
 
 The owner ticks items; the freeze hook refuses an agent's tick (`approval.md` §2). `k accept` refuses while an item
-is unticked unless the owner passes `--checklist-open "<why>"`, which `done.json` records. It takes only a latest
+is unticked unless the owner passes `--checklist-open "<why>"`, which `done.json` records with the text of each item
+left open (unticked, or a row with no item yet), beside the review it took. It takes only a latest
 review that counts (§2) and ends `verdict: met` or `verdict: needs owner (<ids>)`. A `not met` verdict is refused
 whatever the flags (`--checklist-open` waives checklist items, never a criterion); the way out is an amendment and a
 new review, or a new review after a fix. Code committed after the review's `head` is refused the same way (the
@@ -98,7 +100,8 @@ owner finds on a device). Its steps:
    says so.
 2. **Record the acceptance**: ask the owner to type `! k accept <id>` (or `/k-accept <id>` with the mod); the task
    is done only when `done.json` exists. If `k accept` refuses (an unticked checklist item, a review that does not
-   count, a `not met` verdict, no review), say what it named and stop. The skill never runs `k accept` itself: the hook refuses it from the Bash tool.
+   count, a `not met` verdict, code committed after the review, no review), say what it named and stop. The skill
+   never runs `k accept` itself: the hook refuses it from the Bash tool.
 3. **Write the handoff and release**: run `k handoff <id> --session <session_id> --json`. It merges every loaded
    `handoff` plugin (`plugins.md` §2): `targets` say where the handoff goes and what it must hold (the state now,
    what is open, the next step, the owner's decisions with their dates, where things are; nothing git already

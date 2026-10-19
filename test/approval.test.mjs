@@ -308,12 +308,16 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
   const r = accept({ ws, id: ID, via: 'mod', now: NOV7 });
   assert.equal(r.state, 'done');
   const done = JSON.parse(readFileSync(join(taskDir(weather), 'done.json'), 'utf8'));
-  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit']);
+  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit', 'review', 'verdict', 'head', 'reviewHash']);
   assert.equal(done.task, ID);
   assert.match(done.accepted, ISO_LOCAL);
   assert.equal(done.by, 'owner');
   assert.equal(done.via, 'mod');
   assert.equal(done.commit, head);
+  assert.equal(done.review, 'review.md');
+  assert.equal(done.verdict, 'met');
+  assert.equal(done.head, 'HEAD', 'the head as the review states it');
+  assert.equal(done.reviewHash, hashBytes(readFileSync(join(taskDir(weather), 'review.md'))));
   assert.equal(subject(weather), `kirunak: accept ${ID}`);
   assert.equal(subject(hub), `kirunak: queue remove ${ID}`);
   assert.deepEqual(queue.read(ws), []);
@@ -334,12 +338,16 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
   writeFileSync(file, readFileSync(file, 'utf8').replace('- [ ] AC-3', '- [x] AC-3'));
   assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 1 unticked item\(s\):\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: '  ' }), /needs its reason/);
+  // Left open: AC-3 unticked again, and E-1's item gone from checklist.md.
+  writeFileSync(file, '- [ ] AC-3 On a phone: restart offline (review.md)\n');
   gitCommitAll(weather, 'ticked');
   accept({ ws, id: ID, checklistOpen: 'the age line is read at the next release', now: NOV7 });
   const done = JSON.parse(readFileSync(join(taskDir(weather), 'done.json'), 'utf8'));
-  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit', 'checklistOpen']);
+  assert.deepEqual(Object.keys(done), ['task', 'accepted', 'by', 'via', 'commit', 'review', 'verdict', 'head', 'reviewHash', 'checklistOpen', 'openItems']);
   assert.equal(done.via, 'shell');
+  assert.equal(done.verdict, 'needs owner (AC-3, E-1)');
   assert.equal(done.checklistOpen, 'the age line is read at the next release');
+  assert.deepEqual(done.openItems, ['AC-3 On a phone: restart offline (review.md)', 'E-1 Read: the age line (review.md)']);
 });
 
 test('accept refuses a not met verdict, --checklist-open or not: the way out is an amendment or a new review', async () => {
@@ -373,6 +381,7 @@ test('accept refuses code committed after the review head, naming it; commits in
   sh(weather, 'git', ['rm', '-q', ...code]);
   sh(weather, 'git', ['commit', '-q', '-m', 'the fix taken back']);
   assert.equal(accept({ ws, id: ID, now: NOV7 }).state, 'done');
+  assert.equal(JSON.parse(readFileSync(join(dir, 'done.json'), 'utf8')).head, reviewed);
 });
 
 // Rows the owner should check, spelled as no verdict, a cited line past its file, and the last line met anyway.
