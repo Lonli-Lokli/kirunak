@@ -193,8 +193,8 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
   // The head of the queue takes the lock, or takes it over when its owner's process is dead. A dead owner's job that
   // still runs is returned as { orphan: pid } first: nobody will collect its result, and it must end before the take.
   // It is that job only while it started at jobStart; a pid that names another process by now is left alone, and one
-  // ps cannot tell about now is waited for, neither killed nor run beside. A waiter or an owner is alive only while
-  // its pid is still the process that started at its pidStart (or ps cannot tell).
+  // ps cannot tell about now is waited for, neither killed nor run beside ({ unknown: pid }). A waiter or an owner is
+  // alive only while its pid is still the process that started at its pidStart (or ps cannot tell).
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
@@ -208,7 +208,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
         const dead = owner ? !stillRuns(owner.pid, owner.pidStart) : stale(P);
         if (!dead) return false;
         const job = groupAlive(owner?.job) ? isStill(owner.job, owner.jobStart) : false;
-        if (job === null) return false;
+        if (job === null) return { unknown: owner.job };
         if (job === true) return { orphan: owner.job };
         rmSync(P.lock, { recursive: true, force: true });
       }
@@ -244,11 +244,20 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           const P = at();
           const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() };
           await edit(P, () => appendFileSync(P.queue, JSON.stringify(me) + '\n'));
+          let told = false;
           for (;;) {
             const t = await tryTake(P, me);
             if (t === true) break;
             if (t?.orphan) await killTree(t.orphan, killAfterMs);
-            else await sleep(pollMs);
+            else {
+              // A wait on a job ps cannot tell about lasts as long as that job: said once, in the log and to the caller.
+              if (t?.unknown && !told) {
+                told = true;
+                appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: 'wait', session: job.session, pid: t.unknown, reason: 'ps gave no answer' }) + '\n');
+                job.say?.(`waits: the lock's holder is gone, but ps gave no answer for its job (pid ${t.unknown}), so that job is believed to run`);
+              }
+              await sleep(pollMs);
+            }
           }
           const started = Date.now();
           let r = { exitCode: 1, log: '' };
@@ -295,13 +304,16 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           return r;
         },
 
-        // { held, queued, estimateMinutes }: each job's estimate, and at the top the wait of a job that queued now.
+        // { held, queued, estimateMinutes }: each job's estimate, and at the top the wait of a job that queued now. A
+        // dead owner's job that still runs, or that ps cannot tell about, holds the lock for every waiter: it is held,
+        // marked orphan. One ps says is another process by now is not; the next take takes the lock over.
         status() {
           const P = at();
           const owner = readJson(P.owner);
           const minutesSince = (iso) => (Date.now() - Date.parse(iso)) / 60000;
           const job = ({ session, what, since }) => ({ session, what, since, estimateMinutes: estimate(P, what) });
-          const h = owner && stillRuns(owner.pid, owner.pidStart) ? job(owner) : null;
+          const orphan = () => groupAlive(owner.job) && isStill(owner.job, owner.jobStart) !== false;
+          const h = !owner ? null : stillRuns(owner.pid, owner.pidStart) ? job(owner) : orphan() ? { ...job(owner), orphan: true } : null;
           const queued = readQueue(P).filter((e) => e && stillRuns(e.pid, e.pidStart)).map(job);
           const left = h ? Math.max(0, h.estimateMinutes - minutesSince(h.since)) : 0;
           return { held: h, queued, estimateMinutes: Math.round((left + queued.reduce((s, q) => s + q.estimateMinutes, 0)) * 100) / 100 };

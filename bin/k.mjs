@@ -164,7 +164,7 @@ const VERBS = {
     }
     try {
       const st = await ws.seams.resourceGuard.status();
-      say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what})` : 'free'}, ${st.queued.length} queued`);
+      say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);
     } catch (e) {
       say(false, `resource guard: status() did not answer: ${e.message}`);
     }
