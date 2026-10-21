@@ -4,7 +4,20 @@ import type { KirunakRow } from '../types'
 
 // What waits for the owner, as `k waiting --json` gives it: why is what the verb would refuse, null when it would not.
 export type WaitingRow = { id: string; title: string; why: string | null; review?: { file: string; verdict: string | null } | null }
-export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[] }
+// An amendment neither applied nor declined (kirunak-phone S-4): refuse is what k approve --amendment would refuse, one
+// line, null when it would not; file the amendment's absolute path.
+export type AmendmentRow = {
+  id: string
+  amendment: string
+  title: string
+  proposed: string | null
+  by: string | null
+  why: string | null
+  lines: number
+  refuse: string | null
+  file: string
+}
+export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[]; amendments: AmendmentRow[] }
 
 // `/k-approve` or `/k-accept` with no id: the tasks waiting for that verb, numbered as `/k-accept <n>` takes them.
 export function offerText(verb: 'approve' | 'accept', rows: readonly WaitingRow[]): string {
