@@ -29,17 +29,23 @@ export function offerText(verb: 'approve' | 'accept', rows: readonly WaitingRow[
   return [`Waiting for you to ${verb}:`, ...rows.map((r, i) => `${String(i + 1).padStart(3)}  ${r.id}  ${state(r)}`), how].join('\n')
 }
 
-// `2 --checklist-open "..."` as `<the second id offered> --checklist-open "..."`, from the list the owner was last
-// shown in this session, so a list that changed since cannot move the number onto another task. Null when the line
-// does not start with a number.
-export function byNumber(args: string, offered: readonly string[] | undefined): { args: string } | { problem: string } | null {
+// The row a line's leading number names in the list the owner was last shown in this session (`shownBy` shows it),
+// and the rest of the line, so a list that changed since cannot move the number onto another row (E-2). Null when the
+// line does not start with a number.
+export function nth<T>(args: string, offered: readonly T[] | undefined, shownBy = 'the command with no id'): { n: number; row: T; rest: string } | { problem: string } | null {
   const m = /^\s*([1-9]\d*)(?=\s|$)/.exec(args)
   if (!m) return null
   const n = Number(m[1])
-  if (offered === undefined) return { problem: `${n} of which list? the command with no id shows it first` }
-  const id = offered[n - 1]
-  if (id === undefined) return { problem: `the list you were shown has no ${n}` }
-  return { args: id + args.slice(m[0].length) }
+  if (offered === undefined) return { problem: `${n} of which list? ${shownBy} shows it first` }
+  const row = offered[n - 1]
+  if (row === undefined) return { problem: `the list you were shown has no ${n}` }
+  return { n, row, rest: args.slice(m[0].length) }
+}
+
+// `2 --checklist-open "..."` as `<the second id offered> --checklist-open "..."`.
+export function byNumber(args: string, offered: readonly string[] | undefined): { args: string } | { problem: string } | null {
+  const picked = nth(args, offered)
+  return picked === null || 'problem' in picked ? picked : { args: picked.row + picked.rest }
 }
 
 // Which tasks each command's typeahead offers, by state (lib/state.mjs); one awaiting the owner with no review asked a

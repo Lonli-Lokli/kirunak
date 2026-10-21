@@ -8,7 +8,7 @@
     {
       "name": "kirunak",
       "source": "./mods/kirunak",
-      "description": "kirunak's working view in Claude Code: the owner's /k-approve, /k-accept, /k-hold and /k-start, a pane, a line above the prompt and toasts"
+      "description": "kirunak's working view in Claude Code: the owner's /k-approve, /k-approve-amendment, /k-accept, /k-hold and /k-start, the lists /k-list, /k-board and /k-amendments, a pane, a line above the prompt and toasts"
     }
   ]
 }

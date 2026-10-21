@@ -14,7 +14,7 @@ describe('the owner\'s commands', () => {
     const w = world(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await w.clock.advance(60_000)
-    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start', 'k-list', 'k-board', 'kirunak'])
+    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start', 'k-list', 'k-board', 'k-amendments', 'k-approve-amendment', 'kirunak'])
     expect([w.reads, w.tails.length]).toEqual([0, 0])
   })
 

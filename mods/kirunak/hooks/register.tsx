@@ -5,10 +5,10 @@ import { bandLine, paneLines } from './board'
 import type { Tone } from './board'
 import { argvFor, HINTS, isOwners, refusal } from './commands'
 import type { Verb } from './commands'
-import { boardText, listText } from './lists'
+import { amendmentsText, amendmentText, boardText, listText } from './lists'
 import { kOf, lastRows, refresh, sessionTask, tick } from './reads'
-import { byNumber, idSuggestions, offerText } from './waiting'
-import type { Waiting } from './waiting'
+import { byNumber, idSuggestions, nth, offerText } from './waiting'
+import type { AmendmentRow, Waiting } from './waiting'
 
 // An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
 const COMMIT_MS = 600_000
@@ -26,10 +26,12 @@ const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success
 
 // The owner's verbs (boards.md §4, approval.md §5): run only on the owner's own gesture, as `node k <verb> <id>
 // --via mod`, with no model turn; the state line k prints is the command's output.
-// With no id, /k-approve and /k-accept list what waits for that verb; the ids shown, in order, are what `/k-accept <n>`
-// takes. The module's own, so a reload asks for the list again, and `session.end` forgets it: `/clear` and a resume
-// go on in the same process under another session, whose screen shows no such list (review G25).
-const offered: Partial<Record<'approve' | 'accept', string[]>> = {}
+// The lists a number picks from, as last shown in this session: with no id, /k-approve and /k-accept list what waits
+// for that verb, and the ids shown, in order, are what `/k-accept <n>` takes; /k-amendments lists the amendments that
+// `/k-amendments <n>` and `/k-approve-amendment <n>` take (E-2). The module's own, so a reload asks for the list again,
+// and `session.end` forgets it: `/clear` and a resume go on in the same process under another session, whose screen
+// shows no such list (review G25).
+const offered: Partial<Record<'approve' | 'accept', string[]>> & { amendments?: AmendmentRow[] } = {}
 
 // What came from the phone says so, since the transcript does not keep where a command came from; after a blank line
 // under a markdown answer, so it is not read as its list's last entry.
@@ -107,6 +109,47 @@ function boardAnswer($: EngineInterface, args: string): Promise<string> {
   })
 }
 
+// `/k-amendments`: the amendments waiting (AC-2), kept for a number; `/k-amendments <n>`: that one in full, from the
+// list last shown, read from its file.
+function amendments($: EngineInterface, args: string): Promise<string> {
+  return withK($, 'k-amendments', async k => {
+    if (args.trim() === '') {
+      // A list that could not be read leaves none to pick from, never the one before it (review G27).
+      delete offered.amendments
+      const r = await $.process.run(['node', k, 'waiting', '--json'])
+      if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
+      offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments
+      return amendmentsText(offered.amendments)
+    }
+    const picked = nth(args, offered.amendments, '/k-amendments')
+    if (picked === null) return `/k-amendments ${args.trim()}: give an amendment's number from the list. Usage: /k-amendments [<n>]`
+    if ('problem' in picked) return `/k-amendments ${args.trim()}: ${picked.problem}.`
+    if (picked.rest.trim()) return `/k-amendments ${args.trim()}: unexpected ${picked.rest.trim()}.`
+    let text
+    try {
+      text = await $.fs.read(picked.row.file)
+    } catch (err) {
+      // The engine's message starts "<plugin>: $.fs.read: ", which would name kirunak a second time (AC-12).
+      const why = (err instanceof Error ? err.message : String(err)).replace(/^.*?\$\.fs\.read: /, '')
+      return `/k-amendments ${picked.n}: ${picked.row.file} could not be read (${why}).`
+    }
+    return amendmentText(picked.n, picked.row, text)
+  })
+}
+
+// `/k-approve-amendment <n>`: `k approve <id> --amendment A-n` for the n-th of the list /k-amendments last showed; k
+// checks it again as it runs (E-2).
+function approveAmendment($: EngineInterface, args: string): Promise<string> {
+  const name = 'k-approve-amendment'
+  return withK($, name, async k => {
+    const picked = nth(args, offered.amendments, '/k-amendments')
+    if (picked === null) return `/${name}${args.trim() ? ` ${args.trim()}` : ''}: which one? give its number from /k-amendments. Nothing ran.`
+    if ('problem' in picked) return `/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`
+    if (picked.rest.trim()) return `/${name} ${args.trim()}: unexpected ${picked.rest.trim()}. Nothing ran.`
+    return (await runVerb($, name, k, ['approve', picked.row.id, '--amendment', picked.row.amendment, '--via', 'mod'])).text
+  })
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // Literal names, so `claude plugin validate` sees each hook answer its own command. /k-done stays the skill: it
@@ -117,6 +160,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-start', description: 'Name the kirunak task this session works on: k start', argumentHint: HINTS.start })
     await $.command.register({ name: 'k-list', description: 'The kirunak tasks k list shows, as a list for a phone', argumentHint: '[all]' })
     await $.command.register({ name: 'k-board', description: 'The kirunak board as lists: the tasks worked on now, every task by state, the lock and the queue' })
+    await $.command.register({ name: 'k-amendments', description: 'The amendments waiting for your approval; with a number, that one in full', argumentHint: '[<n>]' })
+    await $.command.register({ name: 'k-approve-amendment', description: 'Approve an amendment /k-amendments listed: k approve --amendment, as your own command', argumentHint: '<n>' })
     await $.command.register({ name: 'kirunak', description: 'Show or hide kirunak\'s pane: this session\'s task, the queue and the lock' })
     // A `claude -p` run draws nothing: it gets the commands, which refuse its origin, and no reads.
     if (e.isInteractive) {
@@ -143,10 +188,13 @@ export const register: Register = on => {
   on('command.run', { command: 'k-start' }, ($, e) => owners(e, 'k-start', () => ownerVerb($, e, 'k-start', 'start'))).catch(() => ({ text: FAILED('k-start') }))
   on('command.run', { command: 'k-list' }, ($, e) => owners(e, 'k-list', () => list($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-list') }))
   on('command.run', { command: 'k-board' }, ($, e) => owners(e, 'k-board', () => boardAnswer($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-board') }))
+  on('command.run', { command: 'k-amendments' }, ($, e) => owners(e, 'k-amendments', () => amendments($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-amendments') }))
+  on('command.run', { command: 'k-approve-amendment' }, ($, e) => owners(e, 'k-approve-amendment', () => approveAmendment($, e.args))).catch(() => ({ text: FAILED('k-approve-amendment') }))
 
   on('session.end', ($, e, next) => {
     delete offered.approve
     delete offered.accept
+    delete offered.amendments
     return next(e)
   })
 
