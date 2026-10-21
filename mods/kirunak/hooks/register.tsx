@@ -8,7 +8,7 @@ import type { Verb } from './commands'
 import { amendmentsText, amendmentText, boardText, listText } from './lists'
 import { nothingRan, owners } from './owner'
 import type { Outcome, Turn } from './owner'
-import { acceptScreen, amendmentsScreen, approveScreen, holdScreen, startScreen } from './picks'
+import { acceptScreen, amendmentsScreen, approveScreen, holdScreen, queueScreen, startScreen } from './picks'
 import { lastRows, refresh, sessionTask, tick } from './reads'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
 import type { AmendmentRow, Waiting } from './waiting'
@@ -125,6 +125,18 @@ async function amendments($: EngineInterface, turn: Turn): Promise<string | Outc
   return amendmentText(picked.n, picked.row, text)
 }
 
+// `/k-queue`: the queue in order, then the parked tasks, as the dialog's choices, where the one picked is moved, parked
+// or put back (AC-17); a queue verb answers with the queue it left.
+async function queueDialog($: EngineInterface, turn: Turn): Promise<string | Outcome> {
+  if (turn.args.trim()) return `/k-queue takes nothing, not ${turn.args.trim()}.`
+  const r = await $.process.run(['node', turn.k, 'list', '--json', '--all'])
+  if (r.exitCode !== 0) return refused('k-queue', r)
+  const first = queueScreen(JSON.parse(r.stdout).rows)
+  if (first === null) return 'The queue is empty, and no task is parked.'
+  const out = await turn.dialog(first)
+  return out.nothing === null ? out : nothingRan(out.nothing)
+}
+
 // `/k-approve-amendment <n>`: `k approve <id> --amendment A-n` for the n-th of the list /k-amendments last showed; k
 // checks it again as it runs (E-2).
 async function approveAmendment($: EngineInterface, turn: Turn): Promise<string | Outcome> {
@@ -149,6 +161,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-board', description: 'The kirunak board as lists: the tasks worked on now, every task by state, the lock and the queue' })
     await $.command.register({ name: 'k-amendments', description: 'The amendments waiting for your approval, to approve or decline by touch; with a number, that one in full', argumentHint: '[<n>]' })
     await $.command.register({ name: 'k-approve-amendment', description: 'Approve an amendment /k-amendments listed: k approve --amendment, as your own command', argumentHint: '<n>' })
+    await $.command.register({ name: 'k-queue', description: 'Show the kirunak queue and move, park or put back a task by touch' })
     await $.command.register({ name: 'kirunak', description: 'Show or hide kirunak\'s pane: this session\'s task, the queue and the lock' })
     // A `claude -p` run draws nothing: it gets the commands, which refuse its origin, and no reads.
     if (e.isInteractive) {
@@ -177,6 +190,8 @@ export const register: Register = on => {
   on('command.run', { command: 'k-board' }, ($, e) => owners($, e, 'k-board', t => boardAnswer($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-board') }))
   on('command.run', { command: 'k-amendments' }, ($, e) => owners($, e, 'k-amendments', t => amendments($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-amendments') }))
   on('command.run', { command: 'k-approve-amendment' }, ($, e) => owners($, e, 'k-approve-amendment', t => approveAmendment($, t))).catch(() => ({ text: FAILED('k-approve-amendment') }))
+
+  on('command.run', { command: 'k-queue' }, ($, e) => owners($, e, 'k-queue', t => queueDialog($, t), '\n\n')).catch(() => ({ text: FAILED('k-queue') }))
 
   on('session.end', ($, e, next) => {
     delete offered.approve

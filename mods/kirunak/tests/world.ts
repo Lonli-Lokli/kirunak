@@ -31,6 +31,11 @@ export const ROWS: KirunakRow[] = [
   { id: 'weather/asks-owner', repo: 'weather', title: 'A step asked a question', state: 'awaiting owner', queue: null, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
 ]
 
+const row = (id: string, title: string, state: string, queue: number | null): KirunakRow => ({ id, repo: id.split('/')[0] as string, title, state, queue, step: null, lock: null, review: null, checklist: null, ac: [], e: [] })
+
+// A queue of four, the first in review, and beside it a parked task and a done one (`rows` for /k-queue).
+export const QUEUE: KirunakRow[] = [ROWS[0] as KirunakRow, ROWS[1] as KirunakRow, row('hub/next', 'Next up', 'queued', 3), row('hub/later', 'Later on', 'queued', 4), row('hub/parked', 'Waits outside', 'parked', null), ROWS[2] as KirunakRow]
+
 const AMENDMENT_DIR = '/w/weather/kirunak/tasks/offline-forecast/amendments'
 
 // The amendments `k waiting --json` gives: one k would approve, one it would refuse.

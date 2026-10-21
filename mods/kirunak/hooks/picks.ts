@@ -105,8 +105,10 @@ export function amendmentsScreen(rows: readonly AmendmentRow[]): Screen {
 }
 
 // A task as the hold, start and queue lists show it: id, title, and its state as k list says it, with its queue place.
+const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`
+
 export function stateItem(r: TaskRow, place: number | null = null): Item {
-  return { lead: '', name: r.id, text: `: ${sentence(titleOf(r))} ${r.state.charAt(0).toUpperCase()}${r.state.slice(1)}${place !== null ? `, place ${place}` : ''}.` }
+  return { lead: '', name: r.id, text: `: ${sentence(titleOf(r))} ${capital(r.state)}${place !== null ? `, place ${place}` : ''}.` }
 }
 
 const stateText = (r: TaskRow): string[] => [`${r.id}: ${sentence(titleOf(r))}`, `State: ${r.state}.`]
@@ -143,4 +145,65 @@ export function startScreen(rows: readonly TaskRow[], session: string, after: (o
     question: 'Work on it in this session?',
   })
   return { kind: 'list', header: 'Start', head: 'Tasks this session can work on:', question: 'Which task?', rows: rows.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
+}
+
+// A task as `k list --json --all` gives it, enough for the queue's dialogs.
+export type QueueRow = TaskRow & { queue: number | null }
+
+const END = 'End of the queue'
+
+// /k-queue (AC-17): the queue in order, then the parked tasks; null when there is neither. A task in the queue offers
+// Move when there is another, and "Park <id>" when its state is queued (parking another state would leave it in neither
+// list); Move lists the other tasks of the queue and, last, its end, and the one picked is where it goes, by id. A
+// parked task offers "Put back <id>", to the end. The queue verbs take no --via: k records no one for them.
+export function queueScreen(rows: readonly QueueRow[]): Screen | null {
+  const queued = rows.filter(r => r.queue !== null).sort((a, b) => (a.queue as number) - (b.queue as number))
+  const parked = rows.filter(r => r.queue === null && r.state === 'parked')
+  if (!queued.length && !parked.length) return null
+  const placed = (r: QueueRow): string[] => [`${r.id}: ${sentence(titleOf(r))}`, `${capital(r.state)}, place ${r.queue} of ${queued.length} in the queue.`]
+  const there = (r: QueueRow, y: QueueRow | null): Screen => {
+    const next = queued[queued.indexOf(r) + 1] ?? null
+    const choice: Choice = y === null ? { label: `Move ${r.id} to the end`, verb: ['queue', 'move', r.id, '--last'] } : { label: `Move ${r.id} before ${y.id}`, verb: ['queue', 'move', r.id, '--before', y.id] }
+    return {
+      kind: 'item',
+      header: 'Queue',
+      text: [...placed(r), y === null ? 'To: the end of the queue.' : `To: before ${y.id}, place ${y.queue}.`],
+      choices: y === next ? [] : [choice],
+      question: y === next ? 'It is there already. Back to the list?' : 'Move it there?',
+    }
+  }
+  const where = (r: QueueRow): Screen => ({
+    kind: 'list',
+    header: 'Queue',
+    head: `Move ${r.id} before one of these, or to the end:`,
+    question: 'Where to?',
+    rows: [
+      ...queued.filter(y => y !== r).map(y => ({ item: stateItem(y, y.queue), label: taskLabel(y), open: () => there(r, y) })),
+      { item: { lead: '', name: END, text: '.' }, label: END, open: () => there(r, null) },
+    ],
+  })
+  const inQueue = (r: QueueRow): Screen => {
+    const choices: Choice[] = []
+    if (queued.length > 1) choices.push({ label: 'Move', open: () => where(r) })
+    if (r.state === 'queued') choices.push({ label: `Park ${r.id}`, verb: ['queue', 'remove', r.id] })
+    const question = choices.length === 2 ? 'Move it, or park it?' : queued.length > 1 ? 'Move it?' : r.state === 'queued' ? 'Park it?' : 'It is alone in the queue. Back to the list?'
+    return { kind: 'item', header: 'Queue', text: placed(r), choices, question }
+  }
+  const out = (r: QueueRow): Screen => ({
+    kind: 'item',
+    header: 'Queue',
+    text: [`${r.id}: ${sentence(titleOf(r))}`, 'Parked: approved, out of the queue, so no step of it starts.'],
+    choices: [{ label: `Put back ${r.id}`, verb: ['queue', 'add', r.id] }],
+    question: 'Put it back, at the end of the queue?',
+  })
+  return {
+    kind: 'list',
+    header: 'Queue',
+    head: !parked.length ? 'The queue in order:' : queued.length ? 'The queue in order, then the parked tasks:' : 'The queue is empty. Parked:',
+    question: 'Which task?',
+    rows: [
+      ...queued.map(r => ({ item: stateItem(r, r.queue), label: taskLabel(r), open: () => inQueue(r) })),
+      ...parked.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => out(r) })),
+    ],
+  }
 }
