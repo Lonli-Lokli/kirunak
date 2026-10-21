@@ -69,7 +69,7 @@ test('an Edit of a frozen task.md is denied with the amendment instruction, and 
   assert.match(res.reason, /^kirunak: /);
   assert.match(res.reason, /frozen since 2026-11-05/);
   assert.match(res.reason, /kirunak\/tasks\/offline-forecast\/amendments\/A-<n>\.md/);
-  assert.match(res.reason, /`k amend new weather\/offline-forecast`/);
+  assert.match(res.reason, /`k amend new weather\/offline-forecast --title "<a few words>"`/);
   assert.match(res.reason, /`k approve weather\/offline-forecast --amendment A-<n>`/);
   const log = lines(join(r.home, 'freeze.log'));
   assert.equal(log.length, 1);

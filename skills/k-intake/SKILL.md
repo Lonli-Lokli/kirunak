@@ -98,6 +98,6 @@ record's folder.
 
 ## After approval
 
-The task is frozen. A change is an amendment: `k amend new <id>`, fill in Why and Changes
+The task is frozen. A change is an amendment: `k amend new <id> --title "<a few words>"`, fill in Why and Changes
 (`replace <id>: <line>`, `add <id>: <line>`, `remove <id>`, each new line with its source), `k amend check <id> A-n`,
 then ask the owner to type `! k approve <id> --amendment A-n`.
