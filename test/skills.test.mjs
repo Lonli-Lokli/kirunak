@@ -8,7 +8,7 @@ import { KIRUNAK } from './helpers.mjs';
 // of an allow-list, every path is in this repo, a task folder or Claude Code's own settings, every skill is kirunak's.
 const FILES = ['skills/k-intake/SKILL.md', 'skills/k-done/SKILL.md', 'skills/k-board-page/SKILL.md', 'README.md'];
 const COMMANDS = new Set(['k', 'claude', 'git', 'node', 'npm', 'cd']);
-const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-start', '/kirunak', '/k-board-page', '/clear']);
+const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-start', '/kirunak', '/k-board-page', '/clear', '/k-list', '/k-board', '/k-amendments', '/k-approve-amendment', '/k-queue']);
 const SKILLS = new Set(['k-intake', 'k-done', 'k-board-page']);
 
 const read = (f) => readFileSync(join(KIRUNAK, f), 'utf8');
