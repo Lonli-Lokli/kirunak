@@ -41,7 +41,7 @@ describe('the working view', () => {
         ' ',
         'Queue',
         ` 1  in review  ${ID}`,
-        ' 2  ready  hub/sync-notes',
+        ' 2  queued  hub/sync-notes',
         ' ',
         'lock: weather unit tests (session s1), 1 waiting',
         'running steps: 1 of 2',

@@ -24,7 +24,7 @@ export const ROWS: KirunakRow[] = [
     ],
     e: [{ id: 'E-1', text: 'On the oldest phone.', verdict: 'needs device' }],
   },
-  { id: 'hub/sync-notes', repo: 'hub', title: 'Sync notes', state: 'ready', queue: 2, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
+  { id: 'hub/sync-notes', repo: 'hub', title: 'Sync notes', state: 'queued', queue: 2, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
   { id: 'hub/old', repo: 'hub', title: 'Done before', state: 'done', queue: null, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },
   { id: 'weather/was-reviewed', repo: 'weather', title: 'Reviewed and met', state: 'reviewed', queue: null, step: null, lock: null, review: { file: 'review.md', verdict: 'met' }, checklist: null, ac: [], e: [] },
   { id: 'hub/proposed', repo: 'hub', title: 'Asks for approval', state: 'proposed', queue: null, step: null, lock: null, review: null, checklist: null, ac: [], e: [] },

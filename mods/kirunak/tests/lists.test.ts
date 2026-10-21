@@ -34,7 +34,7 @@ describe('the lists the commands answer with', () => {
       '',
       '1. in review, queue place 1, **weather/offline-forecast**: The last',
       '   forecast stays readable offline. Step: S-2 finished (review.md).',
-      '2. ready, queue place 2, **hub/sync-notes**: Sync notes.',
+      '2. queued, queue place 2, **hub/sync-notes**: Sync notes.',
       '3. reviewed, **weather/was-reviewed**: Reviewed and met.',
       '4. proposed, **hub/proposed**: Asks for approval.',
       '5. awaiting owner, **weather/asks-owner**: A step asked a question.',
@@ -109,7 +109,7 @@ describe('the lists the commands answer with', () => {
       '4. weather/offline-forecast A-3, proposed 2026-11-06: The age line needs its words. Changes 2 lines.',
       '5. weather/offline-forecast A-4, proposed 2026-11-06: E-1 is covered by AC-1. Changes 1 line. Not yet: with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have',
     ])
-    expect(plainLines([taskItem(ROWS[1] as (typeof ROWS)[number])])).toEqual(['1. ready, queue place 2, hub/sync-notes: Sync notes.'])
+    expect(plainLines([taskItem(ROWS[1] as (typeof ROWS)[number])])).toEqual(['1. queued, queue place 2, hub/sync-notes: Sync notes.'])
     expect([amendmentLabel(A3), taskLabel(ROWS[1] as (typeof ROWS)[number])]).toEqual(['weather/offline-forecast A-3', 'hub/sync-notes'])
   })
 })

@@ -19,12 +19,12 @@ describe('picking what waits for the owner', () => {
     const w = world(on)
     expect((await run($, 'k-accept', '', { kind: 'bridge' })).text).toBe([
       'Waiting for you to accept:',
-      '  1  weather/was-reviewed  ready (review.md)',
+      '  1  weather/was-reviewed  can accept (review.md)',
       `  2  ${ID}  not yet: ${ID}: checklist.md has 1 unticked item(s):`,
       '/k-accept 1 accepts the first. Add --checklist-open "<why>" to accept one with checklist items open.',
       '(typed in Remote Control)',
     ].join('\n'))
-    expect((await run($, 'k-approve', '')).text).toBe('Waiting for you to approve:\n  1  hub/proposed  ready\n/k-approve 1 approves the first.')
+    expect((await run($, 'k-approve', '')).text).toBe('Waiting for you to approve:\n  1  hub/proposed  can approve\n/k-approve 1 approves the first.')
     expect(w.runs).toEqual([])
   })
 

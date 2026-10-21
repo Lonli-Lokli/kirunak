@@ -22,7 +22,8 @@ export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[]; amendments:
 // `/k-approve` or `/k-accept` with no id: the tasks waiting for that verb, numbered as `/k-accept <n>` takes them.
 export function offerText(verb: 'approve' | 'accept', rows: readonly WaitingRow[]): string {
   if (!rows.length) return `Nothing waits for you to ${verb}.`
-  const state = (r: WaitingRow) => (r.why === null ? `ready${r.review ? ` (${r.review.file})` : ''}` : `not yet: ${r.why.split('\n')[0]}`)
+  // k waiting's own words: the verb's, never a task's state (kirunak-phone AC-15).
+  const state = (r: WaitingRow) => (r.why === null ? `can ${verb}${r.review ? ` (${r.review.file})` : ''}` : `not yet: ${r.why.split('\n')[0]}`)
   const how = verb === 'accept'
     ? '/k-accept 1 accepts the first. Add --checklist-open "<why>" to accept one with checklist items open.'
     : '/k-approve 1 approves the first.'

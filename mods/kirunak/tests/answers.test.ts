@@ -90,7 +90,7 @@ describe('the lists as answers', () => {
 
   test('/k-approve with no id still lists only the tasks proposed, never an amendment (AC-2)', async ($, on) => {
     world(on)
-    expect(await run($, 'k-approve')).toBe('Waiting for you to approve:\n  1  hub/proposed  ready\n/k-approve 1 approves the first.')
+    expect(await run($, 'k-approve')).toBe('Waiting for you to approve:\n  1  hub/proposed  can approve\n/k-approve 1 approves the first.')
   })
 
   const others: PromptOrigin[] = [{ kind: 'sdk' }, { kind: 'plugin', name: 'other' }, { kind: 'peer' }, { kind: 'task-notification' }, { kind: 'auto-continuation' }]
