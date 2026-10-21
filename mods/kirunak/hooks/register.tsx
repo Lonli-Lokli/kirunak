@@ -1,17 +1,17 @@
 import { atom, read } from 'claude-code'
-import type { CommandRunInput, CommandRunResult, EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { bandLine, paneLines } from './board'
 import type { Tone } from './board'
-import { argvFor, HINTS, isOwners, refusal } from './commands'
+import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
 import { amendmentsText, amendmentText, boardText, listText } from './lists'
-import { kOf, lastRows, refresh, sessionTask, tick } from './reads'
+import { owners } from './owner'
+import type { Outcome, Turn } from './owner'
+import { lastRows, refresh, sessionTask, tick } from './reads'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
 import type { AmendmentRow, Waiting } from './waiting'
 
-// An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
-const COMMIT_MS = 600_000
 // How often the pane and the band read k list and k status when no event asked for a read sooner (boards.md §4).
 const EVERY_MS = 30_000
 
@@ -33,40 +33,7 @@ const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success
 // shows no such list (review G25).
 const offered: Partial<Record<'approve' | 'accept', string[]>> & { amendments?: AmendmentRow[] } = {}
 
-// What came from the phone says so, since the transcript does not keep where a command came from; after a blank line
-// under a markdown answer, so it is not read as its list's last entry.
-async function owners(e: CommandRunInput, name: string, answer: () => Promise<string>, gap = '\n'): Promise<CommandRunResult> {
-  if (!isOwners(e.origin)) return { text: refusal(name, e.origin) }
-  const text = await answer()
-  return { text: e.origin.kind === 'bridge' ? `${text}${gap}(typed in Remote Control)` : text }
-}
-
-// Runs `run` with the checkout's k, or says there is none and runs nothing.
-async function withK($: EngineInterface, name: string, run: (k: string) => Promise<string>): Promise<string> {
-  const k = await kOf($)
-  return (await $.fs.exists(k)) ? run(k) : `/${name}: there is no k at ${k}, so nothing ran.`
-}
-
-// An engine call's failure, less the "<plugin>: $.<noun>.<verb>: " the engine starts it with, which would name kirunak
-// a second time in an answer (AC-12).
-const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).replace(/^[^\n]*?\$\.[\w.]+: /, '')
-
-const refused = (name: string, r: { stdout: string; stderr: string }): string => `/${name} refused:\n${(r.stderr || r.stdout).trim()}`
-const firstLine = (r: { stdout: string; stderr: string }): string => (r.stderr || r.stdout).trim().split('\n')[0] ?? ''
-
-// An owner's verb as `node k <argv>`, with the time a commit takes; k's state line, or why it did not take.
-async function runVerb($: EngineInterface, name: string, k: string, argv: readonly string[]): Promise<{ ok: boolean; text: string }> {
-  let r
-  try {
-    r = await $.process.run(['node', k, ...argv], { timeoutMs: COMMIT_MS })
-  } catch (err) {
-    return { ok: false, text: `/${name}: k did not finish (${reason(err)}); \`k list --all\` says whether it took.` }
-  }
-  void refresh($)
-  return r.exitCode !== 0 ? { ok: false, text: refused(name, r) } : { ok: true, text: r.stdout.trim() }
-}
-
-async function offer($: EngineInterface, k: string, verb: 'approve' | 'accept'): Promise<string> {
+async function offer($: EngineInterface, { k }: Turn, verb: 'approve' | 'accept'): Promise<string> {
   const r = await $.process.run(['node', k, 'waiting', '--json'])
   // A list that could not be read leaves none to pick from, never the one before it (review G27).
   delete offered[verb]
@@ -76,80 +43,71 @@ async function offer($: EngineInterface, k: string, verb: 'approve' | 'accept'):
   return offerText(verb, rows)
 }
 
-async function ownerVerb($: EngineInterface, e: CommandRunInput, name: string, verb: Verb): Promise<string> {
-  return withK($, name, async k => {
-    let args = e.args
-    if (verb === 'approve' || verb === 'accept') {
-      if (args.trim() === '') return offer($, k, verb)
-      const picked = byNumber(args, offered[verb])
-      if (picked !== null && 'problem' in picked) return `/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`
-      if (picked !== null) args = picked.args
-    }
-    const parsed = argvFor(verb, args)
-    if ('problem' in parsed) return `/${name}: ${parsed.problem}. Nothing ran. Usage: /${name} ${HINTS[verb]}`
-    const argv = verb === 'start' ? [...parsed.argv, '--session', await $.session.id()] : parsed.argv
-    const out = await runVerb($, name, k, argv)
-    if (verb === 'start' && out.ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
-    return out.text
+async function ownerVerb($: EngineInterface, turn: Turn, name: string, verb: Verb): Promise<string | Outcome> {
+  let args = turn.args
+  if (verb === 'approve' || verb === 'accept') {
+    if (args.trim() === '') return offer($, turn, verb)
+    const picked = byNumber(args, offered[verb])
+    if (picked !== null && 'problem' in picked) return `/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`
+    if (picked !== null) args = picked.args
+  }
+  const parsed = argvFor(verb, args)
+  if ('problem' in parsed) return `/${name}: ${parsed.problem}. Nothing ran. Usage: /${name} ${HINTS[verb]}`
+  if (verb !== 'start') return turn.typed(parsed.argv)
+  return turn.typed([...parsed.argv, '--session', await $.session.id()], ok => {
+    if (ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
   })
 }
 
 // `/k-list [all]`: k list's rows for a phone (AC-1).
-function list($: EngineInterface, args: string): Promise<string> {
-  return withK($, 'k-list', async k => {
-    const all = args.trim()
-    if (all !== '' && all !== 'all') return `/k-list takes all or nothing, not ${all}.`
-    const r = await $.process.run(['node', k, 'list', '--json', ...(all ? ['--all'] : [])])
-    return r.exitCode !== 0 ? refused('k-list', r) : listText(JSON.parse(r.stdout).rows, all === 'all')
-  })
+async function list($: EngineInterface, { k, args }: Turn): Promise<string> {
+  const all = args.trim()
+  if (all !== '' && all !== 'all') return `/k-list takes all or nothing, not ${all}.`
+  const r = await $.process.run(['node', k, 'list', '--json', ...(all ? ['--all'] : [])])
+  return r.exitCode !== 0 ? refused('k-list', r) : listText(JSON.parse(r.stdout).rows, all === 'all')
 }
 
 // `/k-board`: the board as lists in the chat (AC-5), as `k board --markdown` prints it.
-function boardAnswer($: EngineInterface, args: string): Promise<string> {
-  return withK($, 'k-board', async k => {
-    if (args.trim()) return `/k-board takes nothing, not ${args.trim()}.`
-    const r = await $.process.run(['node', k, 'board', '--markdown'])
-    return r.exitCode !== 0 ? refused('k-board', r) : boardText(r.stdout)
-  })
+async function boardAnswer($: EngineInterface, { k, args }: Turn): Promise<string> {
+  if (args.trim()) return `/k-board takes nothing, not ${args.trim()}.`
+  const r = await $.process.run(['node', k, 'board', '--markdown'])
+  return r.exitCode !== 0 ? refused('k-board', r) : boardText(r.stdout)
 }
 
 // `/k-amendments`: the amendments waiting (AC-2), kept for a number; `/k-amendments <n>`: that one in full, from the
 // list last shown, read from its file.
-function amendments($: EngineInterface, args: string): Promise<string> {
-  return withK($, 'k-amendments', async k => {
-    if (args.trim() === '') {
-      // A list that could not be read leaves none to pick from, never the one before it (review G27).
-      delete offered.amendments
-      const r = await $.process.run(['node', k, 'waiting', '--json'])
-      if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
-      offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments
-      return amendmentsText(offered.amendments)
-    }
-    const picked = nth(args, offered.amendments, '/k-amendments')
-    if (picked === null) return `/k-amendments ${args.trim()}: give an amendment's number from the list. Usage: /k-amendments [<n>]`
-    if ('problem' in picked) return `/k-amendments ${args.trim()}: ${picked.problem}.`
-    if (picked.rest.trim()) return `/k-amendments ${args.trim()}: unexpected ${picked.rest.trim()}.`
-    let text
-    try {
-      text = await $.fs.read(picked.row.file)
-    } catch (err) {
-      return `/k-amendments ${picked.n}: ${picked.row.file} could not be read (${reason(err)}).`
-    }
-    return amendmentText(picked.n, picked.row, text)
-  })
+async function amendments($: EngineInterface, { k, args }: Turn): Promise<string> {
+  if (args.trim() === '') {
+    // A list that could not be read leaves none to pick from, never the one before it (review G27).
+    delete offered.amendments
+    const r = await $.process.run(['node', k, 'waiting', '--json'])
+    if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
+    offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments
+    return amendmentsText(offered.amendments)
+  }
+  const picked = nth(args, offered.amendments, '/k-amendments')
+  if (picked === null) return `/k-amendments ${args.trim()}: give an amendment's number from the list. Usage: /k-amendments [<n>]`
+  if ('problem' in picked) return `/k-amendments ${args.trim()}: ${picked.problem}.`
+  if (picked.rest.trim()) return `/k-amendments ${args.trim()}: unexpected ${picked.rest.trim()}.`
+  let text
+  try {
+    text = await $.fs.read(picked.row.file)
+  } catch (err) {
+    return `/k-amendments ${picked.n}: ${picked.row.file} could not be read (${reason(err)}).`
+  }
+  return amendmentText(picked.n, picked.row, text)
 }
 
 // `/k-approve-amendment <n>`: `k approve <id> --amendment A-n` for the n-th of the list /k-amendments last showed; k
 // checks it again as it runs (E-2).
-function approveAmendment($: EngineInterface, args: string): Promise<string> {
+async function approveAmendment($: EngineInterface, turn: Turn): Promise<string | Outcome> {
   const name = 'k-approve-amendment'
-  return withK($, name, async k => {
-    const picked = nth(args, offered.amendments, '/k-amendments')
-    if (picked === null) return `/${name}${args.trim() ? ` ${args.trim()}` : ''}: which one? give its number from /k-amendments. Nothing ran.`
-    if ('problem' in picked) return `/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`
-    if (picked.rest.trim()) return `/${name} ${args.trim()}: unexpected ${picked.rest.trim()}. Nothing ran.`
-    return (await runVerb($, name, k, ['approve', picked.row.id, '--amendment', picked.row.amendment, '--via', 'mod'])).text
-  })
+  const { args } = turn
+  const picked = nth(args, offered.amendments, '/k-amendments')
+  if (picked === null) return `/${name}${args.trim() ? ` ${args.trim()}` : ''}: which one? give its number from /k-amendments. Nothing ran.`
+  if ('problem' in picked) return `/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`
+  if (picked.rest.trim()) return `/${name} ${args.trim()}: unexpected ${picked.rest.trim()}. Nothing ran.`
+  return turn.typed(['approve', picked.row.id, '--amendment', picked.row.amendment, '--via', 'mod'])
 }
 
 export const register: Register = on => {
@@ -184,14 +142,14 @@ export const register: Register = on => {
   // A hook that fails answers with the mod's own line instead of the engine's (review G22). The engine runs nothing
   // for a registered command whose hook failed either way; a failure after k started cannot be ruled out, so the line
   // says where to look.
-  on('command.run', { command: 'k-approve' }, ($, e) => owners(e, 'k-approve', () => ownerVerb($, e, 'k-approve', 'approve'))).catch(() => ({ text: FAILED('k-approve') }))
-  on('command.run', { command: 'k-accept' }, ($, e) => owners(e, 'k-accept', () => ownerVerb($, e, 'k-accept', 'accept'))).catch(() => ({ text: FAILED('k-accept') }))
-  on('command.run', { command: 'k-hold' }, ($, e) => owners(e, 'k-hold', () => ownerVerb($, e, 'k-hold', 'hold'))).catch(() => ({ text: FAILED('k-hold') }))
-  on('command.run', { command: 'k-start' }, ($, e) => owners(e, 'k-start', () => ownerVerb($, e, 'k-start', 'start'))).catch(() => ({ text: FAILED('k-start') }))
-  on('command.run', { command: 'k-list' }, ($, e) => owners(e, 'k-list', () => list($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-list') }))
-  on('command.run', { command: 'k-board' }, ($, e) => owners(e, 'k-board', () => boardAnswer($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-board') }))
-  on('command.run', { command: 'k-amendments' }, ($, e) => owners(e, 'k-amendments', () => amendments($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-amendments') }))
-  on('command.run', { command: 'k-approve-amendment' }, ($, e) => owners(e, 'k-approve-amendment', () => approveAmendment($, e.args))).catch(() => ({ text: FAILED('k-approve-amendment') }))
+  on('command.run', { command: 'k-approve' }, ($, e) => owners($, e, 'k-approve', t => ownerVerb($, t, 'k-approve', 'approve'))).catch(() => ({ text: FAILED('k-approve') }))
+  on('command.run', { command: 'k-accept' }, ($, e) => owners($, e, 'k-accept', t => ownerVerb($, t, 'k-accept', 'accept'))).catch(() => ({ text: FAILED('k-accept') }))
+  on('command.run', { command: 'k-hold' }, ($, e) => owners($, e, 'k-hold', t => ownerVerb($, t, 'k-hold', 'hold'))).catch(() => ({ text: FAILED('k-hold') }))
+  on('command.run', { command: 'k-start' }, ($, e) => owners($, e, 'k-start', t => ownerVerb($, t, 'k-start', 'start'))).catch(() => ({ text: FAILED('k-start') }))
+  on('command.run', { command: 'k-list' }, ($, e) => owners($, e, 'k-list', t => list($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-list') }))
+  on('command.run', { command: 'k-board' }, ($, e) => owners($, e, 'k-board', t => boardAnswer($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-board') }))
+  on('command.run', { command: 'k-amendments' }, ($, e) => owners($, e, 'k-amendments', t => amendments($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-amendments') }))
+  on('command.run', { command: 'k-approve-amendment' }, ($, e) => owners($, e, 'k-approve-amendment', t => approveAmendment($, t))).catch(() => ({ text: FAILED('k-approve-amendment') }))
 
   on('session.end', ($, e, next) => {
     delete offered.approve
