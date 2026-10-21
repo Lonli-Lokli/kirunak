@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { amendmentItem, amendmentLabel, amendmentsText, amendmentText, entry, listText, plainLines, queueNow, taskItem, taskLabel } from '../hooks/lists'
+import { amendmentItem, amendmentLabel, amendmentsText, amendmentText, entry, listText, plainLines, queueNow, taskItem, taskLabel, unmarked } from '../hooks/lists'
 import type { AmendmentRow } from '../hooks/waiting'
 
 import { AMENDMENTS, ID, ROWS } from './world'
@@ -105,6 +105,10 @@ describe('the lists the commands answer with', () => {
     ])
     expect(plainLines([taskItem(ROWS[1] as (typeof ROWS)[number])])).toEqual(['1. queued, queue place 2, hub/sync-notes: Sync notes.'])
     expect([amendmentLabel(A3), taskLabel(ROWS[1] as (typeof ROWS)[number])]).toEqual(['weather/offline-forecast A-3', 'hub/sync-notes'])
+  })
+
+  test('a dialog\'s question loses its markdown marks: backticks, ** and * around words, a heading\'s leading #; a lone * stays (S-10)', () => {
+    expect(unmarked('## Why\nRun `/k-queue` after **this**, and *then* the rest.\n  # Note\n#5 and 2 * 3 * 4, a*b*c\n*x*')).toBe('Why\nRun /k-queue after this, and then the rest.\n  Note\n#5 and 2 * 3 * 4, a*b*c\nx')
   })
 
   test('what a queue verb printed, as a numbered list; anything else as k said it', () => {

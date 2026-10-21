@@ -34,6 +34,15 @@ export function numbered(items: readonly Item[], from = 1): string[] {
 // The rows as numbered plain lines, one each, for a dialog's question, which draws no markdown.
 export const plainLines = (items: readonly Item[], from = 1): string[] => items.map((x, i) => `${from + i}. ${x.lead}${x.name}${x.text}`)
 
+// A dialog's question with the markdown marks left out: the dialog draws no markdown, so a mark shows as typed (the
+// owner's phone at S-1 and S-10: the backticks around `/k-queue` in /k-amendments). Backticks and ** go wherever they
+// are, * around words, and a heading's leading #; a lone * stays, as it is no mark.
+export const unmarked = (text: string): string =>
+  text
+    .split('\n')
+    .map(l => l.replace(/^(\s*)#{1,6}(?:\s+|$)/, '$1').replace(/`|\*\*/g, '').replace(/(^|[^\p{L}\p{N}*])\*(?=[^\s*])([^*]*?[^\s*])?\*(?![\p{L}\p{N}*])/gu, '$1$2'))
+    .join('\n')
+
 // A task as k list shows it (AC-1): state and queue place, id, title, and the step as the pane shortens it.
 export type ListRow = Pick<KirunakRow, 'id' | 'title' | 'state' | 'queue' | 'step'>
 

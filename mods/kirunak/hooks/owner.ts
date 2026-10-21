@@ -1,7 +1,7 @@
 import type { CommandRunInput, CommandRunResult, EngineInterface } from 'claude-code'
 
 import { isOwners, reason, refusal, refused } from './commands'
-import { plainLines, queueNow } from './lists'
+import { plainLines, queueNow, unmarked } from './lists'
 import type { Item } from './lists'
 import { kOf, refresh } from './reads'
 
@@ -205,5 +205,6 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   if (!labels.length || labels.length > CHOICES || new Set(labels).size < labels.length || labels.some(l => !l.trim() || l === SKIP)) {
     throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique and not blank: ${labels.join(' | ')}`)
   }
-  return { question: [...lines, screen.question].join('\n'), choices }
+  // Every question's one way out, so no text taken from the task files shows its marks as typed (S-10).
+  return { question: unmarked([...lines, screen.question].join('\n')), choices }
 }
