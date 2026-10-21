@@ -14,7 +14,9 @@ import { kOf, refresh } from './reads'
 //   Outcome this same turn made: the verb typed on the command line itself, or the verb choice that was the dialog's
 //   last tap (a turn that opened its dialog can type none);
 // - no other hook, no later command and no dialog the model raised can make such an Outcome or reach runVerb: the mod
-//   has no hook on AskUserQuestion, and a tap reaches nothing but the dialog's own loop.
+//   has no hook on AskUserQuestion, and a tap reaches nothing but the dialog's own loop;
+// - a dialog that runs no verb (`pick`, /k-board's) offers labels alone, no verb choice and no dialog after it, and
+//   ends on a tap with that label, which the command reads; it is the turn's one dialog, so no verb is typed after it.
 
 // An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
 const COMMIT_MS = 600_000
@@ -40,6 +42,8 @@ export type Turn = {
   typed(argv: readonly string[], after?: (ok: boolean) => void): Outcome
   // The command's dialog, from `first`, until a verb choice is tapped (its Outcome) or nothing will run (why).
   dialog(first: Screen): Promise<Outcome>
+  // A dialog that runs no verb (/k-board): the label tapped, or null for Skip, a dismissal or any other answer.
+  pick(first: PickScreen): Promise<string | null>
 }
 
 // A list dialog's row: its words (numbered above the choices as the app numbers them), its choice's short name, and
@@ -53,11 +57,15 @@ export type Choice = { label: string; open: () => Screen | Promise<Screen> } | {
 //   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
 //   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33);
 // - item: the item's own words (`text`), then its choices, a verb's among them;
-// - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel.
+// - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel;
+// - pick: `text` whole on every page, then a page of `labels`, paged as a list's rows, the page named in the question
+//   ("Which task's card (4 to 5 of 11)?"); a label tapped ends the dialog (A-7's AC-5).
+export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; labels: readonly string[]; question: string }
 export type Screen =
   | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string; typed?: true }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string }
   | { kind: 'reason'; header: string; text: readonly string[]; question: string; given: (why: string) => Screen }
+  | PickScreen
 
 // What the dialog's Skip answers (measured on the phone, kirunak-phone S-1), and the dialog's own choices.
 const SKIP = '[No preference]'
@@ -107,11 +115,20 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
       if (asked) throw new Error(`/${name}: a typed verb after the dialog`)
       return choose(me, false, argv, after)
     },
-    dialog: first => {
+    dialog: async first => {
       if (!open) throw new Error(`/${name}: a dialog after the command answered`)
       if (asked) throw new Error(`/${name}: a second dialog`)
       asked = true
-      return talk($, me, first)
+      const out = await talk($, me, first)
+      if ('picked' in out) throw new Error(`/${name}: a pick in a verb's dialog`)
+      return out
+    },
+    pick: async first => {
+      if (!open) throw new Error(`/${name}: a dialog after the command answered`)
+      if (asked) throw new Error(`/${name}: a second dialog`)
+      asked = true
+      const out = await talk($, me, first)
+      return 'picked' in out ? out.picked : null
     },
   }
   let out
@@ -140,7 +157,7 @@ function choose(turn: object, tapped: boolean, argv: readonly string[], after?: 
 }
 
 // What a dialog's choice does.
-type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[]; after: ((ok: boolean) => void) | undefined } | 'back' | 'more' | 'cancel'
+type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[]; after: ((ok: boolean) => void) | undefined } | { pick: string } | 'back' | 'more' | 'cancel'
 type Drawn = { question: string; choices: { label: string; act: Act }[] }
 type Frame = { screen: Screen; start: number }
 
@@ -149,7 +166,7 @@ type Frame = { screen: Screen; start: number }
 // ends it with that verb, the turn's. Words typed in the free-text row that equal a choice exactly are that choice:
 // $.ui.ask gives one string for a tap and for typed text, and they are the owner's own words, with the id, under the
 // item's text, in the owner's own command's dialog (S-7 review, finding 4; approval.md §5).
-async function talk($: EngineInterface, turn: object, first: Screen): Promise<Outcome> {
+async function talk($: EngineInterface, turn: object, first: Screen): Promise<Outcome | { picked: string }> {
   const stack: Frame[] = [{ screen: first, start: 0 }]
   for (;;) {
     const frame = stack[stack.length - 1] as Frame
@@ -173,25 +190,42 @@ async function talk($: EngineInterface, turn: object, first: Screen): Promise<Ou
     else if (act === 'more') stack.push({ screen: frame.screen, start: frame.start + choices.filter(c => typeof c.act === 'object').length })
     else if (act === 'cancel') return { nothing: 'cancelled' }
     else if ('verb' in act) return choose(turn, true, act.verb, act.after)
+    else if ('pick' in act) return { picked: act.pick }
     else stack.push({ screen: await act.open(), start: 0 })
   }
 }
 
-// A dialog's question and choices: a list's page from `start`; Back on every dialog but the command's first; Cancel
-// when there would be one choice alone, which the dialog would pad with Yes and No.
+// One page from `start`: all that are left when they fit beside Back, else one fewer and More; `range` names the page
+// when there is more than one ("4 to 5 of 11").
+function paging<T>(all: readonly T[], start: number, back: boolean): { page: readonly T[]; more: boolean; range: string | null } {
+  const slots = CHOICES - (back ? 1 : 0)
+  const rest = all.slice(start)
+  const page = rest.length <= slots ? rest : rest.slice(0, slots - 1)
+  const more = page.length < rest.length
+  return { page, more, range: start > 0 || more ? `${start + 1} to ${start + page.length} of ${all.length}` : null }
+}
+
+// A dialog's question and choices: a list's or a pick's page from `start`; Back on every dialog but the command's
+// first; Cancel when there would be one choice alone, which the dialog would pad with Yes and No.
 function draw({ screen, start }: Frame, back: boolean): Drawn {
   const choices: Drawn['choices'] = []
   let lines: string[]
+  let question = screen.question
   if (screen.kind === 'list') {
-    const slots = CHOICES - (back ? 1 : 0)
-    const rest = screen.rows.slice(start)
-    const page = rest.length <= slots ? rest : rest.slice(0, slots - 1)
-    const paged = start > 0 || page.length < rest.length
+    const { page, more, range } = paging(screen.rows, start, back)
     const items = page.map((r, i) => (screen.typed && start > 0 ? { ...r.item, name: `${r.item.name} (type ${start + i + 1})` } : r.item))
-    lines = [paged ? `${screen.head} (${start + 1} to ${start + page.length} of ${screen.rows.length})` : screen.head, ...plainLines(items)]
+    lines = [range !== null ? `${screen.head} (${range})` : screen.head, ...plainLines(items)]
     choices.push(...page.map(r => ({ label: r.label, act: { open: r.open } })))
     if (back) choices.push({ label: BACK, act: 'back' })
-    if (page.length < rest.length) choices.push({ label: MORE, act: 'more' })
+    if (more) choices.push({ label: MORE, act: 'more' })
+  } else if (screen.kind === 'pick') {
+    if (!screen.text.length) throw new Error('a pick dialog shows its text')
+    const { page, more, range } = paging(screen.labels, start, back)
+    lines = [...screen.text]
+    if (range !== null) question = question.replace(/\??$/, ` (${range})?`)
+    choices.push(...page.map(label => ({ label, act: { pick: label } })))
+    if (back) choices.push({ label: BACK, act: 'back' })
+    if (more) choices.push({ label: MORE, act: 'more' })
   } else {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
     lines = [...screen.text]
@@ -206,5 +240,5 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique and not blank: ${labels.join(' | ')}`)
   }
   // Every question's one way out, so no text taken from the task files shows its marks as typed (S-10).
-  return { question: unmarked([...lines, screen.question].join('\n')), choices }
+  return { question: unmarked([...lines, question].join('\n')), choices }
 }
