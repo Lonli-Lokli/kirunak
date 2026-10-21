@@ -2,7 +2,9 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { ID, WAITING, world } from './world'
+import type { KirunakRow } from '../types'
+
+import { ID, ROWS, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }): Promise<string> =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -11,12 +13,21 @@ describe('the lists as answers', () => {
   test('/k-list: k list\'s rows for a phone, done and on hold only with all; from the phone it says so under the list', async ($, on) => {
     const w = world(on)
     const open = await run($, 'k-list')
-    expect(open.split('\n').slice(0, 3)).toEqual(['5 tasks not done and not on hold, the queue first:', '', '1. in review, queue place 1, **weather/offline-forecast**: The last'])
+    expect(open.split('\n').slice(0, 3)).toEqual(['5 tasks not done and not on hold, the queue first:', '', '1. in review, queue place 1, **weather/offline-forecast**: The last forecast stays readable offline. Step: S-2 finished (review.md).'])
     expect(open).not.toContain('hub/old')
     expect(await run($, 'k-list', ' all ', { kind: 'bridge' })).toMatch(/^6 tasks, done and on hold among them, the queue first:\n[^]*\n3\. done, \*\*hub\/old\*\*: Done before\.\n[^]*\n\n\(typed in Remote Control\)$/)
     expect(await run($, 'k-list', 'everything')).toBe('/k-list takes all or nothing, not everything.')
     expect(w.reads).toBe(2)
     expect(w.runs).toEqual([])
+  })
+
+  test('/k-list breaks no entry across lines, however long its title and step: the phone wraps a line itself (S-10)', async ($, on) => {
+    const long: KirunakRow = { ...(ROWS[1] as KirunakRow), id: 'hub/long-one', title: 'A title long enough that a line of seventy characters would have broken it in the middle of a sentence', state: 'in progress', queue: null, step: '2026-11-07 11:40 S-3 started (session a-very-long-session-name-1234567890abcdef) and more words after' }
+    world(on, { rows: [...ROWS, long] })
+    const lines = (await run($, 'k-list', '', { kind: 'bridge' })).split('\n')
+    expect(lines.filter(l => /^\d+\. /.test(l)).length).toBe(6)
+    expect(lines.filter(l => /^\s/.test(l))).toEqual([])
+    expect(lines).toContain('6. in progress, **hub/long-one**: A title long enough that a line of seventy characters would have broken it in the middle of a sentence. Step: S-3 started (session a-very-long-session-name-1234567890abcdef) and more words after.')
   })
 
   test('/k-board: k board --markdown less its heading, so the answer names kirunak only in the engine\'s prefix; k\'s refusal when it fails', async ($, on) => {
@@ -34,10 +45,9 @@ describe('the lists as answers', () => {
   test('/k-amendments lists what waits, numbered; /k-amendments <n> shows that one in full from the list last shown', async ($, on) => {
     world(on)
     expect(await run($, 'k-amendments', '1')).toBe('/k-amendments 1: 1 of which list? /k-amendments shows it first.')
-    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**, proposed 2026-11-06: The age line'])
+    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**, proposed 2026-11-06: The age line needs its words. Changes 2 lines.'])
     expect(await run($, 'k-amendments', '1', { kind: 'bridge' })).toBe([
-      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1,',
-      'changes 2 lines.',
+      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1, changes 2 lines.',
       '',
       'Why:',
       '',

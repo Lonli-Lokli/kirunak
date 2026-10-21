@@ -2,13 +2,12 @@ import type { KirunakRow } from '../types'
 import { stepOf } from './board'
 import type { AmendmentRow } from './waiting'
 
-// The lists the mod's commands answer with, which the phone draws as markdown (AC-1, AC-2): numbered, no table, no
-// line longer than WIDTH characters but one holding a single word too long to break (an id), and text from the task
-// files escaped so it shows as written. A list is built in two halves: what a row says, as an Item of plain words
-// (taskItem, amendmentItem), and how rows are drawn (`numbered` for an answer; `plainLines` and the labels for a
-// choice dialog, whose question shows plain lines and whose choices are short names, kirunak-phone S-6).
-
-export const WIDTH = 70
+// The lists the mod's commands answer with, which the phone draws as markdown (AC-1, AC-2): numbered, no table, one
+// line per entry, never broken inside it (the phone wraps a line itself; a line the mod broke at 70 characters landed
+// mid-sentence there, S-10), and text from the task files escaped so it shows as written. A list is built in two
+// halves: what a row says, as an Item of plain words (taskItem, amendmentItem), and how rows are drawn (`numbered` for
+// an answer; `plainLines` and the labels for a choice dialog, whose question shows plain lines and whose choices are
+// short names, kirunak-phone S-6).
 
 // A row as plain words: `lead`, then `name` (the row's id, bold in an answer), then `text`.
 export type Item = { lead: string; name: string; text: string }
@@ -17,21 +16,11 @@ export type Item = { lead: string; name: string; text: string }
 const md = (s: string): string => s.replace(/[\\`*_<>[\]]/g, '\\$&')
 const lead = (w: string): string => (/^\d{1,9}[.)]$/.test(w) ? `${w.slice(0, -1)}\\${w.slice(-1)}` : /^[-=+#]+$/.test(w) ? `\\${w}` : w)
 
-// Markdown text in lines of at most `width`, the first after `first` ('- ', '1. ' or ''), the rest indented under it;
-// a word that would start a line as a list marker, a heading or a rule shows as itself.
-export function wrap(text: string, first = '', width = WIDTH): string[] {
-  const rest = ' '.repeat(first.length)
-  const out: string[] = []
-  let line: string | null = null
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    if (line === null) line = first + lead(word)
-    else if (line.length + 1 + word.length > width) {
-      out.push(line)
-      line = rest + lead(word)
-    } else line += ` ${word}`
-  }
-  out.push(line ?? first.trimEnd())
-  return out
+// Markdown text as one line, after `first` ('- ', '1. ' or ''), its spaces made single; a first word that would start
+// the line as a list marker, a heading or a rule shows as itself.
+export function entry(text: string, first = ''): string {
+  const [head, ...rest] = text.split(/\s+/).filter(Boolean)
+  return head === undefined ? first.trimEnd() : [first + lead(head), ...rest].join(' ')
 }
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
@@ -39,7 +28,7 @@ const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 
 // The rows as a numbered markdown list, each row's name in bold.
 export function numbered(items: readonly Item[], from = 1): string[] {
-  return items.flatMap((x, i) => wrap(`${md(x.lead)}**${md(x.name)}**${md(x.text)}`, `${from + i}. `))
+  return items.map((x, i) => entry(`${md(x.lead)}**${md(x.name)}**${md(x.text)}`, `${from + i}. `))
 }
 
 // The rows as numbered plain lines, one each, for a dialog's question, which draws no markdown.
@@ -105,7 +94,7 @@ export const amendmentLabel = (x: AmendmentRow): string => `${x.id} ${x.amendmen
 export function amendmentsText(rows: readonly AmendmentRow[]): string {
   if (!rows.length) return 'No amendment waits for your approval.'
   const head = `${plural(rows.length, 'amendment')} ${rows.length === 1 ? 'waits' : 'wait'} for your approval:`
-  return [head, '', ...numbered(rows.map(amendmentItem)), '', ...wrap('/k-amendments 1 shows the first in full; /k-approve-amendment 1 approves it.')].join('\n')
+  return [head, '', ...numbered(rows.map(amendmentItem)), '', '/k-amendments 1 shows the first in full; /k-approve-amendment 1 approves it.'].join('\n')
 }
 
 // An amendment file's front matter and its Why and Changes, the lines as written.
@@ -142,16 +131,16 @@ export function amendmentText(n: number, x: AmendmentRow, file: string): string 
   const refuse = refuseOf(x)
   const stamp = front.applied ? `Applied on ${front.applied} since the list was shown.` : front.declined ? `Declined since the list was shown: ${front.declined}` : null
   return [
-    ...wrap(md(`${x.id} ${x.amendment}, proposed ${front.proposed ?? x.proposed ?? 'on no date'}${by ? ` by ${by}` : ''}, changes ${plural(ops.length, 'line')}.`)),
+    entry(md(`${x.id} ${x.amendment}, proposed ${front.proposed ?? x.proposed ?? 'on no date'}${by ? ` by ${by}` : ''}, changes ${plural(ops.length, 'line')}.`)),
     '',
     'Why:',
     '',
-    ...(paragraphs.length ? paragraphs.flatMap((p, i) => [...(i ? [''] : []), ...wrap(md(p))]) : ['(empty)']),
+    ...(paragraphs.length ? paragraphs.flatMap((p, i) => [...(i ? [''] : []), entry(md(p))]) : ['(empty)']),
     '',
     'Changes:',
     '',
-    ...(ops.length ? ops.flatMap(op => (op.startsWith('- ') ? wrap(md(op.slice(2)), '- ') : wrap(md(op)))) : ['(none)']),
+    ...(ops.length ? ops.map(op => (op.startsWith('- ') ? entry(md(op.slice(2)), '- ') : entry(md(op)))) : ['(none)']),
     '',
-    ...wrap(stamp !== null ? md(stamp) : refuse !== null ? `Not yet: ${md(refuse)}` : `/k-approve-amendment ${n} approves it.`),
+    entry(stamp !== null ? md(stamp) : refuse !== null ? `Not yet: ${md(refuse)}` : `/k-approve-amendment ${n} approves it.`),
   ].join('\n')
 }
