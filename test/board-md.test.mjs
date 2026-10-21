@@ -2,38 +2,51 @@
 process.env.TZ = 'UTC';
 
 import { strict as assert } from 'node:assert';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
-import { bullet, counts, cut, renderMarkdown, WIDTH, wrap } from '../lib/board-md.mjs';
+import { bullet, counts, cut, one, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
 import { addTask, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
 
-test('headings and bullet lists, no table, no line over 70 characters but one unbreakable word', async () => {
+// No hard line break inside a paragraph or a list item (kirunak-phone S-10): no line goes on from the one before (an
+// indented line, or text straight after a list item or a paragraph), so each is a heading, a list item, a paragraph
+// standing between blank lines, or blank.
+export function noHardBreak(text) {
+  const lines = text.replace(/\n$/, '').split('\n');
+  const item = (l) => /^(#{1,3} |- |\d+\. )\S/.test(l);
+  lines.forEach((l, i) => {
+    assert.ok(!/^\s/.test(l), `a line that goes on from the one before: ${l}`);
+    if (l && !item(l)) {
+      assert.ok(!lines[i - 1], `a paragraph line straight after another line: ${l}`);
+      assert.ok(!lines[i + 1], `a paragraph line straight before another line: ${l}`);
+    }
+  });
+}
+
+test('headings, lists and paragraphs, no table, and no line broken inside a paragraph or an item however long', async () => {
   const w = await fixture();
   sessionsAt(w);
   const long = 'a-task-slug-that-runs-to-forty-letters-x';
   addTask(w.weather, `weather/${long}`, `A title of many words ${'that goes on and on '.repeat(5)}until it ends`);
+  mkdirSync(join(w.home, 'guard'), { recursive: true });
+  writeFileSync(join(w.home, 'guard', 'queue'), `{"session":"s2","what":"a heavy job named ${'at great length '.repeat(6)}"}\n`);
   const text = await board(w);
-  for (const line of text.split('\n')) {
-    assert.ok(fitsOrOneWord(line), `too long: ${line}`);
-    assert.match(line, /^(|#{1,3} \S.*|- \S.*|\d+\. \S.*| {2,3}\S.*|[^\s|#-].*)$/, `a heading, a list item, its next line or text: ${line}`);
-    assert.ok(!line.trimStart().startsWith('|'), 'no table');
-  }
-  assert.ok(text.includes(`\n- weather/${long}:\n  A title of many words that goes on and on that goes on and… (3 none)\n`));
+  noHardBreak(text);
+  for (const line of text.split('\n')) assert.ok(!line.trimStart().startsWith('|'), 'no table');
+  assert.ok(text.includes(`\n- weather/${long}: A title of m… (3 none)\n`));
+  assert.ok(text.includes('\n- worked on by session s1 since 2026-11-07 11:00\n'));
+  assert.ok(text.includes(`\n1. a heavy job named ${'at great length '.repeat(6).trim()} (session s2)\n`), 'a long row on one line');
   assert.ok(text.includes('\nAn hourly chart \\<for\\> today\n'), 'markdown in a title shows as written');
   assert.equal(text.split('kirunak').length - 1, 1, 'kirunak named once, in the first heading');
   assert.ok(text.startsWith('# kirunak board\n\nMade at 2026-11-07 12:00.\n'));
 });
 
-// A line is at most WIDTH characters, or holds a single word too long to break after its marker.
-const fitsOrOneWord = (line) => line.length <= WIDTH || !/\s/.test(line.replace(/^(#+ |- |\d+\. |\s+)/, ''));
-
-test('pane-sized: no line over 70 characters but a single unbreakable word, the cards\' AC and E cut with …, every other task one bullet with its counts', async () => {
+test('pane-sized: the cards\' AC and E cut at 70 characters with …, every other task one bullet on one line with its counts', async () => {
   const w = await fixture();
   sessionsAt(w);
   const edit = (repo, slug, f) => {
@@ -56,14 +69,14 @@ test('pane-sized: no line over 70 characters but a single unbreakable word, the 
   edit(w.weather, 'no-items', (t) => t.replace(/^- (AC|E)-\d .*\n/gm, ''));
 
   const text = await board(w);
-  for (const line of text.split('\n')) assert.ok(fitsOrOneWord(line), `too long: ${line}`);
+  noHardBreak(text);
   const card = text.slice(text.indexOf('### weather/cut-items'), text.indexOf('\n## ', text.indexOf('### weather/cut-items')));
   assert.deepEqual(card.split('\n').filter((l) => /^- (AC|E)-/.test(l)), [
     '- AC-1 none: Points read \\<below\\> & above zero, Points read \\<below…',
     '- AC-2 none: Points read \\<below\\> & above zero.',
     '- E-1 none: A missing hour leaves a gap and the next one too and the…',
   ]);
-  assert.ok(text.includes(`\n- weather/${roomless}:\n  A title that has to go to the se… (1 met, 1 not met, 1 needs device)\n`));
+  assert.ok(text.includes(`\n- weather/${roomless}: A title that… (1 met, 1 not met, 1 needs device)\n`), 'at least 12 characters of the title');
   assert.ok(text.includes('\n- weather/no-items: A task with nothing to judge yet\n'), 'no AC or E: nothing about verdicts');
   assert.ok(!text.includes('### weather/no-items') && !text.includes('### weather/recent'), 'only the tasks worked on now keep a card');
 });
@@ -80,16 +93,16 @@ test('cut never splits an escape and keeps the tail; a bullet keeps its counts a
   assert.equal(counts(r([])), '');
   assert.deepEqual(bullet(r(['needs owner'])), ['- a/b: A title (1 needs owner)']);
   assert.deepEqual(bullet(r([])), ['- a/b: A title']);
-  // An id too long to break stands alone on the first line; the title and the counts follow, cut to fit.
+  // However long the id, the bullet is one line and keeps 12 characters of the title and its counts.
   const long = `a/${'too-long-to-break-'.repeat(4)}x`;
-  const lines = bullet({ ...r(['met']), id: long, title: 'A title that goes on '.repeat(4) });
-  assert.deepEqual(lines, [`- ${long}:`, '  A title that goes on A title that goes on A title that goes… (1 met)']);
-  assert.ok(lines.every(fitsOrOneWord) && lines[1].length <= WIDTH);
+  assert.deepEqual(bullet({ ...r(['met']), id: long, title: 'A title that goes on '.repeat(4) }), [`- ${long}: A title that… (1 met)`]);
 });
 
-test('a wrapped line never starts as a list, a heading or a rule', () => {
-  assert.deepEqual(wrap('one two - three', '- ', 10), ['- one two', '  \\- three']);
-  assert.deepEqual(wrap('one two 3. three # four', '', 9), ['one two', '3\\. three', '\\# four']);
+test('a line never starts as a list, a heading or a rule, and its spaces and breaks are one space each', () => {
+  assert.equal(one('- three\nfour', '- '), '- \\- three four');
+  assert.equal(one('3. three  # four'), '3\\. three # four');
+  assert.equal(one('# four', '1. '), '1. \\# four');
+  assert.equal(one('', '- '), '-');
 });
 
 test('k board --markdown prints the board and writes nothing', async () => {
