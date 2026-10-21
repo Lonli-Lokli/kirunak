@@ -95,15 +95,11 @@ function refuseOf(x: AmendmentRow): string | null {
   return own.startsWith(`${x.amendment} `) ? own.slice(x.amendment.length + 1) : own
 }
 
-// An amendment waiting for approval (AC-2): task id and A-n, date proposed, the first sentence of its Why, the lines
-// it changes, and what `k approve --amendment` would refuse.
+// An amendment waiting for approval as a list names it (A-8's AC-2): task id, A-n and its name, nothing more; the rest
+// shows once it is picked (amendmentLines) or asked for (`/k-amendments <n>`).
 export function amendmentItem(x: AmendmentRow): Item {
-  const refuse = refuseOf(x)
-  return {
-    lead: '',
-    name: `${x.id} ${x.amendment}`,
-    text: `, proposed ${x.proposed ?? 'on no date'}: ${x.why ?? 'no Why.'} Changes ${plural(x.lines, 'line')}.${refuse !== null ? ` Not yet: ${refuse}` : ''}`,
-  }
+  const name = x.name ? x.name.replace(/\s+/g, ' ').trim() : ''
+  return { lead: '', name: `${x.id} ${x.amendment}`, text: name ? `: ${name}` : '' }
 }
 
 // A dialog's choice for an amendment: its id and A-n.
