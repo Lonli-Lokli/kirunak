@@ -507,7 +507,8 @@ const VERBS = {
   },
 
   // --markdown prints the board for a chat answer on a phone and writes nothing; --brief the brief board of the mod's
-  // /k-board dialog (with --json: { made, text, ids }, text included), --card <id> the card a task tapped there answers.
+  // /k-board dialogs (with --json: { made, text, ids, groups, machine }, text included), --card <id> the card a task
+  // tapped there answers.
   async board({ ws, flags }) {
     if (flags.card) {
       const text = await boardCard(ws, flags.card);
