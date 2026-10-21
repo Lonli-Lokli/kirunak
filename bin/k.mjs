@@ -19,6 +19,7 @@ import * as queue from '../lib/queue.mjs';
 import * as list from '../lib/list.mjs';
 import * as board from '../lib/board.mjs';
 import { markdown as boardMarkdown } from '../lib/board-md.mjs';
+import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
@@ -33,7 +34,7 @@ import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'staged', 'baseline', 'once', 'watch', 'write']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -55,6 +56,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
+          k board --brief: a line per task, for the phone
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
             each verb would refuse; with --json also the tasks k hold and k start take
@@ -501,8 +503,13 @@ const VERBS = {
     return { ...out, text };
   },
 
-  // --markdown prints the board for a chat answer on a phone (the mod's /k-board) and writes nothing.
+  // --markdown prints the board for a chat answer on a phone and writes nothing; --brief the brief board of the mod's
+  // /k-board dialog (with --json: { made, text, ids }, text included).
   async board({ ws, flags }) {
+    if (flags.brief) {
+      const b = await boardBrief(ws);
+      return { json: b, text: b.text };
+    }
     if (flags.markdown) {
       const text = await boardMarkdown(ws);
       return { markdown: text, text: text.trimEnd() };
@@ -595,8 +602,9 @@ export async function main(argv = process.argv.slice(2)) {
   const ws = needsWs ? await loadWorkspace() : null;
   const r = (await fn({ ws, pos, flags })) || {};
   if (flags.json) {
-    const { text, code, ...rest } = r;
-    console.log(JSON.stringify(rest, null, 2));
+    // A verb whose JSON must carry its text too returns it whole as `json`.
+    const { text, code, json, ...rest } = r;
+    console.log(JSON.stringify(json ?? rest, null, 2));
   } else if (r.text) {
     (r.code ? console.error : console.log)(r.text);
   }
