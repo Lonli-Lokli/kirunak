@@ -53,8 +53,9 @@ const tokens = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(
 test('both themes in the CSS, every text pair at 4.5:1 or more in each', async () => {
   const html = await page(await fixture());
   const light = /:root \{([^}]*)\}/.exec(html)[1];
-  const dark = /@media \(prefers-color-scheme: dark\) \{ :root \{([^}]*)\} \}/.exec(html)?.[1];
-  assert.ok(dark, 'a dark block under prefers-color-scheme');
+  const dark = /@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)?.[1];
+  assert.ok(dark, 'a dark block under prefers-color-scheme, unless the host says light');
+  assert.equal(/:root\[data-theme="dark"\] \{([^}]*)\}/.exec(html)?.[1], dark, 'the same dark block when the host says dark');
   for (const [name, block] of [['light', light], ['dark', dark]]) {
     const t = tokens(block);
     for (const [fg, bg] of TEXT_PAIRS) {
