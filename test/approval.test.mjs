@@ -467,7 +467,7 @@ test('accept refuses a not met verdict, --checklist-open or not: the way out is 
   writeFileSync(join(taskDir(weather), 'review.md'), notMet);
   reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
-  const way = new RegExp(`review\\.md ends verdict: not met \\(AC-2\\), which k accept never takes: amend the task \\(k amend new ${ID}\\) and review again, or run a new review$`);
+  const way = new RegExp(`review\\.md ends verdict: not met \\(AC-2\\), which k accept never takes: amend the task \\(k amend new ${ID} --title "<a few words>"\\) and review again, or run a new review$`);
   assert.throws(() => accept({ ws, id: ID }), way);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'AC-2 later' }), way);
   assert.equal(existsSync(join(taskDir(weather), 'done.json')), false);
