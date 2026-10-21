@@ -20,7 +20,7 @@ import * as list from '../lib/list.mjs';
 import * as board from '../lib/board.mjs';
 import { markdown as boardMarkdown } from '../lib/board-md.mjs';
 import * as handoff from '../lib/handoff.mjs';
-import { install } from '../lib/install.mjs';
+import { install, SKILLS } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -168,7 +168,7 @@ const VERBS = {
     const settings = join(homedir(), '.claude', 'settings.json');
     const wired = existsSync(settings) && readFileSync(settings, 'utf8').includes('hooks/kirunak-freeze.mjs');
     say(wired, `the freeze hook is wired in ${settings}${wired ? '' : ' (run k install)'}`);
-    for (const s of ['k-intake', 'k-done']) {
+    for (const s of SKILLS) {
       say(existsSync(join(homedir(), '.claude', 'skills', s, 'SKILL.md')), `skill ${s} is linked (k install)`);
     }
     try {

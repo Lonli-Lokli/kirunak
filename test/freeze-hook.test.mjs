@@ -197,7 +197,7 @@ test('the Skill tool: the owner\'s command names are denied, every other skill a
   for (const skill of ['k-approve', 'k-accept', 'k-hold', 'k-resume', 'someplugin:k-approve']) {
     assert.match(run({ tool_name: 'Skill', tool_input: { skill } }, r.home).reason, /is the owner's/, skill);
   }
-  for (const skill of ['k-intake', 'k-done', 'anything']) {
+  for (const skill of ['k-intake', 'k-done', 'k-board-page', 'anything']) {
     assert.equal(run({ tool_name: 'Skill', tool_input: { skill } }, r.home).stdout, '', skill);
   }
 });

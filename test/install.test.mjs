@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { install } from '../lib/install.mjs';
+import { install, SKILLS } from '../lib/install.mjs';
 import { gitInit, KIRUNAK } from './helpers.mjs';
 
 // A temp home: a settings file with someone else's hooks, an empty skills folder, a kirunak checkout.
 function home() {
   const dir = mkdtempSync(join(tmpdir(), 'kirunak-install-'));
   const kirunakRoot = join(dir, 'kirunak');
-  for (const s of ['k-intake', 'k-done']) mkdirSync(join(kirunakRoot, 'skills', s), { recursive: true });
+  for (const s of SKILLS) mkdirSync(join(kirunakRoot, 'skills', s), { recursive: true });
   const settingsPath = join(dir, '.claude', 'settings.json');
   mkdirSync(join(dir, '.claude'), { recursive: true });
   const settings = {
@@ -50,15 +50,16 @@ test('the block is written with the absolute path, and every other hook and key 
   }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
-  for (const s of ['k-intake', 'k-done']) {
+  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page']);
+  for (const s of SKILLS) {
     const link = join(h.skillsDir, s);
     assert.ok(lstatSync(link).isSymbolicLink());
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
-  assert.equal(actions.length, 5);
+  assert.equal(actions.length, 6);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
-  assert.match(actions[3], /added the kirunak SessionStart hook/);
-  assert.ok(actions[4].endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
+  assert.match(actions[4], /added the kirunak SessionStart hook/);
+  assert.ok(actions[5].endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
 });
 
 test('a missing settings file is created; a second run changes nothing', () => {
