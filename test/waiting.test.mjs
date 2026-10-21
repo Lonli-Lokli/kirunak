@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
@@ -49,7 +49,10 @@ test('k waiting lists the amendments neither applied nor declined, each with wha
   assert.deepEqual(w.amendments.map((x) => x.amendment), ['A-3', 'A-4']);
   assert.deepEqual(w.amendments[0], {
     id: ID, amendment: 'A-3', title: TITLE, proposed: '2026-11-06', by: 'session s1', why: 'The age line needs its words.', lines: 2, refuse: null,
+    file: join(realpathSync(dirOf(weather)), 'amendments', 'A-3.md'),
   });
+  // The mod reads the file whole for `/k-amendments <n>`, from wherever its session runs.
+  assert.match(readFileSync(w.amendments[0].file, 'utf8'), /^## Why\nThe age line needs its words\. The old one was a time alone\./m);
   const refused = w.amendments[1];
   assert.deepEqual([refused.why, refused.lines], ['E-1 is covered by AC-1.', 1]);
   assert.match(refused.refuse, new RegExp(`^${ID} with A-4 applied fails k check: line \\d+: aspect offline: .*E-1`));
