@@ -44,3 +44,102 @@ test('k board --markdown prints the board and writes nothing', async () => {
   assert.match(r.stdout, /\n## Lock, queue and running steps\n/);
   assert.ok(!existsSync(join(w.home, 'board.html')));
 });
+
+// The fixture's board, word for word: what the mod's /k-board shows in the chat.
+const EXPECTED = `# kirunak board
+
+Made at 2026-11-07 12:00.
+
+## Working on now (2)
+
+### weather/hourly-chart
+
+An hourly chart \\<for\\> today
+
+- state: in progress, queue place 1
+- step: 2026-11-03 14:02 S-2 started (opus, session 7c1)
+- worked on by session s1 since 2026-11-07 11:00
+- approved 2026-11-03
+
+Verdicts:
+
+- AC-1 none: The chart shows one point per hour.
+- AC-2 none: Points read \\<below\\> & above zero.
+- E-1 none: A missing hour leaves a gap.
+
+### hub/reviewed
+
+A reviewed task
+
+- state: in review
+- worked on by step S-3 running since 2026-11-07 11:40
+- review: review-2.md, verdict: not met (AC-2)
+- approved 2026-11-01
+
+Verdicts:
+
+- AC-1 met: The chart shows one point per hour.
+- AC-2 not met: Points read \\<below\\> & above zero.
+- E-1 none: A missing hour leaves a gap.
+
+## proposed (1)
+
+### weather/offline-forecast
+
+The last forecast stays readable offline
+
+- state: proposed
+
+Verdicts:
+
+- AC-1 none: With no network, the app opens on the last forecast it
+  fetched, with the time it was fetched.
+- AC-2 none: The forecast screen shows the fetch time in the reader's
+  own time format.
+- AC-3 none: Both phone platforms keep the last forecast across a
+  restart.
+- E-1 none: A forecast older than a day shows its age in words, not
+  only a time.
+
+## done this week (1)
+
+### weather/recent
+
+Done this week
+
+- state: done
+- approved 2026-11-01
+- accepted 2026-11-06
+
+Verdicts:
+
+- AC-1 none: The chart shows one point per hour.
+- AC-2 none: Points read \\<below\\> & above zero.
+- E-1 none: A missing hour leaves a gap.
+
+## Lock, queue and running steps
+
+no lock
+
+### Heavy-job queue
+
+empty
+
+### Running steps: 1 of 2
+
+- hub/reviewed S-3, session s2, since 2026-11-07 11:40
+
+### Device claims
+
+none
+
+### Task queue
+
+1. weather/hourly-chart (in progress)
+`;
+
+test('the fixture\'s board as the chat shows it: the working tasks, each state\'s tasks, the lock and the queues', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  assert.equal(await board(w), EXPECTED);
+});
