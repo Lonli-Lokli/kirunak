@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
 import { bullet, counts, cut, renderMarkdown, WIDTH, wrap } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
-import { addTask, fixture, NOW, sessionsAt } from './board-fixture.mjs';
+import { addTask, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
@@ -143,6 +143,14 @@ Verdicts:
 
 - weather/offline-forecast: The last forecast stays readable… (4 none)
 
+## queued (1)
+
+- weather/next-up: Next in line (3 none)
+
+## parked (1)
+
+- hub/later: Not yet (3 none)
+
 ## done this week (1)
 
 - weather/recent: Done this week (3 none)
@@ -166,10 +174,12 @@ none
 ### Task queue
 
 1. weather/hourly-chart (in progress)
+2. weather/next-up (queued)
 `;
 
 test('the fixture\'s board as the chat shows it: the working tasks, each state\'s tasks, the lock and the queues', async () => {
   const w = await fixture();
   sessionsAt(w);
+  queuedAndParked(w);
   assert.equal(await board(w), EXPECTED);
 });

@@ -3,11 +3,12 @@ import { test } from 'node:test';
 import { status } from '../lib/board.mjs';
 import { facts, items, model, sessions } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
-import { fixture, NOW, sessionsAt } from './board-fixture.mjs';
+import { fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
-async function board() {
+async function board({ more = () => {} } = {}) {
   const w = await fixture();
   sessionsAt(w);
+  more(w);
   return model(await rows(w.ws, { all: true }), { ...status(w.ws), sessions: sessions(w.ws) }, NOW);
 }
 
@@ -18,12 +19,14 @@ test('the session records that name a task, by session id; a record with no task
 });
 
 test('the tasks sessions work on first, in k list\'s order, then every other task by state, done ones for a week', async () => {
-  const m = await board();
+  const m = await board({ more: queuedAndParked });
   assert.deepEqual(m.working.map((r) => r.id), ['weather/hourly-chart', 'hub/reviewed']);
   assert.match(m.working[0].who.join('\n'), /^session s1 since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   assert.match(m.working[1].who.join('\n'), /^step S-3 running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   assert.deepEqual(m.states.map((s) => [s.title, s.rows.map((r) => r.id)]), [
     ['proposed', ['weather/offline-forecast']],
+    ['queued', ['weather/next-up']],
+    ['parked', ['hub/later']],
     ['done this week', ['weather/recent']],
   ], 'a task done more than a week ago is left out, and a done task named by an old session is not worked on');
   assert.match(m.made, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
