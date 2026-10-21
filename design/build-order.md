@@ -25,7 +25,7 @@ lib/task.mjs                parseTask(text) → { front, sections: { goal, ac, e
                             checkTask(parsed, aspectIds) → [{ line, problem }]  (task-files.md §2 rules 1 to 6)
                             isReady(parsed, aspectIds) → boolean (check passes and q is empty)
 lib/source.mjs              parseTags(line) → [{ kind: 'owner'|'research'|'default'|'from', date?, ref?, q? }] or null
-lib/state.mjs               stateOf({ taskDir, record, queue, files }) → one of the eleven states (task-files.md §4)
+lib/state.mjs               stateOf({ taskDir, record, queue, files }) → one of the twelve states (task-files.md §4)
 lib/approval.mjs            hashBytes(buf) → 'sha256:<hex>'; readRecord(repo, slug); approve({ ws, id, amendment?, via,
                             queuePlace? }) → { hash, commit }; verify(ws, id) → 'ok' | 'stale' | 'none'
 lib/amend.mjs               parseAmendment(text) → { front, why, ops: [{ op: 'replace'|'add'|'remove', id, section?, line? }] }
@@ -108,7 +108,7 @@ long README goes stale first.
 | Test file | Proves | Cases |
 | --- | --- | --- |
 | `task.test.mjs` | R4, R5, R2, R3 | an unsourced line fails with its number; each tag kind parses; `[from ...]` alone fails; a `Q-n` line makes `isReady` false; a gap in AC numbering fails; sections out of order fail; an aspect missing from Aspects fails; an unknown aspect fails; `in` naming no existing line fails; CRLF fails; the invented finished task (`test/fixtures`, `weather/offline-forecast`) passes |
-| `state.test.mjs` | R16, task-files.md §4 | one fixture folder per state, all eleven, including `stale` |
+| `state.test.mjs` | R16, task-files.md §4 | one fixture folder per state, all twelve (queued and parked among them), including `stale` |
 | `approval.test.mjs` | D7, R5, R7 | the hash equals `shasum -a 256`; approve writes the record and history; one changed byte → `verify` says `stale`; approve refuses with a Q open, with `check` failing, with an uncommitted task; an amendment's replace, add and remove apply; a removed number is never reused; apply re-hashes and appends history with the amendment id; `declined:` stamps |
 | `freeze-hook.test.mjs` | D7 | spawned as a child with the hook JSON on stdin: Edit of a frozen `task.md` denied with the amendment instruction; Edit of a draft allowed; any Write under `approvals/`, to `done.json`, a `- [x]` tick in `checklist.md`, `intake.md` denied; Bash `k approve x`, `>> kirunak/approvals/x.json`, `sed -i` on a frozen task denied; `k check`, `k intake answer`, `k handoff`, `cat`, `git log` allowed; a subagent's input (`agent_id` present) treated the same; bad input → exit 0 (fails open); `KIRUNAK_FREEZE_OFF=1` allows and logs |
 | `git-hook.test.mjs` | D7 | in a temp repo: a commit with a changed frozen task refused with the message; the same with `KIRUNAK_APPROVING=<id>` allowed; staged `approvals/` without the variable refused; a non-append `intake.md` refused; a commit touching no kirunak file allowed |
@@ -203,11 +203,24 @@ starter. R23 and "at most M" came with the owner's amendment of the same week. D
 
 ## Slice 5: the phone board. Closes D13
 
-- Files: the `sync` step kind, `k board --artifact`, `$KIRUNAK_HOME/board-artifact.json`.
-- Tests: the published HTML equals `k board --html` output and has no controls; the step's brief names no other
-  tool. Numbers: whether the Artifact tool is available under `claude -p` on the account (one run); the sync's
-  weight per run (expected about a fresh session's opening context at the sync model's weight); the page on the
-  phone at 390 px wide, readable in both themes.
+Built 2026-10-21 (gulnya/kirunak-phone S-1, S-8; amendment A-9), in place of the sync step this slice first named.
+Slice 5 was to check one thing before building on it, whether a Claude step could publish the page; S-1 measured the
+mod's side of that and the answer changed the design (`boards.md` §3 has the evidence): a mod cannot publish, so the
+board reaches the phone by two commands the owner types and nothing else refreshes it.
+
+- Files: `lib/board-model.mjs` (the one order every surface uses, `boards.md` §2), `lib/board.mjs` (the page, `k board
+  --html <file> --no-open`), `lib/board-md.mjs` (`k board --markdown`, with `--json` as `{ markdown }`),
+  `skills/k-board-page/SKILL.md` (`k install` links it, `k doctor` checks it), `$KIRUNAK_HOME/board-artifact.json` (the
+  one link the skill keeps). The mod's `/k-board` is slice 6. There is no `sync` step kind and no `k board --artifact`.
+- Tests: `board-model.test.mjs` (the order, the sections); `board.test.mjs` (the page has no form, button or script,
+  no `file://` link under `--html`, follows `data-theme`, 17 text pairs held at 4.5:1 or more in both themes);
+  `board-md.test.mjs` (a word-for-word fixture, lines at most 70 characters, "kirunak" once); `skills.test.mjs`.
+- Numbers, measured: the page at 390 px wide in headless Chrome, scrollWidth 390 of 390 with a 40-character id and an
+  80-character path; `k board --markdown` on the live workspace, 223 lines (1,077 before it was made pane-sized, the
+  owner's decision of 2026-10-21); the new "Working on now" ground 5.57:1 to 14.60:1 light and 6.95:1 to 13.03:1 dark;
+  `npm test` 344 of 344 at S-8's first build and 346 after the pane-sized form. Not yet measured: the cost of one
+  `/k-board-page` turn (expected about a fresh session's opening context, more in a long one); the owner's phone check
+  of the published page is S-10's.
 
 ## Slice 6: the mod. Closes D14
 
@@ -221,6 +234,14 @@ starter. R23 and "at most M" came with the owner's amendment of the same week. D
 - Built 2026-10-19 (branch `slice-6/mod`): validate, test (20) and `tsc -p` green; the numbers are in `boards.md` §4
   (no measurable load time; two reads of 0.08 and 0.07 s every 30 s, a test holds the cadence). The phone check
   passed the same evening: a `/k-accept` typed in Remote Control arrived as `bridge` and ran (`boards.md` §4).
+- The phone commands, built 2026-10-21 (gulnya/kirunak-phone S-5, S-6, A-9): `/k-list`, `/k-board`, `/k-amendments`,
+  `/k-approve-amendment`, `/k-queue`, and `/k-approve`, `/k-accept`, `/k-hold`, `/k-start` with no id opening the
+  owner's choice dialog (`boards.md` §4); the tap is the owner's gesture by the rule of `approval.md` §5, held in
+  `hooks/owner.ts`. Tests: `rule.test.ts` and `commands.test.ts` (every origin refused before any read or dialog;
+  a dialog the model raised runs nothing), `dialog.test.ts`, the AC-12 walk of every dialog, `lists.test.ts`,
+  `pick.test.ts` (all under `mods/kirunak/tests/`). Numbers: `claude plugin test` 79 of 79 (50 before S-6); `npm test` 354 of 354 after the states
+  merged; `k list --json --all` piped whole at 90,372 bytes (the pipe cut it at 64 KiB until `k` exited only after
+  stdout and stderr flushed). The phone check of the dialogs is S-10's.
 
 ## Slice 7, later and not detailed here: R17, R18
 
