@@ -146,7 +146,9 @@ type Frame = { screen: Screen; start: number }
 
 // The dialog's loop: each answer acts only when it equals a choice offered (or is a reason typed in a reason dialog);
 // Skip, a dismissal or any other text ends it with nothing run; Back shows the dialog before again; a verb choice
-// ends it with that verb, the turn's.
+// ends it with that verb, the turn's. Words typed in the free-text row that equal a choice exactly are that choice:
+// $.ui.ask gives one string for a tap and for typed text, and they are the owner's own words, with the id, under the
+// item's text, in the owner's own command's dialog (S-7 review, finding 4; approval.md §5).
 async function talk($: EngineInterface, turn: object, first: Screen): Promise<Outcome> {
   const stack: Frame[] = [{ screen: first, start: 0 }]
   for (;;) {
@@ -164,6 +166,8 @@ async function talk($: EngineInterface, turn: object, first: Screen): Promise<Ou
       if (frame.screen.kind !== 'reason') return { nothing: 'the answer was none of the choices' }
       const why = tap.trim()
       if (!why) return { nothing: 'no reason was typed' }
+      // k takes a value starting with -- for a flag and refuses it; the mod says so itself (S-7 review, finding 8).
+      if (why.startsWith('--')) return { nothing: 'the reason started with --, which k takes for a flag' }
       stack.push({ screen: frame.screen.given(why), start: 0 })
     } else if (act === 'back') stack.pop()
     else if (act === 'more') stack.push({ screen: frame.screen, start: frame.start + choices.filter(c => typeof c.act === 'object').length })

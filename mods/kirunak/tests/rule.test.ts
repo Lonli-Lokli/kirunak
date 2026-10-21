@@ -2,7 +2,7 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { ID, QUEUE, world } from './world'
+import { ID, QUEUE, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -56,6 +56,35 @@ describe('the owner-only rule (kirunak-phone AC-4)', () => {
     ]
     const w = world(on, { taps: cases.flatMap(([taps]) => taps) })
     for (const [, why] of cases) expect((await run($, 'k-accept')).split('\n')[0]).toBe(`Nothing ran: ${why}.`)
+    expect(w.runs).toEqual([])
+  })
+
+  test('words typed in the free-text row that equal a choice exactly are that choice, the verb\'s among them: $.ui.ask gives one string for both (finding 4); words a case or a space apart run nothing', async ($, on) => {
+    const typed = (verb: string): (string | null)[] => ['hub/proposed', verb]
+    const w = world(on, { taps: [...typed('approve hub/proposed'), ...typed('Approve hub/proposed '), ...typed('Approve  hub/proposed'), ...typed('Approve hub/proposed')] })
+    for (let i = 0; i < 3; i++) expect((await run($, 'k-approve')).split('\n')[0]).toBe('Nothing ran: the answer was none of the choices.')
+    expect(w.runs).toEqual([])
+    expect(await run($, 'k-approve')).toBe(`${ID}: done`)
+    expect(w.runs.map(argv => argv.slice(2))).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
+  })
+
+  test('a reason starting with -- is refused in the dialog with its own line, and k never runs; -- inside a reason is the owner\'s words (finding 8)', async ($, on) => {
+    const w = world(on, { taps: [ID, 'Hold', '--dry-run', ID, 'Accept with open items', ' --dry-run', `${ID} A-4`, 'Decline', '--why', ID, 'Hold', 'wait -- see notes', `Hold ${ID}`] })
+    const line = 'Nothing ran: the reason started with --, which k takes for a flag.'
+    expect(await run($, 'k-hold')).toBe(line)
+    expect((await run($, 'k-accept')).split('\n')[0]).toBe(line)
+    expect((await run($, 'k-amendments')).split('\n')[0]).toBe(line)
+    expect(w.runs).toEqual([])
+    await run($, 'k-hold')
+    expect(w.runs.map(argv => argv.slice(2))).toEqual([['hold', ID, '--why', 'wait -- see notes', '--via', 'mod']])
+  })
+
+  test('a hook that fails mid-dialog answers with the mod\'s own line, and k never runs', async ($, on) => {
+    // k waiting giving one id twice: the second page's choices would not be unique, so drawing it fails.
+    const approve = ['hub/t1', 'hub/t2', 'hub/t3', 'hub/t4', 'hub/t4'].map(id => ({ id, title: id, why: null }))
+    const w = world(on, { waiting: [{ ...WAITING, approve }], taps: ['More', 'hub/t4', 'Approve hub/t4'] })
+    expect(await run($, 'k-approve')).toBe('/k-approve failed in the mod (the debug log says why); if k had started, `k list --all` shows whether it took.')
+    expect(w.asked.length).toBe(1)
     expect(w.runs).toEqual([])
   })
 
