@@ -22,7 +22,7 @@ const PATH = [ID, 'Accept with open items', 'read on the phone', `Accept ${ID} w
 // /k-hold's, /k-start's and /k-queue's: to Hold <id>, Start <id>, Move <id> before <id> and Put back <id>.
 const HOLD = [ID, 'Hold', 'the owner is away', `Hold ${ID}`]
 const START = [ID, `Start ${ID}`]
-const MOVE = ['hub/next', 'Move', ID, `Move hub/next before ${ID}`]
+const MOVE = ['hub/next', 'Move', 'More', ID, `Move hub/next before ${ID}`]
 const BACK_IN = ['More', 'hub/parked', 'Put back hub/parked']
 
 describe('the owner-only rule (kirunak-phone AC-4)', () => {
@@ -98,14 +98,14 @@ describe('the owner-only rule (kirunak-phone AC-4)', () => {
     expect(w.runs.map(argv => argv.slice(2))).toEqual([['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod']])
   })
 
-  test('a dialog the model raised, answered "Hold <id>", "Start <id>", "Move <id> before <id>", "Park <id>" or "Put back <id>", runs nothing, before and after the owner\'s own dialogs', async ($, on) => {
-    const w = world(on, { rows: QUEUE, taps: [`Hold ${ID}`, 'hub/next', null, `Move hub/next before ${ID}`, ID, null, 'Park hub/next', `Start ${ID}`, 'Put back hub/parked'] })
+  test('a dialog the model raised, answered "Hold <id>", "Start <id>", "Move <id> before <id>", "Park <id>", "Put back <id>", "Earlier" or "Later", runs nothing, before and after the owner\'s own dialogs', async ($, on) => {
+    const w = world(on, { rows: QUEUE, taps: [`Hold ${ID}`, 'hub/next', null, `Move hub/next before ${ID}`, ID, null, 'Park hub/next', `Start ${ID}`, 'Put back hub/parked', 'Earlier', 'Later'] })
     await modelAsks($, `Hold ${ID}`)
     await run($, 'k-queue')
     await modelAsks($, `Move hub/next before ${ID}`)
     await run($, 'k-hold')
-    for (const label of ['Park hub/next', `Start ${ID}`, 'Put back hub/parked']) await modelAsks($, label)
-    expect(w.asked.length).toBe(9)
+    for (const label of ['Park hub/next', `Start ${ID}`, 'Put back hub/parked', 'Earlier', 'Later']) await modelAsks($, label)
+    expect(w.asked.length).toBe(11)
     expect(w.runs).toEqual([])
   })
 
@@ -133,14 +133,14 @@ describe('the owner-only rule (kirunak-phone AC-4)', () => {
   })
 
   test('/k-hold, /k-start and /k-queue: Back shows each dialog before again and runs nothing; the verb runs only as the last tap (E-5)', async ($, on) => {
-    const w = world(on, { rows: QUEUE, taps: [...HOLD.slice(0, 3), 'Back', 'Back', 'Back', SKIP, ID, 'Back', SKIP, 'hub/next', 'Move', 'More', 'End of the queue', 'Back', 'Back', 'Back', 'Back', SKIP, ...BACK_IN.slice(0, 2), 'Back', 'Back', SKIP] })
+    const w = world(on, { rows: QUEUE, taps: [...HOLD.slice(0, 3), 'Back', 'Back', 'Back', SKIP, ID, 'Back', SKIP, 'hub/next', 'Move', 'More', 'More', 'End of the queue', 'Back', 'Back', 'Back', 'Back', 'Back', SKIP, ...BACK_IN.slice(0, 2), 'Back', 'Back', SKIP] })
     for (const command of ['k-hold', 'k-start', 'k-queue', 'k-queue']) expect(await run($, command)).toBe('Nothing ran: skipped.')
     const a = w.asked
     expect(a.slice(4, 7)).toEqual([a[2], a[1], a[0]])
     expect(a[9]).toEqual(a[7])
-    expect(a.slice(15, 19)).toEqual([a[13], a[12], a[11], a[10]])
-    expect(a.slice(22, 24)).toEqual([a[20], a[19]])
-    expect(a.length).toBe(24)
+    expect(a.slice(16, 21)).toEqual([a[14], a[13], a[12], a[11], a[10]])
+    expect(a.slice(24, 26)).toEqual([a[22], a[21]])
+    expect(a.length).toBe(26)
     expect(w.runs).toEqual([])
   })
 })

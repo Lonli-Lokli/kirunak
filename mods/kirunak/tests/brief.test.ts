@@ -99,7 +99,7 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
   test('Back returns to the groups, from any group (E-5)', async ($, on) => {
     const w = world(on, { rows: ELEVEN, brief: json(BRIEF11), taps: ['Queued', 'Back', 'Working on now', 'Back', 'Done this week', 'hub/d1'] })
     expect(await run($, 'k-board')).toBe(card11('hub/d1'))
-    expect(w.asked.map(a => a.labels)).toEqual([GROUPS11.labels, ['hub/q1', 'hub/q2', 'Back', 'More'], GROUPS11.labels, ['hub/w1', 'hub/w2', 'Back', 'More'], GROUPS11.labels, ['hub/d1', 'hub/d2', 'Back']])
+    expect(w.asked.map(a => a.labels)).toEqual([GROUPS11.labels, ['hub/q1', 'hub/q2', 'More', 'Back'], GROUPS11.labels, ['hub/w1', 'hub/w2', 'More', 'Back'], GROUPS11.labels, ['hub/d1', 'hub/d2', 'Back']])
     expect([w.asked[2], w.asked[4]]).toEqual([GROUPS11, GROUPS11])
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/d1']])
   })
@@ -110,8 +110,8 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     expect(await run($, 'k-board')).toBe(card11('hub/q3'))
     const pages = (name: string, n: number, all: readonly (readonly [string, readonly string[]])[]) =>
       all.map(([range, labels]) => ({ header: 'Board', question: `${paragraph(BRIEF11, name)}\nWhich task's card (${range} of ${n})?`, labels }))
-    const [w1, w2] = pages('Working on now', 5, [['1 to 2', ['hub/w1', 'hub/w2', 'Back', 'More']], ['3 to 5', ['hub/w3', 'hub/w4', 'hub/w5', 'Back']]])
-    const [q1, q2] = pages('Queued', 4, [['1 to 2', ['hub/q1', 'hub/q2', 'Back', 'More']], ['3 to 4', ['hub/q3', 'hub/q4', 'Back']]])
+    const [w1, w2] = pages('Working on now', 5, [['1 to 2', ['hub/w1', 'hub/w2', 'More', 'Back']], ['3 to 5', ['hub/w3', 'hub/w4', 'hub/w5', 'Back']]])
+    const [q1, q2] = pages('Queued', 4, [['1 to 2', ['hub/q1', 'hub/q2', 'More', 'Back']], ['3 to 4', ['hub/q3', 'hub/q4', 'Back']]])
     expect(w.asked).toEqual([GROUPS11, w1, w2, w1, w2, GROUPS11, q1, q2])
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/w4'], ['board', '--brief', '--json'], ['board', '--card', 'hub/q3']])
   })

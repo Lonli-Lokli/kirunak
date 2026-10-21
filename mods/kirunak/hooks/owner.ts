@@ -1,7 +1,7 @@
 import type { CommandRunInput, CommandRunResult, EngineInterface } from 'claude-code'
 
 import { isOwners, reason, refusal, refused } from './commands'
-import { plainLines, queueNow, unmarked } from './lists'
+import { placeLines, plainLines, queueNow, unmarked } from './lists'
 import type { Item } from './lists'
 import { kOf, refresh } from './reads'
 
@@ -48,16 +48,18 @@ export type Turn = {
   pick(first: PickScreen): Promise<string | null>
 }
 
-// A list dialog's row: its words (numbered above the choices as the app numbers them), its choice's short name, and
-// the dialog that choice opens.
-export type Row = { item: Item; label: string; open: () => Screen | Promise<Screen> }
+// A list dialog's row: its words (numbered above the choices as the app numbers them, or in a list of `places` by its
+// own `place`, none when null: /k-queue's, kirunak-phone A-11), its choice's short name, and the dialog that choice
+// opens, or the verb it runs, the last tap (A-11's Earlier and Later, the task's text above them).
+export type Row = { item: Item; label: string; place?: number | null } & ({ open: () => Screen | Promise<Screen> } | { verb: readonly string[] })
 // An item dialog's choice: one that opens another dialog, or a verb, run if it is the last tap; its `after` is told
 // whether k took it, as a typed verb's is.
 export type Choice = { label: string; open: () => Screen | Promise<Screen> } | { label: string; verb: readonly string[]; after?: (ok: boolean) => void }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
 // - list: `head`, then the rows of one page (three and More when there are more than four; one fewer under Back);
 //   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
-//   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33);
+//   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33); `text`, when
+//   given, above `head` on every page;
 // - item: the item's own words (`text`), then its choices, a verb's among them;
 // - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel;
 // - pick: `text` whole on every page, then a page of `labels`, paged as a list's rows, the page named in the question
@@ -66,7 +68,7 @@ export type Choice = { label: string; open: () => Screen | Promise<Screen> } | {
 export type PickStep = { label: string; open: () => PickScreen }
 export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; labels: readonly (string | PickStep)[]; question: string }
 export type Screen =
-  | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string; typed?: true }
+  | { kind: 'list'; header: string; text?: readonly string[]; head: string; rows: readonly Row[]; question: string; typed?: true; places?: true }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string }
   | { kind: 'reason'; header: string; text: readonly string[]; question: string; given: (why: string) => Screen }
   | PickScreen
@@ -215,8 +217,9 @@ function paging<T>(all: readonly T[], start: number, back: boolean): { page: rea
   return { page, more, range: start > 0 || more ? `${start + 1} to ${start + page.length} of ${all.length}` : null }
 }
 
-// A dialog's question and choices: a list's or a pick's page from `start`; Back on every dialog but the command's
-// first; Cancel when there would be one choice alone, which the dialog would pad with Yes and No.
+// A dialog's question and choices: a list's or a pick's page from `start`, More after it; Cancel when there would be
+// one choice alone, which the dialog would pad with Yes and No; and Back, on every dialog but the command's first, the
+// lowest choice of all (kirunak-phone A-11's E-5).
 function draw({ screen, start }: Frame, back: boolean): Drawn {
   const choices: Drawn['choices'] = []
   let lines: string[]
@@ -224,9 +227,9 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   if (screen.kind === 'list') {
     const { page, more, range } = paging(screen.rows, start, back)
     const items = page.map((r, i) => (screen.typed && start > 0 ? { ...r.item, name: `${r.item.name} (type ${start + i + 1})` } : r.item))
-    lines = [range !== null ? `${screen.head} (${range})` : screen.head, ...plainLines(items)]
-    choices.push(...page.map(r => ({ label: r.label, act: { open: r.open } })))
-    if (back) choices.push({ label: BACK, act: 'back' })
+    const head = range !== null ? `${screen.head} (${range})` : screen.head
+    lines = [...(screen.text ?? []), head, ...(screen.places ? placeLines(items, page.map(r => r.place ?? null)) : plainLines(items))]
+    choices.push(...page.map(r => ({ label: r.label, act: 'verb' in r ? { verb: r.verb, after: undefined } : { open: r.open } })))
     if (more) choices.push({ label: MORE, act: 'more' })
   } else if (screen.kind === 'pick') {
     if (!screen.text.length) throw new Error('a pick dialog shows its text')
@@ -234,16 +237,15 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     lines = [...screen.text]
     if (range !== null) question = question.replace(/\??$/, ` (${range})?`)
     choices.push(...page.map(l => (typeof l === 'string' ? { label: l, act: { pick: l } } : { label: l.label, act: { open: l.open } })))
-    if (back) choices.push({ label: BACK, act: 'back' })
     if (more) choices.push({ label: MORE, act: 'more' })
   } else {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
     lines = [...screen.text]
     if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after } : { open: c.open } })))
-    if (back) choices.push({ label: BACK, act: 'back' })
     if (screen.kind === 'reason') choices.push({ label: CANCEL, act: 'cancel' })
   }
-  if (choices.length === 1) choices.push({ label: CANCEL, act: 'cancel' })
+  if (choices.length + (back ? 1 : 0) === 1) choices.push({ label: CANCEL, act: 'cancel' })
+  if (back) choices.push({ label: BACK, act: 'back' })
   const labels = choices.map(c => c.label)
   // A label may start with a digit (a task of the repo "2048"): the app's own number before it is cosmetic (S-1).
   if (!labels.length || labels.length > CHOICES || new Set(labels).size < labels.length || labels.some(l => !l.trim() || l === SKIP)) {
