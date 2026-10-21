@@ -29,6 +29,7 @@ import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
+import * as waiting from '../lib/waiting.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch', 'write']);
@@ -54,7 +55,8 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k queue remove <id>
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] | k verify [<id>] | k queue show
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
-          k waiting: what waits for the owner, to approve and to accept, and what each verb would refuse
+          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
+            each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
@@ -345,8 +347,14 @@ const VERBS = {
 
   async approve({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
+    if (flags['dry-run'] && flags.amendment) {
+      // The checks k approve makes, as k waiting's refuse says them (lib/waiting.mjs).
+      const why = await waiting.amendmentRefusal(ws, id, flags.amendment);
+      if (why) return { problems: [why], code: 1, text: `would refuse ${id}:\n  ${why}` };
+      return { problems: [], text: `would approve ${id} with ${flags.amendment}` };
+    }
     if (flags['dry-run']) {
-      const problems = await approvalProblems(ws, id, flags.amendment);
+      const problems = await approvalProblems(ws, id);
       if (problems.length) return { problems, code: 1, text: `would refuse ${id}:\n${problems.map((x) => `  ${x}`).join('\n')}` };
       return { problems, text: `would approve ${id}${flags.amendment ? ` with ${flags.amendment}` : ''}` };
     }
@@ -379,7 +387,10 @@ const VERBS = {
 
   async hold({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
-    if (flags['dry-run']) return { text: `would hold ${id}` };
+    if (flags['dry-run']) {
+      approval.hold({ ws, id, dryRun: true });
+      return { text: `would hold ${id}` };
+    }
     await approval.hold({ ws, id, why: need(flags.why, '--why') });
     return { text: `${id}: on hold` };
   },
@@ -435,29 +446,31 @@ const VERBS = {
 
   // What waits for the owner, for the mod's /k-approve and /k-accept with no id (boards.md §4): the proposed tasks
   // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
+  // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
+  // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs).
   async waiting({ ws }) {
     const rows = await list.rows(ws);
+    const all = await list.rows(ws, { all: true });
     const approve = [];
     for (const r of rows.filter((x) => x.state === 'proposed')) {
       const problems = await approvalProblems(ws, r.id);
       approve.push({ id: r.id, title: r.title, why: problems.length ? problems.join('; ') : null });
     }
     // A task awaiting the owner with no review asked a question in progress (lib/state.mjs): nothing to accept (G26).
-    const accept = rows.filter((x) => (x.state === 'reviewed' || x.state === 'awaiting owner') && x.review).map((r) => {
-      try {
-        approval.accept({ ws, id: r.id, dryRun: true });
-        return { id: r.id, title: r.title, review: r.review, why: null };
-      } catch (e) {
-        if (!(e instanceof KError)) throw e;
-        return { id: r.id, title: r.title, review: r.review, why: e.message };
-      }
-    });
+    const accept = [];
+    for (const r of rows.filter((x) => (x.state === 'reviewed' || x.state === 'awaiting owner') && x.review)) accept.push(await waiting.acceptRow(ws, r));
+    const amendments = await waiting.pendingAmendments(ws, all);
+    const brief = ({ id, title, state }) => ({ id, title, state });
+    const hold = (await waiting.holdable(ws, all)).map(brief);
+    // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
+    const start = rows.map(brief);
     const line = (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : 'ready'}`;
     const text = [
       approve.length ? ['to approve:', ...approve.map(line)].join('\n') : 'nothing to approve',
+      amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
       accept.length ? ['to accept:', ...accept.map(line)].join('\n') : 'nothing to accept',
     ].join('\n');
-    return { approve, accept, text };
+    return { approve, accept, amendments, hold, start, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

@@ -372,7 +372,10 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   const { ws, home, weather } = await makeWorkspace();
   const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
   const waiting = () => JSON.parse(run(['waiting', '--json']).stdout);
-  assert.deepEqual(waiting(), { approve: [{ id: ID, title: waiting().approve[0].title, why: null }], accept: [] });
+  const first = waiting();
+  const title = first.approve[0].title;
+  const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }] };
+  assert.deepEqual(first, { approve: [{ id: ID, title, why: null }], accept: [], ...rows });
   await approve({ ws, id: ID, now: NOV5 });
   // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
   writeFileSync(join(taskDir(weather), 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n');
@@ -380,7 +383,8 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   mkdirSync(join(taskDir(weather), 'steps', 'S-1'), { recursive: true });
   writeFileSync(join(taskDir(weather), 'steps', 'S-1', 'needs.json'), JSON.stringify({ owner: 'Three days or a week?' }));
   assert.equal(JSON.parse(run(['list', '--json']).stdout).rows[0].state, 'awaiting owner');
-  assert.deepEqual(waiting(), { approve: [], accept: [] });
+  const asked = waiting();
+  assert.deepEqual([asked.approve, asked.accept], [[], []]);
   rmSync(join(taskDir(weather), 'steps'), { recursive: true });
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: needs owner (AC-3, E-1)'));
   reviewsRan(taskDir(weather));
@@ -391,6 +395,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   assert.deepEqual(w.approve, []);
   assert.deepEqual(w.accept.map((x) => x.id), [ID]);
   assert.match(w.accept[0].why, /checklist\.md has 2 unticked item\(s\)/);
+  assert.deepEqual([w.accept[0].checklistOpen, w.accept[0].onlyChecklist], [2, true]);
   const dry = run(['accept', ID, '--dry-run']);
   assert.deepEqual([dry.status, /checklist\.md has 2 unticked item\(s\)/.test(dry.stderr)], [1, true]);
   const open = run(['accept', ID, '--dry-run', '--checklist-open', 'read on the phone later']);
@@ -399,7 +404,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
   gitCommitAll(weather, 'ticked');
   assert.equal(waiting().accept[0].why, null);
-  assert.match(run(['waiting']).stdout, /^nothing to approve\nto accept:\n {2}weather\/offline-forecast {2}ready\n$/);
+  assert.match(run(['waiting']).stdout, /^nothing to approve\nno amendment to approve\nto accept:\n {2}weather\/offline-forecast {2}ready\n$/);
   assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), sh(weather, 'git', ['log', '-1', '--format=%s']).trim()], [false, 'ticked']);
   assert.notEqual(headOf(weather), head);
 });
