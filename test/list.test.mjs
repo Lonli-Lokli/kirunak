@@ -197,3 +197,12 @@ test('runs no git command and stays under 1 s with 30 more tasks', async () => {
     process.env.PATH = path;
   }
 });
+
+test('k list --json reaches a pipe whole past 64 KiB, as the mod reads it', async () => {
+  const { weather, home } = await fixture();
+  for (let i = 0; i < 150; i++) addTask(weather, `weather/extra-${i}`, `Extra task ${i}, with a title as long as the real ones are`);
+  const r = k(home, ['list', '--json']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.length > 65536, `only ${r.stdout.length} bytes: too few to test the pipe`);
+  assert.equal(JSON.parse(r.stdout).rows.length, 155);
+});

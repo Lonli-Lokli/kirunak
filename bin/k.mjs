@@ -581,14 +581,22 @@ export async function main(argv = process.argv.slice(2)) {
   return r.code || 0;
 }
 
+// Exits once stdout and stderr have handed on all they hold: on macOS a pipe takes them asynchronously, and an exit
+// straight away cut `k list --json` at 64 KiB for the mod, which reads k through pipes.
+function exit(code) {
+  let left = 2;
+  const flushed = () => {
+    if (--left === 0) process.exit(code);
+  };
+  process.stdout.write('', flushed);
+  process.stderr.write('', flushed);
+}
+
 // Run as the command (also through a link on PATH), not when a test imports it.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().then(
-    (code) => process.exit(code),
-    (e) => {
-      console.error(e instanceof KError ? `k: ${e.message}` : e.stack || String(e));
-      process.exit(e instanceof KError ? e.code : 1);
-    },
-  );
+  main().then(exit, (e) => {
+    console.error(e instanceof KError ? `k: ${e.message}` : e.stack || String(e));
+    exit(e instanceof KError ? e.code : 1);
+  });
 }
 
