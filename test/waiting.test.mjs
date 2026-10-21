@@ -67,7 +67,7 @@ test('k waiting lists the amendments neither applied nor declined, each with wha
 
   const text = run(home, ['waiting']).stdout;
   const lines = text.split('\n');
-  assert.deepEqual(lines.slice(0, 3), ['nothing to approve', 'amendments to approve:', `  ${ID} A-3  2 lines, ready`]);
+  assert.deepEqual(lines.slice(0, 3), ['nothing to approve', 'amendments to approve:', `  ${ID} A-3  2 lines, can approve`]);
   assert.match(lines[3], new RegExp(`^ {2}${ID} A-4 {2}1 line, not yet: with A-4 applied fails k check: .+…$`));
   assert.deepEqual(lines.slice(4), ['nothing to accept', '']);
   for (const l of lines.slice(2, 4)) assert.ok(l.length - `  ${ID}`.length <= 60, l);

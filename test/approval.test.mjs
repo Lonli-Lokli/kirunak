@@ -404,7 +404,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
   gitCommitAll(weather, 'ticked');
   assert.equal(waiting().accept[0].why, null);
-  assert.match(run(['waiting']).stdout, /^nothing to approve\nno amendment to approve\nto accept:\n {2}weather\/offline-forecast {2}ready\n$/);
+  assert.match(run(['waiting']).stdout, /^nothing to approve\nno amendment to approve\nto accept:\n {2}weather\/offline-forecast {2}can accept\n$/);
   assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), sh(weather, 'git', ['log', '-1', '--format=%s']).trim()], [false, 'ticked']);
   assert.notEqual(headOf(weather), head);
 });

@@ -465,11 +465,12 @@ const VERBS = {
     const hold = (await waiting.holdable(ws, all)).map(brief);
     // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
     const start = rows.map(brief);
-    const line = (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : 'ready'}`;
+    // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
+    const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
-      approve.length ? ['to approve:', ...approve.map(line)].join('\n') : 'nothing to approve',
+      approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
-      accept.length ? ['to accept:', ...accept.map(line)].join('\n') : 'nothing to accept',
+      accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
     ].join('\n');
     return { approve, accept, amendments, hold, start, text };
   },

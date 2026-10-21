@@ -169,6 +169,37 @@ test('k status: the lock, the guard queue parsed, the home, and the session\'s t
   assert.match(k(home, ['status', '--session', 's3']).stdout, /^lock: weather unit tests \(session s1, since 2026-11-03T14:00:00Z\), 2 waiting\nrunning steps: 0 of 2\nsession s3: weather\/offline-forecast\n$/);
 });
 
+test('an approved task with no step started reads queued in the queue and parked out of it, in k list, k waiting and k board; held, it keeps its place', async () => {
+  const w = await makeWorkspace();
+  const ID = 'weather/offline-forecast';
+  const run = (args) => {
+    const r = k(w.home, args, { CLAUDE_CODE_SESSION_ID: '' });
+    assert.equal(r.status, 0, `k ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout;
+  };
+  const row = () => JSON.parse(run(['list', '--all', '--json'])).rows.find((r) => r.id === ID);
+  // The state as k list --json, k list, k waiting --json and k board --markdown show it.
+  const shown = () => {
+    const { state, queue } = row();
+    const list = run(['list']).split('\n')[0];
+    const start = JSON.parse(run(['waiting', '--json'])).start[0]?.state;
+    const board = /\n## (\w+) \(1\)\n\n- weather\/offline-forecast:/.exec(run(['board', '--markdown']))?.[1];
+    return { state, queue, list, start, board };
+  };
+  assert.match(run(['waiting']), new RegExp(`^to approve:\n {2}${ID} {2}can approve\n`), 'k waiting\'s word is the verb\'s, never a state');
+  assert.match(run(['approve', ID, '--no-queue']), new RegExp(`^${ID}: parked \\(sha256:`));
+  const parked = { state: 'parked', queue: null, start: 'parked', board: 'parked' };
+  assert.deepEqual(shown(), { ...parked, list: `    parked  ${ID}  The last forecast stays readable offline` });
+  run(['queue', 'add', ID]);
+  assert.deepEqual(shown(), { state: 'queued', queue: 1, start: 'queued', board: 'queued', list: ` 1  queued  ${ID}  The last forecast stays readable offline` });
+  run(['hold', ID, '--why', 'the provider is down']);
+  assert.deepEqual([row().state, row().queue], ['on hold', 1], 'a held task keeps its queue place');
+  run(['resume', ID]);
+  assert.deepEqual([row().state, row().queue], ['queued', 1]);
+  run(['queue', 'remove', ID]);
+  assert.deepEqual(shown(), { ...parked, list: `    parked  ${ID}  The last forecast stays readable offline` });
+});
+
 test('format: one line per row, places right-aligned, columns padded', async () => {
   const { ws } = await fixture();
   const lines = format(await rows(ws)).split('\n');
