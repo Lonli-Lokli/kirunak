@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { rows } from '../lib/list.mjs';
-import { fixture, NOW } from './board-fixture.mjs';
+import { fixture, NOW, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
   return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
@@ -108,4 +108,51 @@ test('write puts the page in $KIRUNAK_HOME, or at a path, and opens nothing unle
   const other = join(w.root, 'elsewhere', 'b.html');
   assert.equal(await write(w.ws, { path: other }), other);
   assert.ok(existsSync(other));
+});
+
+test('the tasks sessions work on come first, each once, with who works on it; a done task is not among them', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  const html = await page(w);
+  assert.deepEqual(h2s(html), ['Working on now', 'proposed', 'done this week', 'Lock, queue and running steps']);
+  const work = html.slice(html.indexOf('<section class="work">'), html.indexOf('<div class="states">'));
+  assert.deepEqual([...work.matchAll(/<h3>([^<]*)<\/h3>/g)].map((m) => m[1]), ['weather/hourly-chart', 'hub/reviewed'], 'in k list\'s order');
+  assert.match(work, /<h2>Working on now <span class="n">\(2\)<\/span><\/h2>/);
+  assert.match(work, /worked on by session s1 since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  assert.match(work, /worked on by step S-3 running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  assert.equal(html.split('<h3>weather/hourly-chart</h3>').length, 2, 'once on the page');
+  assert.ok(!work.includes('weather/recent'));
+});
+
+test('read in order by a screen reader: one h1, the time it was made, an h2 per section, an h3 per card, lists for the AC and E', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  const html = await page(w);
+  const body = html.slice(html.indexOf('<body>'));
+  assert.deepEqual([...body.matchAll(/<h([1-3])>/g)].map((m) => m[1]).join(''), '1233232323333');
+  assert.match(body, /<h1>kirunak board<\/h1>\n<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  for (const card of body.split('<article class="card">').slice(1)) {
+    assert.match(card, /^\n<h3>[a-z]+\/[a-z-]+<\/h3>\n<p>[^<]+<\/p>\n<p class="meta">state: [a-z ]+/, 'id, title, state as text, in that order');
+    assert.match(card, /<ul class="items">\n(<li><b>(AC|E)-\d+<\/b> <span class="v [a-z-]+">(met|not met|needs device|needs owner|none)<\/span>: [^\n]*<\/li>\n)+<\/ul>/);
+  }
+  assert.ok(!/[·•|]/.test(body.replace(/<[^>]*>/g, '')), 'no separator or bullet drawn in the text');
+  assert.ok(!/content:\s*['"][^'"]/.test(html), 'no CSS mark a reader would speak');
+});
+
+test('laid out for a phone: the viewport, long words broken, no box wider than 390 px less its gutters', async () => {
+  const html = await page(await fixture());
+  assert.ok(html.includes('<meta name="viewport" content="width=device-width, initial-scale=1">'));
+  const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
+  assert.match(style, /body \{[^}]*padding: 16px;[^}]*overflow-wrap: anywhere;/);
+  assert.match(style, /minmax\(min\(100%, \d+rem\), 1fr\)/, 'a grid column never wider than the screen');
+  // A length over 358 px may only cap a width (max-width, min(100%, ...)), never set one.
+  const sized = style.replace(/max-width: [\d.]+rem/g, '').replace(/min\(100%, [\d.]+rem\)/g, '');
+  for (const m of sized.matchAll(/(\d+(?:\.\d+)?)(px|rem)\b/g)) assert.ok(Number(m[1]) * (m[2] === 'rem' ? 16 : 1) <= 358, `${m[0]} in the CSS`);
+});
+
+test('the page written at a path, for the phone, has no file:// link', async () => {
+  const w = await fixture();
+  const out = await write(w.ws, { path: join(w.root, 'phone', 'board.html') });
+  assert.ok(!readFileSync(out, 'utf8').includes('file://'));
+  assert.ok(readFileSync(await write(w.ws), 'utf8').includes('file://'), 'the local page keeps them');
 });
