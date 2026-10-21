@@ -50,10 +50,12 @@ export type Row = { item: Item; label: string; open: () => Screen | Promise<Scre
 export type Choice = { label: string; open: () => Screen | Promise<Screen> } | { label: string; verb: readonly string[]; after?: (ok: boolean) => void }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
 // - list: `head`, then the rows of one page (three and More when there are more than four; one fewer under Back);
+//   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
+//   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33);
 // - item: the item's own words (`text`), then its choices, a verb's among them;
 // - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel.
 export type Screen =
-  | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string }
+  | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string; typed?: true }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string }
   | { kind: 'reason'; header: string; text: readonly string[]; question: string; given: (why: string) => Screen }
 
@@ -181,7 +183,8 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     const rest = screen.rows.slice(start)
     const page = rest.length <= slots ? rest : rest.slice(0, slots - 1)
     const paged = start > 0 || page.length < rest.length
-    lines = [paged ? `${screen.head} (${start + 1} to ${start + page.length} of ${screen.rows.length})` : screen.head, ...plainLines(page.map(r => r.item))]
+    const items = page.map((r, i) => (screen.typed && start > 0 ? { ...r.item, name: `${r.item.name} (type ${start + i + 1})` } : r.item))
+    lines = [paged ? `${screen.head} (${start + 1} to ${start + page.length} of ${screen.rows.length})` : screen.head, ...plainLines(items)]
     choices.push(...page.map(r => ({ label: r.label, act: { open: r.open } })))
     if (back) choices.push({ label: BACK, act: 'back' })
     if (page.length < rest.length) choices.push({ label: MORE, act: 'more' })
