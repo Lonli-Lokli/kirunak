@@ -96,6 +96,37 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     expect(w.runs).toEqual([])
   })
 
+  test('Back returns to the groups, from any group (E-5)', async ($, on) => {
+    const w = world(on, { rows: ELEVEN, brief: json(BRIEF11), taps: ['Queued', 'Back', 'Working on now', 'Back', 'Done this week', 'hub/d1'] })
+    expect(await run($, 'k-board')).toBe(card11('hub/d1'))
+    expect(w.asked.map(a => a.labels)).toEqual([GROUPS11.labels, ['hub/q1', 'hub/q2', 'Back', 'More'], GROUPS11.labels, ['hub/w1', 'hub/w2', 'Back', 'More'], GROUPS11.labels, ['hub/d1', 'hub/d2', 'Back']])
+    expect([w.asked[2], w.asked[4]]).toEqual([GROUPS11, GROUPS11])
+    expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/d1']])
+  })
+
+  test('a group of more than three tasks pages them beside Back, with More, its text whole above every page; Back shows the page before (E-1, E-5)', async ($, on) => {
+    const w = world(on, { rows: ELEVEN, brief: json(BRIEF11), taps: ['Working on now', 'More', 'Back', 'More', 'hub/w4', 'Queued', 'More', 'hub/q3'] })
+    expect(await run($, 'k-board')).toBe(card11('hub/w4'))
+    expect(await run($, 'k-board')).toBe(card11('hub/q3'))
+    const pages = (name: string, n: number, all: readonly (readonly [string, readonly string[]])[]) =>
+      all.map(([range, labels]) => ({ header: 'Board', question: `${paragraph(BRIEF11, name)}\nWhich task's card (${range} of ${n})?`, labels }))
+    const [w1, w2] = pages('Working on now', 5, [['1 to 2', ['hub/w1', 'hub/w2', 'Back', 'More']], ['3 to 5', ['hub/w3', 'hub/w4', 'hub/w5', 'Back']]])
+    const [q1, q2] = pages('Queued', 4, [['1 to 2', ['hub/q1', 'hub/q2', 'Back', 'More']], ['3 to 4', ['hub/q3', 'hub/q4', 'Back']]])
+    expect(w.asked).toEqual([GROUPS11, w1, w2, w1, w2, GROUPS11, q1, q2])
+    expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/w4'], ['board', '--brief', '--json'], ['board', '--card', 'hub/q3']])
+  })
+
+  test('more than four groups: three and More, the rest under Back; a group on the later page opens as any other', async ($, on) => {
+    const w = world(on, { taps: ['More', 'Awaiting owner', 'weather/asks-owner'] })
+    expect(await run($, 'k-board')).toBe(cardOf(row('weather/asks-owner')).trimEnd())
+    const head = ['Made at 2026-11-07 12:00.', '', 'Working on now: 1', 'Proposed: 1', 'Queued: 1', 'Reviewed: 1', 'Awaiting owner: 1', 'Done this week: 1', '', BRIEF.machine].join('\n')
+    expect(w.asked).toEqual([
+      { header: 'Board', question: `${head}\nWhich group (1 to 3 of 6)?`, labels: ['Working on now', 'Proposed', 'Queued', 'More'] },
+      { header: 'Board', question: `${head}\nWhich group (4 to 6 of 6)?`, labels: ['Reviewed', 'Awaiting owner', 'Done this week', 'Back'] },
+      { header: 'Board', question: 'Awaiting owner (1)\nweather/asks-owner: awaiting owner\nWhich task\'s card?', labels: ['weather/asks-owner', 'Back'] },
+    ])
+  })
+
   test('Skip, a dismissal and words that are no choice, at every step, each answer with the brief board itself, and read no card', async ($, on) => {
     const ends: (string | null)[][] = [[SKIP], [null], ['Queued?'], ['More', SKIP], ['More', null], ['Queued', SKIP], ['Queued', null], ['Queued', 'hub/sync'], ['More', 'Reviewed', SKIP]]
     const w = world(on, { taps: ends.flat() })
@@ -104,6 +135,15 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     expect(w.asked.length).toBe(ends.flat().length + 1)
     expect(args(w.boards).filter(a => a.includes('--card'))).toEqual([])
     expect(w.runs).toEqual([])
+  })
+
+  test('an empty group is named and counted, but no choice; one group alone is padded with Cancel, which answers with the brief board', async ($, on) => {
+    const brief = briefOf([{ name: 'Working on now', lines: [] }, { name: 'Queued', lines: ['hub/sync-notes: queued, queue 2'] }])
+    const w = world(on, { brief: json(brief), taps: ['Cancel', 'Queued', 'hub/sync-notes'] })
+    expect(await run($, 'k-board')).toBe('Made at 2026-11-07 12:00.\n\nWorking on now (0)\n\nQueued (1)  \nhub/sync-notes: queued, queue 2\n\nNo lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.')
+    expect(await run($, 'k-board')).toBe(cardOf(row('hub/sync-notes')).trimEnd())
+    const first = { header: 'Board', question: 'Made at 2026-11-07 12:00.\n\nWorking on now: 0\nQueued: 1\n\nNo lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.\nWhich group?', labels: ['Queued', 'Cancel'] }
+    expect(w.asked).toEqual([first, first, { header: 'Board', question: 'Queued (1)\nhub/sync-notes: queued, queue 2\nWhich task\'s card?', labels: ['hub/sync-notes', 'Back'] }])
   })
 
   test('/k-board <id> answers that card at once, with no dialog; an id k does not know answers its refusal; one word only, and never a flag', async ($, on) => {
