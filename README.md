@@ -160,7 +160,7 @@ task is started by hand, one task per session:
    `k start <id>`, which records which task that session is on and changes nothing else.
 3. The session keeps its plan and progress beside the task, in `plan.md` and `progress.md`, never in `task.md`.
    `k list` shows the task as in progress once `progress.md` has a line such as `S-1 started`.
-4. A change to what the task asks for is an amendment: `k amend new <id>`, then the owner types
+4. A change to what the task asks for is an amendment: `k amend new <id> --title "<a few words>"`, then the owner types
    `! k approve <id> --amendment A-n`.
 5. The plan's review step writes `review.md` in a fresh conversation, and `k review check <id>` holds it to the
    grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the

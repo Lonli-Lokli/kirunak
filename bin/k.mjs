@@ -62,7 +62,7 @@ Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [
             each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
-Work      k amend new <id> [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
+Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
 Every verb takes --json and --dry-run.`;
 
@@ -410,8 +410,11 @@ const VERBS = {
     const id = need(pos[1], 'task id');
     const p = taskPaths(ws, id);
     if (sub === 'new') {
-      if (flags['dry-run']) return { text: `would write the next amendment in ${p.rel('amendments')}` };
-      const r = await amend.newAmendment({ ws, id, by: flags.by || (session(flags) ? `session ${session(flags)}` : 'a session') });
+      // Its name in every list (kirunak-phone A-8), so a dry run refuses without it too.
+      const title = typeof flags.title === 'string' ? flags.title.trim() : '';
+      if (!title) throw usage(`k amend new needs --title "<a few words>", the name the amendment goes by in every list`);
+      if (flags['dry-run']) return { text: `would write the next amendment in ${p.rel('amendments')}, titled ${title}` };
+      const r = await amend.newAmendment({ ws, id, title, by: flags.by || (session(flags) ? `session ${session(flags)}` : 'a session') });
       return { ...r, text: `${r.path}: fill in Why and Changes, then \`k amend check ${id} A-${r.n}\`` };
     }
     const a = need(pos[2], 'A-n');
@@ -459,7 +462,7 @@ const VERBS = {
     const approve = [];
     for (const r of rows.filter((x) => x.state === 'proposed')) {
       const problems = await approvalProblems(ws, r.id);
-      approve.push({ id: r.id, title: r.title, why: problems.length ? problems.join('; ') : null });
+      approve.push({ id: r.id, title: r.title, state: r.state, why: problems.length ? problems.join('; ') : null });
     }
     // A task awaiting the owner with no review asked a question in progress (lib/state.mjs): nothing to accept (G26).
     const accept = [];

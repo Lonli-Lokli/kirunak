@@ -3,7 +3,7 @@ import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
-import { decline, newAmendment } from '../lib/amend.mjs';
+import { amendmentName, decline, newAmendment } from '../lib/amend.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
@@ -22,13 +22,13 @@ const run = (home, args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
 const waiting = (home) => JSON.parse(run(home, ['waiting', '--json']).stdout);
 
 // The next amendment, written the way the model fills one.
-function amendment(ws, why, changes) {
-  const a = newAmendment({ ws, id: ID, by: 'session s1', now: NOV6 });
+function amendment(ws, why, changes, title = 'A change') {
+  const a = newAmendment({ ws, id: ID, title, by: 'session s1', now: NOV6 });
   writeFileSync(a.path, readFileSync(a.path, 'utf8').replace('## Why\n', `## Why\n${why}\n`).replace('## Changes\n', `## Changes\n${changes.join('\n')}\n`));
   return a.n;
 }
 
-test('k waiting lists the amendments neither applied nor declined, each with what k approve would refuse, one line each', async () => {
+test('k waiting lists the amendments neither applied nor declined, each by its name and with what k approve would refuse, one line each', async () => {
   const { ws, weather, home } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
   const src = '[research docs/offline.md §2]';
@@ -39,16 +39,25 @@ test('k waiting lists the amendments neither applied nor declined, each with wha
   amendment(ws, `The age line needs its words. The old one was a time alone. ${src}`, [
     `- replace E-1: A forecast older than a day says "yesterday" or "2 days ago". ${src}`,
     `- replace D-1: Keep the last three days, the first one hourly. ${src}`,
-  ]);
+  ], 'Words for the age line');
   // Its result names a line it removes, which only k approve's check of the result finds.
-  amendment(ws, `E-1 is covered by AC-1. ${src}`, ['- remove E-1']);
+  amendment(ws, `E-1 is covered by AC-1. ${src}`, ['- remove E-1'], 'Drop E-1');
+  // One from before titles (kirunak-phone A-8): named by the lines it changes, and refused until it has a title.
+  const a5 = amendment(ws, `Clearer words. ${src}`, [
+    `- replace AC-2: The age line says how old the forecast is. ${src}`,
+    `- replace AC-3: A restart keeps the last forecast. ${src}`,
+    `- add AC-4: The age line is read aloud. ${src}`,
+    '- remove O-1',
+  ]);
+  const a5File = join(dirOf(weather), 'amendments', `A-${a5}.md`);
+  writeFileSync(a5File, readFileSync(a5File, 'utf8').replace('title: A change\n', ''));
   const task = readFileSync(join(dirOf(weather), 'task.md'));
   const head = headOf(weather);
 
   const w = waiting(home);
-  assert.deepEqual(w.amendments.map((x) => x.amendment), ['A-3', 'A-4']);
+  assert.deepEqual(w.amendments.map((x) => x.amendment), ['A-3', 'A-4', 'A-5']);
   assert.deepEqual(w.amendments[0], {
-    id: ID, amendment: 'A-3', title: TITLE, proposed: '2026-11-06', by: 'session s1', why: 'The age line needs its words.', lines: 2, refuse: null,
+    id: ID, amendment: 'A-3', title: TITLE, name: 'Words for the age line', proposed: '2026-11-06', by: 'session s1', why: 'The age line needs its words.', lines: 2, refuse: null,
     file: join(realpathSync(dirOf(weather)), 'amendments', 'A-3.md'),
   });
   // The mod reads the file whole for `/k-amendments <n>`, from wherever its session runs.
@@ -57,6 +66,9 @@ test('k waiting lists the amendments neither applied nor declined, each with wha
   assert.deepEqual([refused.why, refused.lines], ['E-1 is covered by AC-1.', 1]);
   assert.match(refused.refuse, new RegExp(`^${ID} with A-4 applied fails k check: line \\d+: aspect offline: .*E-1`));
   assert.doesNotMatch(refused.refuse, /\n/);
+  const untitled = w.amendments[2];
+  assert.deepEqual([untitled.title, untitled.name, untitled.lines], [TITLE, 'replaces AC-2, AC-3; adds AC-4; removes O-1', 4]);
+  assert.equal(untitled.refuse, `${ID} A-5 does not apply: line 1: front matter has no title: add \`title: <a few words>\` to its front matter, the name it goes by in every list`);
 
   // k approve --dry-run says the same, and neither writes anything.
   const dry = run(home, ['approve', ID, '--amendment', 'A-4', '--dry-run']);
@@ -67,10 +79,22 @@ test('k waiting lists the amendments neither applied nor declined, each with wha
 
   const text = run(home, ['waiting']).stdout;
   const lines = text.split('\n');
-  assert.deepEqual(lines.slice(0, 3), ['nothing to approve', 'amendments to approve:', `  ${ID} A-3  2 lines, can approve`]);
-  assert.match(lines[3], new RegExp(`^ {2}${ID} A-4 {2}1 line, not yet: with A-4 applied fails k check: .+…$`));
-  assert.deepEqual(lines.slice(4), ['nothing to accept', '']);
-  for (const l of lines.slice(2, 4)) assert.ok(l.length - `  ${ID}`.length <= 60, l);
+  assert.deepEqual(lines.slice(0, 3), ['nothing to approve', 'amendments to approve:', `  ${ID} A-3: Words for the age line  2 lines, can approve`]);
+  assert.match(lines[3], new RegExp(`^ {2}${ID} A-4: Drop E-1 {2}1 line, not yet: with A-4 applied fails k check: .+…$`));
+  assert.match(lines[4], new RegExp(`^ {2}${ID} A-5: replaces AC-2, AC-3; adds AC-4; removes O-1 {2}4 lines, not yet: does not apply: .+…$`));
+  assert.deepEqual(lines.slice(5), ['nothing to accept', '']);
+  // At most about 60 characters after the task id, besides the name.
+  w.amendments.forEach((x, i) => assert.ok(lines[i + 2].length - `: ${x.name}`.length - `  ${ID}`.length <= 60, lines[i + 2]));
+
+});
+
+test("an amendment's name is its title, else the lines it changes by verb, each id once, else that it changes nothing yet (kirunak-phone A-8)", () => {
+  const front = (title) => `---\ntask: ${ID}\nproposed: 2026-11-06\n${title}by: s\n---\n\n## Why\nx\n\n## Changes\n`;
+  const ops = '- remove E-1\n- replace AC-5: a [owner 2026-11-06 Q-1]\n- add AC-17: b [owner 2026-11-06 Q-1]\n- replace AC-5: c [owner 2026-11-06 Q-1]\n';
+  assert.equal(amendmentName(front('title: Short lists\n') + ops), 'Short lists');
+  assert.equal(amendmentName(front('') + ops), 'replaces AC-5; adds AC-17; removes E-1');
+  assert.equal(amendmentName(front('title: \n') + '- replace offline: in (AC-1) [owner 2026-11-06 Q-1]\n'), 'replaces offline');
+  assert.equal(amendmentName(front('')), 'changes nothing yet');
 });
 
 test('k waiting offers k hold and k start the tasks k list shows, never a done or held one; k hold --dry-run checks', async () => {

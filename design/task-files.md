@@ -174,6 +174,7 @@ An amendment is a file anyone may write, `amendments/A-n.md`:
 ---
 task: weather/offline-forecast
 proposed: 2026-11-04
+title: Hourly data for the first day
 by: session 7c1 (step S-3)
 ---
 
@@ -189,6 +190,11 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 - `Changes` holds operations only: `replace <id>: <new line>`, `add <section id>: <new line>`, `remove <id>`.
   Each new line carries its own source tag (rule 1 above). Judgement: operations, not a rewritten task, so the owner
   reads exactly what changes and the command applies it without a merge.
+- `title:` is the few words the amendment goes by in every list (kirunak-phone A-8): `k amend new <id> --title
+  "<title>"` writes it between `proposed:` and `by:` and refuses without it, and `k amend check` refuses an amendment
+  neither applied nor declined that has none, so it cannot be approved until it gets one; a stamped amendment is
+  history and never refused for it. `k waiting` names an untitled one by the lines it changes ("replaces AC-2, AC-3;
+  adds AC-17").
 - `k amend check A-n` verifies the operations against the current `task.md` (ids exist, numbers free, sources
   present). `k approve <id> --amendment A-n` (owner only, `approval.md`) applies them, re-hashes, appends the old
   hash and the amendment id to the approval record's `history`, stamps the amendment file `applied: <date>` and

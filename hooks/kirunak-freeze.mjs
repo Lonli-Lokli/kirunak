@@ -20,7 +20,7 @@ const count = (text, re) => (text.match(re) ?? []).length;
 
 const frozen = (id, slug, date) =>
   `kirunak: ${id} is frozen since ${date}: propose an amendment in kirunak/tasks/${slug}/amendments/A-<n>.md ` +
-  `(\`k amend new ${id}\`) and ask the owner to run \`k approve ${id} --amendment A-<n>\``;
+  `(\`k amend new ${id} --title "<a few words>"\`) and ask the owner to run \`k approve ${id} --amendment A-<n>\``;
 const ownerOnly = (id = '<id>') =>
   `kirunak: only the owner's own command writes this: ask them to type \`! k approve ${id}\` / \`! k accept ${id}\``;
 const ownerVerb = (verb) =>
