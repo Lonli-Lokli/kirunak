@@ -82,6 +82,18 @@ describe('picking by touch', () => {
     expect(verbs(w.runs)).toEqual([['approve', '2048/tiles', '--via', 'mod'], ['approve', '2048/tiles', '--via', 'mod']])
   })
 
+  test('from Remote Control, /k-approve\'s and /k-amendments\' dialogs run their verb by id, and every answer says it came from the phone', async ($, on) => {
+    const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed', `${ID} A-3`, `Approve ${ID} A-3`, `${ID} A-4`, SKIP], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
+    const bridge: PromptOrigin = { kind: 'bridge' }
+    expect(await run($, 'k-approve', '', bridge)).toBe('hub/proposed: queued, place 3\n(typed in Remote Control)')
+    expect(await run($, 'k-amendments', '', bridge)).toBe('hub/proposed: queued, place 3\n\n(typed in Remote Control)')
+    const skipped = await run($, 'k-amendments', '', bridge)
+    expect(skipped).toMatch(/^Nothing ran: skipped\.\n\n2 amendments wait for your approval:\n/)
+    expect(skipped).toMatch(/\n\n\(typed in Remote Control\)$/)
+    expect(w.asked.map(a => a.header)).toEqual(['Approve', 'Approve', 'Amendments', 'Amendments', 'Amendments', 'Amendments'])
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod'], ['approve', ID, '--amendment', 'A-3', '--via', 'mod']])
+  })
+
   test('/k-accept: "Accept <id>" for one k would accept; one stopped only by open checklist items takes a reason typed in the free-text row, shown above "Accept <id> with open items" (AC-9)', async ($, on) => {
     const w = world(on, { taps: ['weather/was-reviewed', 'Accept weather/was-reviewed', ID, 'Accept with open items', 'read on the phone', 'Back', ' read on the phone ', `Accept ${ID} with open items`] })
     await run($, 'k-accept')
