@@ -14,7 +14,8 @@ is done.
   matches its approved hash. A change is an amendment the owner approves.
 - **A review against every criterion**, by someone who did not do the work, and an owner's checklist of what needs a
   device or a person. A task is done when the owner says so (`/k-done`).
-- **A board**: `k list` in the terminal and a generated page (`k board`).
+- **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone the board as a chat answer
+  (`/k-board`) or as a private page you open (`/k-board-page`).
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -57,7 +58,8 @@ You need Node 22 or later, git and Claude Code.
    ```
 
    `k install` adds a PreToolUse hook and a SessionStart hook to `~/.claude/settings.json` (keeping yours) and links
-   the `k-intake`, `k-done` and `k-board-page` skills into `~/.claude/skills/`. It also prints one line to add to your
+   the `k-intake`, `k-done` and `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as
+   a page, below). It also prints one line to add to your
    status line command, so the cache keeper sees each session's context and cache; it never edits your status line
    itself.
    `--print` shows what it would do and writes nothing. A repo that already
@@ -78,6 +80,22 @@ You need Node 22 or later, git and Claude Code.
 
    (Or name its folder in the `env` block of `~/.claude/settings.json`:
    `"CLAUDE_CODE_PLUGIN_DIRS": "~/code/kirunak/mods/kirunak"`.)
+
+   **From the phone**, in Remote Control, the mod gives you these (a command that takes an id opens a dialog of
+   touch choices when you type it without one):
+
+   | Type | You get |
+   | --- | --- |
+   | `/k-list` (`/k-list all`) | the tasks, the queue first, as numbered entries with state, place, title and step |
+   | `/k-board` | the board as lists in the chat, at once and without a model turn |
+   | `/k-board-page` | the skill: the board as a private page on claude.ai, one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
+   | `/k-approve`, `/k-accept` | what waits for you, to pick by touch; then a last choice that names the task ("Approve <id>") |
+   | `/k-amendments` | the amendments waiting, to approve or decline by touch; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
+   | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, by touch |
+   | `/k-queue` | the queue in order, then the parked tasks; move, park or put back by touch |
+
+   A tap in these dialogs is your own gesture, like a typed command; `/k-board-page` is the only one of these that
+   uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
    model included, gets a line saying so and nothing runs (`design/approval.md` §5). That rule is a file of this
@@ -133,7 +151,10 @@ Until the orchestrator lands (`k run`, slice 2 in `design/build-order.md`), the 
 task is started by hand, one task per session:
 
 1. `k queue show` lists the approved tasks in order. Only the owner changes it:
-   `! k queue move <id> --first` (or `--last`, `--before <id>`, `--after <id>`).
+   `! k queue move <id> --first` (or `--last`, `--before <id>`, `--after <id>`). A task out of the queue is
+   "parked" (`! k queue remove <id>`, or `k approve --no-queue`): it is approved and starts nothing until
+   `! k queue add <id>` puts it back; a task in the queue is "queued". With the mod, `/k-queue` does all of this by
+   touch.
 2. Open a fresh Claude Code session in the task's repo and ask it to work the task by its id. The session runs
    `k start <id>`, which records which task that session is on and changes nothing else.
 3. The session keeps its plan and progress beside the task, in `plan.md` and `progress.md`, never in `task.md`.
@@ -144,8 +165,8 @@ task is started by hand, one task per session:
    grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
    owner ticks them.
 6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>` (with the
-   mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what waits for you to accept and what still blocks each, and `/k-accept 1` takes
-   the first). It refuses
+   mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what waits for you to accept and what still
+   blocks each, and `/k-accept 1` takes the first). It refuses
    unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
    task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict.
