@@ -3,13 +3,15 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { renderHtml, status, TEXT_PAIRS, write } from '../lib/board.mjs';
+import { renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { rows } from '../lib/list.mjs';
 import { fixture, NOW } from './board-fixture.mjs';
 
-async function page(w) {
-  return renderHtml(await rows(w.ws, { all: true }), status(w.ws), NOW);
+async function page(w, opts) {
+  return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
 }
+
+const h2s = (html) => [...html.matchAll(/<h2>([^<]*?)(?: <span class="n">\((\d+)\)<\/span>)?<\/h2>/g)].map((m) => m[1]);
 
 test('every task appears with its AC and E and their latest verdicts', async () => {
   const w = await fixture();
@@ -23,13 +25,11 @@ test('every task appears with its AC and E and their latest verdicts', async () 
   assert.match(card, /<b>AC-1<\/b>[^<]*<span class="v v-met">met<\/span>/);
   assert.match(card, /<b>AC-2<\/b>.*<span class="v v-notmet">not met<\/span>/);
   assert.match(card, /<b>E-1<\/b>.*<span class="v v-none">none<\/span>/);
-  assert.match(card, /review-2\.md: not met \(AC-2\)/);
+  assert.match(card, /review: review-2\.md, verdict: not met \(AC-2\)/);
   const chart = html.slice(html.indexOf('weather/hourly-chart'), html.indexOf('</article>', html.indexOf('weather/hourly-chart')));
-  assert.match(chart, /queue 1/);
+  assert.match(chart, /state: in progress, queue place 1/);
   assert.match(chart, /step: 2026-11-03 14:02 S-2 started/);
-  for (const col of ['draft', 'proposed', 'ready', 'blocked', 'in progress', 'in review', 'awaiting owner', 'done this week']) {
-    assert.ok(html.includes(`<h2>${col} `), col);
-  }
+  assert.deepEqual(h2s(html), ['Working on now', 'proposed', 'in progress', 'in review', 'done this week', 'Lock, queue and running steps'], 'a section per state with tasks, in lib/state.mjs\'s order');
 });
 
 test('no form, button or script anywhere, and every text is escaped', async () => {
@@ -76,12 +76,14 @@ test('file:// links to the four files of every card', async () => {
   assert.ok(html.includes(`href="${pathToFileURL(join(realpathSync(w.hub), 'kirunak', 'tasks', 'reviewed', 'review-2.md')).href}"`), 'the latest review');
 });
 
-test('the footer: no lock, then the lock, queue, claims and running steps', async () => {
+test('the last section: no lock, then the lock, its queue, the running steps, the claims and the task queue', async () => {
   const w = await fixture();
   let html = await page(w);
   assert.match(html, /<p>no lock<\/p>/);
-  assert.match(html, /running steps: 0 of 2/);
-  assert.match(html, /Generated at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. To regenerate: k board/);
+  assert.match(html, /<h3>Running steps: 0 of 2<\/h3>/);
+  assert.match(html, /<h3>Task queue<\/h3>\n<ol><li>weather\/hourly-chart \(in progress\)<\/li><\/ol>/);
+  assert.match(html, /<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  assert.match(html, /To make it again: k board\./);
   mkdirSync(join(w.home, 'guard', 'lock'), { recursive: true });
   mkdirSync(join(w.home, 'running'), { recursive: true });
   writeFileSync(join(w.home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', pid: 1, since: '2026-11-07T11:50:00Z' }));
@@ -89,10 +91,10 @@ test('the footer: no lock, then the lock, queue, claims and running steps', asyn
   writeFileSync(join(w.home, 'guard', 'claims.json'), JSON.stringify([{ resource: 'phone-1', by: 's1', why: 'smoke run' }]));
   writeFileSync(join(w.home, 'running', '123.json'), JSON.stringify({ task: 'weather/hourly-chart', step: 'S-2', session: 's1', since: '2026-11-07T11:40:00Z' }));
   html = await page(w);
-  assert.match(html, /lock: weather unit tests \(session s1/);
-  assert.match(html, /guard queue: \{&quot;session&quot;:&quot;s2&quot;/);
-  assert.match(html, /claims: phone-1 by s1 \(smoke run\)/);
-  assert.match(html, /running steps: 1 of 2: weather\/hourly-chart S-2 since 2026-11-07T11:40:00Z/);
+  assert.match(html, /<p>lock: weather unit tests \(session s1, since \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)<\/p>/);
+  assert.match(html, /<h3>Heavy-job queue<\/h3>\n<ol><li>hub build \(session s2\)<\/li><\/ol>/);
+  assert.match(html, /<h3>Device claims<\/h3>\n<ul><li>phone-1 by s1 \(smoke run\)<\/li><\/ul>/);
+  assert.match(html, /<h3>Running steps: 1 of 2<\/h3>\n<ul><li>weather\/hourly-chart S-2, session s1, since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/li><\/ul>/);
 });
 
 test('write puts the page in $KIRUNAK_HOME, or at a path, and opens nothing unless asked', async () => {
