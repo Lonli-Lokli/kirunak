@@ -481,6 +481,42 @@ test('accept refuses a review that fails the grammar, and one no finished review
   assert.equal(existsSync(join(dir, 'done.json')), false);
 });
 
+test('approve says queued or parked, by the queue, when the state cannot be read after its commit, never a failure (S-7 review, finding 7)', async () => {
+  for (const [noQueue, state, queuePlace] of [[false, 'queued', 1], [true, 'parked', null]]) {
+    const { ws, weather } = await makeWorkspace();
+    // The state reads plan.md, after the commit; a folder there makes the read throw.
+    mkdirSync(join(taskDir(weather), 'plan.md'));
+    const r = await approve({ ws, id: ID, noQueue, now: NOV5 });
+    assert.deepEqual([r.state, r.queuePlace], [state, queuePlace]);
+    assert.equal(verify(ws, ID), 'ok');
+    assert.equal(subject(weather), `kirunak: approve ${ID}`);
+  }
+});
+
+test('k queue add takes an approved task that is not done, and names why it refuses one never approved, stale or done, a dry run too (S-7 review, finding 6)', async () => {
+  const { ws, weather, home } = await makeWorkspace();
+  const add = (...flags) => k(home, ['queue', 'add', ID, ...flags]);
+  const refused = (r, why) => {
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, why);
+  };
+  for (const flags of [[], ['--dry-run']]) refused(add(...flags), /weather\/offline-forecast was never approved: k approve weather\/offline-forecast queues it/);
+  await approve({ ws, id: ID, noQueue: true, now: NOV5 });
+  const text = readFileSync(taskFile(weather), 'utf8');
+  editTask(weather, 'title:', 'title: Changed:');
+  refused(add(), /weather\/offline-forecast: task\.md does not match its approval \(stale\), so it cannot be queued/);
+  writeFileSync(taskFile(weather), text);
+  assert.equal(add('--dry-run').status, 0);
+  assert.deepEqual(queue.read(ws), []);
+  assert.equal(add().status, 0);
+  assert.deepEqual(queue.read(ws), [ID]);
+  queue.remove(ws, ID);
+  // Accepted since the list was shown: Put back refuses it.
+  writeFileSync(join(taskDir(weather), 'done.json'), '{}\n');
+  for (const flags of [[], ['--dry-run']]) refused(add(...flags), /weather\/offline-forecast is done; a done task stays out of the queue/);
+  assert.deepEqual(queue.read(ws), []);
+});
+
 test('hold writes hold.md with the date and why, resume deletes it, each in its own commit', async () => {
   const { ws, weather } = await makeWorkspace();
   const file = join(taskDir(weather), 'hold.md');

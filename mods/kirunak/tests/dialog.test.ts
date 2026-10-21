@@ -2,7 +2,9 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { ID, QUEUE, WAITING, world } from './world'
+import type { AmendmentRow } from '../hooks/waiting'
+
+import { AMENDMENTS, ID, QUEUE, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -30,13 +32,66 @@ describe('picking by touch', () => {
     await run($, 'k-approve')
     const [one, two, three] = [w.asked[0], w.asked[1], w.asked[2]]
     expect(one).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (1 to 3 of 7)\n1. hub/t1: Task 1. Can approve.\n2. hub/t2: Task 2. Not yet: task.md fails k check: AC-1 has no source.\n3. hub/t3: Task 3. Can approve.\nWhich task?', labels: ['hub/t1', 'hub/t2', 'hub/t3', 'More'] })
-    expect(two).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (4 to 5 of 7)\n1. hub/t4: Task 4. Can approve.\n2. hub/t5: Task 5. Can approve.\nWhich task?', labels: ['hub/t4', 'hub/t5', 'Back', 'More'] })
-    expect(three?.labels).toEqual(['hub/t6', 'hub/t7', 'Back'])
+    // A page after the first keeps the app's numbers and adds the one `/k-approve <n>` takes (Q-33).
+    expect(two).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (4 to 5 of 7)\n1. hub/t4 (type 4): Task 4. Can approve.\n2. hub/t5 (type 5): Task 5. Can approve.\nWhich task?', labels: ['hub/t4', 'hub/t5', 'Back', 'More'] })
+    expect(three).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (6 to 7 of 7)\n1. hub/t6 (type 6): Task 6. Can approve.\n2. hub/t7 (type 7): Task 7. Can approve.\nWhich task?', labels: ['hub/t6', 'hub/t7', 'Back'] })
     // Back shows the dialog before again: page two, then page one.
     expect([w.asked[3], w.asked[4]]).toEqual([two, one])
     expect(w.asked[5]).toEqual({ header: 'Approve', question: 'hub/t2: Task 2.\nNot yet:\ntask.md fails k check: AC-1 has no source\nk would refuse it now. Back to the list?', labels: ['Back', 'Cancel'] })
     expect(w.asked[6]).toEqual(one)
     expect(verbs(w.runs)).toEqual([['approve', 'hub/t7', '--via', 'mod']])
+  })
+
+  test('on a page after the first, /k-approve, /k-accept and /k-amendments give each line the number their typed command takes, which takes that row (Q-33)', async ($, on) => {
+    const accept = [1, 2, 3, 4, 5].map(n => ({ id: `hub/a${n}`, title: `Accept ${n}`, review: { file: 'review.md', verdict: 'met' }, why: null }))
+    const amendments = [1, 2, 3, 4, 5].map(n => ({ ...(AMENDMENTS[0] as AmendmentRow), amendment: `A-${n}`, why: `Reason ${n}.`, lines: 1 }))
+    const w = world(on, { waiting: [{ ...SEVEN, accept, amendments }], taps: ['More', SKIP, 'More', SKIP, 'More', SKIP] })
+    for (const command of ['k-approve', 'k-accept', 'k-amendments']) await run($, command)
+    expect(w.asked[1]?.question).toBe('Waiting for you to approve: (4 to 5 of 7)\n1. hub/t4 (type 4): Task 4. Can approve.\n2. hub/t5 (type 5): Task 5. Can approve.\nWhich task?')
+    expect(w.asked[3]?.question).toBe('Waiting for you to accept: (4 to 5 of 5)\n1. hub/a4 (type 4): Accept 4. Can accept.\n2. hub/a5 (type 5): Accept 5. Can accept.\nWhich task?')
+    expect(w.asked[5]?.question).toBe(`Waiting for your approval: (4 to 5 of 5)\n1. ${ID} A-4 (type 4), proposed 2026-11-06: Reason 4. Changes 1 line.\n2. ${ID} A-5 (type 5), proposed 2026-11-06: Reason 5. Changes 1 line.\nWhich amendment?`)
+    // The first page's numbers are the typed ones already.
+    for (const a of [w.asked[0], w.asked[2], w.asked[4]]) expect(a?.question).not.toMatch(/\(type /)
+    expect(w.runs).toEqual([])
+    await run($, 'k-approve', '4')
+    await run($, 'k-accept', '5')
+    await run($, 'k-approve-amendment', '4')
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/t4', '--via', 'mod'], ['accept', 'hub/a5', '--via', 'mod'], ['approve', ID, '--amendment', 'A-4', '--via', 'mod']])
+  })
+
+  test('/k-hold, /k-start and /k-queue take no number typed, so a page after the first keeps the app\'s numbers alone', async ($, on) => {
+    const hold = [1, 2, 3, 4, 5].map(n => ({ id: `hub/h${n}`, title: `Hold ${n}`, state: 'queued' }))
+    const w = world(on, { rows: QUEUE, waiting: [{ ...WAITING, hold }], taps: ['More', SKIP, 'More', SKIP, 'More', SKIP, 'hub/next', 'Move', 'More', SKIP] })
+    for (const command of ['k-hold', 'k-start', 'k-queue', 'k-queue']) await run($, command)
+    expect(w.asked[1]?.question).toBe('Tasks you can put on hold: (4 to 5 of 5)\n1. hub/h4: Hold 4. Queued.\n2. hub/h5: Hold 5. Queued.\nWhich task?')
+    expect(w.asked[3]?.question).toBe('Tasks this session can work on: (4 to 5 of 5)\n1. hub/proposed: Asks for approval. Proposed.\n2. weather/asks-owner: A step asked a question. Awaiting owner.\nWhich task?')
+    expect(w.asked[5]?.question).toBe('The queue in order, then the parked tasks: (4 to 5 of 5)\n1. hub/later: Later on. Queued, place 4.\n2. hub/parked: Waits outside. Parked.\nWhich task?')
+    expect(w.asked.map(a => a.question).join('\n')).not.toMatch(/\(type /)
+    expect(w.runs).toEqual([])
+  })
+
+  test('a task id starting with a digit (the repo "2048") is listed, picked and approved through the dialog, and typed it is an id, not a number (finding 2)', async ($, on) => {
+    const approve = [{ id: '2048/tiles', title: 'Tiles slide', why: null }, { id: 'hub/proposed', title: 'Asks for approval', why: null }]
+    const w = world(on, { waiting: [{ ...WAITING, approve }], taps: ['2048/tiles', 'Approve 2048/tiles'] })
+    await run($, 'k-approve')
+    expect(w.asked).toEqual([
+      { header: 'Approve', question: 'Waiting for you to approve:\n1. 2048/tiles: Tiles slide. Can approve.\n2. hub/proposed: Asks for approval. Can approve.\nWhich task?', labels: ['2048/tiles', 'hub/proposed'] },
+      { header: 'Approve', question: '2048/tiles: Tiles slide.\nk would approve it now.\nApprove it?', labels: ['Approve 2048/tiles', 'Back'] },
+    ])
+    await run($, 'k-approve', '2048/tiles')
+    expect(verbs(w.runs)).toEqual([['approve', '2048/tiles', '--via', 'mod'], ['approve', '2048/tiles', '--via', 'mod']])
+  })
+
+  test('from Remote Control, /k-approve\'s and /k-amendments\' dialogs run their verb by id, and every answer says it came from the phone', async ($, on) => {
+    const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed', `${ID} A-3`, `Approve ${ID} A-3`, `${ID} A-4`, SKIP], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
+    const bridge: PromptOrigin = { kind: 'bridge' }
+    expect(await run($, 'k-approve', '', bridge)).toBe('hub/proposed: queued, place 3\n(typed in Remote Control)')
+    expect(await run($, 'k-amendments', '', bridge)).toBe('hub/proposed: queued, place 3\n\n(typed in Remote Control)')
+    const skipped = await run($, 'k-amendments', '', bridge)
+    expect(skipped).toMatch(/^Nothing ran: skipped\.\n\n2 amendments wait for your approval:\n/)
+    expect(skipped).toMatch(/\n\n\(typed in Remote Control\)$/)
+    expect(w.asked.map(a => a.header)).toEqual(['Approve', 'Approve', 'Amendments', 'Amendments', 'Amendments', 'Amendments'])
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod'], ['approve', ID, '--amendment', 'A-3', '--via', 'mod']])
   })
 
   test('/k-accept: "Accept <id>" for one k would accept; one stopped only by open checklist items takes a reason typed in the free-text row, shown above "Accept <id> with open items" (AC-9)', async ($, on) => {

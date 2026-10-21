@@ -6,6 +6,9 @@ import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
 // AC-11, E-4): the list of what waits, then the one picked, in its own words, with the verb k would take now and none
 // it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on another row (E-2).
+// /k-approve's, /k-accept's and /k-amendments' lists are the ones a typed number takes (`/k-accept 4`), so they are
+// `typed`: a page after the first gives each line that number too (Q-33). /k-hold, /k-start and /k-queue take an id or
+// nothing typed, never a number, so their lines keep the app's numbers alone.
 
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 const titleOf = (r: { title: string }): string => r.title.replace(/\s+/g, ' ').trim()
@@ -41,7 +44,7 @@ export function approveScreen(rows: readonly WaitingRow[]): Screen {
     choices: r.why === null ? [{ label: `Approve ${r.id}`, verb: ['approve', r.id, '--via', 'mod'] }] : [],
     question: r.why === null ? 'Approve it?' : REFUSED,
   })
-  return { kind: 'list', header: 'Approve', head: 'Waiting for you to approve:', question: 'Which task?', rows: rows.map(r => ({ item: waitingItem('approve', r), label: taskLabel(r), open: () => item(r) })) }
+  return { kind: 'list', header: 'Approve', head: 'Waiting for you to approve:', question: 'Which task?', typed: true, rows: rows.map(r => ({ item: waitingItem('approve', r), label: taskLabel(r), open: () => item(r) })) }
 }
 
 // A task blocked only by open checklist items offers "Accept with open items" (AC-9): the reason typed in the
@@ -68,7 +71,7 @@ export function acceptScreen(rows: readonly WaitingRow[]): Screen {
     const question = r.why === null ? 'Accept it as done?' : r.onlyChecklist ? 'Only open checklist items stop it. Accept it with them open?' : REFUSED
     return { kind: 'item', header: 'Accept', text: taskText('accept', r), choices, question }
   }
-  return { kind: 'list', header: 'Accept', head: 'Waiting for you to accept:', question: 'Which task?', rows: rows.map(r => ({ item: waitingItem('accept', r), label: taskLabel(r), open: () => item(r) })) }
+  return { kind: 'list', header: 'Accept', head: 'Waiting for you to accept:', question: 'Which task?', typed: true, rows: rows.map(r => ({ item: waitingItem('accept', r), label: taskLabel(r), open: () => item(r) })) }
 }
 
 // An amendment picked offers "Approve <id> A-n" when k would take it, and "Decline", which takes a reason (AC-8).
@@ -101,7 +104,7 @@ export function amendmentsScreen(rows: readonly AmendmentRow[]): Screen {
     ],
     question: x.refuse === null ? 'Approve it, or decline it?' : 'k would refuse its approval now. Decline it?',
   })
-  return { kind: 'list', header: 'Amendments', head: 'Waiting for your approval:', question: 'Which amendment?', rows: rows.map(x => ({ item: amendmentItem(x), label: amendmentLabel(x), open: () => item(x) })) }
+  return { kind: 'list', header: 'Amendments', head: 'Waiting for your approval:', question: 'Which amendment?', typed: true, rows: rows.map(x => ({ item: amendmentItem(x), label: amendmentLabel(x), open: () => item(x) })) }
 }
 
 // A task as the hold, start and queue lists show it: id, title, and its state as k list says it, with its queue place.

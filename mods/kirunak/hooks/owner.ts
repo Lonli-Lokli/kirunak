@@ -50,10 +50,12 @@ export type Row = { item: Item; label: string; open: () => Screen | Promise<Scre
 export type Choice = { label: string; open: () => Screen | Promise<Screen> } | { label: string; verb: readonly string[]; after?: (ok: boolean) => void }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
 // - list: `head`, then the rows of one page (three and More when there are more than four; one fewer under Back);
+//   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
+//   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33);
 // - item: the item's own words (`text`), then its choices, a verb's among them;
 // - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel.
 export type Screen =
-  | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string }
+  | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string; typed?: true }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string }
   | { kind: 'reason'; header: string; text: readonly string[]; question: string; given: (why: string) => Screen }
 
@@ -144,7 +146,9 @@ type Frame = { screen: Screen; start: number }
 
 // The dialog's loop: each answer acts only when it equals a choice offered (or is a reason typed in a reason dialog);
 // Skip, a dismissal or any other text ends it with nothing run; Back shows the dialog before again; a verb choice
-// ends it with that verb, the turn's.
+// ends it with that verb, the turn's. Words typed in the free-text row that equal a choice exactly are that choice:
+// $.ui.ask gives one string for a tap and for typed text, and they are the owner's own words, with the id, under the
+// item's text, in the owner's own command's dialog (S-7 review, finding 4; approval.md §5).
 async function talk($: EngineInterface, turn: object, first: Screen): Promise<Outcome> {
   const stack: Frame[] = [{ screen: first, start: 0 }]
   for (;;) {
@@ -162,6 +166,8 @@ async function talk($: EngineInterface, turn: object, first: Screen): Promise<Ou
       if (frame.screen.kind !== 'reason') return { nothing: 'the answer was none of the choices' }
       const why = tap.trim()
       if (!why) return { nothing: 'no reason was typed' }
+      // k takes a value starting with -- for a flag and refuses it; the mod says so itself (S-7 review, finding 8).
+      if (why.startsWith('--')) return { nothing: 'the reason started with --, which k takes for a flag' }
       stack.push({ screen: frame.screen.given(why), start: 0 })
     } else if (act === 'back') stack.pop()
     else if (act === 'more') stack.push({ screen: frame.screen, start: frame.start + choices.filter(c => typeof c.act === 'object').length })
@@ -181,7 +187,8 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     const rest = screen.rows.slice(start)
     const page = rest.length <= slots ? rest : rest.slice(0, slots - 1)
     const paged = start > 0 || page.length < rest.length
-    lines = [paged ? `${screen.head} (${start + 1} to ${start + page.length} of ${screen.rows.length})` : screen.head, ...plainLines(page.map(r => r.item))]
+    const items = page.map((r, i) => (screen.typed && start > 0 ? { ...r.item, name: `${r.item.name} (type ${start + i + 1})` } : r.item))
+    lines = [paged ? `${screen.head} (${start + 1} to ${start + page.length} of ${screen.rows.length})` : screen.head, ...plainLines(items)]
     choices.push(...page.map(r => ({ label: r.label, act: { open: r.open } })))
     if (back) choices.push({ label: BACK, act: 'back' })
     if (page.length < rest.length) choices.push({ label: MORE, act: 'more' })
@@ -194,8 +201,9 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   }
   if (choices.length === 1) choices.push({ label: CANCEL, act: 'cancel' })
   const labels = choices.map(c => c.label)
-  if (!labels.length || labels.length > CHOICES || new Set(labels).size < labels.length || labels.some(l => !l.trim() || /^\d/.test(l) || l === SKIP)) {
-    throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique, none starting with a number: ${labels.join(' | ')}`)
+  // A label may start with a digit (a task of the repo "2048"): the app's own number before it is cosmetic (S-1).
+  if (!labels.length || labels.length > CHOICES || new Set(labels).size < labels.length || labels.some(l => !l.trim() || l === SKIP)) {
+    throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique and not blank: ${labels.join(' | ')}`)
   }
   return { question: [...lines, screen.question].join('\n'), choices }
 }

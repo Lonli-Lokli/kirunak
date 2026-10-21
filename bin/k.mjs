@@ -432,6 +432,8 @@ const VERBS = {
       return { queue: ids, text: ids.map((id, i) => `${String(i + 1).padStart(2)}  ${id}`).join('\n') || 'the queue is empty' };
     }
     const id = need(pos[1], 'task id');
+    // Only an approved task that is not done goes in, a dry run checking it too.
+    if (sub === 'add') approval.queueable(ws, id);
     if (flags['dry-run']) return { text: `would ${sub} ${id}` };
     if (sub === 'add') queue.add(ws, id, place(flags));
     else if (sub === 'move') queue.move(ws, id, place(flags));

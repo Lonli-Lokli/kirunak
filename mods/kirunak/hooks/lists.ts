@@ -58,8 +58,8 @@ export function taskItem(r: ListRow): Item {
   }
 }
 
-// A dialog's choice for a task: its short name, unique in the list and never starting with a number (the app numbers
-// the choices).
+// A dialog's choice for a task: its id, unique in the list; one starting with a digit (repo "2048") shows after the
+// app's own number, which is cosmetic (S-1).
 export const taskLabel = (r: { id: string }): string => r.id
 
 // `/k-list [all]`: every task k list gives, in its order (the queue first).
