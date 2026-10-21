@@ -202,8 +202,10 @@ reached the phone and its answer came back while the command ran, 8.4 s and 16.6
   it).
 
 **`k waiting`** (the reads behind these dialogs, built in S-4): `k waiting --json` has five lists now, `approve`,
-`accept`, `amendments`, `hold` and `start`. The amendments rows carry `{ id, amendment, title, proposed, by, why,
-lines, refuse }`, where `refuse` is one line of what `k approve --amendment` would refuse, or null; the hold and start
+`accept`, `amendments`, `hold` and `start`. The amendments rows carry `{ id, amendment, title, name, proposed, by,
+why, lines, refuse }`, where `title` is the task's, `name` the amendment's own title or, with none, the criteria it
+changes ("replaces AC-2, AC-3; adds AC-17", kirunak-phone A-8), which the text shows as `<id> A-n: <name>`, and
+`refuse` is one line of what `k approve --amendment` would refuse, or null; the hold and start
 rows `{ id, title, state }` (hold what `k hold --dry-run` takes, start the tasks `k list` shows that are neither done
 nor on hold); each accept row adds `checklistOpen` and `onlyChecklist` (true when `k accept` refuses only for open
 items and passes with a reason). `k approve` and `k hold` take `--dry-run`, which makes every check and writes
