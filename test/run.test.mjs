@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
 import { run } from '../lib/run.mjs';
+import * as queue from '../lib/queue.mjs';
 import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
 import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
@@ -293,7 +294,7 @@ test('a step started by hand that asks for a job: k run runs it and starts no cl
   assert.ok(existsSync(stepFile(w, 'needs.json')), 'the question stays for the session that asked it');
 });
 
-test('k run refuses a step past the machine cap and says who runs; a task not queued does not run', async () => {
+test('k run refuses a step past the machine cap and says who runs', async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);
   const others = [spawn('sleep', ['5']), spawn('sleep', ['5'])];
@@ -305,8 +306,33 @@ test('k run refuses a step past the machine cap and says who runs; a task not qu
   } finally {
     others.forEach((c) => c.kill());
   }
-  writeFileSync(w.ws.queue, '');
-  await assert.rejects(run({ ws: w.ws, id: w.id }), /weather\/offline-forecast is not in the queue/);
+});
+
+test('k run starts no step of a parked task and names k queue add, which puts it back; parked during --watch, no other step starts', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w);
+  queue.remove(w.ws, w.id);
+  const parked = `${w.id} is parked, not in the queue: k queue add ${w.id} puts it back`;
+  await assert.rejects(run({ ws: w.ws, id: w.id }), { message: `${w.id} cannot run:\n  ${parked}` });
+  await assert.rejects(steps.start({ ws: w.ws, id: w.id, step: 'S-1' }), { message: `${w.id} cannot run a step:\n  ${parked}` }, 'k step start too');
+  assert.equal(calls.length, 0);
+  assert.ok(!existsSync(join(w.p.dir, 'progress.md')), 'no step started');
+  queue.add(w.ws, w.id);
+  assert.deepEqual((await run({ ws: w.ws, id: w.id })).states, { 'S-1': 'done', 'S-2': 'ready', 'S-3': 'pending', 'S-4': 'pending' });
+  assert.equal(calls.length, 1, 'back in the queue, its step starts');
+
+  // Parked by the owner while S-1 ran: S-1 ends as it would, and S-2 never starts.
+  const v = await approvedWorkspace(PLAN);
+  const vCalls = fakeRunner(v, (step, n) => {
+    if (n === 1) queue.remove(v.ws, v.id);
+    return 'write';
+  });
+  const lines = [];
+  const r = await run({ ws: v.ws, id: v.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.equal(vCalls.length, 1);
+  assert.equal(r.stopped, parked);
+  assert.deepEqual([r.states['S-1'], r.states['S-2']], ['done', 'ready']);
+  assert.ok(lines.some((l) => l.endsWith(`stopped: ${r.stopped}`)), lines.join('\n'));
 });
 
 test('one k run per task: a second refuses, naming the pid, and starts nothing; a lock whose k run is dead is taken over', async () => {

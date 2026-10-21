@@ -53,7 +53,7 @@ Cache     k keep --session <id>: in the background, ends when the session's wake
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
-          k queue remove <id>
+          k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
