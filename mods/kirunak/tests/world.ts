@@ -51,24 +51,26 @@ export const FILES: Record<string, string> = {
   [`${AMENDMENT_DIR}/A-3.md`]: `---\ntask: ${ID}\nproposed: 2026-11-06\nby: session s1\n---\n\n## Why\nThe age line needs its words. The old one was a time alone.\n\n## Changes\n- replace E-1: A forecast older than a day says "yesterday".\n- replace D-1: Keep the last three days.\n`,
 }
 
-// What `k board --brief --json` gives for ROWS: the brief board in plain lines, the task worked on first, and the ids
-// in the order the lines list them.
-export const BRIEF: Brief = {
-  made: '2026-11-07 12:00',
-  text: [
-    'Made at 2026-11-07 12:00.',
-    'Worked on now:',
-    '1. weather/offline-forecast: in review, queue 1. Step: S-2 finished. AC 1 of 2 met, E 0 of 1.',
-    'Every other task:',
-    '2. hub/sync-notes: queued, queue 2.',
-    '3. weather/was-reviewed: reviewed.',
-    '4. hub/proposed: proposed.',
-    '5. weather/asks-owner: awaiting owner.',
-    '6. hub/old: done.',
-    'Lock: weather unit tests (session s1), 1 waiting. Steps running: 1 of 2.',
-  ].join('\n'),
-  ids: [ID, 'hub/sync-notes', 'weather/was-reviewed', 'hub/proposed', 'weather/asks-owner', 'hub/old'],
+// A brief board as `k board --brief --json` gives it (lib/board-brief.mjs): each group's name and entry lines, the
+// text made of them and the machine's line, each paragraph after a blank line, and the ids in the order of the lines.
+export function briefOf(groups: readonly { name: string; lines: string[] }[], machine = 'No lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.', made = '2026-11-07 12:00'): Brief {
+  const all = groups.map(g => ({ name: g.name, count: g.lines.length, ids: g.lines.map(l => l.slice(0, l.indexOf(':'))), lines: [...g.lines] }))
+  const text = [`Made at ${made}.`, ...all.map(g => [`${g.name} (${g.count})`, ...g.lines].join('\n')), machine].join('\n\n')
+  return { made, text, ids: all.flatMap(g => g.ids), groups: all, machine }
 }
+
+// The brief board for ROWS: the task worked on first, then each state's, one task a group.
+export const BRIEF: Brief = briefOf(
+  [
+    { name: 'Working on now', lines: [`${ID}: in review, queue 1, S-2 done, 1 of 3 met, 1 not met, 1 needs a device`] },
+    { name: 'Proposed', lines: ['hub/proposed: proposed'] },
+    { name: 'Queued', lines: ['hub/sync-notes: queued, queue 2'] },
+    { name: 'Reviewed', lines: ['weather/was-reviewed: reviewed'] },
+    { name: 'Awaiting owner', lines: ['weather/asks-owner: awaiting owner'] },
+    { name: 'Done this week', lines: ['hub/old: done'] },
+  ],
+  'Lock: weather unit tests (session s1, since 2026-11-07 11:50), 1 heavy job waiting, 1 of 2 steps running, no device claims.',
+)
 
 // What `k board --card <id>` prints for a task of `rows`: its card, markdown.
 export const cardOf = (r: KirunakRow): string => `### ${r.id}\n\n${r.title}.\n\n- State: ${r.state}.\n${[...r.ac, ...r.e].map(x => `- ${x.id} ${x.verdict ?? 'no verdict'}: ${x.text}\n`).join('')}`

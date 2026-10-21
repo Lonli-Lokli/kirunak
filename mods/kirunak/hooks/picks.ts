@@ -107,13 +107,26 @@ export function amendmentsScreen(rows: readonly AmendmentRow[], files: ReadonlyM
   return { kind: 'list', header: 'Amendments', head: 'Waiting for your approval:', question: 'Which amendment?', typed: true, rows: rows.map(x => ({ item: amendmentItem(x), label: amendmentLabel(x), open: () => item(x) })) }
 }
 
-// What `k board --brief --json` gives (A-7's AC-5): when it was made, the brief board in plain lines, and the tasks'
-// ids in the order those lines list them.
-export type Brief = { made: string; text: string; ids: string[] }
+// What `k board --brief --json` gives (A-7's and A-9's AC-5): when it was made, the brief board in plain lines, the
+// tasks' ids in the order those lines list them, the groups those lines make (each one's name, count, ids and entry
+// lines, in the board's order) and the machine's line, the text's last.
+export type BriefGroup = { name: string; count: number; ids: string[]; lines: string[] }
+export type Brief = { made: string; text: string; ids: string[]; groups: BriefGroup[]; machine: string }
 
-// /k-board with no id (A-7's AC-5): the brief board, the status of every task, kept whole above every page, and the
-// tasks' ids as the choices, three a dialog with More; the one tapped answers with its card. It runs no verb.
-export const boardScreen = (brief: Brief): PickScreen => ({ kind: 'pick', header: 'Board', text: brief.text.trimEnd().split('\n'), labels: brief.ids, question: 'Which task\'s card?' })
+// /k-board with no id (A-9's AC-5), in steps. First the groups: when the board was made, each group's name and count,
+// the machine's line, and the groups that hold a task as the choices (k names group by words, never a digit, so the
+// app's own numbers stand alone). A group picked: its paragraph of the brief board, its tasks as the choices, and
+// Back; the task tapped answers with its card. Both page three and More, as every list does. It runs no verb.
+export function boardScreen(brief: Brief): PickScreen {
+  const group = (g: BriefGroup): PickScreen => ({ kind: 'pick', header: 'Board', text: [`${g.name} (${g.count})`, ...g.lines], labels: g.ids, question: 'Which task\'s card?' })
+  return {
+    kind: 'pick',
+    header: 'Board',
+    text: [`Made at ${brief.made}.`, '', ...brief.groups.map(g => `${g.name}: ${g.count}`), '', brief.machine],
+    labels: brief.groups.filter(g => g.ids.length).map(g => ({ label: g.name, open: () => group(g) })),
+    question: 'Which group?',
+  }
+}
 
 // A task as the hold, start and queue lists show it: its id and state as k list says it, with its queue place.
 export const stateItem = (r: TaskRow, place: number | null = null): Item => ({ lead: '', name: r.id, text: `: ${r.state}${place !== null ? `, place ${place}` : ''}` })
