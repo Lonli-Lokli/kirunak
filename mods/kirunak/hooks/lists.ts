@@ -74,9 +74,19 @@ export function queueNow(stdout: string): string {
   return ['The queue now:', '', ...ids.map((id, i) => `${i + 1}. ${md(id as string)}`)].join('\n')
 }
 
-// `k board --markdown` less its first heading, which names kirunak as the engine's prefix to the answer already does
-// (AC-12), and the blank line under it.
-export const boardText = (markdown: string): string => markdown.replace(/^# .*\n(?:[ \t]*\n)?/, '').trimEnd()
+// The brief board's plain lines as a chat answer, which the phone draws as markdown: each line shows as written and
+// stays a line of its own (two spaces, markdown's hard break, end each line another follows); a blank line stays one,
+// and an indent is kept in no-break spaces, which markdown would drop or take for code.
+export function briefText(text: string): string {
+  const lines = text.trimEnd().split('\n')
+  return lines
+    .map((l, i) => {
+      if (!l.trim()) return ''
+      const indent = '\u00a0'.repeat(/^\s*/.exec(l)?.[0].length ?? 0)
+      return `${indent}${entry(md(l))}${lines[i + 1]?.trim() ? '  ' : ''}`
+    })
+    .join('\n')
+}
 
 // What k approve would refuse, less the id and A-n it starts with, as k waiting's own line shortens it.
 function refuseOf(x: AmendmentRow): string | null {

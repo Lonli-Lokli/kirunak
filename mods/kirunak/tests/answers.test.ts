@@ -30,16 +30,10 @@ describe('the lists as answers', () => {
     expect(lines).toContain('6. in progress, **hub/long-one**: A title long enough that a line of seventy characters would have broken it in the middle of a sentence. Step: S-3 started (session a-very-long-session-name-1234567890abcdef) and more words after.')
   })
 
-  test('/k-board: k board --markdown less its heading, so the answer names kirunak only in the engine\'s prefix; k\'s refusal when it fails', async ($, on) => {
-    const w = world(on)
-    expect(await run($, 'k-board', '', { kind: 'bridge' })).toBe('Made at 2026-11-07 12:00.\n\n## Working on now (1)\n\n### weather/offline-forecast\n\n(typed in Remote Control)')
-    expect(w.boards.map(argv => argv.slice(2))).toEqual([['board', '--markdown']])
-    expect(await run($, 'k-board', 'now')).toBe('/k-board takes nothing, not now.')
-  })
-
-  test('/k-board answers k\'s refusal', async ($, on) => {
-    world(on, { board: { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' } })
+  test('/k-board answers k\'s refusal, of the brief board or of a card', async ($, on) => {
+    world(on, { brief: { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' } })
     expect(await run($, 'k-board')).toBe('/k-board refused:\nk: the workspace did not load')
+    expect(await run($, 'k-board', 'hub/nope')).toBe('/k-board refused:\nk: no task hub/nope')
   })
 
   test('/k-amendments lists what waits, numbered; /k-amendments <n> shows that one in full from the list last shown', async ($, on) => {
@@ -107,7 +101,7 @@ describe('the lists as answers', () => {
   for (const origin of others) {
     test(`from ${origin.kind}: each list is refused with a line, and k never runs`, async ($, on) => {
       const w = world(on)
-      for (const [command, args] of [['k-list', 'all'], ['k-board', ''], ['k-amendments', ''], ['k-amendments', '1'], ['k-approve-amendment', '1']] as const) {
+      for (const [command, args] of [['k-list', 'all'], ['k-board', ''], ['k-board', ID], ['k-amendments', ''], ['k-amendments', '1'], ['k-approve-amendment', '1']] as const) {
         expect(await run($, command, args, origin)).toMatch(new RegExp(`^/${command} runs only from your own prompt or from Remote Control; this one came from .+, so nothing ran\\.$`))
       }
       expect([w.reads, w.boards.length, w.runs.length]).toEqual([0, 0, 0])
@@ -131,7 +125,7 @@ describe('the lists as answers', () => {
     await w.clock.settle()
     const answers: string[] = []
     const calls: [string, string][] = [
-      ['k-list', ''], ['k-list', 'all'], ['k-list', 'x'], ['k-board', ''], ['k-amendments', '1'], ['k-amendments', ''], ['k-amendments', '1'], ['k-amendments', '2'],
+      ['k-list', ''], ['k-list', 'all'], ['k-list', 'x'], ['k-board', ''], ['k-board', ID], ['k-board', 'hub/nope'], ['k-amendments', '1'], ['k-amendments', ''], ['k-amendments', '1'], ['k-amendments', '2'],
       ['k-approve-amendment', '1'], ['k-approve', ''], ['k-accept', ''], ['k-accept', '9'], ['k-hold', ID], ['k-start', ID], ['kirunak', ''], ['kirunak', ''],
     ]
     for (const [command, args] of calls) for (const kind of ['composer', 'bridge'] as const) answers.push(await run($, command, args, { kind }))

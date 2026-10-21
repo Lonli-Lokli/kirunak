@@ -1,6 +1,6 @@
 import { amendmentItem, amendmentLabel, taskLabel } from './lists'
 import type { Item } from './lists'
-import type { Choice, Screen } from './owner'
+import type { Choice, PickScreen, Screen } from './owner'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
@@ -106,6 +106,14 @@ export function amendmentsScreen(rows: readonly AmendmentRow[]): Screen {
   })
   return { kind: 'list', header: 'Amendments', head: 'Waiting for your approval:', question: 'Which amendment?', typed: true, rows: rows.map(x => ({ item: amendmentItem(x), label: amendmentLabel(x), open: () => item(x) })) }
 }
+
+// What `k board --brief --json` gives (A-7's AC-5): when it was made, the brief board in plain lines, and the tasks'
+// ids in the order those lines list them.
+export type Brief = { made: string; text: string; ids: string[] }
+
+// /k-board with no id (A-7's AC-5): the brief board, the status of every task, kept whole above every page, and the
+// tasks' ids as the choices, three a dialog with More; the one tapped answers with its card. It runs no verb.
+export const boardScreen = (brief: Brief): PickScreen => ({ kind: 'pick', header: 'Board', text: brief.text.trimEnd().split('\n'), labels: brief.ids, question: 'Which task\'s card?' })
 
 // A task as the hold, start and queue lists show it: id, title, and its state as k list says it, with its queue place.
 const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`
