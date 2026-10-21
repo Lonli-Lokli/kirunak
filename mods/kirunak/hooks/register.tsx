@@ -113,8 +113,8 @@ async function card($: EngineInterface, k: string, id: string): Promise<string> 
   return r.exitCode !== 0 ? refused('k-board', r) : r.stdout.trimEnd()
 }
 
-// `/k-amendments`: the amendments waiting (AC-2), kept for a number, as the dialog's choices, where one picked is
-// approved or declined (AC-3, AC-8); when nothing ran, the answer says why and shows the list as a number takes it.
+// `/k-amendments`: the amendments waiting (AC-2), kept for a number, as the dialog's choices, where one picked shows in
+// full and is approved or declined (AC-3, AC-8); when nothing ran, the answer says why and shows the list as a number takes it.
 // `/k-amendments <n>`: that one in full, from the list last shown, read from its file.
 async function amendments($: EngineInterface, turn: Turn): Promise<string | Outcome> {
   const { k, args } = turn
@@ -125,7 +125,17 @@ async function amendments($: EngineInterface, turn: Turn): Promise<string | Outc
     if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
     const rows = (offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments)
     if (!rows.length) return amendmentsText(rows)
-    const out = await turn.dialog(amendmentsScreen(rows))
+    // Each one's file, read before the dialog opens, for the one picked to show in full; one that cannot be read shows
+    // k waiting's words instead.
+    const files = new Map<string, string>()
+    for (const x of rows) {
+      try {
+        files.set(x.file, await $.fs.read(x.file))
+      } catch {
+        // amendmentLines says so.
+      }
+    }
+    const out = await turn.dialog(amendmentsScreen(rows, files))
     return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${amendmentsText(rows)}`
   }
   const picked = nth(args, offered.amendments, '/k-amendments')

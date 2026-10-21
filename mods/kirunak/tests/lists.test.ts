@@ -61,12 +61,12 @@ describe('the lists the commands answer with', () => {
     expect(entry('', '1. ')).toBe('1.')
   })
 
-  test('/k-amendments: numbered, task id and A-n, date proposed, the first sentence of the Why, the lines it changes, what k would refuse', () => {
+  test('/k-amendments: numbered, task id, A-n and name, nothing more (A-8)', () => {
     expect(amendmentsText(AMENDMENTS)).toBe([
       '2 amendments wait for your approval:',
       '',
-      '1. **weather/offline-forecast A-3**, proposed 2026-11-06: The age line needs its words. Changes 2 lines.',
-      '2. **weather/offline-forecast A-4**, proposed 2026-11-06: E-1 is covered by AC-1. Changes 1 line. Not yet: with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have',
+      '1. **weather/offline-forecast A-3**: Age line in words',
+      '2. **weather/offline-forecast A-4**: replaces E-1',
       '',
       '/k-amendments 1 shows the first in full; /k-approve-amendment 1 approves it.',
     ].join('\n'))
@@ -76,7 +76,7 @@ describe('the lists the commands answer with', () => {
 
   test('/k-amendments <n>: the Why and Changes in full, from the file, and what follows', () => {
     expect(amendmentText(1, A3, FILE)).toBe([
-      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1, changes 2 lines.',
+      'weather/offline-forecast A-3: Age line in words. Proposed 2026-11-06 by session s1, changes 2 lines.',
       '',
       'Why:',
       '',
@@ -100,8 +100,8 @@ describe('the lists the commands answer with', () => {
 
   test('the same rows as a dialog shows them: numbered plain lines, and short names for the choices', () => {
     expect(plainLines([A3, A4].map(amendmentItem), 4)).toEqual([
-      '4. weather/offline-forecast A-3, proposed 2026-11-06: The age line needs its words. Changes 2 lines.',
-      '5. weather/offline-forecast A-4, proposed 2026-11-06: E-1 is covered by AC-1. Changes 1 line. Not yet: with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have',
+      '4. weather/offline-forecast A-3: Age line in words',
+      '5. weather/offline-forecast A-4: replaces E-1',
     ])
     expect(plainLines([taskItem(ROWS[1] as (typeof ROWS)[number])])).toEqual(['1. queued, queue place 2, hub/sync-notes: Sync notes.'])
     expect([amendmentLabel(A3), taskLabel(ROWS[1] as (typeof ROWS)[number])]).toEqual(['weather/offline-forecast A-3', 'hub/sync-notes'])

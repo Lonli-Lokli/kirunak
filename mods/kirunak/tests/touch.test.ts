@@ -19,7 +19,7 @@ describe('holding and starting by touch', () => {
     const w = world(on, { taps: [ID, 'Hold', 'waiting for the phone test', `Hold ${ID}`] })
     expect(await run($, 'k-hold', '', { kind: 'bridge' })).toBe(`${ID}: done\n(typed in Remote Control)`)
     expect(w.asked).toEqual([
-      { header: 'Hold', question: `Tasks you can put on hold:\n1. ${ID}: The last forecast stays readable offline. In review.\n2. hub/sync-notes: Sync notes. Queued.\nWhich task?`, labels: [ID, 'hub/sync-notes'] },
+      { header: 'Hold', question: `Tasks you can put on hold:\n1. ${ID}: in review\n2. hub/sync-notes: queued\nWhich task?`, labels: [ID, 'hub/sync-notes'] },
       { header: 'Hold', question: `${FORECAST}\nPut it on hold?`, labels: ['Hold', 'Back'] },
       { header: 'Hold', question: `${FORECAST}\nType the reason in the free-text row: why put it on hold?`, labels: ['Back', 'Cancel'] },
       { header: 'Hold', question: `${FORECAST}\nReason: waiting for the phone test\nPut it on hold, for that reason?`, labels: [`Hold ${ID}`, 'Back'] },
@@ -39,7 +39,7 @@ describe('holding and starting by touch', () => {
     expect(await run($, 'k-start')).toBe(`${ID}: done`)
     expect(w.asked[0]).toEqual({
       header: 'Start',
-      question: `Tasks this session can work on: (1 to 3 of 5)\n1. ${ID}: The last forecast stays readable offline. In review.\n2. hub/sync-notes: Sync notes. Queued.\n3. weather/was-reviewed: Reviewed and met. Reviewed.\nWhich task?`,
+      question: `Tasks this session can work on: (1 to 3 of 5)\n1. ${ID}: in review\n2. hub/sync-notes: queued\n3. weather/was-reviewed: reviewed\nWhich task?`,
       labels: [ID, 'hub/sync-notes', 'weather/was-reviewed', 'More'],
     })
     expect(w.asked[1]?.labels).toEqual(['hub/proposed', 'weather/asks-owner', 'Back'])
@@ -69,7 +69,7 @@ describe('holding and starting by touch', () => {
 
 const SKIP = '[No preference]'
 const FOUR = ' 1  hub/next\n 2  weather/offline-forecast\n 3  hub/sync-notes\n 4  hub/later\n'
-const LIST = `The queue in order, then the parked tasks: (1 to 3 of 5)\n1. ${ID}: The last forecast stays readable offline. In review, place 1.\n2. hub/sync-notes: Sync notes. Queued, place 2.\n3. hub/next: Next up. Queued, place 3.\nWhich task?`
+const LIST = `The queue in order, then the parked tasks: (1 to 3 of 5)\n1. ${ID}: in review, place 1\n2. hub/sync-notes: queued, place 2\n3. hub/next: queued, place 3\nWhich task?`
 const NEXT = 'hub/next: Next up.\nQueued, place 3 of 4 in the queue.'
 
 describe('the queue by touch (AC-17)', () => {
@@ -79,7 +79,7 @@ describe('the queue by touch (AC-17)', () => {
     expect(w.asked).toEqual([
       { header: 'Queue', question: LIST, labels: [ID, 'hub/sync-notes', 'hub/next', 'More'] },
       { header: 'Queue', question: `${NEXT}\nMove it, or park it?`, labels: ['Move', 'Park hub/next', 'Back'] },
-      { header: 'Queue', question: `Move hub/next before one of these, or to the end: (1 to 2 of 4)\n1. ${ID}: The last forecast stays readable offline. In review, place 1.\n2. hub/sync-notes: Sync notes. Queued, place 2.\nWhere to?`, labels: [ID, 'hub/sync-notes', 'Back', 'More'] },
+      { header: 'Queue', question: `Move hub/next before one of these, or to the end: (1 to 2 of 4)\n1. ${ID}: in review, place 1\n2. hub/sync-notes: queued, place 2\nWhere to?`, labels: [ID, 'hub/sync-notes', 'Back', 'More'] },
       { header: 'Queue', question: `${NEXT}\nTo: before ${ID}, place 1.\nMove it there?`, labels: [`Move hub/next before ${ID}`, 'Back'] },
     ])
     expect(verbs(w.runs)).toEqual([['queue', 'move', 'hub/next', '--before', ID]])
@@ -88,9 +88,9 @@ describe('the queue by touch (AC-17)', () => {
   test('to the end, "Park <id>" and "Put back <id>" each run their queue verb by id; a task in review offers Move alone, and a place it holds already offers no verb', async ($, on) => {
     const w = world(on, { rows: QUEUE, taps: ['hub/sync-notes', 'Move', 'More', 'End of the queue', 'Move hub/sync-notes to the end', 'hub/next', 'Park hub/next', 'More', 'hub/parked', 'Put back hub/parked', ID, 'Move', 'hub/sync-notes', SKIP] })
     for (let i = 0; i < 3; i++) await run($, 'k-queue')
-    expect(w.asked[3]).toEqual({ header: 'Queue', question: 'Move hub/sync-notes before one of these, or to the end: (3 to 4 of 4)\n1. hub/later: Later on. Queued, place 4.\n2. End of the queue.\nWhere to?', labels: ['hub/later', 'End of the queue', 'Back'] })
+    expect(w.asked[3]).toEqual({ header: 'Queue', question: 'Move hub/sync-notes before one of these, or to the end: (3 to 4 of 4)\n1. hub/later: queued, place 4\n2. End of the queue\nWhere to?', labels: ['hub/later', 'End of the queue', 'Back'] })
     expect(w.asked[4]).toEqual({ header: 'Queue', question: 'hub/sync-notes: Sync notes.\nQueued, place 2 of 4 in the queue.\nTo: the end of the queue.\nMove it there?', labels: ['Move hub/sync-notes to the end', 'Back'] })
-    expect(w.asked[8]).toEqual({ header: 'Queue', question: 'The queue in order, then the parked tasks: (4 to 5 of 5)\n1. hub/later: Later on. Queued, place 4.\n2. hub/parked: Waits outside. Parked.\nWhich task?', labels: ['hub/later', 'hub/parked', 'Back'] })
+    expect(w.asked[8]).toEqual({ header: 'Queue', question: 'The queue in order, then the parked tasks: (4 to 5 of 5)\n1. hub/later: queued, place 4\n2. hub/parked: parked\nWhich task?', labels: ['hub/later', 'hub/parked', 'Back'] })
     expect(w.asked[9]).toEqual({ header: 'Queue', question: 'hub/parked: Waits outside.\nParked: approved, out of the queue, so no step of it starts.\nPut it back, at the end of the queue?', labels: ['Put back hub/parked', 'Back'] })
     expect(verbs(w.runs)).toEqual([['queue', 'move', 'hub/sync-notes', '--last'], ['queue', 'remove', 'hub/next'], ['queue', 'add', 'hub/parked']])
     expect(await run($, 'k-queue')).toBe('Nothing ran: skipped.')
@@ -102,7 +102,7 @@ describe('the queue by touch (AC-17)', () => {
   test('parked tasks alone are listed under an empty queue', async ($, on) => {
     const w = world(on, { rows: [QUEUE[4] as KirunakRow] })
     expect(await run($, 'k-queue')).toBe('Nothing ran: dismissed.')
-    expect(w.asked).toEqual([{ header: 'Queue', question: 'The queue is empty. Parked:\n1. hub/parked: Waits outside. Parked.\nWhich task?', labels: ['hub/parked', 'Cancel'] }])
+    expect(w.asked).toEqual([{ header: 'Queue', question: 'The queue is empty. Parked:\n1. hub/parked: parked\nWhich task?', labels: ['hub/parked', 'Cancel'] }])
   })
 
   test('nothing queued and nothing parked answers so with no dialog; /k-queue takes nothing after its name', async ($, on) => {

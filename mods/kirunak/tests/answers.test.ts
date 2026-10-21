@@ -39,9 +39,9 @@ describe('the lists as answers', () => {
   test('/k-amendments lists what waits, numbered; /k-amendments <n> shows that one in full from the list last shown', async ($, on) => {
     world(on)
     expect(await run($, 'k-amendments', '1')).toBe('/k-amendments 1: 1 of which list? /k-amendments shows it first.')
-    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**, proposed 2026-11-06: The age line needs its words. Changes 2 lines.'])
+    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**: Age line in words'])
     expect(await run($, 'k-amendments', '1', { kind: 'bridge' })).toBe([
-      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1, changes 2 lines.',
+      'weather/offline-forecast A-3: Age line in words. Proposed 2026-11-06 by session s1, changes 2 lines.',
       '',
       'Why:',
       '',

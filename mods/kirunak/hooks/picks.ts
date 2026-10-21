@@ -1,11 +1,11 @@
-import { amendmentItem, amendmentLabel, taskLabel } from './lists'
+import { amendmentItem, amendmentLabel, amendmentLines, taskLabel } from './lists'
 import type { Item } from './lists'
 import type { Choice, PickScreen, Screen } from './owner'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
-// AC-11, E-4): the list of what waits, then the one picked, in its own words, with the verb k would take now and none
-// it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on another row (E-2).
+// AC-11, E-4): the list of what waits, each row named and nothing more (a task's id and state, an amendment's task id,
+// A-n and name, A-8), then the one picked, in its own words, with the verb k would take now and none it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on another row (E-2).
 // /k-approve's, /k-accept's and /k-amendments' lists are the ones a typed number takes (`/k-accept 4`), so they are
 // `typed`: a page after the first gives each line that number too (Q-33). /k-hold, /k-start and /k-queue take an id or
 // nothing typed, never a number, so their lines keep the app's numbers alone.
@@ -19,16 +19,18 @@ function refusalLines(id: string, why: string): string[] {
   return lines.map((l, i) => (i === 0 && l.startsWith(`${id}: `) ? l.slice(id.length + 2) : l))
 }
 
-// A task k waiting offers a verb on, as a list row: id, title, and whether k would take the verb now.
-export function waitingItem(verb: 'approve' | 'accept', r: WaitingRow): Item {
-  const first = r.why === null ? null : refusalLines(r.id, r.why)[0]
-  return { lead: '', name: r.id, text: `: ${sentence(titleOf(r))} ${first == null ? `Can ${verb}.` : `Not yet: ${sentence(first.replace(/:$/, ''))}`}` }
-}
+// A waiting task's state as k waiting gives it; from an older k without it, what k approve and k accept take: proposed
+// tasks, and reviewed ones, which read "awaiting owner" while their checklist has an unticked item (lib/state.mjs).
+const waitingState = (verb: 'approve' | 'accept', r: WaitingRow): string => r.state ?? (verb === 'approve' ? 'proposed' : r.checklistOpen ? 'awaiting owner' : 'reviewed')
 
-// The task picked, in full: id and title, its review, and what k would refuse, every line of it.
+// A task k waiting offers a verb on, as a list row: its id and state; whether k would take the verb shows once picked.
+export const waitingItem = (verb: 'approve' | 'accept', r: WaitingRow): Item => ({ lead: '', name: r.id, text: `: ${waitingState(verb, r)}` })
+
+// The task picked, in full: id and title, its state, its review, and what k would refuse, every line of it.
 function taskText(verb: 'approve' | 'accept', r: WaitingRow): string[] {
   return [
     `${r.id}: ${sentence(titleOf(r))}`,
+    `State: ${waitingState(verb, r)}.`,
     ...(r.review ? [`Review: ${r.review.file}${r.review.verdict ? `, ${r.review.verdict}` : ''}.`] : []),
     ...(r.why === null ? [`k would ${verb} it now.`] : ['Not yet:', ...refusalLines(r.id, r.why)]),
   ]
@@ -74,12 +76,10 @@ export function acceptScreen(rows: readonly WaitingRow[]): Screen {
   return { kind: 'list', header: 'Accept', head: 'Waiting for you to accept:', question: 'Which task?', typed: true, rows: rows.map(r => ({ item: waitingItem('accept', r), label: taskLabel(r), open: () => item(r) })) }
 }
 
-// An amendment picked offers "Approve <id> A-n" when k would take it, and "Decline", which takes a reason (AC-8).
-export function amendmentsScreen(rows: readonly AmendmentRow[]): Screen {
-  const textOf = (x: AmendmentRow): string[] => {
-    const it = amendmentItem(x)
-    return [`${it.lead}${it.name}${it.text}`, `Task: ${sentence(titleOf(x))}`]
-  }
+// An amendment picked shows in full, from its file in `files` (by path; one missing could not be read), and offers
+// "Approve <id> A-n" when k would take it, and "Decline", which takes a reason (AC-2, AC-8).
+export function amendmentsScreen(rows: readonly AmendmentRow[], files: ReadonlyMap<string, string>): Screen {
+  const textOf = (x: AmendmentRow): string[] => amendmentLines(x, files.get(x.file) ?? null)
   const confirm = (x: AmendmentRow, why: string): Screen => ({
     kind: 'item',
     header: 'Amendments',
@@ -115,12 +115,10 @@ export type Brief = { made: string; text: string; ids: string[] }
 // tasks' ids as the choices, three a dialog with More; the one tapped answers with its card. It runs no verb.
 export const boardScreen = (brief: Brief): PickScreen => ({ kind: 'pick', header: 'Board', text: brief.text.trimEnd().split('\n'), labels: brief.ids, question: 'Which task\'s card?' })
 
-// A task as the hold, start and queue lists show it: id, title, and its state as k list says it, with its queue place.
-const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`
+// A task as the hold, start and queue lists show it: its id and state as k list says it, with its queue place.
+export const stateItem = (r: TaskRow, place: number | null = null): Item => ({ lead: '', name: r.id, text: `: ${r.state}${place !== null ? `, place ${place}` : ''}` })
 
-export function stateItem(r: TaskRow, place: number | null = null): Item {
-  return { lead: '', name: r.id, text: `: ${sentence(titleOf(r))} ${capital(r.state)}${place !== null ? `, place ${place}` : ''}.` }
-}
+const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`
 
 const stateText = (r: TaskRow): string[] => [`${r.id}: ${sentence(titleOf(r))}`, `State: ${r.state}.`]
 
@@ -190,7 +188,7 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
     question: 'Where to?',
     rows: [
       ...queued.filter(y => y !== r).map(y => ({ item: stateItem(y, y.queue), label: taskLabel(y), open: () => there(r, y) })),
-      { item: { lead: '', name: END, text: '.' }, label: END, open: () => there(r, null) },
+      { item: { lead: '', name: END, text: '' }, label: END, open: () => there(r, null) },
     ],
   })
   const inQueue = (r: QueueRow): Screen => {

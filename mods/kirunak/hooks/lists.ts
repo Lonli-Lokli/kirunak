@@ -95,15 +95,11 @@ function refuseOf(x: AmendmentRow): string | null {
   return own.startsWith(`${x.amendment} `) ? own.slice(x.amendment.length + 1) : own
 }
 
-// An amendment waiting for approval (AC-2): task id and A-n, date proposed, the first sentence of its Why, the lines
-// it changes, and what `k approve --amendment` would refuse.
+// An amendment waiting for approval as a list names it (A-8's AC-2): task id, A-n and its name, nothing more; the rest
+// shows once it is picked (amendmentLines) or asked for (`/k-amendments <n>`).
 export function amendmentItem(x: AmendmentRow): Item {
-  const refuse = refuseOf(x)
-  return {
-    lead: '',
-    name: `${x.id} ${x.amendment}`,
-    text: `, proposed ${x.proposed ?? 'on no date'}: ${x.why ?? 'no Why.'} Changes ${plural(x.lines, 'line')}.${refuse !== null ? ` Not yet: ${refuse}` : ''}`,
-  }
+  const name = x.name ? x.name.replace(/\s+/g, ' ').trim() : ''
+  return { lead: '', name: `${x.id} ${x.amendment}`, text: name ? `: ${name}` : '' }
 }
 
 // A dialog's choice for an amendment: its id and A-n.
@@ -140,26 +136,54 @@ export function amendmentParts(text: string): { front: Record<string, string>; w
   return { front, why, changes }
 }
 
-// `/k-amendments <n>`: the amendment's Why and Changes in full, from its file, and what the list said k would refuse;
-// one applied or declined since the list was shown says so.
-export function amendmentText(n: number, x: AmendmentRow, file: string): string {
-  const { front, why, changes } = amendmentParts(file)
-  const paragraphs = why.join('\n').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
+// An amendment in full (AC-2): its head (task id, A-n and name, the date proposed and by whom, how many lines it
+// changes), the paragraphs of its Why, its Changes as written, and its last word: the stamp of one applied or declined
+// since the list was read, else what `k approve --amendment` would refuse, null when nothing. With no file (it could
+// not be read), the Why is k waiting's first sentence and there are no Changes.
+type Whole = { head: string; why: string[]; changes: string[]; stamp: string | null; refuse: string | null }
+
+function whole(x: AmendmentRow, file: string | null): Whole {
+  const { front, why, changes } = file === null ? { front: {} as Record<string, string>, why: [x.why ?? ''], changes: [] } : amendmentParts(file)
   const ops = changes.map(l => l.trim()).filter(Boolean)
   const by = front.by ?? x.by
-  const refuse = refuseOf(x)
-  const stamp = front.applied ? `Applied on ${front.applied} since the list was shown.` : front.declined ? `Declined since the list was shown: ${front.declined}` : null
+  const name = x.name ? x.name.replace(/\s+/g, ' ').trim() : ''
+  return {
+    head: `${x.id} ${x.amendment}${name ? `: ${sentence(name)}` : '.'} Proposed ${front.proposed ?? x.proposed ?? 'on no date'}${by ? ` by ${by}` : ''}, changes ${plural(file === null ? x.lines : ops.length, 'line')}.`,
+    why: why.join('\n').split(/\n\s*\n/).map(p => p.split(/\s+/).filter(Boolean).join(' ')).filter(Boolean),
+    changes: ops,
+    stamp: front.applied ? `Applied on ${front.applied} since the list was shown.` : front.declined ? `Declined since the list was shown: ${front.declined}` : null,
+    refuse: refuseOf(x),
+  }
+}
+
+// `/k-amendments <n>`: the amendment in full, from its file, then how to approve it.
+export function amendmentText(n: number, x: AmendmentRow, file: string): string {
+  const { head, why, changes, stamp, refuse } = whole(x, file)
   return [
-    entry(md(`${x.id} ${x.amendment}, proposed ${front.proposed ?? x.proposed ?? 'on no date'}${by ? ` by ${by}` : ''}, changes ${plural(ops.length, 'line')}.`)),
+    entry(md(head)),
     '',
     'Why:',
     '',
-    ...(paragraphs.length ? paragraphs.flatMap((p, i) => [...(i ? [''] : []), entry(md(p))]) : ['(empty)']),
+    ...(why.length ? why.flatMap((p, i) => [...(i ? [''] : []), entry(md(p))]) : ['(empty)']),
     '',
     'Changes:',
     '',
-    ...(ops.length ? ops.map(op => (op.startsWith('- ') ? entry(md(op.slice(2)), '- ') : entry(md(op)))) : ['(none)']),
+    ...(changes.length ? changes.map(op => (op.startsWith('- ') ? entry(md(op.slice(2)), '- ') : entry(md(op)))) : ['(none)']),
     '',
     entry(stamp !== null ? md(stamp) : refuse !== null ? `Not yet: ${md(refuse)}` : `/k-approve-amendment ${n} approves it.`),
   ].join('\n')
+}
+
+// The amendment picked in /k-amendments' dialog, in full as plain lines for the dialog's text (A-8's AC-2, AC-3), with
+// its task's title; `file` is its file, null when it could not be read.
+export function amendmentLines(x: AmendmentRow, file: string | null): string[] {
+  const { head, why, changes, stamp, refuse } = whole(x, file)
+  return [
+    head,
+    `Task: ${sentence(x.title.replace(/\s+/g, ' ').trim())}`,
+    'Why:',
+    ...(why.length ? why : ['(empty)']),
+    ...(file === null ? [`Its file could not be read, so its Changes are not shown: ${x.file}`] : ['Changes:', ...(changes.length ? changes : ['(none)'])]),
+    stamp ?? (refuse !== null ? `Not yet: ${refuse}` : 'k would approve it now.'),
+  ]
 }

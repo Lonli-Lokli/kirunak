@@ -39,10 +39,11 @@ export const QUEUE: KirunakRow[] = [ROWS[0] as KirunakRow, ROWS[1] as KirunakRow
 
 const AMENDMENT_DIR = '/w/weather/kirunak/tasks/offline-forecast/amendments'
 
-// The amendments `k waiting --json` gives: one k would approve, one it would refuse.
+// The amendments `k waiting --json` gives: one k would approve, one it would refuse; A-4 has no name of its own, so k
+// names the criterion it changes, and its file cannot be read.
 export const AMENDMENTS: AmendmentRow[] = [
-  { id: ID, amendment: 'A-3', title: 'The last forecast stays readable offline', proposed: '2026-11-06', by: 'session s1', why: 'The age line needs its words.', lines: 2, refuse: null, file: `${AMENDMENT_DIR}/A-3.md` },
-  { id: ID, amendment: 'A-4', title: 'The last forecast stays readable offline', proposed: '2026-11-06', by: 'session s1', why: 'E-1 is covered by AC-1.', lines: 1, refuse: `${ID} with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have`, file: `${AMENDMENT_DIR}/A-4.md` },
+  { id: ID, amendment: 'A-3', title: 'The last forecast stays readable offline', name: 'Age line in words', proposed: '2026-11-06', by: 'session s1', why: 'The age line needs its words.', lines: 2, refuse: null, file: `${AMENDMENT_DIR}/A-3.md` },
+  { id: ID, amendment: 'A-4', title: 'The last forecast stays readable offline', name: 'replaces E-1', proposed: '2026-11-06', by: 'session s1', why: 'E-1 is covered by AC-1.', lines: 1, refuse: `${ID} with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have`, file: `${AMENDMENT_DIR}/A-4.md` },
 ]
 
 // Their files, as the mod reads them for `/k-amendments <n>`.
