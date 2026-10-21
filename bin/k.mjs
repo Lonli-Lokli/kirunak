@@ -18,7 +18,7 @@ import * as intake from '../lib/intake.mjs';
 import * as queue from '../lib/queue.mjs';
 import * as list from '../lib/list.mjs';
 import * as board from '../lib/board.mjs';
-import { markdown as boardMarkdown } from '../lib/board-md.mjs';
+import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mjs';
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
@@ -56,7 +56,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
-          k board --brief: a line per task, for the phone
+          k board --brief: a line per task, for the phone; k board --card <id>: one task's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
             each verb would refuse; with --json also the tasks k hold and k start take
@@ -504,8 +504,12 @@ const VERBS = {
   },
 
   // --markdown prints the board for a chat answer on a phone and writes nothing; --brief the brief board of the mod's
-  // /k-board dialog (with --json: { made, text, ids }, text included).
+  // /k-board dialog (with --json: { made, text, ids }, text included), --card <id> the card a task tapped there answers.
   async board({ ws, flags }) {
+    if (flags.card) {
+      const text = await boardCard(ws, flags.card);
+      return { markdown: text, text: text.trimEnd() };
+    }
     if (flags.brief) {
       const b = await boardBrief(ws);
       return { json: b, text: b.text };

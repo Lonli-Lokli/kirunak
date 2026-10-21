@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
-import { bullet, counts, cut, one, renderMarkdown } from '../lib/board-md.mjs';
+import { bullet, counts, cut, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
 import { addTask, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
@@ -16,7 +16,7 @@ const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snaps
 // No hard line break inside a paragraph or a list item (kirunak-phone S-10): no line goes on from the one before (an
 // indented line, or text straight after a list item or a paragraph), so each is a heading, a list item, a paragraph
 // standing between blank lines, or blank.
-export function noHardBreak(text) {
+function noHardBreak(text) {
   const lines = text.replace(/\n$/, '').split('\n');
   const item = (l) => /^(#{1,3} |- |\d+\. )\S/.test(l);
   lines.forEach((l, i) => {
@@ -195,4 +195,55 @@ test('the fixture\'s board as the chat shows it: the working tasks, each state\'
   sessionsAt(w);
   queuedAndParked(w);
   assert.equal(await board(w), EXPECTED);
+});
+
+// A task tapped in the mod's /k-board dialog answers with its card (kirunak-phone A-7): the card --markdown draws.
+const REVIEWED = `### hub/reviewed
+
+A reviewed task
+
+- state: in review
+- worked on by step S-3 running since 2026-11-07 11:40
+- review: review-2.md, verdict: not met (AC-2)
+- approved 2026-11-01
+
+Verdicts:
+
+- AC-1 met: The chart shows one point per hour.
+- AC-2 not met: Points read \\<below\\> & above zero.
+- E-1 none: A missing hour leaves a gap.
+`;
+
+test('a task\'s card alone, as the board draws it, for a task worked on, one in a state and one done long ago', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  addTask(w.weather, 'weather/long-title', `A title ${'that goes on and on '.repeat(8)}`);
+  const list = await rows(w.ws, { all: true });
+  const card = (id) => renderCard(list, snapshot(w.ws), id, NOW);
+  assert.equal(card('hub/reviewed'), REVIEWED);
+  assert.ok(EXPECTED.includes(`\n${REVIEWED}\n`), 'the same card as on the board');
+  assert.match(card('weather/recent'), /^### weather\/recent\n\nDone this week\n\n- state: done\n/);
+  assert.match(card('weather/long-ago'), /^### weather\/long-ago\n\nDone long ago\n\n- state: done\n[^]*- accepted 2026-09-02\n/, 'off the board, still a card');
+  noHardBreak(card('weather/long-title'));
+  assert.ok(card('weather/long-title').includes(`\nA title ${'that goes on and on '.repeat(8).trim()}\n`));
+  assert.equal(card('weather/nope'), null);
+});
+
+test('k board --card <id> prints the card; an id that names no task is refused with its name', async () => {
+  const w = await fixture();
+  const r = k(w.home, ['board', '--card', 'hub/reviewed']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.startsWith('### hub/reviewed\n\nA reviewed task\n\n- state: in review\n'));
+  assert.ok(r.stdout.endsWith('- E-1 none: A missing hour leaves a gap.\n'));
+  assert.ok(JSON.parse(k(w.home, ['board', '--card', 'hub/reviewed', '--json']).stdout).markdown.startsWith('### hub/reviewed\n'));
+  const nope = k(w.home, ['board', '--card', 'weather/nope']);
+  assert.equal(nope.status, 1);
+  assert.match(nope.stderr, /^k: unknown task weather\/nope: .*task\.md does not exist\n$/);
+  assert.equal(nope.stdout, '');
+  const repo = k(w.home, ['board', '--card', 'elsewhere/nope']);
+  assert.equal(repo.status, 1);
+  assert.match(repo.stderr, /^k: unknown repo elsewhere: /);
+  assert.equal(k(w.home, ['board', '--card', 'Not An Id']).status, 2);
+  assert.equal(k(w.home, ['board', '--card']).status, 2, '--card needs an id');
+  assert.ok(!existsSync(join(w.home, 'board.html')));
 });
