@@ -65,7 +65,7 @@ describe('picking by touch', () => {
     for (const command of ['k-hold', 'k-start', 'k-queue', 'k-queue']) await run($, command)
     expect(w.asked[1]?.question).toBe('Tasks you can put on hold: (4 to 5 of 5)\n1. hub/h4: queued\n2. hub/h5: queued\nWhich task?')
     expect(w.asked[3]?.question).toBe('Tasks this session can work on: (4 to 5 of 5)\n1. hub/proposed: proposed\n2. weather/asks-owner: awaiting owner\nWhich task?')
-    expect(w.asked[5]?.question).toBe('The queue in order, then the parked tasks: (4 to 5 of 5)\n1. hub/later: queued, place 4\n2. hub/parked: parked\nWhich task?')
+    expect(w.asked[5]?.question).toBe('The queue in order, then the parked tasks: (4 to 5 of 5)\n1. hub/later: queued, place 4. Later on.\n2. hub/parked: parked. Waits outside.\nWhich task?')
     expect(w.asked.map(a => a.question).join('\n')).not.toMatch(/\(type /)
     expect(w.runs).toEqual([])
   })

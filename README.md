@@ -94,7 +94,7 @@ You need Node 22 or later, git and Claude Code.
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |
-   | `/k-queue` | the queue in order, then the parked tasks, each task's id and state; the one picked shows its title, to move, park or put back by touch |
+   | `/k-queue` | the queue in order, then the parked tasks, each task's id, state, place and title, to pick by touch; the one picked can be moved, parked or put back |
 
    A tap in these dialogs is your own gesture, like a typed command; `/k-board-page` is the only one of these that
    uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
