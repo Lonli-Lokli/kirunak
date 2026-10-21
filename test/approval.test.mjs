@@ -84,7 +84,7 @@ test('approve writes the record and its history, commits it, queues the task and
   assert.deepEqual(files, ['kirunak/approvals/offline-forecast.json']);
   assert.equal(subject(hub), `kirunak: queue add ${ID}`);
   assert.deepEqual(queue.read(ws), [ID]);
-  assert.deepEqual(r, { hash: rec.hash, commit: sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim(), state: 'ready', queuePlace: 1 });
+  assert.deepEqual(r, { hash: rec.hash, commit: sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim(), state: 'queued', queuePlace: 1 });
   assert.equal(verify(ws, ID), 'ok');
   const events = readFileSync(join(home, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(events, [{ time: rec.approved, kind: 'approved', task: ID, amendment: null }]);
@@ -137,12 +137,12 @@ test('approve takes a queue place, or none, and refuses a place it cannot find b
   await assert.rejects(approve({ ws, id: ID, queuePlace: { before: 'hub/missing' }, now: NOV5 }), /hub\/missing is not in the queue/);
   assert.equal(readRecord(weather, 'offline-forecast'), null);
   const r = await approve({ ws, id: ID, queuePlace: { first: true }, now: NOV5 });
-  assert.equal(r.queuePlace, 1);
+  assert.deepEqual([r.state, r.queuePlace], ['queued', 1]);
   assert.deepEqual(queue.read(ws), [ID, 'hub/other']);
 
   const other = await makeWorkspace();
   const r2 = await approve({ ws: other.ws, id: ID, noQueue: true, now: NOV5 });
-  assert.equal(r2.queuePlace, null);
+  assert.deepEqual([r2.state, r2.queuePlace], ['parked', null], 'approved out of the queue: parked');
   assert.deepEqual(queue.read(other.ws), []);
   assert.equal(subject(other.hub), 'fixture');
 });
@@ -202,7 +202,7 @@ test('a full amendment cycle: apply, re-hash, history, stamp, and the next edge 
   const hubHead = sh(hub, 'git', ['rev-parse', 'HEAD']).trim();
   const r = await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
   assert.notEqual(r.hash, first.hash);
-  assert.equal(r.queuePlace, 1);
+  assert.deepEqual([r.state, r.queuePlace], ['queued', 1]);
   assert.equal(sh(hub, 'git', ['rev-parse', 'HEAD']).trim(), hubHead, 'already queued: no queue commit');
   assert.equal(subject(weather), `kirunak: approve ${ID} amendment A-1`);
   const files = sh(weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort();

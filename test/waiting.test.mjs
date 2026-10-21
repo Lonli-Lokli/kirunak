@@ -90,7 +90,7 @@ test('k waiting offers k hold and k start the tasks k list shows, never a done o
   const w = waiting(home);
   const listed = JSON.parse(run(home, ['list', '--json']).stdout).rows.map(({ id, title, state }) => ({ id, title, state }));
   assert.deepEqual(listed.map((x) => x.id), [ID, 'weather/hourly-chart']);
-  assert.equal(listed[0].state, 'ready');
+  assert.equal(listed[0].state, 'queued');
   assert.deepEqual(w.hold, listed);
   assert.deepEqual(w.start, listed);
 

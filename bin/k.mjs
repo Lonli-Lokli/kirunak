@@ -362,7 +362,7 @@ const VERBS = {
     const r = await approval.approve({
       ws, id, amendment: flags.amendment, via: flags.via || 'shell', queuePlace: place(flags), noQueue: !!flags['no-queue'],
     });
-    return { ...r, text: `${id}: ready${r.queuePlace ? `, queue place ${r.queuePlace}` : ''} (${r.hash.slice(0, 19)}…, commit ${r.commit})` };
+    return { ...r, text: `${id}: ${r.state}${r.queuePlace ? `, queue place ${r.queuePlace}` : ''} (${r.hash.slice(0, 19)}…, commit ${r.commit})` };
   },
 
   async accept({ ws, pos, flags }) {

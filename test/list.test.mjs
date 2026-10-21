@@ -120,7 +120,7 @@ test('every --json field, with states and queue places', async () => {
   assert.deepEqual(Object.keys(h.paths), ['task', 'plan', 'review', 'checklist']);
   assert.equal(by['weather/settings-backup'].state, 'done');
   assert.equal(by['weather/settings-backup'].queue, 2);
-  assert.equal(by['hub/sync-notes'].state, 'ready');
+  assert.equal(by['hub/sync-notes'].state, 'queued');
   assert.equal(by['hub/sync-notes'].queue, 3);
   assert.equal(by['hub/release-notes'].state, 'draft');
   assert.equal(by['hub/release-notes'].queue, null);
@@ -174,7 +174,7 @@ test('format: one line per row, places right-aligned, columns padded', async () 
   const lines = format(await rows(ws)).split('\n');
   assert.equal(lines.length, 5);
   assert.match(lines[0], /^ 1  in progress\s+weather\/hourly-chart\s+An hourly chart for today\s+S-2 started \(opus, session 7c1\)$/);
-  assert.match(lines[1], /^ 3  ready\s+hub\/sync-notes/);
+  assert.match(lines[1], /^ 3  queued\s+hub\/sync-notes/);
   assert.match(lines[2], /^ {4}draft\s+hub\/release-notes/);
   assert.match(lines[4], /S-2 finished \(review\.md\), verdict: needs owner \(AC-2\), checklist 2 open$/);
   const col = (l) => l.indexOf('weather/') >= 0 ? l.indexOf('weather/') : l.indexOf('hub/');
