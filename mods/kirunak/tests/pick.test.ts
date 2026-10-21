@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { byNumber } from '../hooks/waiting'
 
-import { ID, WAITING, world } from './world'
+import { HELD, ID, ROWS, WAITING, world } from './world'
 
 // The kit's Engine type lists the events a plugin may call; the engine's own $ also raises prompt.autocomplete, as the
 // prompt box does (2.1.303), so the test reaches it through this cast.
@@ -85,7 +85,7 @@ describe('picking what waits for the owner', () => {
   })
 
   test('the typeahead offers the ids each command takes, after the engine\'s own rows', async ($, on) => {
-    const w = world(on)
+    const w = world(on, { rows: [...ROWS, ...HELD] })
     await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
     await w.clock.settle()
     const rows = async (text: string) => {
@@ -97,6 +97,7 @@ describe('picking what waits for the owner', () => {
     expect(await rows('/k-accept w')).toEqual(['engine-row', 'weather/was-reviewed'])
     expect(await rows('/k-approve h')).toEqual(['engine-row', 'hub/proposed'])
     expect(await rows('/k-hold w')).toEqual(['engine-row', ID, 'weather/was-reviewed', 'weather/asks-owner'])
+    expect(await rows('/k-resume ')).toEqual(['engine-row', 'hub/paused', 'weather/held'])
     expect(await rows('/k-accept w --checklist-open w')).toEqual(['engine-row'])
     expect(await rows('please w')).toEqual(['engine-row'])
   })

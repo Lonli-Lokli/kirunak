@@ -70,8 +70,9 @@ You need Node 22 or later, git and Claude Code.
 4. In Claude Code, start your first task with `/k-intake`. When `k check` passes, type `! k approve <id>`.
 
 5. Optional: load the mod, `mods/kirunak/`, so the owner's verbs are slash commands (`/k-approve`, `/k-accept`,
-   `/k-hold`, `/k-start`) that also work from the phone through Remote Control, with a pane (`/kirunak`), a line
-   above the prompt and toasts. Add this checkout as a marketplace, install the mod from it and start a new session:
+   `/k-hold`, `/k-resume`, `/k-start`) that also work from the phone through Remote Control, with a pane
+   (`/kirunak`), a line above the prompt and toasts. Add this checkout as a marketplace, install the mod from it and
+   start a new session:
 
    ```sh
    claude plugin marketplace add ~/code/kirunak
@@ -94,6 +95,7 @@ You need Node 22 or later, git and Claude Code.
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |
+   | `/k-resume` | the tasks on hold, each task's id and state, by touch; the one picked shows its title and state above "Resume <id>", which takes it off hold; `/k-resume <id>` does so at once |
    | `/k-queue` | the queue in order, then the parked tasks, each line numbered by the task's place in the queue with its id, state and title, to pick by touch; the one picked can be moved one place earlier or later, before another task or to the end, parked or put back |
 
    A tap in these dialogs is your own gesture, like a typed command; `/k-board-page` is the only one of these that

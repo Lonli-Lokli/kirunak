@@ -139,11 +139,11 @@ What it shows and does, each from the skill's table of shapes:
 | the current task, its AC and E with review state, the queue, the lock | a pane: `$.ui.open({ id: 'kirunak', title })` drawn by a `ui.render` hook on `Pane` | `k status --json --session <id>` and `k list --json --all` through `$.process.run`, at the session's start, every 30 s on `$.clock`, and at once on a new line of `events.jsonl` |
 | a line above the prompt | `ui.render` on `AbovePrompt`: `kirunak · task · step · lock holder · queue place`; nothing while the session has no task | the same |
 | toasts: a heavy job ended, a review is ready, a cache kept warm, a step waits for the owner, an edit refused | `$.ui.toast(text)` for each new line of those kinds | `events.jsonl`, followed with `tail -n 0 -F` through `$.process.spawn` for the session's life; kinds `build-ended` (`k run`, as a heavy job's record is saved), `review-ready` (`k step finish` of a review step), `keep-alive`, `awaiting owner`, `refusal` (the freeze hook; a workspace's own hooks may append it too) |
-| `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id> <why>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind` `'composer'` or `'bridge'` (`approval.md` §5, the owner's answer of 2026-10-19) and call `$.process.run(['node', K, verb, id, ...flags, '--via', 'mod'])`, returning the state line as `{ text }` | the core verbs |
+| `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id> <why>`, `/k-resume <id>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind` `'composer'` or `'bridge'` (`approval.md` §5, the owner's answer of 2026-10-19) and call `$.process.run(['node', K, verb, id, ...flags, '--via', 'mod'])` (`k resume` without `--via`: it records no one), returning the state line as `{ text }` | the core verbs |
 | `/k-accept <n>`, a number from the list last shown | the same hooks: `<n>` takes the n-th id of that verb's list last shown since the session started, which `/clear` and a resume forget (owner's ask, 2026-10-19: "see what I can accept instead of typing manually") | `k waiting --json`: the proposed tasks with `k approve --dry-run`'s problems, the reviewed and awaiting-owner ones with what `k accept` refuses (its `dryRun` makes every check and writes nothing) |
 | `/k-list [all]`, `/k-board [<id>]`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the board's groups in a dialog, then a group's tasks, and a tapped task's card, `/k-board <id>` that card (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --brief --json` and `k board --card <id>`, `k waiting --json` (the `amendments` rows) |
-| `/k-approve`, `/k-accept`, `/k-hold`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json` |
-| the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
+| `/k-approve`, `/k-accept`, `/k-hold`, `/k-resume`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json`; for `/k-resume`, the tasks on hold of `k list --json --all` |
+| the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold `, `/k-resume ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
 
@@ -152,7 +152,7 @@ What it shows and does, each from the skill's table of shapes:
 - `k start` is the one write a mod command makes that is not the owner's alone; it is allowed from the Bash tool
   too (a session may say which task it works on).
 - Tests: `claude plugin test mods/kirunak` (`npm run test:mod`, with `claude plugin validate`): the pane renders a
-  task's rows from a `k list --json` fixture on the terminal and the desktop; `/k-approve` and the other three with
+  task's rows from a `k list --json` fixture on the terminal and the desktop; `/k-approve` and the other four with
   origin `sdk`, `plugin`, `peer`, `unclassified`, `peer-send-message`, `task-notification`, `scheduled-trigger` or
   `auto-continuation` are refused with a line and run nothing; with `composer` or `bridge` each runs its verb and the
   state line prints; a `build-ended` event line toasts; `/k-done` is not registered; a `-p` run reads nothing.
@@ -160,8 +160,8 @@ What it shows and does, each from the skill's table of shapes:
 ### The phone commands and the dialog (kirunak-phone, built 2026-10-21)
 
 The commands above whose verb needs an id take none from the phone: typed with no id, `/k-approve`, `/k-accept`,
-`/k-hold` and `/k-start` open **the engine's choice dialog** (`$.ui.ask`) and the owner picks by touch; `/k-amendments`,
-`/k-queue` and `/k-board` open it too (`/k-board`'s dialogs are the board's groups, then a group's tasks, and a tap only reads, §3). A command typed with its id, or with a number from a list, runs as before. The dialog is
+`/k-hold`, `/k-resume` and `/k-start` open **the engine's choice dialog** (`$.ui.ask`) and the owner picks by touch;
+`/k-amendments`, `/k-queue` and `/k-board` open it too (`/k-board`'s dialogs are the board's groups, then a group's tasks, and a tap only reads, §3). A command typed with its id, or with a number from a list, runs as before. The dialog is
 raised only inside the `command.run` hook of a command whose origin is `composer` or `bridge`, and what a tap does is
 the rule of `approval.md` §5.
 
@@ -193,15 +193,20 @@ reached the phone and its answer came back while the command ran, 8.4 s and 16.6
   and Cancel (the owner on the phone, A-11's E-1 and E-5); Cancel stands where a reason dialog or a lone choice would
   otherwise be padded with Yes and No. Nothing is run by Back or Cancel.
 - **The last choice names the verb**: "Approve <id>", "Accept <id>", "Accept <id> with open items", "Approve <id> A-n",
-  "Decline <id> A-n", "Hold <id>", "Start <id>", "Move <id> before <Y>", "Move <id> to the end", "Park <id>", "Put back
-  <id>" (the owner's answer Q-17: each behind an explicit last choice), and Move's "Earlier" and "Later", whose lines
-  say the place each takes the task to, under the task's text (A-11). It sits in a dialog that shows the item's text
-  above it, so the owner reads what the tap will do. `k` checks the task again as it runs (E-2): a task changed since
-  the list was shown is answered with k's refusal, never run on another.
+  "Decline <id> A-n", "Hold <id>", "Resume <id>" (A-12), "Start <id>", "Move <id> before <Y>", "Move <id> to the
+  end", "Park <id>", "Put back <id>" (the owner's answer Q-17: each behind an explicit last choice), and Move's
+  "Earlier" and "Later", whose lines say the place each takes the task to, under the task's text (A-11). It sits in a
+  dialog that shows the item's text above it, so the owner reads what the tap will do. `k` checks the task again as it
+  runs (E-2): a task changed since the list was shown is answered with k's refusal, never run on another.
 - When nothing ran, the answer says why ("Nothing ran: skipped", "dismissed", "cancelled", "no reason was typed", "the
   answer was none of the choices"). `/k-approve`, `/k-accept` and `/k-amendments` then print the numbered list again, so
-  a typed number keeps using the whole list; `/k-hold`, `/k-start` and `/k-queue`, which take no number, answer "Nothing
-  ran: <why>." alone.
+  a typed number keeps using the whole list; `/k-hold`, `/k-resume`, `/k-start` and `/k-queue`, which take no number,
+  answer "Nothing ran: <why>." alone.
+- `/k-resume` lists the tasks on hold, read from `k list --json --all` as `/k-queue` reads it (`k waiting` has no list
+  for it), each line a task's id and state; the one picked shows its title and state above "Resume <id>", which runs
+  `k resume <id>` (A-12's AC-18; the state rather than the hold's reason is a default A-12 proposed). With no task on
+  hold it answers "No task is on hold." and opens no dialog; `/k-resume <id>` typed runs at once, as `/k-hold <id>
+  <why>` does.
 - `/k-queue` lists the queue in order and then the parked tasks, each line a task's id, state and title (A-10: the one
   picking list that gives titles), numbered by its place in the queue, a parked task's unnumbered (A-11). A queued task
   offers Move and Park, a parked one Put back; Move lists Earlier and Later first, a tap on either moving the task one

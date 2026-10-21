@@ -4,7 +4,7 @@ import type { PromptOrigin } from 'claude-code'
 // Control from the phone. Every other origin is refused with a line and runs nothing.
 const OWNERS: ReadonlySet<string> = new Set(['composer', 'bridge'])
 
-export type Verb = 'approve' | 'accept' | 'hold' | 'start'
+export type Verb = 'approve' | 'accept' | 'hold' | 'resume' | 'start'
 
 export const isOwners = (origin: PromptOrigin): boolean => OWNERS.has(origin.kind)
 
@@ -19,6 +19,7 @@ const FLAGS: Record<Verb, Record<string, boolean>> = {
   approve: { amendment: true, first: false, before: true, after: true, 'no-queue': false, 'dry-run': false },
   accept: { 'checklist-open': true, 'dry-run': false },
   hold: { why: true, 'dry-run': false },
+  resume: { 'dry-run': false },
   start: { 'dry-run': false },
 }
 
@@ -26,6 +27,7 @@ export const HINTS: Record<Verb, string> = {
   approve: '[<id> | <n>] [--amendment A-n] [--first | --before <id> | --after <id>] [--no-queue]',
   accept: '[<id> | <n>] [--checklist-open "<why>"]',
   hold: '[<id> <why>]',
+  resume: '[<id>]',
   start: '[<id>]',
 }
 
@@ -57,7 +59,8 @@ export function words(text: string): string[] | null {
   return out
 }
 
-// `k <verb> <id> [flags] --via mod` from what follows the command's name, or the problem that stops it.
+// `k <verb> <id> [flags] --via mod` from what follows the command's name, or the problem that stops it; `k resume`
+// records no one, so it takes no --via.
 export function argvFor(verb: Verb, text: string): { argv: string[] } | { problem: string } {
   const all = words(text)
   if (all === null) return { problem: 'a quote is left open' }
@@ -94,7 +97,7 @@ export function argvFor(verb: Verb, text: string): { argv: string[] } | { proble
   } else if (loose.length) {
     return { problem: `unexpected ${loose.join(' ')}` }
   }
-  return { argv: [verb, id, ...flags, '--via', 'mod'] }
+  return { argv: [verb, id, ...flags, ...(verb === 'resume' ? [] : ['--via', 'mod'])] }
 }
 
 // An engine call's failure, less the "<plugin>: $.<noun>.<verb>: " the engine starts it with, which would name kirunak

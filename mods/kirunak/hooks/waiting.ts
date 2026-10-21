@@ -20,7 +20,7 @@ export type AmendmentRow = {
   refuse: string | null
   file: string
 }
-// A task k hold or k start would take, with its state as k list says it.
+// A task k hold, k resume or k start would take, with its state as k list says it.
 export type TaskRow = { id: string; title: string; state: string }
 export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[]; amendments: AmendmentRow[]; hold: TaskRow[]; start: TaskRow[] }
 
@@ -60,12 +60,13 @@ const FITS: Record<string, (r: KirunakRow) => boolean> = {
   'k-approve': r => r.state === 'proposed',
   'k-accept': r => (r.state === 'reviewed' || r.state === 'awaiting owner') && r.review !== null,
   'k-hold': r => r.state !== 'done' && r.state !== 'on hold',
+  'k-resume': r => r.state === 'on hold',
   'k-start': r => r.state !== 'done' && r.state !== 'on hold',
 }
 
 // The typeahead's rows while the person types a command's task id, from the last read's rows.
 export function idSuggestions(text: string, start: number, token: string, rows: readonly KirunakRow[]): PromptAutocompleteSuggestion[] {
-  const m = /^\/(k-approve|k-accept|k-hold|k-start) +$/.exec(text.slice(0, start))
+  const m = /^\/(k-approve|k-accept|k-hold|k-resume|k-start) +$/.exec(text.slice(0, start))
   const fits = m ? FITS[m[1] as string] : undefined
   if (fits === undefined) return []
   return rows.filter(r => fits(r) && r.id.startsWith(token)).map(r => ({ text: r.id, description: `${r.state}: ${r.title}` }))

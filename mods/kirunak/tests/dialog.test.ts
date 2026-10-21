@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { AmendmentRow } from '../hooks/waiting'
 
-import { AMENDMENTS, briefOf, ID, QUEUE, WAITING, world } from './world'
+import { AMENDMENTS, briefOf, HELD, ID, QUEUE, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -202,19 +202,21 @@ describe('picking by touch', () => {
     for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
   })
 
-  test('no dialog or answer of /k-hold, /k-start or /k-queue names kirunak (AC-12)', async ($, on) => {
+  test('no dialog or answer of /k-hold, /k-resume, /k-start or /k-queue names kirunak (AC-12)', async ($, on) => {
     const walk: [string, (string | null)[]][] = [
       ['k-hold', [ID, 'Hold', 'why', SKIP]],
+      ['k-resume', ['hub/paused', SKIP]],
+      ['k-resume', ['weather/held', 'Resume weather/held']],
       ['k-start', [ID, SKIP]],
       ['k-queue', ['hub/next', 'Move', 'More', 'More', 'End of the queue', SKIP]],
       ['k-queue', ['More', 'hub/parked', SKIP]],
       ['k-queue', [ID, 'Move', 'hub/sync-notes', SKIP]],
       ['k-queue', ['hub/next', 'Park hub/next']],
     ]
-    const w = world(on, { rows: QUEUE, taps: walk.flatMap(([, taps]) => taps), verb: { exitCode: 0, stdout: ' 1  hub/sync-notes\n', stderr: '' } })
+    const w = world(on, { rows: [...QUEUE, ...HELD], taps: walk.flatMap(([, taps]) => taps), verb: { exitCode: 0, stdout: ' 1  hub/sync-notes\n', stderr: '' } })
     const answers: string[] = []
     for (const [command] of walk) answers.push(await run($, command, '', { kind: 'bridge' }))
-    expect([w.asked.length, w.runs.length]).toEqual([21, 1])
+    expect([w.asked.length, w.runs.length]).toEqual([25, 2])
     for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
     for (const a of answers) expect(a.replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
   })

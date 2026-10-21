@@ -196,7 +196,8 @@ difference, and its commit runs under the repo's git hooks (§3). `!` stays as t
 2026-10-19 (`README.md`, question 2: "Yes, allow phone", knowing that anyone holding the unlocked phone with Remote
 Control open could approve too). So the hooks of `/k-approve`, `/k-accept` and `/k-hold` run on `composer` and
 `bridge` and refuse every other kind (`sdk`, `plugin`, `peer` and the rest) with a line, running nothing; `/k-start`
-takes the same rule (judgement: one rule for the four). D13 is unchanged: a command typed in Remote Control is the
+takes the same rule (judgement: one rule for them all), and so does `/k-resume`, added for the phone (kirunak-phone
+A-12). D13 is unchanged: a command typed in Remote Control is the
 owner's gesture, a page is not.
 
 ### A tap in the owner's dialog is the owner's gesture (kirunak-phone, built 2026-10-21)

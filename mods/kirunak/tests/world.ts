@@ -37,6 +37,9 @@ const row = (id: string, title: string, state: string, queue: number | null): Ki
 // A queue of four, the first in review, and beside it a parked task and a done one (`rows` for /k-queue).
 export const QUEUE: KirunakRow[] = [ROWS[0] as KirunakRow, ROWS[1] as KirunakRow, row('hub/next', 'Next up', 'queued', 3), row('hub/later', 'Later on', 'queued', 4), row('hub/parked', 'Waits outside', 'parked', null), ROWS[2] as KirunakRow]
 
+// Two tasks on hold, out of the queue (`rows` for /k-resume, beside ROWS or QUEUE).
+export const HELD: KirunakRow[] = [row('hub/paused', 'Waits for the parts', 'on hold', null), row('weather/held', 'Held for the phone test', 'on hold', null)]
+
 const AMENDMENT_DIR = '/w/weather/kirunak/tasks/offline-forecast/amendments'
 
 // The amendments `k waiting --json` gives: one k would approve, one it would refuse; A-4 has no name of its own, so k

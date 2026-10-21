@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { KirunakRow } from '../types'
 
-import { ID, QUEUE, ROWS, WAITING, world } from './world'
+import { HELD, ID, QUEUE, ROWS, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -77,6 +77,50 @@ describe('holding and starting by touch', () => {
 })
 
 const SKIP = '[No preference]'
+const PAUSED = 'hub/paused: Waits for the parts.\nState: on hold.'
+const RESUMED = { exitCode: 0, stdout: 'hub/paused: resumed\n', stderr: '' }
+
+describe('resuming by touch (A-12, AC-18)', () => {
+  test('/k-resume with no id: the tasks on hold, each its id and state; the one picked shows its title and state above "Resume <id>", which runs k resume by id as the last tap', async ($, on) => {
+    const w = world(on, { rows: [...ROWS, ...HELD], taps: ['hub/paused', 'Resume hub/paused'], verb: RESUMED })
+    expect(await run($, 'k-resume', '', { kind: 'bridge' })).toBe('hub/paused: resumed\n(typed in Remote Control)')
+    expect(w.asked).toEqual([
+      { header: 'Resume', question: 'Tasks on hold:\n1. hub/paused: on hold\n2. weather/held: on hold\nWhich task?', labels: ['hub/paused', 'weather/held'] },
+      { header: 'Resume', question: `${PAUSED}\nTake it off hold?`, labels: ['Resume hub/paused', 'Back'] },
+    ])
+    expect(verbs(w.runs)).toEqual([['resume', 'hub/paused']])
+  })
+
+  test('/k-resume <id> typed runs k resume at once, with no --via and no reason; anything after the id runs nothing', async ($, on) => {
+    const w = world(on, { rows: [...ROWS, ...HELD], verb: RESUMED })
+    expect(await run($, 'k-resume', 'hub/paused')).toBe('hub/paused: resumed')
+    expect(await run($, 'k-resume', 'hub/paused the parts came')).toBe('/k-resume: unexpected the parts came. Nothing ran. Usage: /k-resume [<id>]')
+    expect(await run($, 'k-resume', 'hub/paused --why x')).toBe('/k-resume: /k-resume takes no --why. Nothing ran. Usage: /k-resume [<id>]')
+    expect([w.asked, verbs(w.runs)]).toEqual([[], [['resume', 'hub/paused']]])
+  })
+
+  test('no task on hold answers so with no dialog, and nothing runs', async ($, on) => {
+    const w = world(on)
+    expect(await run($, 'k-resume')).toBe('No task is on hold.')
+    expect([w.reads, w.asked, w.runs]).toEqual([1, [], []])
+  })
+
+  test('a long list comes in pages, Back the lowest choice under More; Back from "Resume <id>" shows the list again and runs nothing', async ($, on) => {
+    const five = [1, 2, 3, 4, 5].map(n => ({ ...(HELD[0] as KirunakRow), id: `hub/h${n}`, title: `Held ${n}` }))
+    const w = world(on, { rows: five, taps: ['More', 'hub/h4', 'Back', 'Back', SKIP] })
+    expect(await run($, 'k-resume')).toBe('Nothing ran: skipped.')
+    expect(w.asked.map(a => a.labels)).toEqual([['hub/h1', 'hub/h2', 'hub/h3', 'More'], ['hub/h4', 'hub/h5', 'Back'], ['Resume hub/h4', 'Back'], ['hub/h4', 'hub/h5', 'Back'], ['hub/h1', 'hub/h2', 'hub/h3', 'More']])
+    expect(w.asked[1]?.question).toBe('Tasks on hold: (4 to 5 of 5)\n1. hub/h4: on hold\n2. hub/h5: on hold\nWhich task?')
+    expect(w.runs).toEqual([])
+  })
+
+  test('k checks the task again as the verb runs, and its refusal is the answer (E-2)', async ($, on) => {
+    const w = world(on, { rows: [...ROWS, ...HELD], taps: ['hub/paused', 'Resume hub/paused'], verb: { exitCode: 1, stdout: '', stderr: 'k: hub/paused is not on hold\n' } })
+    expect(await run($, 'k-resume')).toBe('/k-resume refused:\nk: hub/paused is not on hold')
+    expect(verbs(w.runs)).toEqual([['resume', 'hub/paused']])
+  })
+})
+
 const FOUR = ' 1  hub/next\n 2  weather/offline-forecast\n 3  hub/sync-notes\n 4  hub/later\n'
 const NOW = `The queue now:\n\n1. hub/next\n2. ${ID}\n3. hub/sync-notes\n4. hub/later`
 // /k-queue's lines are numbered by each task's place in the queue, a parked one's by none (A-11).
