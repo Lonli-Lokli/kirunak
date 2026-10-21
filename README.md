@@ -87,7 +87,7 @@ You need Node 22 or later, git and Claude Code.
    | Type | You get |
    | --- | --- |
    | `/k-list` (`/k-list all`) | the tasks, the queue first, as numbered entries with state, place, title and step |
-   | `/k-board` | the board as lists in the chat, at once and without a model turn |
+   | `/k-board` (`/k-board <id>`) | the board in brief, each task's status in one dialog, at once and without a model turn; tap a task, or type its id, for its card |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
    | `/k-approve`, `/k-accept` | what waits for you, to pick by touch; then a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, to approve or decline by touch; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
