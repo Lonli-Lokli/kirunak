@@ -84,7 +84,7 @@ test('approve writes the record and its history, commits it, queues the task and
   assert.deepEqual(files, ['kirunak/approvals/offline-forecast.json']);
   assert.equal(subject(hub), `kirunak: queue add ${ID}`);
   assert.deepEqual(queue.read(ws), [ID]);
-  assert.deepEqual(r, { hash: rec.hash, commit: sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim(), state: 'ready', queuePlace: 1 });
+  assert.deepEqual(r, { hash: rec.hash, commit: sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim(), state: 'queued', queuePlace: 1 });
   assert.equal(verify(ws, ID), 'ok');
   const events = readFileSync(join(home, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(events, [{ time: rec.approved, kind: 'approved', task: ID, amendment: null }]);
@@ -137,12 +137,12 @@ test('approve takes a queue place, or none, and refuses a place it cannot find b
   await assert.rejects(approve({ ws, id: ID, queuePlace: { before: 'hub/missing' }, now: NOV5 }), /hub\/missing is not in the queue/);
   assert.equal(readRecord(weather, 'offline-forecast'), null);
   const r = await approve({ ws, id: ID, queuePlace: { first: true }, now: NOV5 });
-  assert.equal(r.queuePlace, 1);
+  assert.deepEqual([r.state, r.queuePlace], ['queued', 1]);
   assert.deepEqual(queue.read(ws), [ID, 'hub/other']);
 
   const other = await makeWorkspace();
   const r2 = await approve({ ws: other.ws, id: ID, noQueue: true, now: NOV5 });
-  assert.equal(r2.queuePlace, null);
+  assert.deepEqual([r2.state, r2.queuePlace], ['parked', null], 'approved out of the queue: parked');
   assert.deepEqual(queue.read(other.ws), []);
   assert.equal(subject(other.hub), 'fixture');
 });
@@ -202,7 +202,7 @@ test('a full amendment cycle: apply, re-hash, history, stamp, and the next edge 
   const hubHead = sh(hub, 'git', ['rev-parse', 'HEAD']).trim();
   const r = await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
   assert.notEqual(r.hash, first.hash);
-  assert.equal(r.queuePlace, 1);
+  assert.deepEqual([r.state, r.queuePlace], ['queued', 1]);
   assert.equal(sh(hub, 'git', ['rev-parse', 'HEAD']).trim(), hubHead, 'already queued: no queue commit');
   assert.equal(subject(weather), `kirunak: approve ${ID} amendment A-1`);
   const files = sh(weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort();
@@ -372,7 +372,10 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   const { ws, home, weather } = await makeWorkspace();
   const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
   const waiting = () => JSON.parse(run(['waiting', '--json']).stdout);
-  assert.deepEqual(waiting(), { approve: [{ id: ID, title: waiting().approve[0].title, why: null }], accept: [] });
+  const first = waiting();
+  const title = first.approve[0].title;
+  const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }] };
+  assert.deepEqual(first, { approve: [{ id: ID, title, why: null }], accept: [], ...rows });
   await approve({ ws, id: ID, now: NOV5 });
   // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
   writeFileSync(join(taskDir(weather), 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n');
@@ -380,7 +383,8 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   mkdirSync(join(taskDir(weather), 'steps', 'S-1'), { recursive: true });
   writeFileSync(join(taskDir(weather), 'steps', 'S-1', 'needs.json'), JSON.stringify({ owner: 'Three days or a week?' }));
   assert.equal(JSON.parse(run(['list', '--json']).stdout).rows[0].state, 'awaiting owner');
-  assert.deepEqual(waiting(), { approve: [], accept: [] });
+  const asked = waiting();
+  assert.deepEqual([asked.approve, asked.accept], [[], []]);
   rmSync(join(taskDir(weather), 'steps'), { recursive: true });
   writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: needs owner (AC-3, E-1)'));
   reviewsRan(taskDir(weather));
@@ -391,6 +395,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   assert.deepEqual(w.approve, []);
   assert.deepEqual(w.accept.map((x) => x.id), [ID]);
   assert.match(w.accept[0].why, /checklist\.md has 2 unticked item\(s\)/);
+  assert.deepEqual([w.accept[0].checklistOpen, w.accept[0].onlyChecklist], [2, true]);
   const dry = run(['accept', ID, '--dry-run']);
   assert.deepEqual([dry.status, /checklist\.md has 2 unticked item\(s\)/.test(dry.stderr)], [1, true]);
   const open = run(['accept', ID, '--dry-run', '--checklist-open', 'read on the phone later']);
@@ -399,7 +404,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
   gitCommitAll(weather, 'ticked');
   assert.equal(waiting().accept[0].why, null);
-  assert.match(run(['waiting']).stdout, /^nothing to approve\nto accept:\n {2}weather\/offline-forecast {2}ready\n$/);
+  assert.match(run(['waiting']).stdout, /^nothing to approve\nno amendment to approve\nto accept:\n {2}weather\/offline-forecast {2}can accept\n$/);
   assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), sh(weather, 'git', ['log', '-1', '--format=%s']).trim()], [false, 'ticked']);
   assert.notEqual(headOf(weather), head);
 });
@@ -474,6 +479,42 @@ test('accept refuses a review that fails the grammar, and one no finished review
   writeFileSync(join(dir, 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: review.md\n');
   assert.throws(() => accept({ ws, id: ID }), /takes:\n {2}no review step of plan\.md writes review\.md: a review is what a finished review step wrote$/);
   assert.equal(existsSync(join(dir, 'done.json')), false);
+});
+
+test('approve says queued or parked, by the queue, when the state cannot be read after its commit, never a failure (S-7 review, finding 7)', async () => {
+  for (const [noQueue, state, queuePlace] of [[false, 'queued', 1], [true, 'parked', null]]) {
+    const { ws, weather } = await makeWorkspace();
+    // The state reads plan.md, after the commit; a folder there makes the read throw.
+    mkdirSync(join(taskDir(weather), 'plan.md'));
+    const r = await approve({ ws, id: ID, noQueue, now: NOV5 });
+    assert.deepEqual([r.state, r.queuePlace], [state, queuePlace]);
+    assert.equal(verify(ws, ID), 'ok');
+    assert.equal(subject(weather), `kirunak: approve ${ID}`);
+  }
+});
+
+test('k queue add takes an approved task that is not done, and names why it refuses one never approved, stale or done, a dry run too (S-7 review, finding 6)', async () => {
+  const { ws, weather, home } = await makeWorkspace();
+  const add = (...flags) => k(home, ['queue', 'add', ID, ...flags]);
+  const refused = (r, why) => {
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, why);
+  };
+  for (const flags of [[], ['--dry-run']]) refused(add(...flags), /weather\/offline-forecast was never approved: k approve weather\/offline-forecast queues it/);
+  await approve({ ws, id: ID, noQueue: true, now: NOV5 });
+  const text = readFileSync(taskFile(weather), 'utf8');
+  editTask(weather, 'title:', 'title: Changed:');
+  refused(add(), /weather\/offline-forecast: task\.md does not match its approval \(stale\), so it cannot be queued/);
+  writeFileSync(taskFile(weather), text);
+  assert.equal(add('--dry-run').status, 0);
+  assert.deepEqual(queue.read(ws), []);
+  assert.equal(add().status, 0);
+  assert.deepEqual(queue.read(ws), [ID]);
+  queue.remove(ws, ID);
+  // Accepted since the list was shown: Put back refuses it.
+  writeFileSync(join(taskDir(weather), 'done.json'), '{}\n');
+  for (const flags of [[], ['--dry-run']]) refused(add(...flags), /weather\/offline-forecast is done; a done task stays out of the queue/);
+  assert.deepEqual(queue.read(ws), []);
 });
 
 test('hold writes hold.md with the date and why, resume deletes it, each in its own commit', async () => {

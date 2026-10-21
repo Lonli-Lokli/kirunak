@@ -25,8 +25,8 @@ const FLAGS: Record<Verb, Record<string, boolean>> = {
 export const HINTS: Record<Verb, string> = {
   approve: '[<id> | <n>] [--amendment A-n] [--first | --before <id> | --after <id>] [--no-queue]',
   accept: '[<id> | <n>] [--checklist-open "<why>"]',
-  hold: '<id> <why>',
-  start: '<id>',
+  hold: '[<id> <why>]',
+  start: '[<id>]',
 }
 
 // lib/workspace.mjs's task id: <repo>/<slug>.
@@ -96,3 +96,10 @@ export function argvFor(verb: Verb, text: string): { argv: string[] } | { proble
   }
   return { argv: [verb, id, ...flags, '--via', 'mod'] }
 }
+
+// An engine call's failure, less the "<plugin>: $.<noun>.<verb>: " the engine starts it with, which would name kirunak
+// a second time in an answer (AC-12).
+export const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).replace(/^[^\n]*?\$\.[\w.]+: /, '')
+
+export const refused = (name: string, r: { stdout: string; stderr: string }): string => `/${name} refused:\n${(r.stderr || r.stdout).trim()}`
+export const firstLine = (r: { stdout: string; stderr: string }): string => (r.stderr || r.stdout).trim().split('\n')[0] ?? ''

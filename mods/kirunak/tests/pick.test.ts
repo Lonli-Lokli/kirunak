@@ -15,16 +15,18 @@ const run = ($: Engine, command: string, args: string, origin: PromptOrigin = { 
   $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })
 
 describe('picking what waits for the owner', () => {
-  test('/k-accept with no id lists what waits, numbered, with what blocks each; from the phone it says so', async ($, on) => {
+  test('/k-accept with no id lists what waits in the dialog; dismissed, the answer says nothing ran and shows the list numbered as a number takes it; from the phone it says so', async ($, on) => {
     const w = world(on)
     expect((await run($, 'k-accept', '', { kind: 'bridge' })).text).toBe([
+      'Nothing ran: dismissed.',
+      '',
       'Waiting for you to accept:',
-      '  1  weather/was-reviewed  ready (review.md)',
+      '  1  weather/was-reviewed  can accept (review.md)',
       `  2  ${ID}  not yet: ${ID}: checklist.md has 1 unticked item(s):`,
       '/k-accept 1 accepts the first. Add --checklist-open "<why>" to accept one with checklist items open.',
       '(typed in Remote Control)',
     ].join('\n'))
-    expect((await run($, 'k-approve', '')).text).toBe('Waiting for you to approve:\n  1  hub/proposed  ready\n/k-approve 1 approves the first.')
+    expect((await run($, 'k-approve', '')).text).toBe('Nothing ran: dismissed.\n\nWaiting for you to approve:\n  1  hub/proposed  can approve\n/k-approve 1 approves the first.')
     expect(w.runs).toEqual([])
   })
 

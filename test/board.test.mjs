@@ -3,76 +3,19 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { hashBytes } from '../lib/approval.mjs';
-import { renderHtml, status, TEXT_PAIRS, write } from '../lib/board.mjs';
+import { renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { rows } from '../lib/list.mjs';
-import { makeWorkspace } from './helpers.mjs';
+import { fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
-function addTask(repoRoot, id, title, { approved, files = {} } = {}) {
-  const slug = id.split('/')[1];
-  const dir = join(repoRoot, 'kirunak', 'tasks', slug);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'task.md'), `---
-id: ${id}
-title: ${title}
-created: 2026-11-03
----
-
-## Goal
-${title}. [owner 2026-11-03 Q-1]
-
-## Acceptance criteria
-- AC-1 The chart shows one point per hour. [owner 2026-11-03 Q-1]
-- AC-2 Points read <below> & above zero. [owner 2026-11-03 Q-2]
-
-## Edge cases
-- E-1 A missing hour leaves a gap. [owner 2026-11-03 Q-3]
-
-## Out of scope
-
-## Decisions
-
-## Aspects
-
-## Open questions
-`);
-  if (approved) {
-    mkdirSync(join(repoRoot, 'kirunak', 'approvals'), { recursive: true });
-    const record = { task: id, hash: hashBytes(readFileSync(join(dir, 'task.md'))), approved, by: 'owner', via: 'shell', commit: 'abc1234', history: [] };
-    writeFileSync(join(repoRoot, 'kirunak', 'approvals', `${slug}.json`), JSON.stringify(record));
-  }
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+async function page(w, opts) {
+  return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
 }
 
-const REVIEW = `| id | verdict | evidence |
-| --- | --- | --- |
-| AC-1 | met | test A.one (test/a.test.mjs:3) |
-| AC-2 | not met | file src/a.mjs:9: below zero is drawn above |
-
-verdict: not met (AC-2)
-`;
-
-async function fixture() {
-  const w = await makeWorkspace();
-  addTask(w.weather, 'weather/hourly-chart', 'An hourly chart <for> today', {
-    approved: '2026-11-03T10:00:00Z',
-    files: { 'progress.md': '2026-11-03 14:02 S-2 started (opus, session 7c1)\n' },
-  });
-  addTask(w.hub, 'hub/reviewed', 'A reviewed task', { approved: '2026-11-01T09:00:00Z', files: { 'review-2.md': REVIEW } });
-  addTask(w.weather, 'weather/recent', 'Done this week', { approved: '2026-11-01T09:00:00Z', files: { 'done.json': '{"accepted":"2026-11-06"}' } });
-  addTask(w.weather, 'weather/long-ago', 'Done long ago', { approved: '2026-09-01T09:00:00Z', files: { 'done.json': '{"accepted":"2026-09-02"}' } });
-  writeFileSync(join(w.hub, 'kirunak', 'queue.md'), '# queue\nweather/hourly-chart\n');
-  return w;
-}
-
-const NOW = new Date('2026-11-07T12:00:00Z');
-
-async function page(w) {
-  return renderHtml(await rows(w.ws, { all: true }), status(w.ws), NOW);
-}
+const h2s = (html) => [...html.matchAll(/<h2>([^<]*?)(?: <span class="n">\((\d+)\)<\/span>)?<\/h2>/g)].map((m) => m[1]);
 
 test('every task appears with its AC and E and their latest verdicts', async () => {
   const w = await fixture();
+  queuedAndParked(w);
   const html = await page(w);
   for (const id of ['weather/hourly-chart', 'hub/reviewed', 'weather/recent', 'weather/offline-forecast']) assert.ok(html.includes(id), id);
   assert.ok(!html.includes('weather/long-ago'), 'done more than a week ago is left out');
@@ -83,13 +26,17 @@ test('every task appears with its AC and E and their latest verdicts', async () 
   assert.match(card, /<b>AC-1<\/b>[^<]*<span class="v v-met">met<\/span>/);
   assert.match(card, /<b>AC-2<\/b>.*<span class="v v-notmet">not met<\/span>/);
   assert.match(card, /<b>E-1<\/b>.*<span class="v v-none">none<\/span>/);
-  assert.match(card, /review-2\.md: not met \(AC-2\)/);
+  assert.match(card, /review: review-2\.md, verdict: not met \(AC-2\)/);
   const chart = html.slice(html.indexOf('weather/hourly-chart'), html.indexOf('</article>', html.indexOf('weather/hourly-chart')));
-  assert.match(chart, /queue 1/);
+  assert.match(chart, /state: in progress, queue place 1/);
   assert.match(chart, /step: 2026-11-03 14:02 S-2 started/);
-  for (const col of ['draft', 'proposed', 'ready', 'blocked', 'in progress', 'in review', 'awaiting owner', 'done this week']) {
-    assert.ok(html.includes(`<h2>${col} `), col);
-  }
+  const cardOf = (id) => html.slice(html.indexOf(`<h3>${id}</h3>`), html.indexOf('</article>', html.indexOf(`<h3>${id}</h3>`)));
+  assert.match(cardOf('weather/next-up'), /state: queued, queue place 2/);
+  assert.match(cardOf('hub/later'), /state: parked</);
+  assert.deepEqual(h2s(html), [
+    'Working on now', 'proposed', 'queued', 'parked', 'in progress', 'in review', 'done this week', 'Lock, queue and running steps',
+  ], 'a section per state with tasks, in lib/state.mjs\'s order');
+  assert.match(html, /<h3>Task queue<\/h3>\n<ol><li>weather\/hourly-chart \(in progress\)<\/li><li>weather\/next-up \(queued\)<\/li><\/ol>/);
 });
 
 test('no form, button or script anywhere, and every text is escaped', async () => {
@@ -113,8 +60,9 @@ const tokens = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(
 test('both themes in the CSS, every text pair at 4.5:1 or more in each', async () => {
   const html = await page(await fixture());
   const light = /:root \{([^}]*)\}/.exec(html)[1];
-  const dark = /@media \(prefers-color-scheme: dark\) \{ :root \{([^}]*)\} \}/.exec(html)?.[1];
-  assert.ok(dark, 'a dark block under prefers-color-scheme');
+  const dark = /@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)?.[1];
+  assert.ok(dark, 'a dark block under prefers-color-scheme, unless the host says light');
+  assert.equal(/:root\[data-theme="dark"\] \{([^}]*)\}/.exec(html)?.[1], dark, 'the same dark block when the host says dark');
   for (const [name, block] of [['light', light], ['dark', dark]]) {
     const t = tokens(block);
     for (const [fg, bg] of TEXT_PAIRS) {
@@ -136,12 +84,14 @@ test('file:// links to the four files of every card', async () => {
   assert.ok(html.includes(`href="${pathToFileURL(join(realpathSync(w.hub), 'kirunak', 'tasks', 'reviewed', 'review-2.md')).href}"`), 'the latest review');
 });
 
-test('the footer: no lock, then the lock, queue, claims and running steps', async () => {
+test('the last section: no lock, then the lock, its queue, the running steps, the claims and the task queue', async () => {
   const w = await fixture();
   let html = await page(w);
   assert.match(html, /<p>no lock<\/p>/);
-  assert.match(html, /running steps: 0 of 2/);
-  assert.match(html, /Generated at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. To regenerate: k board/);
+  assert.match(html, /<h3>Running steps: 0 of 2<\/h3>/);
+  assert.match(html, /<h3>Task queue<\/h3>\n<ol><li>weather\/hourly-chart \(in progress\)<\/li><\/ol>/);
+  assert.match(html, /<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  assert.match(html, /To make it again: k board\./);
   mkdirSync(join(w.home, 'guard', 'lock'), { recursive: true });
   mkdirSync(join(w.home, 'running'), { recursive: true });
   writeFileSync(join(w.home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', pid: 1, since: '2026-11-07T11:50:00Z' }));
@@ -149,10 +99,10 @@ test('the footer: no lock, then the lock, queue, claims and running steps', asyn
   writeFileSync(join(w.home, 'guard', 'claims.json'), JSON.stringify([{ resource: 'phone-1', by: 's1', why: 'smoke run' }]));
   writeFileSync(join(w.home, 'running', '123.json'), JSON.stringify({ task: 'weather/hourly-chart', step: 'S-2', session: 's1', since: '2026-11-07T11:40:00Z' }));
   html = await page(w);
-  assert.match(html, /lock: weather unit tests \(session s1/);
-  assert.match(html, /guard queue: \{&quot;session&quot;:&quot;s2&quot;/);
-  assert.match(html, /claims: phone-1 by s1 \(smoke run\)/);
-  assert.match(html, /running steps: 1 of 2: weather\/hourly-chart S-2 since 2026-11-07T11:40:00Z/);
+  assert.match(html, /<p>lock: weather unit tests \(session s1, since \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)<\/p>/);
+  assert.match(html, /<h3>Heavy-job queue<\/h3>\n<ol><li>hub build \(session s2\)<\/li><\/ol>/);
+  assert.match(html, /<h3>Device claims<\/h3>\n<ul><li>phone-1 by s1 \(smoke run\)<\/li><\/ul>/);
+  assert.match(html, /<h3>Running steps: 1 of 2<\/h3>\n<ul><li>weather\/hourly-chart S-2, session s1, since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/li><\/ul>/);
 });
 
 test('write puts the page in $KIRUNAK_HOME, or at a path, and opens nothing unless asked', async () => {
@@ -166,4 +116,51 @@ test('write puts the page in $KIRUNAK_HOME, or at a path, and opens nothing unle
   const other = join(w.root, 'elsewhere', 'b.html');
   assert.equal(await write(w.ws, { path: other }), other);
   assert.ok(existsSync(other));
+});
+
+test('the tasks sessions work on come first, each once, with who works on it; a done task is not among them', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  const html = await page(w);
+  assert.deepEqual(h2s(html), ['Working on now', 'proposed', 'done this week', 'Lock, queue and running steps']);
+  const work = html.slice(html.indexOf('<section class="work">'), html.indexOf('<div class="states">'));
+  assert.deepEqual([...work.matchAll(/<h3>([^<]*)<\/h3>/g)].map((m) => m[1]), ['weather/hourly-chart', 'hub/reviewed'], 'in k list\'s order');
+  assert.match(work, /<h2>Working on now <span class="n">\(2\)<\/span><\/h2>/);
+  assert.match(work, /worked on by session s1 since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  assert.match(work, /worked on by step S-3 running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  assert.equal(html.split('<h3>weather/hourly-chart</h3>').length, 2, 'once on the page');
+  assert.ok(!work.includes('weather/recent'));
+});
+
+test('read in order by a screen reader: one h1, the time it was made, an h2 per section, an h3 per card, lists for the AC and E', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  const html = await page(w);
+  const body = html.slice(html.indexOf('<body>'));
+  assert.deepEqual([...body.matchAll(/<h([1-3])>/g)].map((m) => m[1]).join(''), '1233232323333');
+  assert.match(body, /<h1>kirunak board<\/h1>\n<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
+  for (const card of body.split('<article class="card">').slice(1)) {
+    assert.match(card, /^\n<h3>[a-z]+\/[a-z-]+<\/h3>\n<p>[^<]+<\/p>\n<p class="meta">state: [a-z ]+/, 'id, title, state as text, in that order');
+    assert.match(card, /<ul class="items">\n(<li><b>(AC|E)-\d+<\/b> <span class="v [a-z-]+">(met|not met|needs device|needs owner|none)<\/span>: [^\n]*<\/li>\n)+<\/ul>/);
+  }
+  assert.ok(!/[·•|]/.test(body.replace(/<[^>]*>/g, '')), 'no separator or bullet drawn in the text');
+  assert.ok(!/content:\s*['"][^'"]/.test(html), 'no CSS mark a reader would speak');
+});
+
+test('laid out for a phone: the viewport, long words broken, no box wider than 390 px less its gutters', async () => {
+  const html = await page(await fixture());
+  assert.ok(html.includes('<meta name="viewport" content="width=device-width, initial-scale=1">'));
+  const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
+  assert.match(style, /body \{[^}]*padding: 16px;[^}]*overflow-wrap: anywhere;/);
+  assert.match(style, /minmax\(min\(100%, \d+rem\), 1fr\)/, 'a grid column never wider than the screen');
+  // A length over 358 px may only cap a width (max-width, min(100%, ...)), never set one.
+  const sized = style.replace(/max-width: [\d.]+rem/g, '').replace(/min\(100%, [\d.]+rem\)/g, '');
+  for (const m of sized.matchAll(/(\d+(?:\.\d+)?)(px|rem)\b/g)) assert.ok(Number(m[1]) * (m[2] === 'rem' ? 16 : 1) <= 358, `${m[0]} in the CSS`);
+});
+
+test('the page written at a path, for the phone, has no file:// link', async () => {
+  const w = await fixture();
+  const out = await write(w.ws, { path: join(w.root, 'phone', 'board.html') });
+  assert.ok(!readFileSync(out, 'utf8').includes('file://'));
+  assert.ok(readFileSync(await write(w.ws), 'utf8').includes('file://'), 'the local page keeps them');
 });

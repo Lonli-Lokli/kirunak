@@ -33,9 +33,10 @@ validation, archives) then go unused, and what the owner needs is not in it:
 - D5 **People see the tasks.** Local first, built so it can move to the cloud later without changing the task format.
 - D6 **Old planning records are history.** A workspace that planned in openspec keeps those folders, read-only; a
   change becomes a task only when it is picked up again, through the intake.
-- D7 **Approval by hooks and a command the owner types**: a Claude Code hook blocks agents from editing a frozen task,
-  a git hook checks the task's hash against its approval record, and only a command the owner runs (with `!`)
-  approves. This guards against mistakes, not a deliberate bypass.
+- D7 **Approval by hooks and the owner's own gesture**: a Claude Code hook blocks agents from editing a frozen task,
+  a git hook checks the task's hash against its approval record, and only the owner's own gesture approves: a
+  command the owner types (with `!`, or the mod's command, D14), or a choice the owner taps in a dialog that such a
+  command opened, answered while it runs. This guards against mistakes, not a deliberate bypass.
 - D8 **One repo migrates first, as the first thing kirunak does**: as soon as the intake works, that repo's open
   changes become kirunak tasks through it, and its work runs on kirunak from then on. Other repos follow only after
   that. So the first slice built is the one that migration needs: the task files, the intake, approval and the board.
@@ -48,16 +49,20 @@ validation, archives) then go unused, and what the owner needs is not in it:
 - D12 **Every kirunak command carries the `k-` prefix**, so it never meets a built-in, plugin or Anthropic command of
   the same name: `/k-done` closes a task and asks for `/clear`; the intake, approval and review commands follow as
   `k-<verb>`. A workspace's other skills keep their names.
-- D13 **A board on the phone**: the generated board is also published as a private claude.ai artifact the owner opens
-  on the phone, read-only, its rows kept current by a kirunak sync step (an artifact is updated through Claude's tools,
-  so a Claude step does it). Approvals never happen there: anything a page records could also be written by an agent
-  acting as the owner, so they stay a command the owner types (D7). A front end over the task files, like the others.
+- D13 **A board on the phone**: on the owner's command and nothing else, the board reaches the phone two ways. The
+  mod's `/k-board` answers in the chat at once with the board as lists, with no model turn; the skill
+  `/k-board-page` publishes the generated board as a private claude.ai artifact, read-only, updating the one link
+  it keeps, in one model turn (an artifact is published through Claude's tools, which ask on every publish, so a
+  Claude turn the owner's command asks for does it; a mod cannot). Approvals never happen on a page: anything a page
+  records could also be written by an agent acting as the owner, so they stay the owner's own gesture (D7). A front
+  end over the task files, like the others.
 - D14 **A Claude Code mod as the working view**: a pane or panel with the current task, its criteria and their review
-  state, the queue and the build lock; a line above the prompt; toasts when a build ends, a review is ready, a cache is
-  kept warm or an openspec change is refused; the `k-` commands. If a mod's slash command runs without the model and
-  the model cannot call it, it becomes the owner's approval command in place of `!`. The design settled it
-  (`design/approval.md` §5): a mod's registered command runs without the model and carries an engine-stamped origin
-  the model cannot produce, so it replaces `!` once the mod exists; `!` stays for sessions without it. A mod is
+  state, the queue and the build lock; a line above the prompt; toasts when a build ends, a review is ready, a cache
+  is kept warm or an openspec change is refused; the `k-` commands. A mod's registered command runs without the
+  model and carries an engine-stamped origin the model cannot produce (`design/approval.md` §5), so it is the
+  owner's approval command in place of `!`, typed at the terminal or through Remote Control; `!` stays for sessions
+  without it. With no id, the owner's commands list what they can take in the engine's choice dialog, raised only
+  by the owner's own command and answered while it runs, so a tap there is the owner's gesture (D7). A mod is
   specific to Claude Code, so it stays one front end, a plugin over the core.
 
 ## Requirements

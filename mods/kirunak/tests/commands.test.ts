@@ -10,11 +10,11 @@ const run = ($: Engine, command: string, args: string, origin: PromptOrigin) =>
   $.command.run({ command, args, origin, presentation: PRESENTATION })
 
 describe('the owner\'s commands', () => {
-  test('registers /k-approve, /k-accept, /k-hold, /k-start and /kirunak, and never /k-done; a -p run reads nothing', async ($, on) => {
+  test('registers the owner\'s verbs, the lists and /kirunak, and never /k-done; a -p run reads nothing', async ($, on) => {
     const w = world(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await w.clock.advance(60_000)
-    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start', 'kirunak'])
+    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-start', 'k-list', 'k-board', 'k-amendments', 'k-approve-amendment', 'k-queue', 'kirunak'])
     expect([w.reads, w.tails.length]).toEqual([0, 0])
   })
 
@@ -31,7 +31,7 @@ describe('the owner\'s commands', () => {
   for (const origin of others) {
     test(`from ${origin.kind}: refused with a line, and k never runs`, async ($, on) => {
       const w = world(on)
-      for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start']) {
+      for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start', 'k-queue']) {
         const { text } = await run($, command, `${ID} because`, origin)
         expect(text).toMatch(new RegExp(`^/${command} runs only from your own prompt or from Remote Control; this one came from .*${origin.kind === 'plugin' ? 'the plugin other' : origin.kind}, so nothing ran\\.$`))
       }
@@ -78,10 +78,10 @@ describe('the owner\'s commands', () => {
       ['k-hold', `${ID} --why --dry-run`, /--why needs a value, not --dry-run\. Nothing ran\./],
       ['k-accept', `${ID} --checklist-open=--dry-run`, /--checklist-open needs a value, not --dry-run\. Nothing ran\./],
       ['k-approve', 'not-an-id', /not a task id: not-an-id\. Nothing ran\./],
-      ['k-start', '', /which task\? give its id, <repo>\/<slug>\. Nothing ran\./],
+      ['k-start', '--dry-run', /not a task id: --dry-run\. Nothing ran\./],
       ['k-start', `${ID} extra`, /unexpected extra\. Nothing ran\./],
       ['k-hold', `${ID} "open`, /a quote is left open\. Nothing ran\./],
-      ['k-hold', ID, /why\? \/k-hold <id> <why>\. Nothing ran\. Usage: \/k-hold <id> <why>$/],
+      ['k-hold', ID, /why\? \/k-hold <id> <why>\. Nothing ran\. Usage: \/k-hold \[<id> <why>\]$/],
     ]
     for (const [command, args, want] of cases) {
       expect((await run($, command, args, { kind: 'composer' })).text).toMatch(want)

@@ -119,7 +119,8 @@ under 100 ms).
 3. stages `task.md`, the record, the amendment; commits `kirunak: approve <id>` (`... amendment A-n`) with
    `KIRUNAK_APPROVING=<id>`; adds the task to the queue (`k queue add`, a commit in the queue's repo) unless
    `--no-queue`;
-4. prints the state line (`ready, queue place 3`) and appends `events.jsonl` (the mod's toast).
+4. prints the state line (`queued, queue place 3`, or `parked` with `--no-queue`) and appends `events.jsonl` (the
+   mod's toast).
 
 `k accept <id> --dry-run` makes every check below and writes nothing, so it says what `k accept` would refuse (`k
 waiting` lists it for every reviewed task, for the mod, `boards.md` §4). `k accept <id>`: refuses unless the latest review (`review.md`, `review-2.md`, ...) counts, that is it passes
@@ -174,7 +175,11 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
   'composer'` and refuses every other origin with a line answers the owner's Enter and nothing else, and, since the
   owner's answer of 2026-10-19, `bridge` (the last paragraph of this section).
 - Two caveats the build must keep: (1) "Registering a name again replaces it" (3167): another plugin could take
-  `/k-approve`; that is a deliberate act, out of D7's scope, and `k plugins`/`/plugins` shows what is loaded.
+  `/k-approve`; that is a deliberate act, out of D7's scope, and `k plugins`/`/plugins` shows what is loaded. Of the
+  same class (S-7 review, finding 5): the mod's dialog is a `tool.call` of `AskUserQuestion` "through every hook but
+  the calling one" (2.1.304's types, `$.ui.ask`, line 2455), so another plugin's `tool.call` hook on
+  `AskUserQuestion` could answer it, with a verb's label among the answers; a loaded plugin doing so is the same
+  deliberate act, D7's class, and the same `/plugins` shows it.
   (2) The mod must be loaded in the owner's session: installed from a folder marketplace, or named in
   `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (plugin-authoring reference.md,
   "`--plugin-dir`"); hot reloading from the dev-mods folder is for developing it. (3) The gate is a file of the loaded
@@ -194,6 +199,62 @@ Control open could approve too). So the hooks of `/k-approve`, `/k-accept` and `
 takes the same rule (judgement: one rule for the four). D13 is unchanged: a command typed in Remote Control is the
 owner's gesture, a page is not.
 
+### A tap in the owner's dialog is the owner's gesture (kirunak-phone, built 2026-10-21)
+
+The rule above covered a typed command. Since amendment A-9 (the owner's answers of 2026-10-20 and 21, Q-6 and Q-17,
+approved 2026-10-21) it covers one more thing: **a choice the owner taps in a dialog that such a command opened,
+answered while the command runs.** The verbs a tap may run are approve (a task or an amendment), accept, decline an
+amendment, hold, start, and the queue's add, move and remove (park); each stands behind a last explicit choice that
+names the verb and the task, with the task's text above it ("Approve <id> A-n", "Accept <id>", `boards.md` §4). The
+owner accepted the same risk as before: anyone holding the unlocked phone with Remote Control open could tap as they
+could type. `!` and the typed `/k-` commands are unchanged, and a command typed with its id runs as it always did.
+
+**The evidence it rests on** (`evidence/S-1-phone-probe.md`, S-1): the dialog's answer is a plain string with no origin
+of its own, and Skip answers `[No preference]`. So the origin cannot be read from the tap; the rule is held by where
+the dialog may be raised and by what an answer may do. Judgement: a tap is no weaker than a typed line only if nothing
+but the owner's own command can raise the dialog whose answer runs a verb.
+
+**How `mods/kirunak/hooks/owner.ts` holds it**, in code, each part with the test that holds it (`claude plugin test
+mods/kirunak`, 79 of 79 at the build's end, in `mods/kirunak/tests/`):
+
+- *Origin first.* `owners()` is the one wrapper every owner command uses. It refuses every origin but `composer` and
+  `bridge` with a line, before any read of `k` and before any dialog. `rule.test.ts` runs each command from five
+  origins; `commands.test.ts` runs the typed verbs from eight.
+- *A turn exists only inside `owners()`.* The command's `Turn` is made there, in the command's own `command.run` hook,
+  and closes when the hook answers; a verb or a dialog asked of a closed turn throws. A turn opens at most one dialog.
+- *The dialog and the verb are owner.ts's own.* `$.ui.ask` and the function that runs a verb appear in that file and
+  nowhere else in the mod (checked by search at the end of S-6: `$.ui.ask(` and `runVerb(` appear only in
+  `hooks/owner.ts`), and neither is exported.
+- *Only k's owner verbs run.* The verb a turn chooses is a sealed object bound to its turn, whether tapped or typed,
+  and its words must match `VERBS` (approve, accept, amend decline, hold, start, queue add, move, remove); a reading
+  verb or a session's own command throws.
+- *A tap counts only as the last one, in an item's dialog.* A verb choice stands only in an item dialog, under the
+  item's own text, and an answer counts only if it equals a choice of that same dialog. A list's row opens a dialog and
+  runs nothing.
+- *Words typed equal to a choice are that choice* (S-7 review, finding 4, accepted). The free-text row answers with
+  the same plain string a tap does (`$.ui.ask` returns "the label chosen, ... or free text typed under 'Other'"; the
+  tool's own `response` field is out of the mod's reach), so "Approve <id>" typed there equals the choice and runs it.
+  That is accepted, not worked around: the words are the owner's own, they name the verb and the id, and they are
+  typed under the item's text, in the dialog of the owner's own command, the same gesture as the tap. Only exact
+  equality counts: a case or a space apart is no choice and runs nothing (`rule.test.ts`).
+- *A dialog the model raised runs nothing.* The mod has no hook on `AskUserQuestion`, and the engine refuses a mod the
+  tool anyway (S-1: "that is $.ui.ask"). `rule.test.ts` answers a dialog the model raised with "Approve <id>", "Hold
+  <id>", "Start <id>", "Move <id> before <Y>", "Park <id>" and "Put back <id>", before and after the owner's own
+  dialog: nothing runs.
+- *Anything else is nothing.* Skip, a dismissal, a label typed where it is no choice, a blank reason, a reason
+  starting with `--` (S-7 finding 8: k would take it for a flag) and Cancel run nothing, at every depth of every
+  command (tested at four depths); Back shows the dialog before again; no dialog names kirunak.
+
+The binding to one turn is tested from outside since S-7 (`turn.test.ts`, test b): `owners()` with a fake body that
+hands back another turn's Outcome, typed or tapped there, or a typed one after its own dialog opened, runs nothing.
+
+The dialog's own idle auto-answer (`afkTimeoutMs`, read in Claude Code 2.1.305 by the S-7 review) cannot act for the
+owner: it is off while another surface can answer the dialog or a screen reader is on; it submits only answers the
+owner had already picked, never one of its own; and a question left with no answer rejects, which the mod reports as
+dismissed and runs nothing, as it does for a reload mid-dialog. And an answer acts only if it equals a choice, so
+whatever string a time-out returned would run nothing. Buttons in the pane remain unbuilt for the reason in
+`boards.md` §4: a press carries no origin.
+
 ## 6. A frozen openspec's instructions, once slice 1 exists (D11, R20)
 
 kirunak ships no openspec hook (judgement: freezing a tool is a workspace's decision, D11). A workspace whose
@@ -206,5 +267,5 @@ nothing is lost."
 
 ## 7. Requirements this file satisfies
 
-D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
+D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
 R15 (`k accept`, with `review.md`).
