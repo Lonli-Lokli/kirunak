@@ -94,4 +94,18 @@ describe('a turn runs only an Outcome it made (kirunak-phone AC-4, S-7 review)',
     expect(await answer($, picked)).toBe('none')
     expect([w.asked, w.runs]).toEqual([7, []])
   })
+
+  test('a pick in steps (/k-board\'s groups, A-9): a step opens the next pick dialog, Back returns, a label there ends it; a step to any other dialog, or a pick that is no pick dialog, throws and runs nothing', async () => {
+    const PICK: PickScreen = { kind: 'pick', header: 'Board', text: ['Proposed (1)', 'hub/proposed: proposed'], labels: ['hub/proposed'], question: 'Which task\'s card?' }
+    const GROUPS: PickScreen = { kind: 'pick', header: 'Board', text: ['Proposed: 1'], labels: [{ label: 'Proposed', open: () => PICK }], question: 'Which group?' }
+    const { $, w } = engine(['Proposed', 'Back', 'Proposed', 'hub/proposed', 'Proposed', '[No preference]', 'Proposed'])
+    const picked = async (t: Turn, first: PickScreen): Promise<string> => (await t.pick(first)) ?? 'none'
+    expect(await answer($, t => picked(t, GROUPS))).toBe('hub/proposed')
+    expect(await answer($, t => picked(t, GROUPS))).toBe('none')
+    // A step whose next dialog offers a verb is refused as it opens, before that dialog is asked.
+    const TO_ITEM: PickScreen = { ...GROUPS, labels: [{ label: 'Proposed', open: () => ITEM as unknown as PickScreen }] }
+    await expect(answer($, t => picked(t, TO_ITEM))).rejects.toThrow('a pick dialog opens only pick dialogs')
+    await expect(answer($, t => picked(t, ITEM as unknown as PickScreen))).rejects.toThrow('/k-probe: a pick that opens no pick dialog')
+    expect([w.asked, w.runs]).toEqual([7, []])
+  })
 })
