@@ -53,8 +53,9 @@ validation, archives) then go unused, and what the owner needs is not in it:
   mod's `/k-board` shows the board in brief, with no model turn, in a dialog of the owner's own command: the groups
   with how many tasks each holds, a group's tasks one line each once picked, a task's card in the chat once tapped;
   the skill `/k-board-page` publishes the generated board as a private claude.ai artifact, read-only, a brief row per
-  task that opens its card in place, updating the one link it keeps, in one model turn (an artifact is published through Claude's tools, which ask on every publish, so a
-  Claude turn the owner's command asks for does it; a mod cannot). Approvals never happen on a page: anything a page
+  task that opens its card in place, updating the one link it keeps, in one model turn (an artifact is published
+  through Claude's tools, which ask on every publish, so a Claude turn the owner's command asks for does it; a mod
+  cannot). Approvals never happen on a page: anything a page
   records could also be written by an agent acting as the owner, so they stay the owner's own gesture (D7). A front
   end over the task files, like the others.
 - D14 **A Claude Code mod as the working view**: a pane or panel with the current task, its criteria and their review
