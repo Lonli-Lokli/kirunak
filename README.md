@@ -14,8 +14,8 @@ is done.
   matches its approved hash. A change is an amendment the owner approves.
 - **A review against every criterion**, by someone who did not do the work, and an owner's checklist of what needs a
   device or a person. A task is done when the owner says so (`/k-done`).
-- **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone the board as a chat answer
-  (`/k-board`) or as a private page you open (`/k-board-page`).
+- **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone a brief board, a line per
+  task that opens its card, in the chat (`/k-board`) or as a private page you open (`/k-board-page`).
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -87,8 +87,9 @@ You need Node 22 or later, git and Claude Code.
    | Type | You get |
    | --- | --- |
    | `/k-list` (`/k-list all`) | the tasks, the queue first, as numbered entries with state, place, title and step |
-   | `/k-board` | the board as lists in the chat, at once and without a model turn |
-   | `/k-board-page` | the skill: the board as a private page on claude.ai, one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
+   | `/k-board` | the brief board, a line per task, at once and without a model turn; tap a task for its card, or Skip for the brief board as text |
+   | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
+   | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
    | `/k-approve`, `/k-accept` | what waits for you, to pick by touch; then a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, to approve or decline by touch; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, by touch |
