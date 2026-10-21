@@ -4,8 +4,10 @@ import type { Choice, PickScreen, Screen } from './owner'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
-// AC-11, E-4): the list of what waits, each row named and nothing more (a task's id and state, an amendment's task id,
-// A-n and name, A-8), then the one picked, in its own words, with the verb k would take now and none it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on another row (E-2).
+// AC-11, E-4): the list of what waits, each row named and nothing more (a task's id and state, in /k-queue its title
+// too, A-10; an amendment's task id, A-n and name, A-8), then the one picked, in its own words, with the verb k would
+// take now and none it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on
+// another row (E-2).
 // /k-approve's, /k-accept's and /k-amendments' lists are the ones a typed number takes (`/k-accept 4`), so they are
 // `typed`: a page after the first gives each line that number too (Q-33). /k-hold, /k-start and /k-queue take an id or
 // nothing typed, never a number, so their lines keep the app's numbers alone.
@@ -128,7 +130,8 @@ export function boardScreen(brief: Brief): PickScreen {
   }
 }
 
-// A task as the hold, start and queue lists show it: its id and state as k list says it, with its queue place.
+// A task as the hold and start lists show it, and the queue's before its title: its id and state as k list says it,
+// with its queue place.
 export const stateItem = (r: TaskRow, place: number | null = null): Item => ({ lead: '', name: r.id, text: `: ${r.state}${place !== null ? `, place ${place}` : ''}` })
 
 const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`
@@ -172,6 +175,14 @@ export function startScreen(rows: readonly TaskRow[], session: string, after: (o
 // A task as `k list --json --all` gives it, enough for the queue's dialogs.
 export type QueueRow = TaskRow & { queue: number | null }
 
+// A task as /k-queue's lists show it (A-10's AC-3, AC-17): its id, state and queue place, then its title, so the owner
+// knows which task to move before which.
+const queueItem = (r: QueueRow): Item => {
+  const item = stateItem(r, r.queue)
+  const title = titleOf(r)
+  return title ? { ...item, text: `${item.text}. ${sentence(title)}` } : item
+}
+
 const END = 'End of the queue'
 
 // /k-queue (AC-17): the queue in order, then the parked tasks; null when there is neither. A task in the queue offers
@@ -200,7 +211,7 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
     head: `Move ${r.id} before one of these, or to the end:`,
     question: 'Where to?',
     rows: [
-      ...queued.filter(y => y !== r).map(y => ({ item: stateItem(y, y.queue), label: taskLabel(y), open: () => there(r, y) })),
+      ...queued.filter(y => y !== r).map(y => ({ item: queueItem(y), label: taskLabel(y), open: () => there(r, y) })),
       { item: { lead: '', name: END, text: '' }, label: END, open: () => there(r, null) },
     ],
   })
@@ -224,8 +235,8 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
     head: !parked.length ? 'The queue in order:' : queued.length ? 'The queue in order, then the parked tasks:' : 'The queue is empty. Parked:',
     question: 'Which task?',
     rows: [
-      ...queued.map(r => ({ item: stateItem(r, r.queue), label: taskLabel(r), open: () => inQueue(r) })),
-      ...parked.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => out(r) })),
+      ...queued.map(r => ({ item: queueItem(r), label: taskLabel(r), open: () => inQueue(r) })),
+      ...parked.map(r => ({ item: queueItem(r), label: taskLabel(r), open: () => out(r) })),
     ],
   }
 }

@@ -15,28 +15,51 @@ const FORECAST = 'The last forecast stays readable offline'
 const REFUSED = { id: 'hub/refused', title: 'Refused for now', why: 'hub/refused: task.md fails k check: AC-1 has no source' }
 
 // The owner's ask (A-8, Q-38): "their names and specific amendment inside when I select it". Each picking list's text
-// is its rows' names alone; the row picked shows its details in the next dialog's text.
+// is its rows' names alone (/k-queue's with each task's title too, A-10); the row picked shows its details in the next
+// dialog's text.
 describe('names in the list, details once picked (A-8)', () => {
-  const cases: { command: string; rows?: typeof QUEUE; pick: string; list: string; title: string; inside: string[] }[] = [
+  const cases: { command: string; rows?: typeof QUEUE; pick: string; list: string; title: string; inside: string[]; titled?: true }[] = [
     { command: 'k-approve', pick: REFUSED.id, list: 'Waiting for you to approve:\n1. hub/proposed: proposed\n2. hub/refused: proposed\nWhich task?', title: 'Refused for now', inside: ['State: proposed.', 'Not yet:', 'task.md fails k check: AC-1 has no source'] },
     { command: 'k-accept', pick: ID, list: `Waiting for you to accept:\n1. weather/was-reviewed: reviewed\n2. ${ID}: awaiting owner\nWhich task?`, title: FORECAST, inside: ['State: awaiting owner.', 'Review: review.md, needs owner (E-1).', 'checklist.md has 1 unticked item(s):', '- [ ] E-1 On the oldest phone. (review.md)'] },
     { command: 'k-hold', pick: 'hub/sync-notes', list: `Tasks you can put on hold:\n1. ${ID}: in review\n2. hub/sync-notes: queued\nWhich task?`, title: 'Sync notes', inside: ['State: queued.'] },
     { command: 'k-start', pick: 'hub/sync-notes', list: `Tasks this session can work on: (1 to 3 of 5)\n1. ${ID}: in review\n2. hub/sync-notes: queued\n3. weather/was-reviewed: reviewed\nWhich task?`, title: 'Sync notes', inside: ['State: queued.'] },
-    { command: 'k-queue', rows: QUEUE, pick: 'hub/next', list: `The queue in order, then the parked tasks: (1 to 3 of 5)\n1. ${ID}: in review, place 1\n2. hub/sync-notes: queued, place 2\n3. hub/next: queued, place 3\nWhich task?`, title: 'Next up', inside: ['Queued, place 3 of 4 in the queue.'] },
+    { command: 'k-queue', rows: QUEUE, pick: 'hub/next', titled: true, list: `The queue in order, then the parked tasks: (1 to 3 of 5)\n1. ${ID}: in review, place 1. ${FORECAST}.\n2. hub/sync-notes: queued, place 2. Sync notes.\n3. hub/next: queued, place 3. Next up.\nWhich task?`, title: 'Next up', inside: ['Queued, place 3 of 4 in the queue.'] },
   ]
   for (const c of cases) {
-    test(`/${c.command}: the list is each row's id and state, one line each; the task picked shows its title and the rest`, async ($, on) => {
+    test(`/${c.command}: the list is each row's id and state${c.titled ? ', its place and title too (A-10)' : ''}, one line each; the task picked shows its title and the rest`, async ($, on) => {
       const w = world(on, { rows: c.rows, waiting: [{ ...WAITING, approve: [...WAITING.approve, REFUSED] }], taps: [c.pick, SKIP] })
       await run($, c.command)
       const [list, item] = w.asked
       expect(list?.question).toBe(c.list)
-      expect(list?.question).not.toContain(c.title)
+      if (c.titled) expect(list?.question).toContain(c.title)
+      else expect(list?.question).not.toContain(c.title)
       expect(list?.labels).toContain(c.pick)
       expect(item?.question).toMatch(new RegExp(`^${c.pick}: ${c.title}\\.\\n`))
       for (const line of c.inside) expect(item?.question.split('\n')).toContain(line)
       expect(w.runs).toEqual([])
     })
   }
+
+  // A-10's AC-3 (the owner's Q-45, "Titles in /k-queue"): AC-17 asks for /k-queue's rows with their titles, so its
+  // lists carry them, the Move list's too; every other task list stays names alone.
+  test('/k-queue\'s lines carry each task\'s title, in the queue, among the parked and under Move; /k-hold\'s lines do not (A-10)', async ($, on) => {
+    const w = world(on, { rows: QUEUE, taps: [SKIP, 'More', SKIP, 'hub/next', 'Move', 'More', SKIP] })
+    for (const command of ['k-hold', 'k-queue', 'k-queue']) await run($, command)
+    const lines = (...at: number[]): string[] => at.flatMap(i => (w.asked[i]?.question ?? '').split('\n').filter(l => /^\d+\. /.test(l)))
+    const titled = (l: string): boolean => {
+      const r = QUEUE.find(x => l.includes(` ${x.id}: `))
+      return r !== undefined && l.endsWith(`. ${r.title}.`)
+    }
+    const queue = lines(1, 2)
+    const move = lines(5, 6)
+    expect(queue.map(l => l.slice(3, l.indexOf(':')))).toEqual([ID, 'hub/sync-notes', 'hub/next', 'hub/later', 'hub/parked'])
+    expect(queue.every(titled)).toBe(true)
+    expect(move.filter(l => !l.endsWith('End of the queue')).every(titled)).toBe(true)
+    expect(move).toHaveLength(4)
+    expect(lines(0)).toEqual([`1. ${ID}: in review`, '2. hub/sync-notes: queued'])
+    for (const r of WAITING.hold) expect(w.asked[0]?.question).not.toContain(r.title)
+    expect(w.runs).toEqual([])
+  })
 
   test('/k-amendments: the list is task id, A-n and name; one picked shows in full from its file: the date, Why, Changes, how many lines, and that k would approve it', async ($, on) => {
     const w = world(on, { taps: [`${ID} A-3`, SKIP] })

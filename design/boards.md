@@ -169,8 +169,8 @@ the rule of `approval.md` §5.
 reached the phone and its answer came back while the command ran, 8.4 s and 16.6 s):
 
 - It takes **labels only**, two to four: a mod cannot give a choice a description (AC-3's "a label and a description"
-  was changed to this in A-1 of the task). The question's list names each row only, as plain numbered lines, and a
-  picked row's details are the next dialog's text (A-8).
+  was changed to this in A-1 of the task). The question's list names each row only, as plain numbered lines
+  (`/k-queue`'s gives each task's title too, A-10), and a picked row's details are the next dialog's text (A-8).
 - The question is **plain text**: line breaks are kept, markdown is not drawn (`**` shows as typed), and a line the mod
   logged before the dialog does not appear on the phone.
 - The **app numbers the choices itself** (chips 1 to 4), so a label never starts with a number (a test holds it) and
@@ -196,11 +196,12 @@ reached the phone and its answer came back while the command ran, 8.4 s and 16.6
   answer was none of the choices"). `/k-approve`, `/k-accept` and `/k-amendments` then print the numbered list again, so
   a typed number keeps using the whole list; `/k-hold`, `/k-start` and `/k-queue`, which take no number, answer "Nothing
   ran: <why>." alone.
-- `/k-queue` lists the queue in order and then the parked tasks. A queued task offers Move and Park, a parked one Put
-  back; Move lists the other queued tasks and last the end of the queue. Two choices the build made that AC-17 does
-  not spell out: Park is offered only to a task in the state "queued" (one in progress or in review that sits in the
-  queue gets Move only, because parked it would leave both lists and the phone could not put it back), and a move to
-  the place the task already holds offers no verb ("It is there already"), since `k queue` would fail on an empty
+- `/k-queue` lists the queue in order and then the parked tasks, each line a task's id, state, place when it has one and
+  title (A-10: the one picking list that gives titles). A queued task offers Move and Park, a parked one Put back; Move
+  lists the other queued tasks, as the first list does, and last the end of the queue. Two choices the build made that
+  AC-17 does not spell out: Park is offered only to a task in the state "queued" (one in progress or in review that sits
+  in the queue gets Move only, because parked it would leave both lists and the phone could not put it back), and a move
+  to the place the task already holds offers no verb ("It is there already"), since `k queue` would fail on an empty
   commit.
 - **kirunak is named once**: the engine puts "kirunak: " before the first line of every command's answer, so no dialog
   and no answer's own text names it but inside an id or a path (a test holds it; `/kirunak` is the command that says
