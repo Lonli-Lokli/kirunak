@@ -78,7 +78,8 @@ describe('the lists the commands answer with', () => {
 
   test('/k-amendments <n>: the Why and Changes in full, from the file, and what follows', () => {
     expect(amendmentText(1, A3, FILE)).toBe([
-      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1, changes 2 lines.',
+      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1,',
+      'changes 2 lines.',
       '',
       'Why:',
       '',
@@ -100,6 +101,7 @@ describe('the lists the commands answer with', () => {
     expect(amendmentText(2, A4, FILE).split('\n').slice(-2)).toEqual(['Not yet: with A-4 applied fails k check: line 9: aspect offline: in', '(E-1) names E-1, which the task does not have'])
     expect(amendmentText(1, A3, FILE.replace('by: session s1\n', 'by: session s1\napplied: 2026-11-07\n')).split('\n').at(-1)).toBe('Applied on 2026-11-07 since the list was shown.')
     expect(amendmentText(1, A3, '---\ntask: x\n---\n')).toMatch(/Why:\n\n\(empty\)\n\nChanges:\n\n\(none\)\n/)
+    expect(fits(amendmentText(1, { ...A3, id: 'a-repository-with-a-long-name/a-forty-character-slug-for-the-test' }, FILE.replace('session s1', 'session 1d4ef848 (asked by session gulnya-83 for the owner)')))).toBe(true)
   })
 
   test('the same rows as a dialog shows them: numbered plain lines, and short names for the choices', () => {

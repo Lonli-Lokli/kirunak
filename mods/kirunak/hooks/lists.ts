@@ -135,7 +135,7 @@ export function amendmentText(n: number, x: AmendmentRow, file: string): string 
   const refuse = refuseOf(x)
   const stamp = front.applied ? `Applied on ${front.applied} since the list was shown.` : front.declined ? `Declined since the list was shown: ${front.declined}` : null
   return [
-    `${x.id} ${x.amendment}, proposed ${front.proposed ?? x.proposed ?? 'on no date'}${by ? ` by ${by}` : ''}, changes ${plural(ops.length, 'line')}.`,
+    ...wrap(md(`${x.id} ${x.amendment}, proposed ${front.proposed ?? x.proposed ?? 'on no date'}${by ? ` by ${by}` : ''}, changes ${plural(ops.length, 'line')}.`)),
     '',
     'Why:',
     '',
