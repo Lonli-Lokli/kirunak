@@ -169,7 +169,8 @@ the rule of `approval.md` §5.
 reached the phone and its answer came back while the command ran, 8.4 s and 16.6 s):
 
 - It takes **labels only**, two to four: a mod cannot give a choice a description (AC-3's "a label and a description"
-  was changed to this in A-2 of the task). The details of each row go in the question, as plain numbered lines.
+  was changed to this in A-1 of the task). The question's list names each row only, as plain numbered lines, and a
+  picked row's details are the next dialog's text (A-8).
 - The question is **plain text**: line breaks are kept, markdown is not drawn (`**` shows as typed), and a line the mod
   logged before the dialog does not appear on the phone.
 - The **app numbers the choices itself** (chips 1 to 4), so a label never starts with a number (a test holds it) and
@@ -192,7 +193,9 @@ reached the phone and its answer came back while the command ran, 8.4 s and 16.6
   above it, so the owner reads what the tap will do. `k` checks the task again as it runs (E-2): a task changed since
   the list was shown is answered with k's refusal, never run on another.
 - When nothing ran, the answer says why ("Nothing ran: skipped", "dismissed", "cancelled", "no reason was typed", "the
-  answer was none of the choices") and prints the numbered list again, so a typed number keeps using the whole list.
+  answer was none of the choices"). `/k-approve`, `/k-accept` and `/k-amendments` then print the numbered list again, so
+  a typed number keeps using the whole list; `/k-hold`, `/k-start` and `/k-queue`, which take no number, answer "Nothing
+  ran: <why>." alone.
 - `/k-queue` lists the queue in order and then the parked tasks. A queued task offers Move and Park, a parked one Put
   back; Move lists the other queued tasks and last the end of the queue. Two choices the build made that AC-17 does
   not spell out: Park is offered only to a task in the state "queued" (one in progress or in review that sits in the

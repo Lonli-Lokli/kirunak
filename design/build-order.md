@@ -209,12 +209,18 @@ mod's side of that and the answer changed the design (`boards.md` §3 has the ev
 board reaches the phone by two commands the owner types and nothing else refreshes it.
 
 - Files: `lib/board-model.mjs` (the one order every surface uses, `boards.md` §2), `lib/board.mjs` (the page, `k board
-  --html <file> --no-open`), `lib/board-md.mjs` (`k board --markdown`, with `--json` as `{ markdown }`),
+  --html <file> --no-open`), `lib/board-md.mjs` (`k board --markdown`, with `--json` as `{ markdown }`, and `k board
+  --card <id>`, one task's card alone), `lib/board-brief.mjs` (`k board --brief`, with `--json` as `{ made, text, ids,
+  groups, machine }`: the brief board of the mod's `/k-board` dialogs, its groups and its machine line),
   `skills/k-board-page/SKILL.md` (`k install` links it, `k doctor` checks it), `$KIRUNAK_HOME/board-artifact.json` (the
   one link the skill keeps). The mod's `/k-board` is slice 6. There is no `sync` step kind and no `k board --artifact`.
-- Tests: `board-model.test.mjs` (the order, the sections); `board.test.mjs` (the page has no form, button or script,
-  no `file://` link under `--html`, follows `data-theme`, 17 text pairs held at 4.5:1 or more in both themes);
-  `board-md.test.mjs` (a word-for-word fixture, lines at most 70 characters, "kirunak" once); `skills.test.mjs`.
+- Tests: `board-model.test.mjs` (the order, the sections); `board.test.mjs` (the page has no form, button or script, no
+  `file://` link under `--html`, follows `data-theme`, 17 text pairs held at 4.5:1 or more in both themes);
+  `board-md.test.mjs` (a word-for-word fixture, no line broken inside a paragraph or a list item however long, a card's
+  AC and E cut at 70 characters with "…", "kirunak" once, `--card <id>` the board's card and an id that names no task
+  refused); `board-brief.test.mjs` (a word-for-word fixture, plain text with no markdown mark and one line per entry
+  however long, each group named and counted in the board's order, a group's name never starting with a digit, the
+  machine's line, `--brief --json` as the printed text); `skills.test.mjs`.
 - Numbers, measured: the page at 390 px wide in headless Chrome, scrollWidth 390 of 390 with a 40-character id and an
   80-character path; `k board --markdown` on the live workspace, 223 lines (1,077 before it was made pane-sized, the
   owner's decision of 2026-10-21); the new "Working on now" ground 5.57:1 to 14.60:1 light and 6.95:1 to 13.03:1 dark;
