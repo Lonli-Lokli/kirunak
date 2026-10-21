@@ -6,8 +6,9 @@ import type { Tone } from './board'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
 import { amendmentsText, amendmentText, boardText, listText } from './lists'
-import { owners } from './owner'
+import { nothingRan, owners } from './owner'
 import type { Outcome, Turn } from './owner'
+import { acceptScreen, amendmentsScreen, approveScreen } from './picks'
 import { lastRows, refresh, sessionTask, tick } from './reads'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
 import type { AmendmentRow, Waiting } from './waiting'
@@ -33,14 +34,18 @@ const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success
 // shows no such list (review G25).
 const offered: Partial<Record<'approve' | 'accept', string[]>> & { amendments?: AmendmentRow[] } = {}
 
-async function offer($: EngineInterface, { k }: Turn, verb: 'approve' | 'accept'): Promise<string> {
-  const r = await $.process.run(['node', k, 'waiting', '--json'])
+// `/k-approve` or `/k-accept` with no id: what waits for that verb, kept for a number, as the dialog's choices
+// (kirunak-phone AC-3); when nothing ran, the answer says why and shows the list as a number takes it.
+async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept'): Promise<string | Outcome> {
+  const r = await $.process.run(['node', turn.k, 'waiting', '--json'])
   // A list that could not be read leaves none to pick from, never the one before it (review G27).
   delete offered[verb]
   if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
   const rows = (JSON.parse(r.stdout) as Waiting)[verb]
   offered[verb] = rows.map(row => row.id)
-  return offerText(verb, rows)
+  if (!rows.length) return offerText(verb, rows)
+  const out = await turn.dialog(verb === 'approve' ? approveScreen(rows) : acceptScreen(rows))
+  return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${offerText(verb, rows)}`
 }
 
 async function ownerVerb($: EngineInterface, turn: Turn, name: string, verb: Verb): Promise<string | Outcome> {
@@ -74,16 +79,20 @@ async function boardAnswer($: EngineInterface, { k, args }: Turn): Promise<strin
   return r.exitCode !== 0 ? refused('k-board', r) : boardText(r.stdout)
 }
 
-// `/k-amendments`: the amendments waiting (AC-2), kept for a number; `/k-amendments <n>`: that one in full, from the
-// list last shown, read from its file.
-async function amendments($: EngineInterface, { k, args }: Turn): Promise<string> {
+// `/k-amendments`: the amendments waiting (AC-2), kept for a number, as the dialog's choices, where one picked is
+// approved or declined (AC-3, AC-8); when nothing ran, the answer says why and shows the list as a number takes it.
+// `/k-amendments <n>`: that one in full, from the list last shown, read from its file.
+async function amendments($: EngineInterface, turn: Turn): Promise<string | Outcome> {
+  const { k, args } = turn
   if (args.trim() === '') {
     // A list that could not be read leaves none to pick from, never the one before it (review G27).
     delete offered.amendments
     const r = await $.process.run(['node', k, 'waiting', '--json'])
     if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
-    offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments
-    return amendmentsText(offered.amendments)
+    const rows = (offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments)
+    if (!rows.length) return amendmentsText(rows)
+    const out = await turn.dialog(amendmentsScreen(rows))
+    return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${amendmentsText(rows)}`
   }
   const picked = nth(args, offered.amendments, '/k-amendments')
   if (picked === null) return `/k-amendments ${args.trim()}: give an amendment's number from the list. Usage: /k-amendments [<n>]`

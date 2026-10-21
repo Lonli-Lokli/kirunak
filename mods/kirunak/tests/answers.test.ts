@@ -34,7 +34,7 @@ describe('the lists as answers', () => {
   test('/k-amendments lists what waits, numbered; /k-amendments <n> shows that one in full from the list last shown', async ($, on) => {
     world(on)
     expect(await run($, 'k-amendments', '1')).toBe('/k-amendments 1: 1 of which list? /k-amendments shows it first.')
-    expect((await run($, 'k-amendments')).split('\n').slice(0, 3)).toEqual(['2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**, proposed 2026-11-06: The age line'])
+    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**, proposed 2026-11-06: The age line'])
     expect(await run($, 'k-amendments', '1', { kind: 'bridge' })).toBe([
       'weather/offline-forecast A-3, proposed 2026-11-06 by session s1,',
       'changes 2 lines.',
@@ -90,7 +90,7 @@ describe('the lists as answers', () => {
 
   test('/k-approve with no id still lists only the tasks proposed, never an amendment (AC-2)', async ($, on) => {
     world(on)
-    expect(await run($, 'k-approve')).toBe('Waiting for you to approve:\n  1  hub/proposed  can approve\n/k-approve 1 approves the first.')
+    expect(await run($, 'k-approve')).toBe('Nothing ran: dismissed.\n\nWaiting for you to approve:\n  1  hub/proposed  can approve\n/k-approve 1 approves the first.')
   })
 
   const others: PromptOrigin[] = [{ kind: 'sdk' }, { kind: 'plugin', name: 'other' }, { kind: 'peer' }, { kind: 'task-notification' }, { kind: 'auto-continuation' }]

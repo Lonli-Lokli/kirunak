@@ -2,8 +2,9 @@ import type { PromptAutocompleteSuggestion } from 'claude-code'
 
 import type { KirunakRow } from '../types'
 
-// What waits for the owner, as `k waiting --json` gives it: why is what the verb would refuse, null when it would not.
-export type WaitingRow = { id: string; title: string; why: string | null; review?: { file: string; verdict: string | null } | null }
+// What waits for the owner, as `k waiting --json` gives it: why is what the verb would refuse, null when it would not;
+// an accept row's onlyChecklist says open checklist items are all that stops it (`--checklist-open` would run).
+export type WaitingRow = { id: string; title: string; why: string | null; review?: { file: string; verdict: string | null } | null; checklistOpen?: number; onlyChecklist?: boolean }
 // An amendment neither applied nor declined (kirunak-phone S-4): refuse is what k approve --amendment would refuse, one
 // line, null when it would not; file the amendment's absolute path.
 export type AmendmentRow = {

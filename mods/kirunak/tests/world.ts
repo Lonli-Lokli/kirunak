@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
 
-import type { AmendmentRow } from '../hooks/waiting'
+import type { AmendmentRow, Waiting } from '../hooks/waiting'
 import type { KirunakRow, KirunakStatus } from '../types'
 
 export const ID = 'weather/offline-forecast'
@@ -48,12 +48,12 @@ export const FILES: Record<string, string> = {
 export const BOARD = '# kirunak board\n\nMade at 2026-11-07 12:00.\n\n## Working on now (1)\n\n### weather/offline-forecast\n'
 
 // What `k waiting --json` gives for those rows.
-export const WAITING = {
+export const WAITING: Waiting = {
   amendments: AMENDMENTS,
   approve: [{ id: 'hub/proposed', title: 'Asks for approval', why: null }],
   accept: [
     { id: 'weather/was-reviewed', title: 'Reviewed and met', review: { file: 'review.md', verdict: 'met' }, why: null },
-    { id: ID, title: 'The last forecast stays readable offline', review: { file: 'review.md', verdict: 'needs owner (E-1)' }, why: `${ID}: checklist.md has 1 unticked item(s):\n  - [ ] E-1 On the oldest phone. (review.md)` },
+    { id: ID, title: 'The last forecast stays readable offline', review: { file: 'review.md', verdict: 'needs owner (E-1)' }, why: `${ID}: checklist.md has 1 unticked item(s):\n  - [ ] E-1 On the oldest phone. (review.md)`, checklistOpen: 1, onlyChecklist: true },
   ],
 }
 
@@ -68,12 +68,24 @@ export const status = (task: string | null): KirunakStatus => ({
 
 type Answer = { exitCode: number; stdout: string; stderr: string }
 
+// A dialog the mod opened: its question, choices and chip.
+export type Asked = { question: string; labels: string[]; header: string }
+
 // The world beneath the mod: a clock, the commands it registers, its session's id, a k that exists and answers
 // `k list`, `k status`, `k waiting` and `k board` from the fixtures above (each owner verb with `verb`), the amendment
-// files, events.jsonl's lines as tail would print them, and the toasts and panes the mod raised.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (typeof WAITING | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer, verbFails = null as string | null } = {}) {
+// files, events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers
+// to its dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or
+// none left dismisses it.
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
-  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>() }
+  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[] }
+  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
+    const q = e.questions[0]
+    if (q === undefined) return { deny: 'no question' }
+    w.asked.push({ question: q.question, labels: q.options.map(o => o.label), header: q.header })
+    const tap = taps.shift() ?? null
+    return tap === null ? { deny: 'dismissed' } : { result: { questions: e.questions, answers: { [q.question]: tap } } }
+  })
   on('command.register', ($, e) => {
     w.registered.push(e.name)
     return { value: { command: e.name } }
@@ -99,6 +111,7 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       w.boards.push([...e.argv])
       answer = board
     } else if (what === 'waiting') {
+      w.waits++
       // Each `k waiting` takes the next answer, the last one again once they run out; null is a k that failed.
       const next = waiting.length > 1 ? waiting.shift() : waiting[0]
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
