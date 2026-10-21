@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
+import { renderBrief } from '../lib/board-brief.mjs';
 import { rows } from '../lib/list.mjs';
 import { fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
@@ -12,6 +13,14 @@ async function page(w, opts) {
 }
 
 const h2s = (html) => [...html.matchAll(/<h2>([^<]*?)(?: <span class="n">\((\d+)\)<\/span>)?<\/h2>/g)].map((m) => m[1]);
+
+// Each task's row: its summary as read (the tags taken out), its id, and the card under it.
+const tasks = (html) =>
+  [...html.matchAll(/<details class="task">\n<summary>(.*?)<\/summary>\n<div class="card">\n([^]*?)<\/div>\n<\/details>/g)].map((m) => {
+    const summary = m[1].replace(/<[^>]*>/g, '');
+    return { summary, id: summary.slice(0, summary.indexOf(':')), card: m[2], raw: m[0] };
+  });
+const cardOf = (html, id) => tasks(html).find((t) => t.id === id)?.card ?? '';
 
 test('every task appears with its AC and E and their latest verdicts', async () => {
   const w = await fixture();
@@ -22,17 +31,16 @@ test('every task appears with its AC and E and their latest verdicts', async () 
   for (const text of ['The last forecast stays readable offline', 'With no network, the app opens on the last forecast it fetched', 'A forecast older than a day shows its age in words']) {
     assert.ok(html.includes(text), text);
   }
-  const card = html.slice(html.indexOf('hub/reviewed'), html.indexOf('</article>', html.indexOf('hub/reviewed')));
+  const card = cardOf(html, 'hub/reviewed');
   assert.match(card, /<b>AC-1<\/b>[^<]*<span class="v v-met">met<\/span>/);
   assert.match(card, /<b>AC-2<\/b>.*<span class="v v-notmet">not met<\/span>/);
   assert.match(card, /<b>E-1<\/b>.*<span class="v v-none">none<\/span>/);
   assert.match(card, /review: review-2\.md, verdict: not met \(AC-2\)/);
-  const chart = html.slice(html.indexOf('weather/hourly-chart'), html.indexOf('</article>', html.indexOf('weather/hourly-chart')));
+  const chart = cardOf(html, 'weather/hourly-chart');
   assert.match(chart, /state: in progress, queue place 1/);
   assert.match(chart, /step: 2026-11-03 14:02 S-2 started/);
-  const cardOf = (id) => html.slice(html.indexOf(`<h3>${id}</h3>`), html.indexOf('</article>', html.indexOf(`<h3>${id}</h3>`)));
-  assert.match(cardOf('weather/next-up'), /state: queued, queue place 2/);
-  assert.match(cardOf('hub/later'), /state: parked</);
+  assert.match(cardOf(html, 'weather/next-up'), /state: queued, queue place 2/);
+  assert.match(cardOf(html, 'hub/later'), /state: parked</);
   assert.deepEqual(h2s(html), [
     'Working on now', 'proposed', 'queued', 'parked', 'in progress', 'in review', 'done this week', 'Lock, queue and running steps',
   ], 'a section per state with tasks, in lib/state.mjs\'s order');
@@ -124,24 +132,26 @@ test('the tasks sessions work on come first, each once, with who works on it; a 
   const html = await page(w);
   assert.deepEqual(h2s(html), ['Working on now', 'proposed', 'done this week', 'Lock, queue and running steps']);
   const work = html.slice(html.indexOf('<section class="work">'), html.indexOf('<div class="states">'));
-  assert.deepEqual([...work.matchAll(/<h3>([^<]*)<\/h3>/g)].map((m) => m[1]), ['weather/hourly-chart', 'hub/reviewed'], 'in k list\'s order');
+  assert.deepEqual(tasks(work).map((t) => t.id), ['weather/hourly-chart', 'hub/reviewed'], 'in k list\'s order');
   assert.match(work, /<h2>Working on now <span class="n">\(2\)<\/span><\/h2>/);
   assert.match(work, /worked on by session s1 since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
   assert.match(work, /worked on by step S-3 running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
-  assert.equal(html.split('<h3>weather/hourly-chart</h3>').length, 2, 'once on the page');
+  assert.equal(html.split('<summary><b>weather/hourly-chart</b>').length, 2, 'once on the page');
   assert.ok(!work.includes('weather/recent'));
 });
 
-test('read in order by a screen reader: one h1, the time it was made, an h2 per section, an h3 per card, lists for the AC and E', async () => {
+test('read in order by a screen reader: one h1, the time it was made, an h2 per section, a row per task, lists for the AC and E', async () => {
   const w = await fixture();
   sessionsAt(w);
   const html = await page(w);
   const body = html.slice(html.indexOf('<body>'));
-  assert.deepEqual([...body.matchAll(/<h([1-3])>/g)].map((m) => m[1]).join(''), '1233232323333');
+  assert.deepEqual([...body.matchAll(/<h([1-3])>/g)].map((m) => m[1]).join(''), '122223333');
   assert.match(body, /<h1>kirunak board<\/h1>\n<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
-  for (const card of body.split('<article class="card">').slice(1)) {
-    assert.match(card, /^\n<h3>[a-z]+\/[a-z-]+<\/h3>\n<p>[^<]+<\/p>\n<p class="meta">state: [a-z ]+/, 'id, title, state as text, in that order');
-    assert.match(card, /<ul class="items">\n(<li><b>(AC|E)-\d+<\/b> <span class="v [a-z-]+">(met|not met|needs device|needs owner|none)<\/span>: [^\n]*<\/li>\n)+<\/ul>/);
+  assert.equal(tasks(body).length, body.split('<details').length - 1, 'every task a row');
+  for (const t of tasks(body)) {
+    assert.match(t.raw, /^<details class="task">\n<summary><b>[a-z]+\/[a-z-]+<\/b>: [a-z ]+[,<]/, 'the id, then the state, as text');
+    assert.match(t.card, /^<p>[^<]+<\/p>\n<p class="meta">state: [a-z ]+/, 'the title, then the state as text');
+    assert.match(t.card, /<ul class="items">\n(<li><b>(AC|E)-\d+<\/b> <span class="v [a-z-]+">(met|not met|needs device|needs owner|none)<\/span>: [^\n]*<\/li>\n)+<\/ul>/);
   }
   assert.ok(!/[·•|]/.test(body.replace(/<[^>]*>/g, '')), 'no separator or bullet drawn in the text');
   assert.ok(!/content:\s*['"][^'"]/.test(html), 'no CSS mark a reader would speak');
@@ -163,4 +173,20 @@ test('the page written at a path, for the phone, has no file:// link', async () 
   const out = await write(w.ws, { path: join(w.root, 'phone', 'board.html') });
   assert.ok(!readFileSync(out, 'utf8').includes('file://'));
   assert.ok(readFileSync(await write(w.ws), 'utf8').includes('file://'), 'the local page keeps them');
+});
+
+test('each task a brief row, closed at first, that opens its card in place: native details, in the brief board\'s order', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  queuedAndParked(w);
+  const list = await rows(w.ws, { all: true });
+  const html = renderHtml(list, snapshot(w.ws), NOW);
+  const brief = renderBrief(list, snapshot(w.ws), NOW);
+  const entries = brief.text.split('\n').filter((l) => /^[a-z]+\/[a-z-]+: /.test(l));
+  assert.deepEqual(tasks(html).map((t) => t.summary), entries, 'each summary the brief entry, in the same order');
+  assert.deepEqual(tasks(html).map((t) => t.id), brief.ids);
+  assert.ok(!/<details[^>]*\sopen/.test(html), 'closed until tapped');
+  assert.ok(!/\srole=/.test(html), 'no role over the native semantics');
+  assert.ok(!/\saria-(?!hidden)/.test(html), 'no aria but on a decorative mark');
+  assert.ok(cardOf(html, 'weather/offline-forecast').includes('A forecast older than a day shows its age in words'), 'every AC and E in full');
 });
