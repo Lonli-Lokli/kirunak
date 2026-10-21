@@ -7,7 +7,7 @@ export type Tone = 'plain' | 'dim' | 'bold' | 'success' | 'error' | 'warning'
 export type Line = { text: string; tone: Tone }
 
 // A progress line as k list's row carries it, less its date and a review's hash, as `k list` prints it.
-const stepOf = (step: string | null): string | null =>
+export const stepOf = (step: string | null): string | null =>
   step === null ? null : step.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} /, '').replace(/ sha256:[0-9a-f]{64}/, '')
 
 const toneOf = (verdict: string | null): Tone =>
