@@ -69,6 +69,10 @@ export function listText(rows: readonly ListRow[], all: boolean): string {
   return [head, '', ...numbered(rows.map(taskItem)), ...(all ? [] : ['', '/k-list all adds the done and on hold.'])].join('\n')
 }
 
+// `k board --markdown` less its first heading, which names kirunak as the engine's prefix to the answer already does
+// (AC-12), and the blank line under it.
+export const boardText = (markdown: string): string => markdown.replace(/^# .*\n(?:[ \t]*\n)?/, '').trimEnd()
+
 // What k approve would refuse, less the id and A-n it starts with, as k waiting's own line shortens it.
 function refuseOf(x: AmendmentRow): string | null {
   if (x.refuse === null) return null

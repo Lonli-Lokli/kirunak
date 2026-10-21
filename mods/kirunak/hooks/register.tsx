@@ -5,6 +5,7 @@ import { bandLine, paneLines } from './board'
 import type { Tone } from './board'
 import { argvFor, HINTS, isOwners, refusal } from './commands'
 import type { Verb } from './commands'
+import { boardText, listText } from './lists'
 import { kOf, lastRows, refresh, sessionTask, tick } from './reads'
 import { byNumber, idSuggestions, offerText } from './waiting'
 import type { Waiting } from './waiting'
@@ -16,6 +17,8 @@ const EVERY_MS = 30_000
 
 const PANE = 'kirunak'
 const FAILED = (name: string): string => `/${name} failed in the mod (the debug log says why); if k had started, \`k list --all\` shows whether it took.`
+// A list's: it runs no verb.
+const READ_FAILED = (name: string): string => `/${name} failed in the mod; the debug log says why.`
 // The read's value, which reads.ts writes; the scan wants the reference written in the file that reads it.
 const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
 
@@ -28,42 +31,80 @@ const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success
 // go on in the same process under another session, whose screen shows no such list (review G25).
 const offered: Partial<Record<'approve' | 'accept', string[]>> = {}
 
+// What came from the phone says so, since the transcript does not keep where a command came from; after a blank line
+// under a markdown answer, so it is not read as its list's last entry.
+async function owners(e: CommandRunInput, name: string, answer: () => Promise<string>, gap = '\n'): Promise<CommandRunResult> {
+  if (!isOwners(e.origin)) return { text: refusal(name, e.origin) }
+  const text = await answer()
+  return { text: e.origin.kind === 'bridge' ? `${text}${gap}(typed in Remote Control)` : text }
+}
+
+// Runs `run` with the checkout's k, or says there is none and runs nothing.
+async function withK($: EngineInterface, name: string, run: (k: string) => Promise<string>): Promise<string> {
+  const k = await kOf($)
+  return (await $.fs.exists(k)) ? run(k) : `/${name}: there is no k at ${k}, so nothing ran.`
+}
+
+const refused = (name: string, r: { stdout: string; stderr: string }): string => `/${name} refused:\n${(r.stderr || r.stdout).trim()}`
+const firstLine = (r: { stdout: string; stderr: string }): string => (r.stderr || r.stdout).trim().split('\n')[0] ?? ''
+
+// An owner's verb as `node k <argv>`, with the time a commit takes; k's state line, or why it did not take.
+async function runVerb($: EngineInterface, name: string, k: string, argv: readonly string[]): Promise<{ ok: boolean; text: string }> {
+  let r
+  try {
+    r = await $.process.run(['node', k, ...argv], { timeoutMs: COMMIT_MS })
+  } catch (err) {
+    return { ok: false, text: `/${name}: k did not finish (${err instanceof Error ? err.message : String(err)}); \`k list --all\` says whether it took.` }
+  }
+  void refresh($)
+  return r.exitCode !== 0 ? { ok: false, text: refused(name, r) } : { ok: true, text: r.stdout.trim() }
+}
+
 async function offer($: EngineInterface, k: string, verb: 'approve' | 'accept'): Promise<string> {
   const r = await $.process.run(['node', k, 'waiting', '--json'])
   // A list that could not be read leaves none to pick from, never the one before it (review G27).
   delete offered[verb]
-  if (r.exitCode !== 0) return `k waiting did not answer: ${(r.stderr || r.stdout).trim().split('\n')[0]}`
+  if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
   const rows = (JSON.parse(r.stdout) as Waiting)[verb]
   offered[verb] = rows.map(row => row.id)
   return offerText(verb, rows)
 }
 
-async function ownerVerb($: EngineInterface, e: CommandRunInput, name: string, verb: Verb): Promise<CommandRunResult> {
-  if (!isOwners(e.origin)) return { text: refusal(name, e.origin) }
-  // What came from the phone says so, since the transcript does not keep where a command came from.
-  const said = (text: string): CommandRunResult => ({ text: e.origin.kind === 'bridge' ? `${text}\n(typed in Remote Control)` : text })
-  const k = await kOf($)
-  if (!(await $.fs.exists(k))) return said(`/${name}: there is no k at ${k}, so nothing ran.`)
-  let args = e.args
-  if (verb === 'approve' || verb === 'accept') {
-    if (args.trim() === '') return said(await offer($, k, verb))
-    const picked = byNumber(args, offered[verb])
-    if (picked !== null && 'problem' in picked) return said(`/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`)
-    if (picked !== null) args = picked.args
-  }
-  const parsed = argvFor(verb, args)
-  if ('problem' in parsed) return said(`/${name}: ${parsed.problem}. Nothing ran. Usage: /${name} ${HINTS[verb]}`)
-  const argv = verb === 'start' ? [...parsed.argv, '--session', await $.session.id()] : parsed.argv
-  let r
-  try {
-    r = await $.process.run(['node', k, ...argv], { timeoutMs: COMMIT_MS })
-  } catch (err) {
-    return said(`/${name}: k did not finish (${err instanceof Error ? err.message : String(err)}); \`k list --all\` says whether it took.`)
-  }
-  void refresh($)
-  if (r.exitCode !== 0) return said(`/${name} refused:\n${(r.stderr || r.stdout).trim()}`)
-  if (verb === 'start') void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
-  return said(r.stdout.trim())
+async function ownerVerb($: EngineInterface, e: CommandRunInput, name: string, verb: Verb): Promise<string> {
+  return withK($, name, async k => {
+    let args = e.args
+    if (verb === 'approve' || verb === 'accept') {
+      if (args.trim() === '') return offer($, k, verb)
+      const picked = byNumber(args, offered[verb])
+      if (picked !== null && 'problem' in picked) return `/${name} ${args.trim()}: ${picked.problem}. Nothing ran.`
+      if (picked !== null) args = picked.args
+    }
+    const parsed = argvFor(verb, args)
+    if ('problem' in parsed) return `/${name}: ${parsed.problem}. Nothing ran. Usage: /${name} ${HINTS[verb]}`
+    const argv = verb === 'start' ? [...parsed.argv, '--session', await $.session.id()] : parsed.argv
+    const out = await runVerb($, name, k, argv)
+    if (verb === 'start' && out.ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
+    return out.text
+  })
+}
+
+// `/k-list [all]`: k list's rows for a phone (AC-1).
+function list($: EngineInterface, args: string): Promise<string> {
+  return withK($, 'k-list', async k => {
+    const all = args.trim()
+    if (all !== '' && all !== 'all') return `/k-list takes all or nothing, not ${all}.`
+    const r = await $.process.run(['node', k, 'list', '--json', ...(all ? ['--all'] : [])])
+    return r.exitCode !== 0 ? refused('k-list', r) : listText(JSON.parse(r.stdout).rows, all === 'all')
+  })
+}
+
+// `/k-board`: the board as lists in the chat (AC-5), as `k board --markdown` prints it.
+function boardAnswer($: EngineInterface, args: string): Promise<string> {
+  return withK($, 'k-board', async k => {
+    if (args.trim()) return `/k-board takes nothing, not ${args.trim()}.`
+    const r = await $.process.run(['node', k, 'board', '--markdown'])
+    return r.exitCode !== 0 ? refused('k-board', r) : boardText(r.stdout)
+  })
 }
 
 export const register: Register = on => {
@@ -74,6 +115,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-accept', description: 'Accept a reviewed kirunak task as done: k accept, as your own command', argumentHint: HINTS.accept })
     await $.command.register({ name: 'k-hold', description: 'Put a kirunak task on hold: k hold, as your own command', argumentHint: HINTS.hold })
     await $.command.register({ name: 'k-start', description: 'Name the kirunak task this session works on: k start', argumentHint: HINTS.start })
+    await $.command.register({ name: 'k-list', description: 'The kirunak tasks k list shows, as a list for a phone', argumentHint: '[all]' })
+    await $.command.register({ name: 'k-board', description: 'The kirunak board as lists: the tasks worked on now, every task by state, the lock and the queue' })
     await $.command.register({ name: 'kirunak', description: 'Show or hide kirunak\'s pane: this session\'s task, the queue and the lock' })
     // A `claude -p` run draws nothing: it gets the commands, which refuse its origin, and no reads.
     if (e.isInteractive) {
@@ -89,13 +132,17 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The engine puts the plugin's name before the first line of every answer (measured on the phone, kirunak-phone
+  // AC-12), so no answer of the mod starts with it or names it again.
   // A hook that fails answers with the mod's own line instead of the engine's (review G22). The engine runs nothing
   // for a registered command whose hook failed either way; a failure after k started cannot be ruled out, so the line
   // says where to look.
-  on('command.run', { command: 'k-approve' }, ($, e) => ownerVerb($, e, 'k-approve', 'approve')).catch(() => ({ text: FAILED('k-approve') }))
-  on('command.run', { command: 'k-accept' }, ($, e) => ownerVerb($, e, 'k-accept', 'accept')).catch(() => ({ text: FAILED('k-accept') }))
-  on('command.run', { command: 'k-hold' }, ($, e) => ownerVerb($, e, 'k-hold', 'hold')).catch(() => ({ text: FAILED('k-hold') }))
-  on('command.run', { command: 'k-start' }, ($, e) => ownerVerb($, e, 'k-start', 'start')).catch(() => ({ text: FAILED('k-start') }))
+  on('command.run', { command: 'k-approve' }, ($, e) => owners(e, 'k-approve', () => ownerVerb($, e, 'k-approve', 'approve'))).catch(() => ({ text: FAILED('k-approve') }))
+  on('command.run', { command: 'k-accept' }, ($, e) => owners(e, 'k-accept', () => ownerVerb($, e, 'k-accept', 'accept'))).catch(() => ({ text: FAILED('k-accept') }))
+  on('command.run', { command: 'k-hold' }, ($, e) => owners(e, 'k-hold', () => ownerVerb($, e, 'k-hold', 'hold'))).catch(() => ({ text: FAILED('k-hold') }))
+  on('command.run', { command: 'k-start' }, ($, e) => owners(e, 'k-start', () => ownerVerb($, e, 'k-start', 'start'))).catch(() => ({ text: FAILED('k-start') }))
+  on('command.run', { command: 'k-list' }, ($, e) => owners(e, 'k-list', () => list($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-list') }))
+  on('command.run', { command: 'k-board' }, ($, e) => owners(e, 'k-board', () => boardAnswer($, e.args), '\n\n')).catch(() => ({ text: READ_FAILED('k-board') }))
 
   on('session.end', ($, e, next) => {
     delete offered.approve
@@ -106,12 +153,12 @@ export const register: Register = on => {
   on('command.run', { command: 'kirunak' }, async $ => {
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
       await $.ui.close({ id: PANE })
-      return { text: 'kirunak: the pane is closed.' }
+      return { text: 'The pane is closed.' }
     }
     const opened = await $.ui.open({ id: PANE, title: 'kirunak' })
     void refresh($)
-    return { text: opened.isPlaced ? 'kirunak: the pane is open.' : `kirunak: the pane waits: ${opened.reason}` }
-  }).catch(() => ({ text: 'kirunak: the pane could not be opened or closed; the debug log says why.' }))
+    return { text: opened.isPlaced ? 'The pane is open.' : `The pane waits: ${opened.reason}` }
+  }).catch(() => ({ text: 'The pane could not be opened or closed; the debug log says why.' }))
 
   // At the terminal, the tasks a command can take come up in the typeahead as its id is typed.
   on('prompt.autocomplete', async ($, e, next) => {

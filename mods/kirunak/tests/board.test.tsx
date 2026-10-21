@@ -76,13 +76,13 @@ describe('the working view', () => {
     expect((await pane.findAll({ type: 'Text' }))[0]?.text).toBe('No task in this session: /k-start <id> names one.')
   })
 
-  test('/kirunak opens the pane and closes it again', async ($, on) => {
+  test('/kirunak opens the pane and closes it again, under the one "kirunak" the engine puts before an answer', async ($, on) => {
     const w = world(on, { task: null })
     await start($, w)
     const presentation = { isFullscreen: true, columns: 160 }
-    expect((await $.command.run({ command: 'kirunak', args: '', origin: { kind: 'composer' }, presentation })).text).toBe('kirunak: the pane is open.')
+    expect((await $.command.run({ command: 'kirunak', args: '', origin: { kind: 'composer' }, presentation })).text).toBe('The pane is open.')
     expect([...w.panes]).toEqual(['kirunak'])
-    expect((await $.command.run({ command: 'kirunak', args: '', origin: { kind: 'composer' }, presentation })).text).toBe('kirunak: the pane is closed.')
+    expect((await $.command.run({ command: 'kirunak', args: '', origin: { kind: 'composer' }, presentation })).text).toBe('The pane is closed.')
     expect([...w.panes]).toEqual([])
   })
 })
