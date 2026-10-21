@@ -3,69 +3,9 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { hashBytes } from '../lib/approval.mjs';
 import { renderHtml, status, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { rows } from '../lib/list.mjs';
-import { makeWorkspace } from './helpers.mjs';
-
-function addTask(repoRoot, id, title, { approved, files = {} } = {}) {
-  const slug = id.split('/')[1];
-  const dir = join(repoRoot, 'kirunak', 'tasks', slug);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'task.md'), `---
-id: ${id}
-title: ${title}
-created: 2026-11-03
----
-
-## Goal
-${title}. [owner 2026-11-03 Q-1]
-
-## Acceptance criteria
-- AC-1 The chart shows one point per hour. [owner 2026-11-03 Q-1]
-- AC-2 Points read <below> & above zero. [owner 2026-11-03 Q-2]
-
-## Edge cases
-- E-1 A missing hour leaves a gap. [owner 2026-11-03 Q-3]
-
-## Out of scope
-
-## Decisions
-
-## Aspects
-
-## Open questions
-`);
-  if (approved) {
-    mkdirSync(join(repoRoot, 'kirunak', 'approvals'), { recursive: true });
-    const record = { task: id, hash: hashBytes(readFileSync(join(dir, 'task.md'))), approved, by: 'owner', via: 'shell', commit: 'abc1234', history: [] };
-    writeFileSync(join(repoRoot, 'kirunak', 'approvals', `${slug}.json`), JSON.stringify(record));
-  }
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
-}
-
-const REVIEW = `| id | verdict | evidence |
-| --- | --- | --- |
-| AC-1 | met | test A.one (test/a.test.mjs:3) |
-| AC-2 | not met | file src/a.mjs:9: below zero is drawn above |
-
-verdict: not met (AC-2)
-`;
-
-async function fixture() {
-  const w = await makeWorkspace();
-  addTask(w.weather, 'weather/hourly-chart', 'An hourly chart <for> today', {
-    approved: '2026-11-03T10:00:00Z',
-    files: { 'progress.md': '2026-11-03 14:02 S-2 started (opus, session 7c1)\n' },
-  });
-  addTask(w.hub, 'hub/reviewed', 'A reviewed task', { approved: '2026-11-01T09:00:00Z', files: { 'review-2.md': REVIEW } });
-  addTask(w.weather, 'weather/recent', 'Done this week', { approved: '2026-11-01T09:00:00Z', files: { 'done.json': '{"accepted":"2026-11-06"}' } });
-  addTask(w.weather, 'weather/long-ago', 'Done long ago', { approved: '2026-09-01T09:00:00Z', files: { 'done.json': '{"accepted":"2026-09-02"}' } });
-  writeFileSync(join(w.hub, 'kirunak', 'queue.md'), '# queue\nweather/hourly-chart\n');
-  return w;
-}
-
-const NOW = new Date('2026-11-07T12:00:00Z');
+import { fixture, NOW } from './board-fixture.mjs';
 
 async function page(w) {
   return renderHtml(await rows(w.ws, { all: true }), status(w.ws), NOW);
