@@ -55,6 +55,12 @@ export const WAITING: Waiting = {
     { id: 'weather/was-reviewed', title: 'Reviewed and met', review: { file: 'review.md', verdict: 'met' }, why: null },
     { id: ID, title: 'The last forecast stays readable offline', review: { file: 'review.md', verdict: 'needs owner (E-1)' }, why: `${ID}: checklist.md has 1 unticked item(s):\n  - [ ] E-1 On the oldest phone. (review.md)`, checklistOpen: 1, onlyChecklist: true },
   ],
+  hold: [
+    { id: ID, title: 'The last forecast stays readable offline', state: 'in review' },
+    { id: 'hub/sync-notes', title: 'Sync notes', state: 'queued' },
+  ],
+  // k start takes what k list shows: every task neither done nor on hold.
+  start: ROWS.filter(r => r.state !== 'done').map(({ id, title, state }) => ({ id, title, state })),
 }
 
 export const status = (task: string | null): KirunakStatus => ({
@@ -71,14 +77,15 @@ type Answer = { exitCode: number; stdout: string; stderr: string }
 // A dialog the mod opened: its question, choices and chip.
 export type Asked = { question: string; labels: string[]; header: string }
 
-// The world beneath the mod: a clock, the commands it registers, its session's id, a k that exists and answers
-// `k list`, `k status`, `k waiting` and `k board` from the fixtures above (each owner verb with `verb`), the amendment
-// files, events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers
-// to its dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or
-// none left dismisses it.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[] } = {}) {
+// The world beneath the mod: a clock, the commands it registers, its session's id (`idRead`: how many dialogs had
+// opened at each read of it), a k that exists and answers `k list` (from `rows`, ROWS unless a test gives its own),
+// `k status`, `k waiting` and `k board` from the fixtures above (each owner verb with `verb`), the amendment files,
+// events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
+// dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
+// left dismisses it.
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
-  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[] }
+  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[] }
   on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
     const q = e.questions[0]
     if (q === undefined) return { deny: 'no question' }
@@ -91,7 +98,11 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
     return { value: { command: e.name } }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'sess-1' }))
+  // How many dialogs had opened when the session's id was read.
+  on('session.id', () => {
+    w.idRead.push(w.asked.length)
+    return { value: 'sess-1' }
+  })
   // `broken` makes the mod's first question about k fail, as a hook that throws.
   on('fs.exists', () => (broken ? { deny: 'the disk is gone' } : { value: true }))
   on('fs.read', ($, e) => (FILES[e.path] !== undefined ? { value: FILES[e.path] as string } : { deny: `ENOENT: no such file, ${e.path}` }))
@@ -105,8 +116,8 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
     if (what === 'list' || what === 'status') {
       w.reads += what === 'list' ? 1 : 0
       // k list leaves out done and on hold unless asked for --all.
-      const rows = e.argv.includes('--all') ? ROWS : ROWS.filter(r => r.state !== 'done' && r.state !== 'on hold')
-      answer = { exitCode: 0, stdout: JSON.stringify(what === 'list' ? { rows } : status(task)), stderr: '' }
+      const shown = e.argv.includes('--all') ? rows : rows.filter(r => r.state !== 'done' && r.state !== 'on hold')
+      answer = { exitCode: 0, stdout: JSON.stringify(what === 'list' ? { rows: shown } : status(task)), stderr: '' }
     } else if (what === 'board') {
       w.boards.push([...e.argv])
       answer = board

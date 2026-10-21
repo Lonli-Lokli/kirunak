@@ -25,8 +25,8 @@ const FLAGS: Record<Verb, Record<string, boolean>> = {
 export const HINTS: Record<Verb, string> = {
   approve: '[<id> | <n>] [--amendment A-n] [--first | --before <id> | --after <id>] [--no-queue]',
   accept: '[<id> | <n>] [--checklist-open "<why>"]',
-  hold: '<id> <why>',
-  start: '<id>',
+  hold: '[<id> <why>]',
+  start: '[<id>]',
 }
 
 // lib/workspace.mjs's task id: <repo>/<slug>.

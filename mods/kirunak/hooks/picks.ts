@@ -1,11 +1,11 @@
 import { amendmentItem, amendmentLabel, taskLabel } from './lists'
 import type { Item } from './lists'
 import type { Choice, Screen } from './owner'
-import type { AmendmentRow, WaitingRow } from './waiting'
+import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
-// The dialogs of /k-approve, /k-accept and /k-amendments with no number (kirunak-phone AC-3, AC-8, AC-9, E-4): the
-// list of what waits, then the one picked, in its own words, with the verb k would take now and none it would refuse.
-// Each verb runs by id, so a list that changed since ends in k's refusal, never on another row (E-2).
+// The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
+// AC-11, E-4): the list of what waits, then the one picked, in its own words, with the verb k would take now and none
+// it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on another row (E-2).
 
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 const titleOf = (r: { title: string }): string => r.title.replace(/\s+/g, ' ').trim()
@@ -102,4 +102,45 @@ export function amendmentsScreen(rows: readonly AmendmentRow[]): Screen {
     question: x.refuse === null ? 'Approve it, or decline it?' : 'k would refuse its approval now. Decline it?',
   })
   return { kind: 'list', header: 'Amendments', head: 'Waiting for your approval:', question: 'Which amendment?', rows: rows.map(x => ({ item: amendmentItem(x), label: amendmentLabel(x), open: () => item(x) })) }
+}
+
+// A task as the hold, start and queue lists show it: id, title, and its state as k list says it, with its queue place.
+export function stateItem(r: TaskRow, place: number | null = null): Item {
+  return { lead: '', name: r.id, text: `: ${sentence(titleOf(r))} ${r.state.charAt(0).toUpperCase()}${r.state.slice(1)}${place !== null ? `, place ${place}` : ''}.` }
+}
+
+const stateText = (r: TaskRow): string[] => [`${r.id}: ${sentence(titleOf(r))}`, `State: ${r.state}.`]
+
+// /k-hold with no id (AC-10): the tasks k hold would take; the one picked offers Hold, which takes the reason typed in
+// the free-text row, shown above "Hold <id>".
+export function holdScreen(rows: readonly TaskRow[]): Screen {
+  const confirm = (r: TaskRow, why: string): Screen => ({
+    kind: 'item',
+    header: 'Hold',
+    text: [...stateText(r), `Reason: ${why}`],
+    choices: [{ label: `Hold ${r.id}`, verb: ['hold', r.id, '--why', why, '--via', 'mod'] }],
+    question: 'Put it on hold, for that reason?',
+  })
+  const reason = (r: TaskRow): Screen => ({
+    kind: 'reason',
+    header: 'Hold',
+    text: stateText(r),
+    question: 'Type the reason in the free-text row: why put it on hold?',
+    given: why => confirm(r, why),
+  })
+  const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Hold', text: stateText(r), choices: [{ label: 'Hold', open: () => reason(r) }], question: 'Put it on hold?' })
+  return { kind: 'list', header: 'Hold', head: 'Tasks you can put on hold:', question: 'Which task?', rows: rows.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
+}
+
+// /k-start with no id (AC-11): the tasks k start would take; "Start <id>" names it this session's (`session`, read
+// before the dialog opens), and `after` is told whether k took it.
+export function startScreen(rows: readonly TaskRow[], session: string, after: (ok: boolean) => void): Screen {
+  const item = (r: TaskRow): Screen => ({
+    kind: 'item',
+    header: 'Start',
+    text: stateText(r),
+    choices: [{ label: `Start ${r.id}`, verb: ['start', r.id, '--via', 'mod', '--session', session], after }],
+    question: 'Work on it in this session?',
+  })
+  return { kind: 'list', header: 'Start', head: 'Tasks this session can work on:', question: 'Which task?', rows: rows.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
 }

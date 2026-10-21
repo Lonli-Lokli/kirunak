@@ -78,10 +78,10 @@ describe('the owner\'s commands', () => {
       ['k-hold', `${ID} --why --dry-run`, /--why needs a value, not --dry-run\. Nothing ran\./],
       ['k-accept', `${ID} --checklist-open=--dry-run`, /--checklist-open needs a value, not --dry-run\. Nothing ran\./],
       ['k-approve', 'not-an-id', /not a task id: not-an-id\. Nothing ran\./],
-      ['k-start', '', /which task\? give its id, <repo>\/<slug>\. Nothing ran\./],
+      ['k-start', '--dry-run', /not a task id: --dry-run\. Nothing ran\./],
       ['k-start', `${ID} extra`, /unexpected extra\. Nothing ran\./],
       ['k-hold', `${ID} "open`, /a quote is left open\. Nothing ran\./],
-      ['k-hold', ID, /why\? \/k-hold <id> <why>\. Nothing ran\. Usage: \/k-hold <id> <why>$/],
+      ['k-hold', ID, /why\? \/k-hold <id> <why>\. Nothing ran\. Usage: \/k-hold \[<id> <why>\]$/],
     ]
     for (const [command, args, want] of cases) {
       expect((await run($, command, args, { kind: 'composer' })).text).toMatch(want)

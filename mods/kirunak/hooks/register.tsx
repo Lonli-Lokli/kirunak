@@ -8,7 +8,7 @@ import type { Verb } from './commands'
 import { amendmentsText, amendmentText, boardText, listText } from './lists'
 import { nothingRan, owners } from './owner'
 import type { Outcome, Turn } from './owner'
-import { acceptScreen, amendmentsScreen, approveScreen } from './picks'
+import { acceptScreen, amendmentsScreen, approveScreen, holdScreen, startScreen } from './picks'
 import { lastRows, refresh, sessionTask, tick } from './reads'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
 import type { AmendmentRow, Waiting } from './waiting'
@@ -48,8 +48,26 @@ async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept')
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${offerText(verb, rows)}`
 }
 
+// `/k-hold` or `/k-start` with no id: the tasks k waiting says the verb would take, as the dialog's choices
+// (kirunak-phone AC-10, AC-11). k start records this session as the task's, so its id is read before the dialog opens,
+// and the pane opens once k took it, as after the typed /k-start.
+async function pickTask($: EngineInterface, turn: Turn, verb: 'hold' | 'start'): Promise<string | Outcome> {
+  const r = await $.process.run(['node', turn.k, 'waiting', '--json'])
+  if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
+  const rows = (JSON.parse(r.stdout) as Waiting)[verb] ?? []
+  if (!rows.length) return verb === 'hold' ? 'No task can be put on hold now.' : 'No task to start: every task is done or on hold.'
+  const first = verb === 'hold'
+    ? holdScreen(rows)
+    : startScreen(rows, await $.session.id(), ok => {
+      if (ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
+    })
+  const out = await turn.dialog(first)
+  return out.nothing === null ? out : nothingRan(out.nothing)
+}
+
 async function ownerVerb($: EngineInterface, turn: Turn, name: string, verb: Verb): Promise<string | Outcome> {
   let args = turn.args
+  if ((verb === 'hold' || verb === 'start') && args.trim() === '') return pickTask($, turn, verb)
   if (verb === 'approve' || verb === 'accept') {
     if (args.trim() === '') return offer($, turn, verb)
     const picked = byNumber(args, offered[verb])

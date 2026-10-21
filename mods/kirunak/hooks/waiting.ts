@@ -18,7 +18,9 @@ export type AmendmentRow = {
   refuse: string | null
   file: string
 }
-export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[]; amendments: AmendmentRow[] }
+// A task k hold or k start would take, with its state as k list says it.
+export type TaskRow = { id: string; title: string; state: string }
+export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[]; amendments: AmendmentRow[]; hold: TaskRow[]; start: TaskRow[] }
 
 // `/k-approve` or `/k-accept` with no id: the tasks waiting for that verb, numbered as `/k-accept <n>` takes them.
 export function offerText(verb: 'approve' | 'accept', rows: readonly WaitingRow[]): string {
