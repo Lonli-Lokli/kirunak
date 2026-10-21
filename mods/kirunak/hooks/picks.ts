@@ -19,9 +19,9 @@ function refusalLines(id: string, why: string): string[] {
   return lines.map((l, i) => (i === 0 && l.startsWith(`${id}: `) ? l.slice(id.length + 2) : l))
 }
 
-// A waiting task's state, which k waiting does not give: k approve takes proposed tasks, and k accept reviewed ones,
-// which read "awaiting owner" while their checklist has an unticked item (lib/state.mjs).
-const waitingState = (verb: 'approve' | 'accept', r: WaitingRow): string => (verb === 'approve' ? 'proposed' : r.checklistOpen ? 'awaiting owner' : 'reviewed')
+// A waiting task's state as k waiting gives it; from an older k without it, what k approve and k accept take: proposed
+// tasks, and reviewed ones, which read "awaiting owner" while their checklist has an unticked item (lib/state.mjs).
+const waitingState = (verb: 'approve' | 'accept', r: WaitingRow): string => r.state ?? (verb === 'approve' ? 'proposed' : r.checklistOpen ? 'awaiting owner' : 'reviewed')
 
 // A task k waiting offers a verb on, as a list row: its id and state; whether k would take the verb shows once picked.
 export const waitingItem = (verb: 'approve' | 'accept', r: WaitingRow): Item => ({ lead: '', name: r.id, text: `: ${waitingState(verb, r)}` })
