@@ -1,55 +1,105 @@
-# The boards: the list, the local page, the phone artifact, the mod
+# The boards: the list, the local page, the phone board, the mod
 
 Design (D5, D10, D13, D14, R16). Each choice is marked **evidence** (with its source) or **judgement**. Index:
 `README.md`. All four are front ends over the task files (`frontend` seam, `plugins.md` §2); none holds state of its
-own, and none approves anything.
+own, and none approves anything by itself: the only taps that act are the owner's, in the mod's dialog (§4,
+`approval.md` §5). Revised 2026-10-21 for kirunak-phone (amendment A-9): §3 and §4 say what was built, in place of
+the sync step this file first designed.
 
 ## 1. The list: `k list`
 
 One line per task across every workspace repo, queue order first (invented rows):
 
 ```
- 1  ready        weather/offline-forecast   The last forecast stays readable offline   next S-1 (sonnet)
+ 1  queued       weather/offline-forecast   The last forecast stays readable offline   next S-1 (sonnet)
  2  in progress  weather/hourly-chart       An hourly chart for today                  S-4 running 12 min, lock: weather unit tests
+    parked       hub/sync-notes             Sync notes between devices                 approved, out of the queue
     awaiting     hub/release-notes          Release notes in every language            Q-3 open
     done         weather/settings-backup    ...                                        2026-11-01
 ```
+
+The states are the twelve of `task-files.md` §4. An approved task with no step started reads **queued** while it is in
+the queue and **parked** while it is not (approved with `k approve --no-queue`, or taken out with `k queue remove`); a
+step's own "ready" means its inputs are met and is a different thing (kirunak-phone AC-15, the owner's answers of
+2026-10-21, Q-29 and Q-30). Every surface says queued and parked: this list, `k waiting`, the page, the markdown board
+and the mod. Queued tasks come first, in queue order, then the rest by id.
 
 `--json` gives the same rows with every field (`id`, `title`, `state`, `queue`, `step`, `lock`, `approved`,
 `review`, `checklist`), which the page, the artifact step and the mod read. `--repo <name>`, `--all` (done and on
 hold too). Number to check: under 1 s across the workspace's repos (it reads a few files per task and runs no git
 command except `git show` for a staged hash when asked).
 
-## 2. The local page: `k board` (D10)
+## 2. The page: `k board` and `k board --html` (D10)
 
 - `k board` writes `$KIRUNAK_HOME/board.html` from `k list --json` and `k status --json` (the lock, the device
   claims, the running steps, the keeper's last lines) and opens it (`open` on macOS, `xdg-open` elsewhere). No
-  server: a static page, inline CSS, both themes through `prefers-color-scheme` (judgement: WCAG AA in both themes,
-  4.5:1 for text, because the board is read on any screen at any hour).
-- Columns by state (draft, proposed, ready, blocked, in progress, in review, awaiting owner, done this week), a card
-  per task with its AC and E and their latest verdicts (met, not met, needs device, needs owner, none), the queue
-  place, the step running and since when, and links `file://` to `task.md`, `plan.md`, `review.md`, `checklist.md`.
+  server: a static page, inline CSS. `k board --html <file>` writes the same page where it is told, with `--no-open`
+  when nothing should open it; this is what the skill of §3 publishes.
+- **One order for every surface** (`lib/board-model.mjs`, built 2026-10-21, kirunak-phone S-8; the page,
+  `lib/board.mjs`, and the markdown, `lib/board-md.mjs`, only lay it out): first "Working on now", the tasks that a
+  session record (`$KIRUNAK_HOME/sessions`) or a running step names; then every other task under its state, in the
+  order of `lib/state.mjs` and only for the states that have a task (done only for the week after acceptance); then
+  "Lock, queue and running steps": the lock, the heavy-job queue, the running steps, the device claims, the task
+  queue. Judgement: what the owner is doing comes before everything, and a section that is empty takes no room on a
+  small screen.
+- A task is an article with its title as h3, the id, its AC and E with their latest verdicts in words (met, not met,
+  needs device, needs owner, none), the queue place, and the step running and since when. The page has one h1, a
+  "Made at <time>" line and an h2 per section.
+- **One column at 390 px**, columns by state only when the screen is wider (evidence: headless Chrome, scrollWidth
+  390 of 390 with a 40-character id and an 80-character path in the data, S-8). A page written with `--html` has no
+  `file://` links to `task.md`, `plan.md`, `review.md` or `checklist.md`: they open nothing on a phone (judgement).
+  The plain `k board` keeps them.
+- **Both themes** (judgement: WCAG AA in both, 4.5:1 for text, because the board is read on any screen at any hour).
+  The page follows `data-theme` when the host sets it (claude.ai does), and `prefers-color-scheme` otherwise. A
+  contrast test holds 17 text and ground pairs at 4.5:1 or more in both themes; the newest, "Working on now", measures
+  5.57:1 to 14.60:1 in the light theme and 6.95:1 to 13.03:1 in the dark (S-8).
 - A footer: the lock holder and queue, device claims, running steps against `maxAgents`, the keeper's last
-  keep-alive and miss. Generated at `<time>`; the page says so and has a "regenerate" note (`k board`).
-- No control on the page: approval and acceptance are commands (D7). The test asserts the page contains no form,
-  button or script.
+  keep-alive and miss. "Made at <time>" tells how old the copy is; `k board` makes a new one.
+- No control on the page: approval and acceptance are the owner's own gesture (D7). The test asserts the page contains
+  no form, button or script.
+- `k board --markdown` is the same board as headings and lists (`--json` gives `{ markdown }`); see §3.
 
-## 3. The phone artifact: a sync step (D13)
+## 3. The phone board: `/k-board` and `/k-board-page` (D13)
 
-- A `sync` step kind (`orchestrator.md` §1) or `k board --artifact`: a short headless run (the workspace's
-  `models.sync`, `--max-turns 8`, `--disallowedTools Agent,Bash(…)` except `k board --html`) whose brief is: "run
-  `k board --html <path>`; publish that file as the artifact at `<url>` with the Artifact tool, updating in place;
-  no capabilities; say the URL". The URL is kept in `$KIRUNAK_HOME/board-artifact.json` after the first publish;
-  later runs pass it. The page is the same HTML as §2 (the Artifact tool wraps it); read-only by construction (D13:
-  no form, no `db`, no capabilities).
-- Triggered when `events.jsonl` has changed since the last sync and at most once an hour (judgement: each sync is a
-  fresh conversation, which costs about Claude Code's opening context at the sync model's weight; hourly at most
-  keeps that small against a working day, and `k cost` shows it). The owner can run it by hand.
-- Approvals never happen there (D13): the page has no control, and the record is written only by the owner's
-  command (`approval.md`).
-- A thing to check in slice 5 before building on it: that the Artifact tool is available to a `claude -p` run on the
-  account (the docs fetched on 2026-10-18 do not say; one run tells). If it is not, the step runs as a bounded
-  interactive command the owner types (`/k-board-sync`), which costs the same tokens in the owner's session.
+Two ways, one for speed and one for the page, both on the owner's command and nothing else (the owner's answers of
+2026-10-20 and 2026-10-21, Q-8, Q-9, Q-15, Q-27: "Both"; amendment A-9).
+
+- **`/k-board`**, the mod's command (§4): runs `k board --markdown` and answers in the chat at once. No model turn, so
+  it costs no tokens and takes about the time of `k`. The markdown is **pane-sized** (the owner's decision, Q-28): the
+  tasks worked on now get their AC and E on one line each, cut with an ellipsis as the pane cuts them, and every
+  other task one bullet (id, title cut, the verdict counts that are not zero). Lines are at most 70 characters, task
+  text is escaped, and the word kirunak appears once, in the first heading, since the engine prefixes the answer with
+  it (§4). Number: 223 lines on the live workspace on 2026-10-21 (the unlimited form was 1,077); a word-for-word
+  fixture test holds the form.
+- **`/k-board-page`**, the skill (`skills/k-board-page/SKILL.md`, linked by `k install`, checked by `k doctor`): one
+  model turn. It runs `k board --html <file> --no-open` (the session's scratchpad, else `$KIRUNAK_HOME`), reads the
+  file, reads the link kept in `$KIRUNAK_HOME/board-artifact.json`, and publishes to that link with the Artifact tool
+  (or, the first time, to a new private artifact: icon "board", no capabilities), writes the link back and answers
+  "kirunak: board published at <time>: <url>". It runs only when the owner types the command, never to refresh the page
+  unasked. The page is the same HTML as §2 and read-only by construction (D13: no form, no `db`, no capabilities).
+- Cost (judgement, not yet measured on a long session): one model turn, about a fresh session's opening context, more
+  in a long one. The owner accepted it in A-9; `/k-board` is the free way.
+- Approvals never happen on a page (D13): it has no control, and the record is written only by the owner's own
+  gesture (`approval.md` §5).
+
+**Why a skill and not the mod** (evidence: `evidence/S-1-phone-probe.md` in the task `gulnya/kirunak-phone`, Claude
+Code 2.1.304, a terminal session with Remote Control on, a probe mod run from the phone):
+
+- A mod's Artifact publish goes through `$.tool.call`. The tool's own check asks on every publish (it uploads to
+  claude.ai), and in auto mode that question goes to the classifier, which "gave no verdict for Artifact: the request
+  that produced this action did not ask for one": a command's output is no request. It was denied in 73 to 89 ms. An
+  allow rule for the tool in `~/.claude/settings.json` changed nothing. Passing the owner's typed command as the call's
+  consent was refused by the classifier as a bypass of auto mode, so it was not tried.
+- A file a mod sends with SendUserFile is reported "1 file delivered to user" (twice), but the owner saw nothing on
+  the phone, neither inline nor as a file. A file under `$KIRUNAK_HOME` asks for the read first and is denied.
+- After any `$.tool.call` other than the dialog, the engine answered the command with "registered ... but no
+  command.run hook answered it", though the hook had returned its text: a command whose hook calls a tool loses its
+  answer.
+- So no route found puts a page on the phone from a mod without a model turn. A skill is a model turn the owner's
+  command asked for, which the classifier has a request for.
+
+There is no sync step and no trigger on `events.jsonl`: the first design (a `claude -p` step at most hourly) was
+replaced by A-9, since nothing refreshes the page but the owner's command (Q-15).
 
 ## 4. The mod: the working view (D14)
 
@@ -58,7 +108,8 @@ workspace, so it ships with kirunak, D2), installed by the owner from a folder m
 relative path, or named in `CLAUDE_CODE_PLUGIN_DIRS` (`approval.md` §5): both run the checkout's own folder. Never a
 copied install (a git, npm or archive source), where K below is missing and every read and verb fails (review D-4). The shape is the one Claude Code's `plugin-authoring` skill describes
 (2.1.302; built on 2.1.303): `.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/register.tsx`,
-`types/index.d.ts` for its `$.state`. Built 2026-10-19 (slice 6).
+`types/index.d.ts` for its `$.state`. Built 2026-10-19 (slice 6); the commands and dialogs for the phone added
+2026-10-21 (kirunak-phone S-5, S-6, built on Claude Code 2.1.304).
 
 What it shows and does, each from the skill's table of shapes:
 
@@ -68,7 +119,9 @@ What it shows and does, each from the skill's table of shapes:
 | a line above the prompt | `ui.render` on `AbovePrompt`: `kirunak · task · step · lock holder · queue place`; nothing while the session has no task | the same |
 | toasts: a heavy job ended, a review is ready, a cache kept warm, a step waits for the owner, an edit refused | `$.ui.toast(text)` for each new line of those kinds | `events.jsonl`, followed with `tail -n 0 -F` through `$.process.spawn` for the session's life; kinds `build-ended` (`k run`, as a heavy job's record is saved), `review-ready` (`k step finish` of a review step), `keep-alive`, `awaiting owner`, `refusal` (the freeze hook; a workspace's own hooks may append it too) |
 | `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id> <why>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind` `'composer'` or `'bridge'` (`approval.md` §5, the owner's answer of 2026-10-19) and call `$.process.run(['node', K, verb, id, ...flags, '--via', 'mod'])`, returning the state line as `{ text }` | the core verbs |
-| `/k-accept`, `/k-approve` with no id; `/k-accept <n>` | the same hooks: with no id they list what waits for that verb, numbered, each `ready` or what the verb would refuse; `<n>` takes the n-th id of that verb's list last shown since the session started, which `/clear` and a resume forget (owner's ask, 2026-10-19: "see what I can accept instead of typing manually") | `k waiting --json`: the proposed tasks with `k approve --dry-run`'s problems, the reviewed and awaiting-owner ones with what `k accept` refuses (its `dryRun` makes every check and writes nothing) |
+| `/k-accept <n>`, a number from the list last shown | the same hooks: `<n>` takes the n-th id of that verb's list last shown since the session started, which `/clear` and a resume forget (owner's ask, 2026-10-19: "see what I can accept instead of typing manually") | `k waiting --json`: the proposed tasks with `k approve --dry-run`'s problems, the reviewed and awaiting-owner ones with what `k accept` refuses (its `dryRun` makes every check and writes nothing) |
+| `/k-list [all]`, `/k-board`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the pane-sized board (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --markdown`, `k waiting --json` (the `amendments` rows) |
+| `/k-approve`, `/k-accept`, `/k-hold`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json` |
 | the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
@@ -82,6 +135,62 @@ What it shows and does, each from the skill's table of shapes:
   origin `sdk`, `plugin`, `peer`, `unclassified`, `peer-send-message`, `task-notification`, `scheduled-trigger` or
   `auto-continuation` are refused with a line and run nothing; with `composer` or `bridge` each runs its verb and the
   state line prints; a `build-ended` event line toasts; `/k-done` is not registered; a `-p` run reads nothing.
+
+### The phone commands and the dialog (kirunak-phone, built 2026-10-21)
+
+The commands above whose verb needs an id take none from the phone: typed with no id, `/k-approve`, `/k-accept`,
+`/k-hold` and `/k-start` open **the engine's choice dialog** (`$.ui.ask`) and the owner picks by touch; `/k-amendments`
+and `/k-queue` open it too. A command typed with its id, or with a number from a list, runs as before. The dialog is
+raised only inside the `command.run` hook of a command whose origin is `composer` or `bridge`, and what a tap does is
+the rule of `approval.md` §5.
+
+**What the dialog is, as measured** (evidence: `evidence/S-1-phone-probe.md`, S-1, 2026-10-20 and 21; a mod's dialog
+reached the phone and its answer came back while the command ran, 8.4 s and 16.6 s):
+
+- It takes **labels only**, two to four: a mod cannot give a choice a description (AC-3's "a label and a description"
+  was changed to this in A-2 of the task). The details of each row go in the question, as plain numbered lines.
+- The question is **plain text**: line breaks are kept, markdown is not drawn (`**` shows as typed), and a line the mod
+  logged before the dialog does not appear on the phone.
+- The **app numbers the choices itself** (chips 1 to 4), so a label never starts with a number (a test holds it) and
+  the question's numbers are the app's: "1. hub/sync-notes: ..." sits above the choice that opens it.
+- Under the choices the app adds a **free-text row** ("Something else") and a **Skip** button. Skip answers the string
+  `[No preference]`, which is no rejection: an answer acts only when it equals one of the dialog's own labels, so Skip,
+  a dismissal and any other text run nothing. The free-text row is how a reason is typed (hold, decline, accept with
+  open items); a blank reason runs nothing.
+
+**How it is laid out** (`mods/kirunak/hooks/owner.ts`, `picks.ts`; judgement unless marked):
+
+- A list shows **three rows and More** when there are more than four (the fourth choice is More), and one fewer under
+  Back: "Waiting for you to approve (1 to 3 of 7)". A short list shows all its rows. Evidence for the limit: four
+  choices at most.
+- **Back** on every dialog but the first shows the dialog before it again; Cancel stands where a reason dialog or a
+  lone choice would otherwise be padded with Yes and No. Nothing is run by Back or Cancel.
+- **The last choice names the verb**: "Approve <id>", "Accept <id>", "Accept <id> with open items", "Approve <id> A-n",
+  "Decline <id> A-n", "Hold <id>", "Start <id>", "Move <id> before <Y>", "Move <id> to the end", "Park <id>", "Put back
+  <id>" (the owner's answer Q-17: each behind an explicit last choice). It sits in a dialog that shows the item's text
+  above it, so the owner reads what the tap will do. `k` checks the task again as it runs (E-2): a task changed since
+  the list was shown is answered with k's refusal, never run on another.
+- When nothing ran, the answer says why ("Nothing ran: skipped", "dismissed", "cancelled", "no reason was typed", "the
+  answer was none of the choices") and prints the numbered list again, so a typed number keeps using the whole list.
+- `/k-queue` lists the queue in order and then the parked tasks. A queued task offers Move and Park, a parked one Put
+  back; Move lists the other queued tasks and last the end of the queue. Two choices the build made that AC-17 does
+  not spell out: Park is offered only to a task in the state "queued" (one in progress or in review that sits in the
+  queue gets Move only, because parked it would leave both lists and the phone could not put it back), and a move to
+  the place the task already holds offers no verb ("It is there already"), since `k queue` would fail on an empty
+  commit.
+- **kirunak is named once**: the engine puts "kirunak: " before the first line of every command's answer, so no dialog
+  and no answer's own text names it but inside an id or a path (a test holds it; `/kirunak` is the command that says
+  it).
+
+**`k waiting`** (the reads behind these dialogs, built in S-4): `k waiting --json` has five lists now, `approve`,
+`accept`, `amendments`, `hold` and `start`. The amendments rows carry `{ id, amendment, title, proposed, by, why,
+lines, refuse }`, where `refuse` is one line of what `k approve --amendment` would refuse, or null; the hold and start
+rows `{ id, title, state }` (hold what `k hold --dry-run` takes, start the tasks `k list` shows that are neither done
+nor on hold); each accept row adds `checklistOpen` and `onlyChecklist` (true when `k accept` refuses only for open
+items and passes with a reason). `k approve` and `k hold` take `--dry-run`, which makes every check and writes
+nothing. A row says "can approve" or "can accept" where it said "ready". Evidence: `test/waiting.test.mjs`. Known gap:
+`k start` refuses no state, so the start list is narrower than the verb, and `k approve` does not refuse an amendment
+to a done task.
 
 As built, where the build chose (each judgement unless marked):
 
@@ -132,4 +241,4 @@ As built, where the build chose (each judgement unless marked):
 
 ## 5. Requirements this file satisfies
 
-D5 and R16 (§1, §2), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5).
+D5 and R16 (§1, §2), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5).
