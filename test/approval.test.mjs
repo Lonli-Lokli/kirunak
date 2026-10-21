@@ -426,7 +426,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   const first = waiting();
   const title = first.approve[0].title;
   const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }] };
-  assert.deepEqual(first, { approve: [{ id: ID, title, why: null }], accept: [], ...rows });
+  assert.deepEqual(first, { approve: [{ id: ID, title, state: 'proposed', why: null }], accept: [], ...rows });
   await approve({ ws, id: ID, now: NOV5 });
   // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
   writeFileSync(join(taskDir(weather), 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n');
@@ -446,7 +446,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   assert.deepEqual(w.approve, []);
   assert.deepEqual(w.accept.map((x) => x.id), [ID]);
   assert.match(w.accept[0].why, /checklist\.md has 2 unticked item\(s\)/);
-  assert.deepEqual([w.accept[0].checklistOpen, w.accept[0].onlyChecklist], [2, true]);
+  assert.deepEqual([w.accept[0].state, w.accept[0].checklistOpen, w.accept[0].onlyChecklist], ['awaiting owner', 2, true]);
   const dry = run(['accept', ID, '--dry-run']);
   assert.deepEqual([dry.status, /checklist\.md has 2 unticked item\(s\)/.test(dry.stderr)], [1, true]);
   const open = run(['accept', ID, '--dry-run', '--checklist-open', 'read on the phone later']);

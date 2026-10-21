@@ -462,7 +462,7 @@ const VERBS = {
     const approve = [];
     for (const r of rows.filter((x) => x.state === 'proposed')) {
       const problems = await approvalProblems(ws, r.id);
-      approve.push({ id: r.id, title: r.title, why: problems.length ? problems.join('; ') : null });
+      approve.push({ id: r.id, title: r.title, state: r.state, why: problems.length ? problems.join('; ') : null });
     }
     // A task awaiting the owner with no review asked a question in progress (lib/state.mjs): nothing to accept (G26).
     const accept = [];
