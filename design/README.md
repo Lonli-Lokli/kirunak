@@ -6,13 +6,13 @@ examples are invented: a repo `weather`, a task `weather/offline-forecast`, a hu
 
 | File | What it settles |
 | --- | --- |
-| `task-files.md` | the `kirunak/` folder in a repo, the frozen `task.md` grammar (every line sourced), the other files, the eleven states and who moves a task, amendments, the one queue |
+| `task-files.md` | the `kirunak/` folder in a repo, the frozen `task.md` grammar (every line sourced), the other files, the twelve states (queued and parked among them) and who moves a task, amendments, the one queue |
 | `plugins.md` | the core's shape, the ten seams with their contracts, policies and defaults (the default resource guard, the `handoff` seam), the workspace config, how plugins load, the state folder `$KIRUNAK_HOME` |
 | `intake.md` | the `k-intake` skill with its own interview method, the `k intake` verbs, what a workspace's checklist plugin supplies, converting an openspec change |
 | `approval.md` | the approval record and hash, the PreToolUse freeze hook, the git pre-commit hook, `k approve` and `k accept` through `!`, D14 settled (the mod's command replaces `!`), the instruction text for a workspace's openspec freeze |
 | `orchestrator.md` | `plan.md`, the step lifecycle, the headless `claude -p` runner with every flag cited, models and budgets as config, heavy jobs and the machine guard, the cache keeper with the 17-hour figure checked, token records and the workspace's baseline |
 | `review.md` | the reviewer's separation and inputs, the `review.md` grammar, the owner's checklist, closing through kirunak's `k-done` skill and `k accept` |
-| `boards.md` | `k list`, the generated local page, the phone artifact sync step, the mod |
+| `boards.md` | `k list`, the generated local page, the phone board (`/k-board` and the skill `/k-board-page`), the mod and its dialogs |
 | `change-size.md` | SLAP on every commit (R21, R22, R23): the measure, the owner's `.slapignore` and its approval, the prepare-commit-msg gate that `--no-verify` cannot skip, `k slap`, `k slapignore` |
 | `build-order.md` | slice 1 in full (files, functions, verbs, `k install`, what a workspace supplies, the root README, the tests per requirement, the numbers to check), slices 2 to 7 |
 

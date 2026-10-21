@@ -140,8 +140,9 @@ are a state field agents rewrite; a state read from files that only named comman
 | --- | --- | --- |
 | draft | `task.md` exists, no approval record, `k check` fails or Open questions not empty | the intake (`k intake start`) |
 | proposed | no approval record, `k check` passes, Open questions empty | the intake, when the last question closes |
-| ready | approval record with a matching hash; no step started in `progress.md` | the owner: `k approve` |
-| blocked | ready or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces, or the plan has steps and none of kind `review` | the plan |
+| queued | approval record with a matching hash; no step started in `progress.md`; the task is in the queue | the owner: `k approve` (which queues it), or `k queue add` |
+| parked | the same, and the task is not in the queue | the owner: `k approve --no-queue`, or `k queue remove` |
+| blocked | queued, parked or in progress, and `plan.md` names `blocked-by:` a task not done, or a step waits on an input no step produces, or the plan has steps and none of kind `review` | the plan |
 | in progress | a step started in `progress.md`; no `review.md` verdict | `k step start` (the orchestrator or a session) |
 | in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it as it stands (the hash on the step's `finished` line) | `k review start` |
 | reviewed | the latest review passes the grammar and its review step finished in `progress.md` with the file's hash; no `done.json` | the review step |
@@ -150,8 +151,20 @@ are a state field agents rewrite; a state read from files that only named comman
 | on hold | `hold.md` exists (why, date) and no `done.json` | the owner: `k hold` / `k resume` |
 | stale | approval record whose hash does not match `task.md` | never on purpose: the git hook refuses it; `k list` shows it red |
 
-Only the owner's commands move a task to ready, done or on hold (D7). The intake moves draft to proposed by closing
-questions. Steps and reviews move the middle states by appending records.
+Only the owner's commands move a task to queued or parked, done or on hold (D7). The intake moves draft to proposed by
+closing questions. Steps and reviews move the middle states by appending records.
+
+Twelve states, with queued and parked told apart since 2026-10-21 (kirunak-phone AC-15, the owner's answer of that day,
+Q-29 and Q-30, in place of one state "ready"). **Queued** means the owner has approved the task and put it in the one
+queue (§6): it waits its turn. **Parked** means approved and out of the queue: it waits for nothing, and nothing starts
+it until the owner puts it back. The word "ready" now names only a step's own state (`orchestrator.md` §1, every input
+met), never a task's. The queue is read when the state is derived, so a task that is queued and put on hold reads "on
+hold" and keeps its place in the queue (tested), and a blocked task reads "blocked" whichever it is. Every surface
+shows the two words: `k list`, `k waiting` ("can approve" and "can accept" in place of "ready"), the board's page and
+its markdown, and the mod's pane and lists. Evidence:
+`lib/state.mjs` (`STATES`, `stateOf`), `test/state.test.mjs`, and `test/list.test.mjs`, which takes one task through
+`--no-queue`, `queue add`, `hold`, `resume` and `queue remove` and reads it in `k list`, `k waiting` and the board
+each time.
 
 ## 5. Amendments (R7)
 
@@ -191,11 +204,21 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 - `k queue add <id> [--before <id>|--after <id>|--first|--last]`, `k queue move`, `k queue remove`: each edits the
   file and commits it in the queue's repo with the message `kirunak: queue <verb> <id>`. `k approve` adds the task
   last unless told otherwise; `k accept` removes it.
-- The queue orders; it never holds state. `k list` joins the queue with each task's derived state and prints ready
-  and blocked tasks in queue order, then the others.
+- The queue orders; it never holds state of its own, but whether a task is in it is part of what its state is read
+  from (§4: queued or parked). `k list` joins the queue with each task's derived state and prints the tasks in the
+  queue in queue order, then the others.
 - A task not in the queue is visible (`k list --all`) and runs nowhere: `k run` and `k step start` refuse a task
   that is not queued (judgement: the queue is the owner's statement of order, R1 says nothing enters it but through
-  the intake and approval).
+  the intake and approval). The refusal is "<id> is parked, not in the queue: k queue add <id> puts it back", and a
+  task parked while `k run --watch` is going starts no further step (kirunak-phone AC-16, built 2026-10-21; `k run`
+  reads the queue again before each step).
+- The three owner verbs that change the queue, `k queue add`, `k queue move` and `k queue remove`, are the ones the
+  mod's `/k-queue` runs from the phone (`boards.md` §4). `add` takes `--first`, `--last`, `--before <id>` or `--after
+  <id>` (no flag: last) and refuses an unknown task, one already queued, or a target that is not queued; `move` takes
+  the same flags and refuses a task or target that is not queued, or a task moved before itself; **`remove` parks the
+  task** and refuses one that is not queued. A held task is not parked: `k hold` leaves its place. Each verb makes one
+  commit, `kirunak: queue <verb> <id>`; they take no `--via` (it is parsed and ignored: nothing records who moved a
+  task), and `--dry-run` checks nothing for them.
 
 ## 7. Requirements this file satisfies
 
