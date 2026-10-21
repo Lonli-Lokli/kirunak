@@ -50,9 +50,10 @@ validation, archives) then go unused, and what the owner needs is not in it:
   the same name: `/k-done` closes a task and asks for `/clear`; the intake, approval and review commands follow as
   `k-<verb>`. A workspace's other skills keep their names.
 - D13 **A board on the phone**: on the owner's command and nothing else, the board reaches the phone two ways. The
-  mod's `/k-board` answers in the chat at once with the board as lists, with no model turn; the skill
-  `/k-board-page` publishes the generated board as a private claude.ai artifact, read-only, updating the one link
-  it keeps, in one model turn (an artifact is published through Claude's tools, which ask on every publish, so a
+  mod's `/k-board` shows the board in brief, with no model turn, in a dialog of the owner's own command: the groups
+  with how many tasks each holds, a group's tasks one line each once picked, a task's card in the chat once tapped;
+  the skill `/k-board-page` publishes the generated board as a private claude.ai artifact, read-only, a brief row per
+  task that opens its card in place, updating the one link it keeps, in one model turn (an artifact is published through Claude's tools, which ask on every publish, so a
   Claude turn the owner's command asks for does it; a mod cannot). Approvals never happen on a page: anything a page
   records could also be written by an agent acting as the owner, so they stay the owner's own gesture (D7). A front
   end over the task files, like the others.
