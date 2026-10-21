@@ -82,7 +82,8 @@ You need Node 22 or later, git and Claude Code.
    `"CLAUDE_CODE_PLUGIN_DIRS": "~/code/kirunak/mods/kirunak"`.)
 
    **From the phone**, in Remote Control, the mod gives you these (a command that takes an id opens a dialog of
-   touch choices when you type it without one):
+   touch choices when you type it without one; its list names each task or amendment and nothing more, and the one
+   you pick shows its details in the next dialog):
 
    | Type | You get |
    | --- | --- |
@@ -90,10 +91,10 @@ You need Node 22 or later, git and Claude Code.
    | `/k-board` | the brief board, a line per task, at once and without a model turn; tap a task for its card, or Skip for the brief board as text |
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
-   | `/k-approve`, `/k-accept` | what waits for you, to pick by touch; then a last choice that names the task ("Approve <id>") |
-   | `/k-amendments` | the amendments waiting, to approve or decline by touch; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
-   | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, by touch |
-   | `/k-queue` | the queue in order, then the parked tasks; move, park or put back by touch |
+   | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
+   | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
+   | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |
+   | `/k-queue` | the queue in order, then the parked tasks, each task's id and state; the one picked shows its title, to move, park or put back by touch |
 
    A tap in these dialogs is your own gesture, like a typed command; `/k-board-page` is the only one of these that
    uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
@@ -166,8 +167,8 @@ task is started by hand, one task per session:
    grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
    owner ticks them.
 6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>` (with the
-   mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what waits for you to accept and what still
-   blocks each, and `/k-accept 1` takes the first). It refuses
+   mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what waits for you to accept, the one you
+   pick showing what still blocks it, and `/k-accept 1` takes the first). It refuses
    unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
    task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict.
