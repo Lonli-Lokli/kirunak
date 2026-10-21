@@ -2,7 +2,7 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { ID, QUEUE, WAITING, world } from './world'
+import { HELD, ID, QUEUE, ROWS, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -24,13 +24,15 @@ const HOLD = [ID, 'Hold', 'the owner is away', `Hold ${ID}`]
 const START = [ID, `Start ${ID}`]
 const MOVE = ['hub/next', 'Move', 'More', ID, `Move hub/next before ${ID}`]
 const BACK_IN = ['More', 'hub/parked', 'Put back hub/parked']
+// /k-resume's: to Resume <id>.
+const RESUME = ['hub/paused', 'Resume hub/paused']
 
 describe('the owner-only rule (kirunak-phone AC-4)', () => {
   const others: PromptOrigin[] = [{ kind: 'sdk' }, { kind: 'plugin', name: 'other' }, { kind: 'peer' }, { kind: 'unclassified' }, { kind: 'task-notification' }]
   for (const origin of others) {
-    test(`from ${origin.kind}: /k-approve, /k-accept, /k-amendments, /k-hold, /k-start and /k-queue are refused before any read or dialog, and k runs nothing`, async ($, on) => {
-      const w = world(on, { rows: QUEUE, taps: ['hub/proposed', 'Approve hub/proposed', ...PATH, ...HOLD, ...MOVE] })
-      for (const command of ['k-approve', 'k-accept', 'k-amendments', 'k-hold', 'k-start', 'k-queue']) expect(await run($, command, '', origin)).toMatch(/, so nothing ran\.$/)
+    test(`from ${origin.kind}: /k-approve, /k-accept, /k-amendments, /k-hold, /k-resume, /k-start and /k-queue are refused before any read or dialog, and k runs nothing`, async ($, on) => {
+      const w = world(on, { rows: [...QUEUE, ...HELD], taps: ['hub/proposed', 'Approve hub/proposed', ...PATH, ...HOLD, ...RESUME, ...MOVE] })
+      for (const command of ['k-approve', 'k-accept', 'k-amendments', 'k-hold', 'k-resume', 'k-start', 'k-queue']) expect(await run($, command, '', origin)).toMatch(/, so nothing ran\.$/)
       expect([w.asked, w.waits, w.reads, w.runs]).toEqual([[], 0, 0, []])
     })
   }
@@ -142,5 +144,31 @@ describe('the owner-only rule (kirunak-phone AC-4)', () => {
     expect(a.slice(24, 26)).toEqual([a[22], a[21]])
     expect(a.length).toBe(26)
     expect(w.runs).toEqual([])
+  })
+
+  test('a dialog the model raised, answered "Resume <id>", runs nothing, before and after the owner\'s own /k-resume (A-12, AC-18)', async ($, on) => {
+    const w = world(on, { rows: [...ROWS, ...HELD], taps: ['Resume hub/paused', 'hub/paused', null, 'Resume hub/paused'] })
+    await modelAsks($, 'Resume hub/paused')
+    expect(await run($, 'k-resume')).toBe('Nothing ran: dismissed.')
+    await modelAsks($, 'Resume hub/paused')
+    expect(w.asked.map(a => a.labels[0])).toEqual(['Resume hub/paused', 'hub/paused', 'Resume hub/paused', 'Resume hub/paused'])
+    expect(w.runs).toEqual([])
+  })
+
+  test('/k-resume skipped, dismissed or answered with no choice at any depth: nothing runs and the answer says why; Back shows the list again and runs nothing; the verb runs only as the last tap (E-3, E-5)', async ($, on) => {
+    const ends: [string | null, string][] = [[null, 'dismissed'], [SKIP, 'skipped']]
+    const cases: [(string | null)[], string][] = [
+      ...RESUME.flatMap((_, depth) => ends.map(([tap, why]): [(string | null)[], string] => [[...RESUME.slice(0, depth), tap], why])),
+      // The verb's own label, typed in the free-text row of the list, which does not offer it.
+      [['Resume hub/paused'], 'the answer was none of the choices'],
+      [['hub/paused', 'Back', SKIP], 'skipped'],
+    ]
+    const w = world(on, { rows: [...ROWS, ...HELD], taps: [...cases.flatMap(([taps]) => taps), ...RESUME] })
+    for (const [, why] of cases) expect(await run($, 'k-resume')).toBe(`Nothing ran: ${why}.`)
+    const a = w.asked
+    expect(a[a.length - 1]).toEqual(a[a.length - 3])
+    expect(w.runs).toEqual([])
+    await run($, 'k-resume')
+    expect(w.runs.map(argv => argv.slice(2))).toEqual([['resume', 'hub/paused']])
   })
 })

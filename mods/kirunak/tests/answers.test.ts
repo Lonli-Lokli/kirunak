@@ -126,7 +126,7 @@ describe('the lists as answers', () => {
     const answers: string[] = []
     const calls: [string, string][] = [
       ['k-list', ''], ['k-list', 'all'], ['k-list', 'x'], ['k-board', ''], ['k-board', ID], ['k-board', 'hub/nope'], ['k-amendments', '1'], ['k-amendments', ''], ['k-amendments', '1'], ['k-amendments', '2'],
-      ['k-approve-amendment', '1'], ['k-approve', ''], ['k-accept', ''], ['k-accept', '9'], ['k-hold', ID], ['k-start', ID], ['kirunak', ''], ['kirunak', ''],
+      ['k-approve-amendment', '1'], ['k-approve', ''], ['k-accept', ''], ['k-accept', '9'], ['k-hold', ID], ['k-resume', ID], ['k-resume', ''], ['k-start', ID], ['kirunak', ''], ['kirunak', ''],
     ]
     for (const [command, args] of calls) for (const kind of ['composer', 'bridge'] as const) answers.push(await run($, command, args, { kind }))
     answers.push(await run($, 'k-list', '', { kind: 'sdk' }))
