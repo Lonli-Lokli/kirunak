@@ -8,7 +8,7 @@ import type { Verb } from './commands'
 import { amendmentsText, amendmentText, briefText, listText } from './lists'
 import { nothingRan, owners } from './owner'
 import type { Outcome, Turn } from './owner'
-import { acceptScreen, amendmentsScreen, approveScreen, boardScreen, holdScreen, queueScreen, startScreen } from './picks'
+import { acceptScreen, amendmentsScreen, approveScreen, boardScreen, holdScreen, queueScreen, resumeScreen, startScreen } from './picks'
 import type { Brief } from './picks'
 import { lastRows, refresh, sessionTask, tick } from './reads'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
@@ -66,9 +66,20 @@ async function pickTask($: EngineInterface, turn: Turn, verb: 'hold' | 'start'):
   return out.nothing === null ? out : nothingRan(out.nothing)
 }
 
+// `/k-resume` with no id: the tasks on hold, from k list as /k-queue reads it, as the dialog's choices (A-12's AC-18).
+async function pickHeld($: EngineInterface, turn: Turn): Promise<string | Outcome> {
+  const r = await $.process.run(['node', turn.k, 'list', '--json', '--all'])
+  if (r.exitCode !== 0) return refused('k-resume', r)
+  const first = resumeScreen(JSON.parse(r.stdout).rows)
+  if (first === null) return 'No task is on hold.'
+  const out = await turn.dialog(first)
+  return out.nothing === null ? out : nothingRan(out.nothing)
+}
+
 async function ownerVerb($: EngineInterface, turn: Turn, name: string, verb: Verb): Promise<string | Outcome> {
   let args = turn.args
   if ((verb === 'hold' || verb === 'start') && args.trim() === '') return pickTask($, turn, verb)
+  if (verb === 'resume' && args.trim() === '') return pickHeld($, turn)
   if (verb === 'approve' || verb === 'accept') {
     if (args.trim() === '') return offer($, turn, verb)
     const picked = byNumber(args, offered[verb])
@@ -182,6 +193,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-approve', description: 'Approve a kirunak task: k approve, as your own command', argumentHint: HINTS.approve })
     await $.command.register({ name: 'k-accept', description: 'Accept a reviewed kirunak task as done: k accept, as your own command', argumentHint: HINTS.accept })
     await $.command.register({ name: 'k-hold', description: 'Put a kirunak task on hold: k hold, as your own command', argumentHint: HINTS.hold })
+    await $.command.register({ name: 'k-resume', description: 'Take a kirunak task off hold: k resume, as your own command', argumentHint: HINTS.resume })
     await $.command.register({ name: 'k-start', description: 'Name the kirunak task this session works on: k start', argumentHint: HINTS.start })
     await $.command.register({ name: 'k-list', description: 'The kirunak tasks k list shows, as a list for a phone', argumentHint: '[all]' })
     await $.command.register({ name: 'k-board', description: 'The kirunak board in brief: its groups in a dialog, then a group\'s tasks; a task tapped, or its id typed, shows its card', argumentHint: '[<id>]' })
@@ -211,6 +223,7 @@ export const register: Register = on => {
   on('command.run', { command: 'k-approve' }, ($, e) => owners($, e, 'k-approve', t => ownerVerb($, t, 'k-approve', 'approve'))).catch(() => ({ text: FAILED('k-approve') }))
   on('command.run', { command: 'k-accept' }, ($, e) => owners($, e, 'k-accept', t => ownerVerb($, t, 'k-accept', 'accept'))).catch(() => ({ text: FAILED('k-accept') }))
   on('command.run', { command: 'k-hold' }, ($, e) => owners($, e, 'k-hold', t => ownerVerb($, t, 'k-hold', 'hold'))).catch(() => ({ text: FAILED('k-hold') }))
+  on('command.run', { command: 'k-resume' }, ($, e) => owners($, e, 'k-resume', t => ownerVerb($, t, 'k-resume', 'resume'))).catch(() => ({ text: FAILED('k-resume') }))
   on('command.run', { command: 'k-start' }, ($, e) => owners($, e, 'k-start', t => ownerVerb($, t, 'k-start', 'start'))).catch(() => ({ text: FAILED('k-start') }))
   on('command.run', { command: 'k-list' }, ($, e) => owners($, e, 'k-list', t => list($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-list') }))
   on('command.run', { command: 'k-board' }, ($, e) => owners($, e, 'k-board', t => boardAnswer($, t), '\n\n')).catch(() => ({ text: READ_FAILED('k-board') }))

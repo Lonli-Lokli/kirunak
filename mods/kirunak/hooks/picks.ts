@@ -3,14 +3,14 @@ import type { Item } from './lists'
 import type { Choice, PickScreen, Row, Screen } from './owner'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
-// The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
-// AC-11, E-4): the list of what waits, each row named and nothing more (a task's id and state, in /k-queue its title
-// too, A-10; an amendment's task id, A-n and name, A-8), then the one picked, in its own words, with the verb k would
-// take now and none it would refuse. Each verb runs by id, so a list that changed since ends in k's refusal, never on
-// another row (E-2).
+// The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold, /k-resume and /k-start with no number (kirunak-phone
+// AC-3, AC-8 to AC-11, AC-18, E-4): the list of what waits, each row named and nothing more (a task's id and state, in
+// /k-queue its title too, A-10; an amendment's task id, A-n and name, A-8), then the one picked, in its own words, with
+// the verb k would take now and none it would refuse. Each verb runs by id, so a list that changed since ends in k's
+// refusal, never on another row (E-2).
 // /k-approve's, /k-accept's and /k-amendments' lists are the ones a typed number takes (`/k-accept 4`), so they are
-// `typed`: a page after the first gives each line that number too (Q-33). /k-hold, /k-start and /k-queue take an id or
-// nothing typed, never a number, so their lines keep the app's numbers alone.
+// `typed`: a page after the first gives each line that number too (Q-33). /k-hold, /k-resume, /k-start and /k-queue
+// take an id or nothing typed, never a number, so their lines keep the app's numbers alone.
 
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 const titleOf = (r: { title: string }): string => r.title.replace(/\s+/g, ' ').trim()
@@ -130,8 +130,8 @@ export function boardScreen(brief: Brief): PickScreen {
   }
 }
 
-// A task as the hold and start lists show it, and the queue's before its title: its id and state as k list says it,
-// with its queue place.
+// A task as the hold, resume and start lists show it, and the queue's before its title: its id and state as k list
+// says it, with its queue place.
 export const stateItem = (r: TaskRow, place: number | null = null): Item => ({ lead: '', name: r.id, text: `: ${r.state}${place !== null ? `, place ${place}` : ''}` })
 
 const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`
@@ -157,6 +157,15 @@ export function holdScreen(rows: readonly TaskRow[]): Screen {
   })
   const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Hold', text: stateText(r), choices: [{ label: 'Hold', open: () => reason(r) }], question: 'Put it on hold?' })
   return { kind: 'list', header: 'Hold', head: 'Tasks you can put on hold:', question: 'Which task?', rows: rows.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
+}
+
+// /k-resume with no id (A-12's AC-18): the tasks on hold of k list's rows, null when there is none; the one picked
+// offers "Resume <id>". k resume takes no --via: it records no one.
+export function resumeScreen(rows: readonly TaskRow[]): Screen | null {
+  const held = rows.filter(r => r.state === 'on hold')
+  if (!held.length) return null
+  const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Resume', text: stateText(r), choices: [{ label: `Resume ${r.id}`, verb: ['resume', r.id] }], question: 'Take it off hold?' })
+  return { kind: 'list', header: 'Resume', head: 'Tasks on hold:', question: 'Which task?', rows: held.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
 }
 
 // /k-start with no id (AC-11): the tasks k start would take; "Start <id>" names it this session's (`session`, read

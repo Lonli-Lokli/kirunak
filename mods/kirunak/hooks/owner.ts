@@ -23,7 +23,7 @@ import { kOf, refresh } from './reads'
 const COMMIT_MS = 600_000
 
 // The verbs a turn may run: k's owner verbs, never a read or a session's own command.
-const VERBS = /^(?:approve|accept|hold|start|amend decline|queue (?:add|move|remove))$/
+const VERBS = /^(?:approve|accept|hold|resume|start|amend decline|queue (?:add|move|remove))$/
 
 // How a command's turn ends: why nothing ran, or (nothing null) the verb chosen in it, which only this module reads.
 export type Outcome = { readonly nothing: string | null }
