@@ -29,6 +29,7 @@ const taskDir = (weather) => join(weather, 'kirunak/tasks/offline-forecast');
 const A1 = `---
 task: weather/offline-forecast
 proposed: 2026-11-04
+title: Hourly forecasts
 by: session test
 ---
 
@@ -175,7 +176,7 @@ test('checkAmendment: ids exist, the added number is the next free one, every ne
   assert.ok(problems.some((p) => p.startsWith('not an operation')));
   const other = A1.replace('task: weather/offline-forecast', 'task: weather/other');
   assert.ok(checkAmendment(task, other).some((x) => x.problem === 'task weather/other is not weather/offline-forecast'));
-  const empty = '---\ntask: weather/offline-forecast\nproposed: 2026-11-04\nby: session test\n---\n\n## Why\n\n## Changes\n';
+  const empty = '---\ntask: weather/offline-forecast\nproposed: 2026-11-04\ntitle: Nothing yet\nby: session test\n---\n\n## Why\n\n## Changes\n';
   assert.deepEqual(checkAmendment(task, empty).map((x) => x.problem), ['Why is empty: say why the task must change', 'Changes has no operation']);
 });
 
@@ -193,10 +194,10 @@ test('a full amendment cycle: apply, re-hash, history, stamp, and the next edge 
   const { ws, weather, hub } = await makeWorkspace();
   const first = await approve({ ws, id: ID, now: NOV5 });
 
-  const a1 = newAmendment({ ws, id: ID, by: 'session test', now: NOV6 });
+  const a1 = newAmendment({ ws, id: ID, title: 'Hourly forecasts', by: 'session test', now: NOV6 });
   assert.equal(a1.n, 1);
   assert.equal(realpathSync(a1.path), realpathSync(amendmentFile(weather, 1)));
-  assert.equal(readFileSync(a1.path, 'utf8'), '---\ntask: weather/offline-forecast\nproposed: 2026-11-06\nby: session test\n---\n\n## Why\n\n## Changes\n');
+  assert.equal(readFileSync(a1.path, 'utf8'), '---\ntask: weather/offline-forecast\nproposed: 2026-11-06\ntitle: Hourly forecasts\nby: session test\n---\n\n## Why\n\n## Changes\n');
   fill(a1.path, 'The provider now returns hourly data. [research docs/offline.md §3]', A1.split('## Changes\n')[1].trim().split('\n'));
 
   const hubHead = sh(hub, 'git', ['rev-parse', 'HEAD']).trim();
@@ -221,7 +222,7 @@ test('a full amendment cycle: apply, re-hash, history, stamp, and the next edge 
   assert.deepEqual(rec.history[1], { hash: rec.hash, approved: rec.approved, amendment: 'A-1' });
   assert.match(readFileSync(a1.path, 'utf8'), /^by: session test\napplied: 2026-11-06\n---\n/m);
 
-  const a2 = newAmendment({ ws, id: ID, by: 'session test', now: NOV7 });
+  const a2 = newAmendment({ ws, id: ID, title: 'A cut download', by: 'session test', now: NOV7 });
   assert.equal(a2.n, 2);
   fill(a2.path, 'A cut download needs its own edge case. [owner 2026-11-02 Q-4]', ['- add E-1: A cut download says so. [owner 2026-11-02 Q-4]']);
   await assert.rejects(approve({ ws, id: ID, amendment: 'A-2', now: NOV7 }), /E-1 was removed and a number is never reused; the next free is E-2/);
@@ -236,7 +237,7 @@ test('a full amendment cycle: apply, re-hash, history, stamp, and the next edge 
 
 test('approve refuses a failing amendment, a stamped one, and one whose result fails k check, changing nothing', async () => {
   const { ws, weather } = await makeWorkspace();
-  newAmendment({ ws, id: ID, now: NOV6 });
+  newAmendment({ ws, id: ID, title: 'Drop E-1', now: NOV6 });
   await assert.rejects(approve({ ws, id: ID, amendment: 'A-1', now: NOV6 }), /has no approval yet/);
   await approve({ ws, id: ID, now: NOV5 });
   await assert.rejects(approve({ ws, id: ID, amendment: 'A-1', now: NOV6 }), /A-1 does not apply:\n.*Why is empty/);
@@ -262,7 +263,7 @@ const stampedText = (t) => t.replace('by: session\n---', 'by: session\napplied: 
 test('decline stamps declined: with the date and why, commits it, and the amendment cannot be applied after', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
-  const a = newAmendment({ ws, id: ID, by: 'session test', now: NOV6 });
+  const a = newAmendment({ ws, id: ID, title: 'A week', by: 'session test', now: NOV6 });
   fill(a.path, 'Hourly data. [research docs/offline.md §3]', ['- replace D-1: Keep a week. [research docs/offline.md §3]']);
   await assert.throws(() => decline({ ws, id: ID, amendment: 'A-1', why: ' ', now: NOV7 }), /needs its reason/);
   const r = decline({ ws, id: ID, amendment: 'A-1', why: 'three days is enough', now: NOV7 });
@@ -273,7 +274,57 @@ test('decline stamps declined: with the date and why, commits it, and the amendm
   assert.throws(() => decline({ ws, id: ID, amendment: 'A-1', why: 'again', now: NOV7 }), /already declined/);
   await assert.rejects(approve({ ws, id: ID, amendment: 'A-1', now: NOV7 }), /already declined: 2026-11-07 three days is enough/);
   assert.equal(readRecord(weather, 'offline-forecast').history.length, 1);
-  assert.equal(newAmendment({ ws, id: ID, now: NOV7 }).n, 2);
+  assert.equal(newAmendment({ ws, id: ID, title: 'Next', now: NOV7 }).n, 2);
+});
+
+// An amendment's name in every list (kirunak-phone A-8, AC-2).
+const NO_TITLE = 'front matter has no title: add `title: <a few words>` to its front matter, the name it goes by in every list';
+
+test('k amend new writes its title between proposed and by, and without --title refuses naming the flag, a dry run too (kirunak-phone A-8)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  for (const args of [['amend', 'new', ID], ['amend', 'new', ID, '--title', '  '], ['amend', 'new', ID, '--dry-run']]) {
+    const r = run(args);
+    assert.deepEqual([r.status, r.stderr], [2, 'k: k amend new needs --title "<a few words>", the name the amendment goes by in every list\n'], args.join(' '));
+  }
+  assert.throws(() => newAmendment({ ws, id: ID, now: NOV6 }), /an amendment needs its title, .*--title "<title>"/);
+  assert.equal(existsSync(amendmentFile(weather, 1)), false);
+  assert.equal(run(['amend', 'new', ID, '--title', 'Hourly', '--dry-run']).stdout, 'would write the next amendment in kirunak/tasks/offline-forecast/amendments, titled Hourly\n');
+
+  const r = run(['amend', 'new', ID, '--title', ' Hourly   forecasts ', '--by', 'session s1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(amendmentFile(weather, 1), 'utf8'), /^---\ntask: weather\/offline-forecast\nproposed: \d{4}-\d{2}-\d{2}\ntitle: Hourly forecasts\nby: session s1\n---\n\n## Why\n/);
+});
+
+test('k amend check and k approve --amendment refuse a waiting amendment with no title, naming the fix; an applied or declined one is history (kirunak-phone A-8)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  const task = readFileSync(taskFile(weather), 'utf8');
+  const a = newAmendment({ ws, id: ID, title: 'Hourly forecasts', now: NOV6 });
+  fill(a.path, 'Hourly data. [research docs/offline.md §3]', ['- replace D-1: Keep three days, the first hourly. [research docs/offline.md §3]']);
+  const titled = readFileSync(a.path, 'utf8');
+
+  for (const untitled of [titled.replace('title: Hourly forecasts\n', ''), titled.replace('title: Hourly forecasts', 'title:  ')]) {
+    assert.deepEqual(checkAmendment(task, untitled), [{ line: 1, problem: NO_TITLE }]);
+    writeFileSync(a.path, untitled);
+    const check = run(['amend', 'check', ID, 'A-1']);
+    assert.deepEqual([check.status, check.stderr], [1, `${ID} A-1: 1 problem\n  A-1.md line 1: ${NO_TITLE}\n`]);
+    const dry = run(['approve', ID, '--amendment', 'A-1', '--dry-run']);
+    assert.deepEqual([dry.status, dry.stderr], [1, `would refuse ${ID}:\n  ${ID} A-1 does not apply: line 1: ${NO_TITLE}\n`]);
+    await assert.rejects(approve({ ws, id: ID, amendment: 'A-1', now: NOV6 }), new RegExp(`A-1 does not apply:\\n.*front matter has no title`));
+  }
+  assert.equal(readFileSync(taskFile(weather), 'utf8'), task);
+
+  // Titled, it is approved; stamped, it is history, and a stamp is all that refuses it, title or none.
+  writeFileSync(a.path, titled);
+  assert.equal(run(['amend', 'check', ID, 'A-1']).stdout, `${ID} A-1: check passes\n`);
+  await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
+  const applied = readFileSync(a.path, 'utf8').replace('title: Hourly forecasts\n', '');
+  assert.deepEqual(checkAmendment(task, applied).map((x) => x.problem), ['already applied on 2026-11-06']);
+  const declined = titled.replace('title: Hourly forecasts\n', '').replace('by: session\n', 'by: session\ndeclined: 2026-11-07 not now\n');
+  assert.deepEqual(checkAmendment(task, declined).map((x) => x.problem), ['already declined: 2026-11-07 not now']);
 });
 
 const headOf = (repo) => sh(repo, 'git', ['rev-parse', '--short', 'HEAD']).trim();

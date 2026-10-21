@@ -22,8 +22,8 @@ const run = (home, args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
 const waiting = (home) => JSON.parse(run(home, ['waiting', '--json']).stdout);
 
 // The next amendment, written the way the model fills one.
-function amendment(ws, why, changes) {
-  const a = newAmendment({ ws, id: ID, by: 'session s1', now: NOV6 });
+function amendment(ws, why, changes, title = 'A change') {
+  const a = newAmendment({ ws, id: ID, title, by: 'session s1', now: NOV6 });
   writeFileSync(a.path, readFileSync(a.path, 'utf8').replace('## Why\n', `## Why\n${why}\n`).replace('## Changes\n', `## Changes\n${changes.join('\n')}\n`));
   return a.n;
 }
