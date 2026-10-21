@@ -2,7 +2,7 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { ID, WAITING, world } from './world'
+import { ID, QUEUE, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -95,6 +95,23 @@ describe('picking by touch', () => {
     expect(w.asked.length).toBe(10)
     // An id or a path may hold the word; the dialog's own words never do.
     for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
+  })
+
+  test('no dialog or answer of /k-hold, /k-start or /k-queue names kirunak (AC-12)', async ($, on) => {
+    const walk: [string, (string | null)[]][] = [
+      ['k-hold', [ID, 'Hold', 'why', SKIP]],
+      ['k-start', [ID, SKIP]],
+      ['k-queue', ['hub/next', 'Move', 'More', 'End of the queue', SKIP]],
+      ['k-queue', ['More', 'hub/parked', SKIP]],
+      ['k-queue', [ID, 'Move', 'hub/sync-notes', SKIP]],
+      ['k-queue', ['hub/next', 'Park hub/next']],
+    ]
+    const w = world(on, { rows: QUEUE, taps: walk.flatMap(([, taps]) => taps), verb: { exitCode: 0, stdout: ' 1  hub/sync-notes\n', stderr: '' } })
+    const answers: string[] = []
+    for (const [command] of walk) answers.push(await run($, command, '', { kind: 'bridge' }))
+    expect([w.asked.length, w.runs.length]).toEqual([20, 1])
+    for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
+    for (const a of answers) expect(a.replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
   })
 
   test('k checks the item again as the verb runs, and its refusal is the answer; a number typed after the dialog still takes the list as shown (E-2, AC-3)', async ($, on) => {

@@ -31,7 +31,7 @@ describe('the owner\'s commands', () => {
   for (const origin of others) {
     test(`from ${origin.kind}: refused with a line, and k never runs`, async ($, on) => {
       const w = world(on)
-      for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start']) {
+      for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start', 'k-queue']) {
         const { text } = await run($, command, `${ID} because`, origin)
         expect(text).toMatch(new RegExp(`^/${command} runs only from your own prompt or from Remote Control; this one came from .*${origin.kind === 'plugin' ? 'the plugin other' : origin.kind}, so nothing ran\\.$`))
       }
