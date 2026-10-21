@@ -170,11 +170,15 @@ reached the phone and its answer came back while the command ran, 8.4 s and 16.6
 
 - It takes **labels only**, two to four: a mod cannot give a choice a description (AC-3's "a label and a description"
   was changed to this in A-1 of the task). The question's list names each row only, as plain numbered lines
-  (`/k-queue`'s gives each task's title too, A-10), and a picked row's details are the next dialog's text (A-8).
+  (`/k-queue`'s gives each task's title too, A-10, and is numbered by place, A-11), and a picked row's details are the
+  next dialog's text (A-8).
 - The question is **plain text**: line breaks are kept, markdown is not drawn (`**` shows as typed), and a line the mod
   logged before the dialog does not appear on the phone.
 - The **app numbers the choices itself** (chips 1 to 4), so a label never starts with a number (a test holds it) and
-  the question's numbers are the app's: "1. hub/sync-notes: ..." sits above the choice that opens it.
+  the question's numbers are the app's: "1. hub/sync-notes: ..." sits above the choice that opens it. A mod cannot
+  hide the chips' numbers (the owner asked, A-11's Q-48): `$.ui.ask` takes labels and a header only. `/k-queue` is the
+  one list whose lines carry the task's place in the queue instead ("7. gulnya/large-screens: queued. ..."), so they
+  match `k list` and `k queue show` (A-11); its parked tasks, and Move's Earlier, Later and end, have no number.
 - Under the choices the app adds a **free-text row** ("Something else") and a **Skip** button. Skip answers the string
   `[No preference]`, which is no rejection: an answer acts only when it equals one of the dialog's own labels, so Skip,
   a dismissal and any other text run nothing. The free-text row is how a reason is typed (hold, decline, accept with
@@ -182,23 +186,27 @@ reached the phone and its answer came back while the command ran, 8.4 s and 16.6
 
 **How it is laid out** (`mods/kirunak/hooks/owner.ts`, `picks.ts`; judgement unless marked):
 
-- A list shows **three rows and More** when there are more than four (the fourth choice is More), and one fewer under
+- A list shows **three rows and More** when there are more than four (the fourth choice is More), and one fewer above
   Back: "Waiting for you to approve (1 to 3 of 7)". A short list shows all its rows. Evidence for the limit: four
   choices at most.
-- **Back** on every dialog but the first shows the dialog before it again; Cancel stands where a reason dialog or a
-  lone choice would otherwise be padded with Yes and No. Nothing is run by Back or Cancel.
+- **Back** on every dialog but the first shows the dialog before it again, and is always the lowest choice, below More
+  and Cancel (the owner on the phone, A-11's E-1 and E-5); Cancel stands where a reason dialog or a lone choice would
+  otherwise be padded with Yes and No. Nothing is run by Back or Cancel.
 - **The last choice names the verb**: "Approve <id>", "Accept <id>", "Accept <id> with open items", "Approve <id> A-n",
   "Decline <id> A-n", "Hold <id>", "Start <id>", "Move <id> before <Y>", "Move <id> to the end", "Park <id>", "Put back
-  <id>" (the owner's answer Q-17: each behind an explicit last choice). It sits in a dialog that shows the item's text
+  <id>" (the owner's answer Q-17: each behind an explicit last choice), and Move's "Earlier" and "Later", whose lines
+  say the place each takes the task to, under the task's text (A-11). It sits in a dialog that shows the item's text
   above it, so the owner reads what the tap will do. `k` checks the task again as it runs (E-2): a task changed since
   the list was shown is answered with k's refusal, never run on another.
 - When nothing ran, the answer says why ("Nothing ran: skipped", "dismissed", "cancelled", "no reason was typed", "the
   answer was none of the choices"). `/k-approve`, `/k-accept` and `/k-amendments` then print the numbered list again, so
   a typed number keeps using the whole list; `/k-hold`, `/k-start` and `/k-queue`, which take no number, answer "Nothing
   ran: <why>." alone.
-- `/k-queue` lists the queue in order and then the parked tasks, each line a task's id, state, place when it has one and
-  title (A-10: the one picking list that gives titles). A queued task offers Move and Park, a parked one Put back; Move
-  lists the other queued tasks, as the first list does, and last the end of the queue. Two choices the build made that
+- `/k-queue` lists the queue in order and then the parked tasks, each line a task's id, state and title (A-10: the one
+  picking list that gives titles), numbered by its place in the queue, a parked task's unnumbered (A-11). A queued task
+  offers Move and Park, a parked one Put back; Move lists Earlier and Later first, a tap on either moving the task one
+  place (`k queue move <id> --before` the task before it, `--after` the one after; none for the first task and none
+  later for the last, A-11), then the other queued tasks, as the first list does, and last the end of the queue. Two choices the build made that
   AC-17 does not spell out: Park is offered only to a task in the state "queued" (one in progress or in review that sits
   in the queue gets Move only, because parked it would leave both lists and the phone could not put it back), and a move
   to the place the task already holds offers no verb ("It is there already"), since `k queue` would fail on an empty

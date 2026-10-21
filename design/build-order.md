@@ -248,6 +248,12 @@ board reaches the phone by two commands the owner types and nothing else refresh
   `pick.test.ts` (all under `mods/kirunak/tests/`). Numbers: `claude plugin test` 79 of 79 (50 before S-6); `npm test` 354 of 354 after the states
   merged; `k list --json --all` piped whole at 90,372 bytes (the pipe cut it at 64 KiB until `k` exited only after
   stdout and stderr flushed). The phone check of the dialogs is S-10's.
+- The queue on the phone, built 2026-10-21 (gulnya/kirunak-phone A-11, S-19, branch `phone/queue`): Back is the
+  lowest choice of every dialog, below More and Cancel; `/k-queue`'s lines are numbered by queue place, parked tasks
+  unnumbered; Move lists Earlier and Later first, each a tap running `k queue move --before` or `--after` by id
+  (`hooks/owner.ts`, `picks.ts`, `lists.ts`). Tests: `touch.test.ts` (Earlier and Later at the first, a middle and the
+  last task; place numbers on every page), `dialog.test.ts` (Back last in every dialog kind). Numbers: `claude plugin
+  test` 115 of 115; `npm test` 369 of 369.
 
 ## Slice 7, later and not detailed here: R17, R18
 

@@ -1,6 +1,6 @@
 import { amendmentItem, amendmentLabel, amendmentLines, taskLabel } from './lists'
 import type { Item } from './lists'
-import type { Choice, PickScreen, Screen } from './owner'
+import type { Choice, PickScreen, Row, Screen } from './owner'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold and /k-start with no number (kirunak-phone AC-3, AC-8 to
@@ -175,20 +175,22 @@ export function startScreen(rows: readonly TaskRow[], session: string, after: (o
 // A task as `k list --json --all` gives it, enough for the queue's dialogs.
 export type QueueRow = TaskRow & { queue: number | null }
 
-// A task as /k-queue's lists show it (A-10's AC-3, AC-17): its id, state and queue place, then its title, so the owner
-// knows which task to move before which.
+// A task as /k-queue's lists show it (A-10's AC-3, AC-17): its id and state, then its title, so the owner knows which
+// task to move before which; its line is numbered by its place in the queue (A-11), so the place is not said again.
 const queueItem = (r: QueueRow): Item => {
-  const item = stateItem(r, r.queue)
+  const item = stateItem(r)
   const title = titleOf(r)
   return title ? { ...item, text: `${item.text}. ${sentence(title)}` } : item
 }
 
 const END = 'End of the queue'
 
-// /k-queue (AC-17): the queue in order, then the parked tasks; null when there is neither. A task in the queue offers
-// Move when there is another, and "Park <id>" when its state is queued (parking another state would leave it in neither
-// list); Move lists the other tasks of the queue and, last, its end, and the one picked is where it goes, by id. A
-// parked task offers "Put back <id>", to the end. The queue verbs take no --via: k records no one for them.
+// /k-queue (AC-17): the queue in order, then the parked tasks, each line numbered by its place in the queue, a parked
+// one's by none (A-11); null when there is neither. A task in the queue offers Move when there is another, and
+// "Park <id>" when its state is queued (parking another state would leave it in neither list); Move lists Earlier and
+// Later, each a tap that moves it one place (A-11), the first task having no Earlier and the last no Later, then the
+// other tasks of the queue and, last, its end, and the one picked is where it goes, by id. A parked task offers
+// "Put back <id>", to the end. The queue verbs take no --via: k records no one for them.
 export function queueScreen(rows: readonly QueueRow[]): Screen | null {
   const queued = rows.filter(r => r.queue !== null).sort((a, b) => (a.queue as number) - (b.queue as number))
   const parked = rows.filter(r => r.queue === null && r.state === 'parked')
@@ -205,16 +207,27 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
       question: y === next ? 'It is there already. Back to the list?' : 'Move it there?',
     }
   }
-  const where = (r: QueueRow): Screen => ({
-    kind: 'list',
-    header: 'Queue',
-    head: `Move ${r.id} before one of these, or to the end:`,
-    question: 'Where to?',
-    rows: [
-      ...queued.filter(y => y !== r).map(y => ({ item: queueItem(y), label: taskLabel(y), open: () => there(r, y) })),
-      { item: { lead: '', name: END, text: '' }, label: END, open: () => there(r, null) },
-    ],
-  })
+  const where = (r: QueueRow): Screen => {
+    const before = queued[queued.indexOf(r) - 1] ?? null
+    const after = queued[queued.indexOf(r) + 1] ?? null
+    const near: Row[] = []
+    if (before) near.push({ item: { lead: '', name: 'Earlier', text: `: to place ${before.queue}, before ${before.id}.` }, label: 'Earlier', verb: ['queue', 'move', r.id, '--before', before.id] })
+    if (after) near.push({ item: { lead: '', name: 'Later', text: `: to place ${after.queue}, after ${after.id}.` }, label: 'Later', verb: ['queue', 'move', r.id, '--after', after.id] })
+    const step = before && after ? 'one place earlier or later' : before ? 'one place earlier' : 'one place later'
+    return {
+      kind: 'list',
+      header: 'Queue',
+      text: placed(r),
+      head: `Move it ${step}, before one of these, or to the end:`,
+      question: 'Where to?',
+      places: true,
+      rows: [
+        ...near,
+        ...queued.filter(y => y !== r).map(y => ({ item: queueItem(y), label: taskLabel(y), place: y.queue, open: () => there(r, y) })),
+        { item: { lead: '', name: END, text: '' }, label: END, open: () => there(r, null) },
+      ],
+    }
+  }
   const inQueue = (r: QueueRow): Screen => {
     const choices: Choice[] = []
     if (queued.length > 1) choices.push({ label: 'Move', open: () => where(r) })
@@ -234,8 +247,9 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
     header: 'Queue',
     head: !parked.length ? 'The queue in order:' : queued.length ? 'The queue in order, then the parked tasks:' : 'The queue is empty. Parked:',
     question: 'Which task?',
+    places: true,
     rows: [
-      ...queued.map(r => ({ item: queueItem(r), label: taskLabel(r), open: () => inQueue(r) })),
+      ...queued.map(r => ({ item: queueItem(r), label: taskLabel(r), place: r.queue, open: () => inQueue(r) })),
       ...parked.map(r => ({ item: queueItem(r), label: taskLabel(r), open: () => out(r) })),
     ],
   }

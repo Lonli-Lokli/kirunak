@@ -34,6 +34,11 @@ export function numbered(items: readonly Item[], from = 1): string[] {
 // The rows as numbered plain lines, one each, for a dialog's question, which draws no markdown.
 export const plainLines = (items: readonly Item[], from = 1): string[] => items.map((x, i) => `${from + i}. ${x.lead}${x.name}${x.text}`)
 
+// The rows as plain lines, each numbered by its own number, a row without one unnumbered (/k-queue's places,
+// kirunak-phone A-11).
+export const placeLines = (items: readonly Item[], places: readonly (number | null)[]): string[] =>
+  items.map((x, i) => `${places[i] != null ? `${places[i]}. ` : ''}${x.lead}${x.name}${x.text}`)
+
 // A dialog's question with the markdown marks left out: the dialog draws no markdown, so a mark shows as typed (the
 // owner's phone at S-1 and S-10: the backticks around `/k-queue` in /k-amendments). Backticks and ** go wherever they
 // are, * around words, and a heading's leading #; a lone * stays, as it is no mark.
