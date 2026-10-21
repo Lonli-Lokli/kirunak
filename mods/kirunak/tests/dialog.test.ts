@@ -22,7 +22,7 @@ describe('picking by touch', () => {
     expect(await run($, 'k-approve')).toBe('hub/proposed: queued, place 3')
     expect(w.asked).toEqual([
       { header: 'Approve', question: 'Waiting for you to approve:\n1. hub/proposed: Asks for approval. Can approve.\nWhich task?', labels: ['hub/proposed', 'Cancel'] },
-      { header: 'Approve', question: 'hub/proposed: Asks for approval.\nk would approve it now.\nApprove it?', labels: ['Approve hub/proposed', 'Back'] },
+      { header: 'Approve', question: 'hub/proposed: Asks for approval.\nState: proposed.\nk would approve it now.\nApprove it?', labels: ['Approve hub/proposed', 'Back'] },
     ])
     expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
   })
@@ -37,7 +37,7 @@ describe('picking by touch', () => {
     expect(three).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (6 to 7 of 7)\n1. hub/t6 (type 6): Task 6. Can approve.\n2. hub/t7 (type 7): Task 7. Can approve.\nWhich task?', labels: ['hub/t6', 'hub/t7', 'Back'] })
     // Back shows the dialog before again: page two, then page one.
     expect([w.asked[3], w.asked[4]]).toEqual([two, one])
-    expect(w.asked[5]).toEqual({ header: 'Approve', question: 'hub/t2: Task 2.\nNot yet:\ntask.md fails k check: AC-1 has no source\nk would refuse it now. Back to the list?', labels: ['Back', 'Cancel'] })
+    expect(w.asked[5]).toEqual({ header: 'Approve', question: 'hub/t2: Task 2.\nState: proposed.\nNot yet:\ntask.md fails k check: AC-1 has no source\nk would refuse it now. Back to the list?', labels: ['Back', 'Cancel'] })
     expect(w.asked[6]).toEqual(one)
     expect(verbs(w.runs)).toEqual([['approve', 'hub/t7', '--via', 'mod']])
   })
@@ -76,7 +76,7 @@ describe('picking by touch', () => {
     await run($, 'k-approve')
     expect(w.asked).toEqual([
       { header: 'Approve', question: 'Waiting for you to approve:\n1. 2048/tiles: Tiles slide. Can approve.\n2. hub/proposed: Asks for approval. Can approve.\nWhich task?', labels: ['2048/tiles', 'hub/proposed'] },
-      { header: 'Approve', question: '2048/tiles: Tiles slide.\nk would approve it now.\nApprove it?', labels: ['Approve 2048/tiles', 'Back'] },
+      { header: 'Approve', question: '2048/tiles: Tiles slide.\nState: proposed.\nk would approve it now.\nApprove it?', labels: ['Approve 2048/tiles', 'Back'] },
     ])
     await run($, 'k-approve', '2048/tiles')
     expect(verbs(w.runs)).toEqual([['approve', '2048/tiles', '--via', 'mod'], ['approve', '2048/tiles', '--via', 'mod']])
@@ -104,7 +104,7 @@ describe('picking by touch', () => {
     })
     expect(w.asked[1]?.labels).toEqual(['Accept weather/was-reviewed', 'Back'])
     await run($, 'k-accept')
-    const text = `${ID}: The last forecast stays readable offline.\nReview: review.md, needs owner (E-1).\nNot yet:\nchecklist.md has 1 unticked item(s):\n- [ ] E-1 On the oldest phone. (review.md)`
+    const text = `${ID}: The last forecast stays readable offline.\nState: awaiting owner.\nReview: review.md, needs owner (E-1).\nNot yet:\nchecklist.md has 1 unticked item(s):\n- [ ] E-1 On the oldest phone. (review.md)`
     expect(w.asked[3]).toEqual({ header: 'Accept', question: `${text}\nOnly open checklist items stop it. Accept it with them open?`, labels: ['Accept with open items', 'Back'] })
     const reason = { header: 'Accept', question: `${text}\nType the reason in the free-text row: why accept it with these items open?`, labels: ['Back', 'Cancel'] }
     expect(w.asked[4]).toEqual(reason)
@@ -131,7 +131,17 @@ describe('picking by touch', () => {
     })
     expect(w.asked[1]).toEqual({
       header: 'Amendments',
-      question: `${ID} A-3, proposed 2026-11-06: The age line needs its words. Changes 2 lines.\nTask: The last forecast stays readable offline.\nApprove it, or decline it?`,
+      question: [
+        `${ID} A-3: Age line in words. Proposed 2026-11-06 by session s1, changes 2 lines.`,
+        'Task: The last forecast stays readable offline.',
+        'Why:',
+        'The age line needs its words. The old one was a time alone.',
+        'Changes:',
+        '- replace E-1: A forecast older than a day says "yesterday".',
+        '- replace D-1: Keep the last three days.',
+        'k would approve it now.',
+        'Approve it, or decline it?',
+      ].join('\n'),
       labels: [`Approve ${ID} A-3`, 'Decline', 'Back'],
     })
     await run($, 'k-amendments')
@@ -153,7 +163,7 @@ describe('picking by touch', () => {
     await run($, 'k-amendments')
     expect(w.asked.length).toBe(6)
     expect(w.asked[0]?.question).toBe('Waiting for you to approve:\n1. hub/proposed: Asks k approve for this. Can approve.\nWhich task?')
-    expect(w.asked[1]?.question).toBe('hub/proposed: Asks k approve for this.\nk would approve it now.\nApprove it?')
+    expect(w.asked[1]?.question).toBe('hub/proposed: Asks k approve for this.\nState: proposed.\nk would approve it now.\nApprove it?')
     expect(w.asked[2]?.question).toMatch(/^Waiting for your approval:\n1\. weather\/offline-forecast A-3, proposed 2026-11-06: Says \/k-queue and bold first\. Changes 2 lines\.\n/)
     for (const a of w.asked) expect(a.question).not.toMatch(/`|\*\*/)
   })

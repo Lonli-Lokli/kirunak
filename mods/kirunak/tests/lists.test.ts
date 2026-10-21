@@ -76,7 +76,7 @@ describe('the lists the commands answer with', () => {
 
   test('/k-amendments <n>: the Why and Changes in full, from the file, and what follows', () => {
     expect(amendmentText(1, A3, FILE)).toBe([
-      'weather/offline-forecast A-3, proposed 2026-11-06 by session s1, changes 2 lines.',
+      'weather/offline-forecast A-3: Age line in words. Proposed 2026-11-06 by session s1, changes 2 lines.',
       '',
       'Why:',
       '',

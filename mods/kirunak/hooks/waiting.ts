@@ -6,11 +6,13 @@ import type { KirunakRow } from '../types'
 // an accept row's onlyChecklist says open checklist items are all that stops it (`--checklist-open` would run).
 export type WaitingRow = { id: string; title: string; why: string | null; review?: { file: string; verdict: string | null } | null; checklistOpen?: number; onlyChecklist?: boolean }
 // An amendment neither applied nor declined (kirunak-phone S-4): refuse is what k approve --amendment would refuse, one
-// line, null when it would not; file the amendment's absolute path.
+// line, null when it would not; file the amendment's absolute path; title is the task's, name the amendment's own few
+// words, or the criteria it changes when it has none ("replaces AC-5", kirunak-phone A-8).
 export type AmendmentRow = {
   id: string
   amendment: string
   title: string
+  name: string
   proposed: string | null
   by: string | null
   why: string | null
