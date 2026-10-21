@@ -254,6 +254,11 @@ board reaches the phone by two commands the owner types and nothing else refresh
   (`hooks/owner.ts`, `picks.ts`, `lists.ts`). Tests: `touch.test.ts` (Earlier and Later at the first, a middle and the
   last task; place numbers on every page), `dialog.test.ts` (Back last in every dialog kind). Numbers: `claude plugin
   test` 115 of 115; `npm test` 369 of 369.
+- `/k-resume`, built 2026-10-21 (gulnya/kirunak-phone A-12, S-21, branch `phone/resume`): the tasks on hold by touch,
+  the one picked with its title and state above "Resume <id>", running `k resume <id>` by id; `/k-resume <id>` typed
+  runs at once; the owner's rule as `/k-hold`'s (`hooks/commands.ts`, `owner.ts`, `picks.ts`, `register.tsx`). Tests:
+  `touch.test.ts`, `rule.test.ts`, `commands.test.ts`, `dialog.test.ts`, `answers.test.ts`, `pick.test.ts`. Numbers:
+  `claude plugin test` 122 of 122; `npm test` 369 of 369.
 
 ## Slice 7, later and not detailed here: R17, R18
 

@@ -9,7 +9,8 @@ import { kOf, refresh } from './reads'
 // - a command's turn (Turn) is made only by owners(), in the command's own command.run hook, after the command's
 //   origin passed (composer or bridge), and closes when that hook answers;
 // - the dialog ($.ui.ask) is opened only by a turn, at most once, while its hook runs; its answer acts only when it
-//   equals a choice it offered, and a verb choice stands only in an item dialog, under the item's own words;
+//   equals a choice it offered, and a verb choice stands under the item's own words (an item dialog's, or /k-queue's
+//   Move list's Earlier and Later, under the task's lines, kirunak-phone A-11);
 // - a verb runs only through runVerb, which this module keeps to itself and calls once, as the hook answers, for an
 //   Outcome this same turn made: the verb typed on the command line itself, or the verb choice that was the dialog's
 //   last tap (a turn that opened its dialog can type none);
