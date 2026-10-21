@@ -20,7 +20,7 @@ function folder(setup) {
     writeFileSync(join(dir, name), text);
   };
   const out = setup({ dir, put, record }) || {};
-  return { taskDir: dir, record: out.record === undefined ? record : out.record, aspectIds: ASPECTS, isDone: out.isDone };
+  return { taskDir: dir, record: out.record === undefined ? record : out.record, aspectIds: ASPECTS, isDone: out.isDone, queued: out.queued ?? true };
 }
 
 const REVIEW = '| id | verdict | evidence |\n| --- | --- | --- |\n| AC-1 | met | test X (a.test.mjs:1) |\n';
@@ -35,7 +35,9 @@ const CASES = {
     return { record: null };
   },
   proposed: () => ({ record: null }),
-  ready: () => {},
+  queued: () => {},
+  // Approved with k approve --no-queue, or taken out with k queue remove: k run starts none of its steps (AC-15, AC-16).
+  parked: () => ({ queued: false }),
   blocked: ({ put }) => {
     put('plan.md', '---\ntask: weather/offline-forecast\nblocked-by: [weather/other]\n---\n');
     return { isDone: () => false };
@@ -69,12 +71,18 @@ for (const [state, setup] of Object.entries(CASES)) {
   });
 }
 
+test('the queue decides only between queued and parked: a held, blocked or started task reads the same in it or out', () => {
+  for (const queued of [true, false]) {
+    for (const state of ['on hold', 'blocked', 'in progress']) assert.equal(stateOf({ ...folder(CASES[state]), queued }), state, `queued: ${queued}`);
+  }
+});
+
 test('a blocker that is done does not block', () => {
   const f = folder(({ put }) => {
     put('plan.md', '---\ntask: weather/offline-forecast\nblocked-by: [weather/other]\n---\n');
     return { isDone: (id) => id === 'weather/other' };
   });
-  assert.equal(stateOf(f), 'ready');
+  assert.equal(stateOf(f), 'queued');
 });
 
 const REVIEW_STEP = '\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n';
@@ -82,7 +90,7 @@ const REVIEW_STEP = '\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs:
 test('a step waiting on an input no step produces blocks', () => {
   const plan = '### S-1 Cache [agent]\ncovers: all\ninputs: task, docs/none.md\noutputs: steps/S-1/report.md\n' + REVIEW_STEP;
   assert.equal(stateOf(folder(({ put }) => put('plan.md', plan))), 'blocked');
-  assert.equal(stateOf(folder(({ put }) => put('plan.md', plan.replace('docs/none.md', 'intake.md')))), 'ready');
+  assert.equal(stateOf(folder(({ put }) => put('plan.md', plan.replace('docs/none.md', 'intake.md')))), 'queued');
 });
 
 test('a plan with no review step blocks, a task in progress too: no step may start', () => {

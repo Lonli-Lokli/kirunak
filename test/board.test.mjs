@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { rows } from '../lib/list.mjs';
-import { fixture, NOW, sessionsAt } from './board-fixture.mjs';
+import { fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
   return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
@@ -15,6 +15,7 @@ const h2s = (html) => [...html.matchAll(/<h2>([^<]*?)(?: <span class="n">\((\d+)
 
 test('every task appears with its AC and E and their latest verdicts', async () => {
   const w = await fixture();
+  queuedAndParked(w);
   const html = await page(w);
   for (const id of ['weather/hourly-chart', 'hub/reviewed', 'weather/recent', 'weather/offline-forecast']) assert.ok(html.includes(id), id);
   assert.ok(!html.includes('weather/long-ago'), 'done more than a week ago is left out');
@@ -29,7 +30,13 @@ test('every task appears with its AC and E and their latest verdicts', async () 
   const chart = html.slice(html.indexOf('weather/hourly-chart'), html.indexOf('</article>', html.indexOf('weather/hourly-chart')));
   assert.match(chart, /state: in progress, queue place 1/);
   assert.match(chart, /step: 2026-11-03 14:02 S-2 started/);
-  assert.deepEqual(h2s(html), ['Working on now', 'proposed', 'in progress', 'in review', 'done this week', 'Lock, queue and running steps'], 'a section per state with tasks, in lib/state.mjs\'s order');
+  const cardOf = (id) => html.slice(html.indexOf(`<h3>${id}</h3>`), html.indexOf('</article>', html.indexOf(`<h3>${id}</h3>`)));
+  assert.match(cardOf('weather/next-up'), /state: queued, queue place 2/);
+  assert.match(cardOf('hub/later'), /state: parked</);
+  assert.deepEqual(h2s(html), [
+    'Working on now', 'proposed', 'queued', 'parked', 'in progress', 'in review', 'done this week', 'Lock, queue and running steps',
+  ], 'a section per state with tasks, in lib/state.mjs\'s order');
+  assert.match(html, /<h3>Task queue<\/h3>\n<ol><li>weather\/hourly-chart \(in progress\)<\/li><li>weather\/next-up \(queued\)<\/li><\/ol>/);
 });
 
 test('no form, button or script anywhere, and every text is escaped', async () => {

@@ -53,7 +53,7 @@ Cache     k keep --session <id>: in the background, ends when the session's wake
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
-          k queue remove <id>
+          k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
@@ -362,7 +362,7 @@ const VERBS = {
     const r = await approval.approve({
       ws, id, amendment: flags.amendment, via: flags.via || 'shell', queuePlace: place(flags), noQueue: !!flags['no-queue'],
     });
-    return { ...r, text: `${id}: ready${r.queuePlace ? `, queue place ${r.queuePlace}` : ''} (${r.hash.slice(0, 19)}…, commit ${r.commit})` };
+    return { ...r, text: `${id}: ${r.state}${r.queuePlace ? `, queue place ${r.queuePlace}` : ''} (${r.hash.slice(0, 19)}…, commit ${r.commit})` };
   },
 
   async accept({ ws, pos, flags }) {
@@ -465,11 +465,12 @@ const VERBS = {
     const hold = (await waiting.holdable(ws, all)).map(brief);
     // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
     const start = rows.map(brief);
-    const line = (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : 'ready'}`;
+    // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
+    const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
-      approve.length ? ['to approve:', ...approve.map(line)].join('\n') : 'nothing to approve',
+      approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
-      accept.length ? ['to accept:', ...accept.map(line)].join('\n') : 'nothing to accept',
+      accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
     ].join('\n');
     return { approve, accept, amendments, hold, start, text };
   },

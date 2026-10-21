@@ -62,6 +62,13 @@ export async function fixture() {
   return w;
 }
 
+// Two approved tasks with no step started: one in the queue after the chart (queued), one out of it (parked).
+export function queuedAndParked(w) {
+  addTask(w.weather, 'weather/next-up', 'Next in line', { approved: '2026-11-04T09:00:00Z' });
+  addTask(w.hub, 'hub/later', 'Not yet', { approved: '2026-11-04T10:00:00Z' });
+  writeFileSync(join(w.hub, 'kirunak', 'queue.md'), '# queue\nweather/hourly-chart\nweather/next-up\n');
+}
+
 export const NOW = new Date('2026-11-07T12:00:00Z');
 
 // A session record naming the chart (k start), a running step naming the reviewed task, and an old session naming a
