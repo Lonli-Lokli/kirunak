@@ -194,8 +194,9 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   }
   if (choices.length === 1) choices.push({ label: CANCEL, act: 'cancel' })
   const labels = choices.map(c => c.label)
-  if (!labels.length || labels.length > CHOICES || new Set(labels).size < labels.length || labels.some(l => !l.trim() || /^\d/.test(l) || l === SKIP)) {
-    throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique, none starting with a number: ${labels.join(' | ')}`)
+  // A label may start with a digit (a task of the repo "2048"): the app's own number before it is cosmetic (S-1).
+  if (!labels.length || labels.length > CHOICES || new Set(labels).size < labels.length || labels.some(l => !l.trim() || l === SKIP)) {
+    throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique and not blank: ${labels.join(' | ')}`)
   }
   return { question: [...lines, screen.question].join('\n'), choices }
 }

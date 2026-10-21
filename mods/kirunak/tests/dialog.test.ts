@@ -39,6 +39,18 @@ describe('picking by touch', () => {
     expect(verbs(w.runs)).toEqual([['approve', 'hub/t7', '--via', 'mod']])
   })
 
+  test('a task id starting with a digit (the repo "2048") is listed, picked and approved through the dialog, and typed it is an id, not a number (finding 2)', async ($, on) => {
+    const approve = [{ id: '2048/tiles', title: 'Tiles slide', why: null }, { id: 'hub/proposed', title: 'Asks for approval', why: null }]
+    const w = world(on, { waiting: [{ ...WAITING, approve }], taps: ['2048/tiles', 'Approve 2048/tiles'] })
+    await run($, 'k-approve')
+    expect(w.asked).toEqual([
+      { header: 'Approve', question: 'Waiting for you to approve:\n1. 2048/tiles: Tiles slide. Can approve.\n2. hub/proposed: Asks for approval. Can approve.\nWhich task?', labels: ['2048/tiles', 'hub/proposed'] },
+      { header: 'Approve', question: '2048/tiles: Tiles slide.\nk would approve it now.\nApprove it?', labels: ['Approve 2048/tiles', 'Back'] },
+    ])
+    await run($, 'k-approve', '2048/tiles')
+    expect(verbs(w.runs)).toEqual([['approve', '2048/tiles', '--via', 'mod'], ['approve', '2048/tiles', '--via', 'mod']])
+  })
+
   test('/k-accept: "Accept <id>" for one k would accept; one stopped only by open checklist items takes a reason typed in the free-text row, shown above "Accept <id> with open items" (AC-9)', async ($, on) => {
     const w = world(on, { taps: ['weather/was-reviewed', 'Accept weather/was-reviewed', ID, 'Accept with open items', 'read on the phone', 'Back', ' read on the phone ', `Accept ${ID} with open items`] })
     await run($, 'k-accept')
