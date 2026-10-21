@@ -104,6 +104,12 @@ describe('the lists as answers', () => {
     })
   }
 
+  test('a verb k did not finish says so without the engine\'s own prefix (AC-12)', async ($, on) => {
+    world(on, { verbFails: 'timed out after 600000 ms' })
+    await run($, 'k-amendments')
+    expect(await run($, 'k-approve-amendment', '1')).toMatch(/^\/k-approve-amendment: k did not finish \((?!kirunak)[^]*timed out after 600000 ms\); `k list --all` says whether it took\.$/)
+  })
+
   test('a list whose hook fails says so in the mod\'s own line', async ($, on) => {
     world(on, { broken: true })
     expect(await run($, 'k-board')).toBe('/k-board failed in the mod; the debug log says why.')

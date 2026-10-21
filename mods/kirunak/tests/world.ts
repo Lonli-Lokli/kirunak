@@ -71,7 +71,7 @@ type Answer = { exitCode: number; stdout: string; stderr: string }
 // The world beneath the mod: a clock, the commands it registers, its session's id, a k that exists and answers
 // `k list`, `k status`, `k waiting` and `k board` from the fixtures above (each owner verb with `verb`), the amendment
 // files, events.jsonl's lines as tail would print them, and the toasts and panes the mod raised.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (typeof WAITING | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (typeof WAITING | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer, verbFails = null as string | null } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>() }
   on('command.register', ($, e) => {
@@ -104,6 +104,8 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
     } else {
       w.runs.push([...e.argv])
+      // `verbFails`: the verb never finished, as a timeout rejects.
+      if (verbFails !== null) return { deny: verbFails }
     }
     return { value: { ...answer, isStdoutTruncated: false, isStderrTruncated: false } }
   })

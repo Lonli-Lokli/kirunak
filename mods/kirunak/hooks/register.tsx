@@ -47,6 +47,10 @@ async function withK($: EngineInterface, name: string, run: (k: string) => Promi
   return (await $.fs.exists(k)) ? run(k) : `/${name}: there is no k at ${k}, so nothing ran.`
 }
 
+// An engine call's failure, less the "<plugin>: $.<noun>.<verb>: " the engine starts it with, which would name kirunak
+// a second time in an answer (AC-12).
+const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).replace(/^[^\n]*?\$\.[\w.]+: /, '')
+
 const refused = (name: string, r: { stdout: string; stderr: string }): string => `/${name} refused:\n${(r.stderr || r.stdout).trim()}`
 const firstLine = (r: { stdout: string; stderr: string }): string => (r.stderr || r.stdout).trim().split('\n')[0] ?? ''
 
@@ -56,7 +60,7 @@ async function runVerb($: EngineInterface, name: string, k: string, argv: readon
   try {
     r = await $.process.run(['node', k, ...argv], { timeoutMs: COMMIT_MS })
   } catch (err) {
-    return { ok: false, text: `/${name}: k did not finish (${err instanceof Error ? err.message : String(err)}); \`k list --all\` says whether it took.` }
+    return { ok: false, text: `/${name}: k did not finish (${reason(err)}); \`k list --all\` says whether it took.` }
   }
   void refresh($)
   return r.exitCode !== 0 ? { ok: false, text: refused(name, r) } : { ok: true, text: r.stdout.trim() }
@@ -129,9 +133,7 @@ function amendments($: EngineInterface, args: string): Promise<string> {
     try {
       text = await $.fs.read(picked.row.file)
     } catch (err) {
-      // The engine's message starts "<plugin>: $.fs.read: ", which would name kirunak a second time (AC-12).
-      const why = (err instanceof Error ? err.message : String(err)).replace(/^.*?\$\.fs\.read: /, '')
-      return `/k-amendments ${picked.n}: ${picked.row.file} could not be read (${why}).`
+      return `/k-amendments ${picked.n}: ${picked.row.file} could not be read (${reason(err)}).`
     }
     return amendmentText(picked.n, picked.row, text)
   })
