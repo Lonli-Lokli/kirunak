@@ -89,6 +89,14 @@ describe('picking by touch', () => {
     ])
   })
 
+  test('no dialog names kirunak: its words are the item\'s and the mod\'s, never the plugin\'s name (AC-12)', async ($, on) => {
+    const w = world(on, { taps: ['hub/proposed', SKIP, ID, 'Accept with open items', 'why', SKIP, `${ID} A-4`, 'Decline', 'why', SKIP] })
+    for (const command of ['k-approve', 'k-accept', 'k-amendments']) await run($, command)
+    expect(w.asked.length).toBe(10)
+    // An id or a path may hold the word; the dialog's own words never do.
+    for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
+  })
+
   test('k checks the item again as the verb runs, and its refusal is the answer; a number typed after the dialog still takes the list as shown (E-2, AC-3)', async ($, on) => {
     const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed'], verb: { exitCode: 1, stdout: '', stderr: 'k: hub/proposed was approved on 2026-11-07\n' } })
     expect(await run($, 'k-approve')).toBe('/k-approve refused:\nk: hub/proposed was approved on 2026-11-07')
