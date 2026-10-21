@@ -2,7 +2,7 @@ import type { CommandRunInput, EngineInterface } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 
 import { owners } from '../hooks/owner'
-import type { Outcome, Screen, Turn } from '../hooks/owner'
+import type { Outcome, PickScreen, Screen, Turn } from '../hooks/owner'
 
 // owners() from outside (S-7 review, test b): a fake body keeps an Outcome from one turn and hands it back in another,
 // or keeps a typed one across its own dialog; neither runs. A test's own hooks may make no engine call (the host's
@@ -71,5 +71,27 @@ describe('a turn runs only an Outcome it made (kirunak-phone AC-4, S-7 review)',
       return t.typed(ARGV)
     })).rejects.toThrow('/k-probe: a typed verb after the dialog')
     expect([w.asked, w.runs]).toEqual([3, []])
+  })
+
+  test('a dialog that runs no verb (/k-board\'s) answers the label tapped, null for Skip or a dismissal; no verb is typed after it, and a verb\'s dialog never ends in a pick', async () => {
+    const PICK: PickScreen = { kind: 'pick', header: 'Board', text: ['hub/proposed: proposed.'], labels: ['hub/proposed'], question: 'Which task\'s card?' }
+    const LIST: Screen = { kind: 'list', header: 'Approve', head: 'Waiting:', question: 'Which task?', rows: [{ item: { lead: '', name: 'hub/proposed', text: '.' }, label: 'hub/proposed', open: () => PICK }] }
+    const SKIP = '[No preference]'
+    const { $, w } = engine(['hub/proposed', SKIP, 'hub/proposed', SKIP, 'hub/proposed', 'hub/proposed'])
+    const picked = async (t: Turn): Promise<string> => (await t.pick(PICK)) ?? 'none'
+    expect(await answer($, picked)).toBe('hub/proposed')
+    expect(await answer($, picked)).toBe('none')
+    await expect(answer($, async t => {
+      await t.pick(PICK)
+      return t.typed(ARGV)
+    })).rejects.toThrow('/k-probe: a typed verb after the dialog')
+    await expect(answer($, async t => {
+      await t.dialog(ITEM)
+      return picked(t)
+    })).rejects.toThrow('/k-probe: a second dialog')
+    await expect(answer($, t => t.dialog(LIST))).rejects.toThrow('/k-probe: a pick in a verb\'s dialog')
+    // No tap left: dismissed.
+    expect(await answer($, picked)).toBe('none')
+    expect([w.asked, w.runs]).toEqual([7, []])
   })
 })

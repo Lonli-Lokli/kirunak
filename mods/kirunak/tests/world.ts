@@ -1,6 +1,7 @@
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
 
+import type { Brief } from '../hooks/picks'
 import type { AmendmentRow, Waiting } from '../hooks/waiting'
 import type { KirunakRow, KirunakStatus } from '../types'
 
@@ -49,8 +50,27 @@ export const FILES: Record<string, string> = {
   [`${AMENDMENT_DIR}/A-3.md`]: `---\ntask: ${ID}\nproposed: 2026-11-06\nby: session s1\n---\n\n## Why\nThe age line needs its words. The old one was a time alone.\n\n## Changes\n- replace E-1: A forecast older than a day says "yesterday".\n- replace D-1: Keep the last three days.\n`,
 }
 
-// What `k board --markdown` prints: its heading names kirunak, which the engine's prefix already does.
-export const BOARD = '# kirunak board\n\nMade at 2026-11-07 12:00.\n\n## Working on now (1)\n\n### weather/offline-forecast\n'
+// What `k board --brief --json` gives for ROWS: the brief board in plain lines, the task worked on first, and the ids
+// in the order the lines list them.
+export const BRIEF: Brief = {
+  made: '2026-11-07 12:00',
+  text: [
+    'Made at 2026-11-07 12:00.',
+    'Worked on now:',
+    '1. weather/offline-forecast: in review, queue 1. Step: S-2 finished. AC 1 of 2 met, E 0 of 1.',
+    'Every other task:',
+    '2. hub/sync-notes: queued, queue 2.',
+    '3. weather/was-reviewed: reviewed.',
+    '4. hub/proposed: proposed.',
+    '5. weather/asks-owner: awaiting owner.',
+    '6. hub/old: done.',
+    'Lock: weather unit tests (session s1), 1 waiting. Steps running: 1 of 2.',
+  ].join('\n'),
+  ids: [ID, 'hub/sync-notes', 'weather/was-reviewed', 'hub/proposed', 'weather/asks-owner', 'hub/old'],
+}
+
+// What `k board --card <id>` prints for a task of `rows`: its card, markdown.
+export const cardOf = (r: KirunakRow): string => `### ${r.id}\n\n${r.title}.\n\n- State: ${r.state}.\n${[...r.ac, ...r.e].map(x => `- ${x.id} ${x.verdict ?? 'no verdict'}: ${x.text}\n`).join('')}`
 
 // What `k waiting --json` gives for those rows.
 export const WAITING: Waiting = {
@@ -84,11 +104,12 @@ export type Asked = { question: string; labels: string[]; header: string }
 
 // The world beneath the mod: a clock, the commands it registers, its session's id (`idRead`: how many dialogs had
 // opened at each read of it), a k that exists and answers `k list` (from `rows`, ROWS unless a test gives its own),
-// `k status`, `k waiting` and `k board` from the fixtures above (each owner verb with `verb`), the amendment files,
+// `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` (any
+// other id refused) (each owner verb with `verb`), the amendment files,
 // events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
 // dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
 // left dismisses it.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], board = { exitCode: 0, stdout: BOARD, stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[] }
   on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
@@ -125,7 +146,10 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       answer = { exitCode: 0, stdout: JSON.stringify(what === 'list' ? { rows: shown } : status(task)), stderr: '' }
     } else if (what === 'board') {
       w.boards.push([...e.argv])
-      answer = board
+      const at = e.argv.indexOf('--card')
+      const id = at < 0 ? null : (e.argv[at + 1] ?? '')
+      const r = rows.find(x => x.id === id)
+      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
     } else if (what === 'waiting') {
       w.waits++
       // Each `k waiting` takes the next answer, the last one again once they run out; null is a k that failed.

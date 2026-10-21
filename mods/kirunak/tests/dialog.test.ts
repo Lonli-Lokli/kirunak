@@ -144,6 +144,20 @@ describe('picking by touch', () => {
     ])
   })
 
+  test('no dialog\'s question shows a markdown mark: the backticks and ** a title or a Why carries are left out, in every dialog (S-10)', async ($, on) => {
+    const why = 'Says `/k-queue` and **bold** first.'
+    const amendments = AMENDMENTS.map(x => ({ ...x, why, title: 'The `last` forecast, **offline**' }))
+    const approve = [{ id: 'hub/proposed', title: 'Asks `k approve` for **this**', why: null }]
+    const w = world(on, { waiting: [{ ...WAITING, amendments, approve }], taps: ['hub/proposed', SKIP, `${ID} A-3`, 'Decline', 'why', SKIP] })
+    await run($, 'k-approve')
+    await run($, 'k-amendments')
+    expect(w.asked.length).toBe(6)
+    expect(w.asked[0]?.question).toBe('Waiting for you to approve:\n1. hub/proposed: Asks k approve for this. Can approve.\nWhich task?')
+    expect(w.asked[1]?.question).toBe('hub/proposed: Asks k approve for this.\nk would approve it now.\nApprove it?')
+    expect(w.asked[2]?.question).toMatch(/^Waiting for your approval:\n1\. weather\/offline-forecast A-3, proposed 2026-11-06: Says \/k-queue and bold first\. Changes 2 lines\.\n/)
+    for (const a of w.asked) expect(a.question).not.toMatch(/`|\*\*/)
+  })
+
   test('no dialog names kirunak: its words are the item\'s and the mod\'s, never the plugin\'s name (AC-12)', async ($, on) => {
     const w = world(on, { taps: ['hub/proposed', SKIP, ID, 'Accept with open items', 'why', SKIP, `${ID} A-4`, 'Decline', 'why', SKIP] })
     for (const command of ['k-approve', 'k-accept', 'k-amendments']) await run($, command)
