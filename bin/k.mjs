@@ -18,6 +18,7 @@ import * as intake from '../lib/intake.mjs';
 import * as queue from '../lib/queue.mjs';
 import * as list from '../lib/list.mjs';
 import * as board from '../lib/board.mjs';
+import { markdown as boardMarkdown } from '../lib/board-md.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install } from '../lib/install.mjs';
 import * as slap from '../lib/slap.mjs';
@@ -31,7 +32,7 @@ import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'staged', 'baseline', 'once', 'watch', 'write']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'staged', 'baseline', 'once', 'watch', 'write']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -52,7 +53,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>
-Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] | k verify [<id>] | k queue show
+Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k waiting: what waits for the owner, to approve and to accept, and what each verb would refuse
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
@@ -484,7 +485,12 @@ const VERBS = {
     return { ...out, text };
   },
 
+  // --markdown prints the board for a chat answer on a phone (the mod's /k-board) and writes nothing.
   async board({ ws, flags }) {
+    if (flags.markdown) {
+      const text = await boardMarkdown(ws);
+      return { markdown: text, text: text.trimEnd() };
+    }
     if (flags['dry-run']) return { text: `would write ${flags.html || join(ws.home, 'board.html')}` };
     const path = await board.write(ws, { path: flags.html ? resolve(flags.html) : undefined, open: !flags.html && !flags['no-open'] });
     return { path, text: path };
