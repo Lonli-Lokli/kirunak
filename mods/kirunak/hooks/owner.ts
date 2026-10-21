@@ -1,7 +1,7 @@
 import type { CommandRunInput, CommandRunResult, EngineInterface } from 'claude-code'
 
 import { isOwners, reason, refusal, refused } from './commands'
-import { plainLines } from './lists'
+import { plainLines, queueNow } from './lists'
 import type { Item } from './lists'
 import { kOf, refresh } from './reads'
 
@@ -45,8 +45,9 @@ export type Turn = {
 // A list dialog's row: its words (numbered above the choices as the app numbers them), its choice's short name, and
 // the dialog that choice opens.
 export type Row = { item: Item; label: string; open: () => Screen | Promise<Screen> }
-// An item dialog's choice: one that opens another dialog, or a verb, run if it is the last tap.
-export type Choice = { label: string; open: () => Screen | Promise<Screen> } | { label: string; verb: readonly string[] }
+// An item dialog's choice: one that opens another dialog, or a verb, run if it is the last tap; its `after` is told
+// whether k took it, as a typed verb's is.
+export type Choice = { label: string; open: () => Screen | Promise<Screen> } | { label: string; verb: readonly string[]; after?: (ok: boolean) => void }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
 // - list: `head`, then the rows of one page (three and More when there are more than four; one fewer under Back);
 // - item: the item's own words (`text`), then its choices, a verb's among them;
@@ -66,7 +67,8 @@ const CHOICES = 4
 
 export const nothingRan = (why: string): string => `Nothing ran: ${why}.`
 
-// An owner's verb as `node k <argv>`, with the time a commit takes; k's state line, or why it did not take.
+// An owner's verb as `node k <argv>`, with the time a commit takes; k's state line (a queue verb's: the queue it left),
+// or why it did not take.
 async function runVerb($: EngineInterface, name: string, k: string, argv: readonly string[]): Promise<{ ok: boolean; text: string }> {
   let r
   try {
@@ -75,7 +77,8 @@ async function runVerb($: EngineInterface, name: string, k: string, argv: readon
     return { ok: false, text: `/${name}: k did not finish (${reason(err)}); \`k list --all\` says whether it took.` }
   }
   void refresh($)
-  return r.exitCode !== 0 ? { ok: false, text: refused(name, r) } : { ok: true, text: r.stdout.trim() }
+  if (r.exitCode !== 0) return { ok: false, text: refused(name, r) }
+  return { ok: true, text: argv[0] === 'queue' ? queueNow(r.stdout) : r.stdout.trim() }
 }
 
 // The answer of `/<name>`'s own command.run hook: refuses every origin but the owner's with a line, before anything is
@@ -135,7 +138,7 @@ function choose(turn: object, tapped: boolean, argv: readonly string[], after?: 
 }
 
 // What a dialog's choice does.
-type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[] } | 'back' | 'more' | 'cancel'
+type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[]; after: ((ok: boolean) => void) | undefined } | 'back' | 'more' | 'cancel'
 type Drawn = { question: string; choices: { label: string; act: Act }[] }
 type Frame = { screen: Screen; start: number }
 
@@ -163,7 +166,7 @@ async function talk($: EngineInterface, turn: object, first: Screen): Promise<Ou
     } else if (act === 'back') stack.pop()
     else if (act === 'more') stack.push({ screen: frame.screen, start: frame.start + choices.filter(c => typeof c.act === 'object').length })
     else if (act === 'cancel') return { nothing: 'cancelled' }
-    else if ('verb' in act) return choose(turn, true, act.verb)
+    else if ('verb' in act) return choose(turn, true, act.verb, act.after)
     else stack.push({ screen: await act.open(), start: 0 })
   }
 }
@@ -185,7 +188,7 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   } else {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
     lines = [...screen.text]
-    if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb } : { open: c.open } })))
+    if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after } : { open: c.open } })))
     if (back) choices.push({ label: BACK, act: 'back' })
     if (screen.kind === 'reason') choices.push({ label: CANCEL, act: 'cancel' })
   }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { amendmentItem, amendmentLabel, amendmentsText, amendmentText, listText, plainLines, taskItem, taskLabel, WIDTH, wrap } from '../hooks/lists'
+import { amendmentItem, amendmentLabel, amendmentsText, amendmentText, listText, plainLines, queueNow, taskItem, taskLabel, WIDTH, wrap } from '../hooks/lists'
 import type { AmendmentRow } from '../hooks/waiting'
 
 import { AMENDMENTS, ID, ROWS } from './world'
@@ -111,5 +111,10 @@ describe('the lists the commands answer with', () => {
     ])
     expect(plainLines([taskItem(ROWS[1] as (typeof ROWS)[number])])).toEqual(['1. queued, queue place 2, hub/sync-notes: Sync notes.'])
     expect([amendmentLabel(A3), taskLabel(ROWS[1] as (typeof ROWS)[number])]).toEqual(['weather/offline-forecast A-3', 'hub/sync-notes'])
+  })
+
+  test('what a queue verb printed, as a numbered list; anything else as k said it', () => {
+    expect(queueNow(' 1  hub/next\n 2  my_repo/sync-notes\n')).toBe('The queue now:\n\n1. hub/next\n2. my\\_repo/sync-notes')
+    expect(queueNow('the queue is empty\n')).toBe('the queue is empty')
   })
 })

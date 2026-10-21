@@ -69,6 +69,13 @@ export function listText(rows: readonly ListRow[], all: boolean): string {
   return [head, '', ...numbered(rows.map(taskItem)), ...(all ? [] : ['', '/k-list all adds the done and on hold.'])].join('\n')
 }
 
+// What a queue verb printed (`k queue show`'s lines, " 1  <id>"), as a numbered list; anything else as k said it.
+export function queueNow(stdout: string): string {
+  const ids = stdout.trim().split('\n').map(l => /^\s*\d+\s+(\S+)\s*$/.exec(l)?.[1])
+  if (ids.some(id => id === undefined)) return stdout.trim()
+  return ['The queue now:', '', ...ids.map((id, i) => `${i + 1}. ${md(id as string)}`)].join('\n')
+}
+
 // `k board --markdown` less its first heading, which names kirunak as the engine's prefix to the answer already does
 // (AC-12), and the blank line under it.
 export const boardText = (markdown: string): string => markdown.replace(/^# .*\n(?:[ \t]*\n)?/, '').trimEnd()
