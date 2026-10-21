@@ -15,8 +15,9 @@ import { kOf, refresh } from './reads'
 //   last tap (a turn that opened its dialog can type none);
 // - no other hook, no later command and no dialog the model raised can make such an Outcome or reach runVerb: the mod
 //   has no hook on AskUserQuestion, and a tap reaches nothing but the dialog's own loop;
-// - a dialog that runs no verb (`pick`, /k-board's) offers labels alone, no verb choice and no dialog after it, and
-//   ends on a tap with that label, which the command reads; it is the turn's one dialog, so no verb is typed after it.
+// - a dialog that runs no verb (`pick`, /k-board's) offers labels alone, no verb choice, and ends on a tap with such a
+//   label, which the command reads; a choice of it may open the next step, always another pick dialog (checked as it
+//   opens), so no verb choice is ever reached from it; it is the turn's one dialog, so no verb is typed after it.
 
 // An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
 const COMMIT_MS = 600_000
@@ -42,7 +43,8 @@ export type Turn = {
   typed(argv: readonly string[], after?: (ok: boolean) => void): Outcome
   // The command's dialog, from `first`, until a verb choice is tapped (its Outcome) or nothing will run (why).
   dialog(first: Screen): Promise<Outcome>
-  // A dialog that runs no verb (/k-board): the label tapped, or null for Skip, a dismissal or any other answer.
+  // A dialog that runs no verb (/k-board), in steps: the label that ended it, or null for Skip, a dismissal, Cancel or
+  // any other answer, at any step.
   pick(first: PickScreen): Promise<string | null>
 }
 
@@ -59,8 +61,10 @@ export type Choice = { label: string; open: () => Screen | Promise<Screen> } | {
 // - item: the item's own words (`text`), then its choices, a verb's among them;
 // - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel;
 // - pick: `text` whole on every page, then a page of `labels`, paged as a list's rows, the page named in the question
-//   ("Which task's card (4 to 5 of 11)?"); a label tapped ends the dialog (A-7's AC-5).
-export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; labels: readonly string[]; question: string }
+//   ("Which task's card (4 to 5 of 11)?"); a label tapped ends the dialog, a step opens its next pick dialog, with Back
+//   (A-9's AC-5: /k-board's groups, then a group's tasks).
+export type PickStep = { label: string; open: () => PickScreen }
+export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; labels: readonly (string | PickStep)[]; question: string }
 export type Screen =
   | { kind: 'list'; header: string; head: string; rows: readonly Row[]; question: string; typed?: true }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string }
@@ -126,6 +130,7 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
     pick: async first => {
       if (!open) throw new Error(`/${name}: a dialog after the command answered`)
       if (asked) throw new Error(`/${name}: a second dialog`)
+      if (first.kind !== 'pick') throw new Error(`/${name}: a pick that opens no pick dialog`)
       asked = true
       const out = await talk($, me, first)
       return 'picked' in out ? out.picked : null
@@ -191,7 +196,12 @@ async function talk($: EngineInterface, turn: object, first: Screen): Promise<Ou
     else if (act === 'cancel') return { nothing: 'cancelled' }
     else if ('verb' in act) return choose(turn, true, act.verb, act.after)
     else if ('pick' in act) return { picked: act.pick }
-    else stack.push({ screen: await act.open(), start: 0 })
+    else {
+      const next = await act.open()
+      // A pick's step opens a pick dialog alone, so a dialog that runs no verb never reaches a verb choice.
+      if (frame.screen.kind === 'pick' && next.kind !== 'pick') throw new Error('a pick dialog opens only pick dialogs')
+      stack.push({ screen: next, start: 0 })
+    }
   }
 }
 
@@ -223,7 +233,7 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     const { page, more, range } = paging(screen.labels, start, back)
     lines = [...screen.text]
     if (range !== null) question = question.replace(/\??$/, ` (${range})?`)
-    choices.push(...page.map(label => ({ label, act: { pick: label } })))
+    choices.push(...page.map(l => (typeof l === 'string' ? { label: l, act: { pick: l } } : { label: l.label, act: { open: l.open } })))
     if (back) choices.push({ label: BACK, act: 'back' })
     if (more) choices.push({ label: MORE, act: 'more' })
   } else {

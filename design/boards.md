@@ -71,10 +71,12 @@ Two ways, one for speed and one for the page, both on the owner's command and no
 
 - **`/k-board`**, the mod's command (§4), is **brief first** (amendment A-7: the owner, reading the board on the
   phone on 2026-10-21, found too many details and too much scroll, and asked for it brief with a way to look inside a
-  task, Q-36, Q-37). It opens the choice dialog whose text is the brief board, `k board --brief --json` (`{ made,
-  text, ids }`); the choices are the tasks in `ids` order, three and More. A tapped task answers at once with its
-  card, `k board --card <id>`; `/k-board <id>` typed answers the same card; Skip or a dismissed dialog answers with
-  the brief board. No model turn, so it costs no tokens and takes about the time of `k`.
+  task, Q-36, Q-37) and **in steps** (amendment A-9, Q-41). Its first dialog says when the board was made, each group
+  with how many tasks it holds ("Working on now: 5") and the machine's line, the groups as its choices; a group picked
+  shows its tasks, one entry each, with Back, and a task tapped answers with its card, `k board --card <id>`, as
+  `/k-board <id>` typed does, while Skip or a dismissed dialog at any step answers with the brief board (all from `k
+  board --brief --json`: `{ made, text, ids, groups, machine }`). No model turn, so it costs no tokens and takes about
+  the time of `k`.
 - **The brief board** is plain text with no markdown mark, since the dialog draws none: "Made at <time>.", then
   "Working on now (n)" and every other state as "<State> (n)" in the board's order, one line per task, `<id>: <state>,
   queue <n>, <last step>, <m> of <n> met` (the last step as "S-20 done", "S-15 running" or "S-4 failed", a done task's
@@ -139,7 +141,7 @@ What it shows and does, each from the skill's table of shapes:
 | toasts: a heavy job ended, a review is ready, a cache kept warm, a step waits for the owner, an edit refused | `$.ui.toast(text)` for each new line of those kinds | `events.jsonl`, followed with `tail -n 0 -F` through `$.process.spawn` for the session's life; kinds `build-ended` (`k run`, as a heavy job's record is saved), `review-ready` (`k step finish` of a review step), `keep-alive`, `awaiting owner`, `refusal` (the freeze hook; a workspace's own hooks may append it too) |
 | `/k-approve <id>`, `/k-accept <id>`, `/k-hold <id> <why>`, `/k-start <id>` | `$.command.register` in `session.start`, answered by `command.run` hooks that run only on `e.origin.kind` `'composer'` or `'bridge'` (`approval.md` §5, the owner's answer of 2026-10-19) and call `$.process.run(['node', K, verb, id, ...flags, '--via', 'mod'])`, returning the state line as `{ text }` | the core verbs |
 | `/k-accept <n>`, a number from the list last shown | the same hooks: `<n>` takes the n-th id of that verb's list last shown since the session started, which `/clear` and a resume forget (owner's ask, 2026-10-19: "see what I can accept instead of typing manually") | `k waiting --json`: the proposed tasks with `k approve --dry-run`'s problems, the reviewed and awaiting-owner ones with what `k accept` refuses (its `dryRun` makes every check and writes nothing) |
-| `/k-list [all]`, `/k-board [<id>]`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the brief board in a dialog and a tapped task's card, `/k-board <id>` that card (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --brief --json` and `k board --card <id>`, `k waiting --json` (the `amendments` rows) |
+| `/k-list [all]`, `/k-board [<id>]`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the board's groups in a dialog, then a group's tasks, and a tapped task's card, `/k-board <id>` that card (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --brief --json` and `k board --card <id>`, `k waiting --json` (the `amendments` rows) |
 | `/k-approve`, `/k-accept`, `/k-hold`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json` |
 | the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
@@ -159,7 +161,7 @@ What it shows and does, each from the skill's table of shapes:
 
 The commands above whose verb needs an id take none from the phone: typed with no id, `/k-approve`, `/k-accept`,
 `/k-hold` and `/k-start` open **the engine's choice dialog** (`$.ui.ask`) and the owner picks by touch; `/k-amendments`,
-`/k-queue` and `/k-board` open it too (`/k-board`'s text is the brief board and a tap only reads, §3). A command typed with its id, or with a number from a list, runs as before. The dialog is
+`/k-queue` and `/k-board` open it too (`/k-board`'s dialogs are the board's groups, then a group's tasks, and a tap only reads, §3). A command typed with its id, or with a number from a list, runs as before. The dialog is
 raised only inside the `command.run` hook of a command whose origin is `composer` or `bridge`, and what a tap does is
 the rule of `approval.md` §5.
 

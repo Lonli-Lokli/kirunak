@@ -14,8 +14,8 @@ is done.
   matches its approved hash. A change is an amendment the owner approves.
 - **A review against every criterion**, by someone who did not do the work, and an owner's checklist of what needs a
   device or a person. A task is done when the owner says so (`/k-done`).
-- **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone a brief board, a line per
-  task that opens its card, in the chat (`/k-board`) or as a private page you open (`/k-board-page`).
+- **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone a brief board, in the chat
+  (`/k-board`: the groups, then a group's tasks, then a task's card) or as a private page you open (`/k-board-page`).
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -88,7 +88,7 @@ You need Node 22 or later, git and Claude Code.
    | Type | You get |
    | --- | --- |
    | `/k-list` (`/k-list all`) | the tasks, the queue first, as numbered entries with state, place, title and step |
-   | `/k-board` | the brief board, a line per task, at once and without a model turn; tap a task for its card, or Skip for the brief board as text |
+   | `/k-board` | the board's groups (working on now, queued, done this week and the rest) and how many tasks each holds, at once and without a model turn; tap a group for its tasks, a line each, then a task for its card, or Skip for the brief board as text |
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |

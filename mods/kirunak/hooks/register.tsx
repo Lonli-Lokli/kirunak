@@ -91,9 +91,9 @@ async function list($: EngineInterface, { k, args }: Turn): Promise<string> {
   return r.exitCode !== 0 ? refused('k-list', r) : listText(JSON.parse(r.stdout).rows, all === 'all')
 }
 
-// `/k-board` (A-7's AC-5): the brief board as the dialog's text and the tasks as its choices; the one tapped answers
-// with its card, and Skip, a dismissal or any other answer with the brief board itself. It reads, and runs no verb.
-// `/k-board <id>`: that task's card at once, with no dialog.
+// `/k-board` (A-9's AC-5): the dialog in steps, the board's groups and then a group's tasks; the task tapped answers
+// with its card, and Skip, a dismissal or any other answer, at any step, with the brief board itself. It reads, and
+// runs no verb. `/k-board <id>`: that task's card at once, with no dialog.
 async function boardAnswer($: EngineInterface, turn: Turn): Promise<string> {
   const id = turn.args.trim()
   if (id) return card($, turn.k, id)
@@ -184,7 +184,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-hold', description: 'Put a kirunak task on hold: k hold, as your own command', argumentHint: HINTS.hold })
     await $.command.register({ name: 'k-start', description: 'Name the kirunak task this session works on: k start', argumentHint: HINTS.start })
     await $.command.register({ name: 'k-list', description: 'The kirunak tasks k list shows, as a list for a phone', argumentHint: '[all]' })
-    await $.command.register({ name: 'k-board', description: 'The kirunak board in brief, each task\'s status in a dialog; a task tapped, or its id typed, shows its card', argumentHint: '[<id>]' })
+    await $.command.register({ name: 'k-board', description: 'The kirunak board in brief: its groups in a dialog, then a group\'s tasks; a task tapped, or its id typed, shows its card', argumentHint: '[<id>]' })
     await $.command.register({ name: 'k-amendments', description: 'The amendments waiting for your approval, to approve or decline by touch; with a number, that one in full', argumentHint: '[<n>]' })
     await $.command.register({ name: 'k-approve-amendment', description: 'Approve an amendment /k-amendments listed: k approve --amendment, as your own command', argumentHint: '<n>' })
     await $.command.register({ name: 'k-queue', description: 'Show the kirunak queue and move, park or put back a task by touch' })
