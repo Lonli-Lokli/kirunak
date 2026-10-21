@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { AmendmentRow } from '../hooks/waiting'
 
-import { AMENDMENTS, ID, QUEUE, WAITING, world } from './world'
+import { AMENDMENTS, briefOf, ID, QUEUE, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -33,11 +33,11 @@ describe('picking by touch', () => {
     const [one, two, three] = [w.asked[0], w.asked[1], w.asked[2]]
     expect(one).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (1 to 3 of 7)\n1. hub/t1: proposed\n2. hub/t2: proposed\n3. hub/t3: proposed\nWhich task?', labels: ['hub/t1', 'hub/t2', 'hub/t3', 'More'] })
     // A page after the first keeps the app's numbers and adds the one `/k-approve <n>` takes (Q-33).
-    expect(two).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (4 to 5 of 7)\n1. hub/t4 (type 4): proposed\n2. hub/t5 (type 5): proposed\nWhich task?', labels: ['hub/t4', 'hub/t5', 'Back', 'More'] })
+    expect(two).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (4 to 5 of 7)\n1. hub/t4 (type 4): proposed\n2. hub/t5 (type 5): proposed\nWhich task?', labels: ['hub/t4', 'hub/t5', 'More', 'Back'] })
     expect(three).toEqual({ header: 'Approve', question: 'Waiting for you to approve: (6 to 7 of 7)\n1. hub/t6 (type 6): proposed\n2. hub/t7 (type 7): proposed\nWhich task?', labels: ['hub/t6', 'hub/t7', 'Back'] })
     // Back shows the dialog before again: page two, then page one.
     expect([w.asked[3], w.asked[4]]).toEqual([two, one])
-    expect(w.asked[5]).toEqual({ header: 'Approve', question: 'hub/t2: Task 2.\nState: proposed.\nNot yet:\ntask.md fails k check: AC-1 has no source\nk would refuse it now. Back to the list?', labels: ['Back', 'Cancel'] })
+    expect(w.asked[5]).toEqual({ header: 'Approve', question: 'hub/t2: Task 2.\nState: proposed.\nNot yet:\ntask.md fails k check: AC-1 has no source\nk would refuse it now. Back to the list?', labels: ['Cancel', 'Back'] })
     expect(w.asked[6]).toEqual(one)
     expect(verbs(w.runs)).toEqual([['approve', 'hub/t7', '--via', 'mod']])
   })
@@ -59,14 +59,39 @@ describe('picking by touch', () => {
     expect(verbs(w.runs)).toEqual([['approve', 'hub/t4', '--via', 'mod'], ['accept', 'hub/a5', '--via', 'mod'], ['approve', ID, '--amendment', 'A-4', '--via', 'mod']])
   })
 
-  test('/k-hold, /k-start and /k-queue take no number typed, so a page after the first keeps the app\'s numbers alone', async ($, on) => {
+  test('/k-hold, /k-start and /k-queue take no number typed, so a page after the first adds none: /k-hold\'s and /k-start\'s lines keep the app\'s numbers, /k-queue\'s their places in the queue (A-11)', async ($, on) => {
     const hold = [1, 2, 3, 4, 5].map(n => ({ id: `hub/h${n}`, title: `Hold ${n}`, state: 'queued' }))
     const w = world(on, { rows: QUEUE, waiting: [{ ...WAITING, hold }], taps: ['More', SKIP, 'More', SKIP, 'More', SKIP, 'hub/next', 'Move', 'More', SKIP] })
     for (const command of ['k-hold', 'k-start', 'k-queue', 'k-queue']) await run($, command)
     expect(w.asked[1]?.question).toBe('Tasks you can put on hold: (4 to 5 of 5)\n1. hub/h4: queued\n2. hub/h5: queued\nWhich task?')
     expect(w.asked[3]?.question).toBe('Tasks this session can work on: (4 to 5 of 5)\n1. hub/proposed: proposed\n2. weather/asks-owner: awaiting owner\nWhich task?')
-    expect(w.asked[5]?.question).toBe('The queue in order, then the parked tasks: (4 to 5 of 5)\n1. hub/later: queued, place 4. Later on.\n2. hub/parked: parked. Waits outside.\nWhich task?')
+    expect(w.asked[5]?.question).toBe('The queue in order, then the parked tasks: (4 to 5 of 5)\n4. hub/later: queued. Later on.\nhub/parked: parked. Waits outside.\nWhich task?')
     expect(w.asked.map(a => a.question).join('\n')).not.toMatch(/\(type /)
+    expect(w.runs).toEqual([])
+  })
+
+  test('Back is the lowest choice of every dialog after the command\'s first, below More and Cancel: a list\'s page, a pick\'s page, an item, a reason and one with nothing else to offer (A-11\'s E-1, E-5)', async ($, on) => {
+    const brief = briefOf([{ name: 'Queued', lines: [1, 2, 3, 4, 5].map(n => `hub/q${n}: queued, queue ${n}`) }])
+    const taps = ['More', 'hub/t4', SKIP, 'hub/t2', SKIP, ID, 'Hold', SKIP, 'Queued', SKIP, 'hub/next', 'Move', SKIP]
+    const w = world(on, { rows: QUEUE, waiting: [SEVEN], brief: { exitCode: 0, stdout: JSON.stringify(brief), stderr: '' }, taps })
+    for (const command of ['k-approve', 'k-approve', 'k-hold', 'k-board', 'k-queue']) await run($, command)
+    expect(w.asked.map(a => a.labels)).toEqual([
+      ['hub/t1', 'hub/t2', 'hub/t3', 'More'],
+      ['hub/t4', 'hub/t5', 'More', 'Back'],
+      ['Approve hub/t4', 'Back'],
+      ['hub/t1', 'hub/t2', 'hub/t3', 'More'],
+      // A refused task's item offers no verb: Cancel, so the dialog is not padded with Yes and No, then Back.
+      ['Cancel', 'Back'],
+      [ID, 'hub/sync-notes'],
+      ['Hold', 'Back'],
+      ['Cancel', 'Back'],
+      // A command's first dialog has no Back: its one choice is padded with Cancel alone.
+      ['Queued', 'Cancel'],
+      ['hub/q1', 'hub/q2', 'More', 'Back'],
+      [ID, 'hub/sync-notes', 'hub/next', 'More'],
+      ['Move', 'Park hub/next', 'Back'],
+      ['Earlier', 'Later', 'More', 'Back'],
+    ])
     expect(w.runs).toEqual([])
   })
 
@@ -106,7 +131,7 @@ describe('picking by touch', () => {
     await run($, 'k-accept')
     const text = `${ID}: The last forecast stays readable offline.\nState: awaiting owner.\nReview: review.md, needs owner (E-1).\nNot yet:\nchecklist.md has 1 unticked item(s):\n- [ ] E-1 On the oldest phone. (review.md)`
     expect(w.asked[3]).toEqual({ header: 'Accept', question: `${text}\nOnly open checklist items stop it. Accept it with them open?`, labels: ['Accept with open items', 'Back'] })
-    const reason = { header: 'Accept', question: `${text}\nType the reason in the free-text row: why accept it with these items open?`, labels: ['Back', 'Cancel'] }
+    const reason = { header: 'Accept', question: `${text}\nType the reason in the free-text row: why accept it with these items open?`, labels: ['Cancel', 'Back'] }
     expect(w.asked[4]).toEqual(reason)
     expect(w.asked[5]).toEqual({ header: 'Accept', question: `${text}\nReason: read on the phone\nAccept it with these items open, for that reason?`, labels: [`Accept ${ID} with open items`, 'Back'] })
     expect(w.asked[6]).toEqual(reason)
@@ -181,7 +206,7 @@ describe('picking by touch', () => {
     const walk: [string, (string | null)[]][] = [
       ['k-hold', [ID, 'Hold', 'why', SKIP]],
       ['k-start', [ID, SKIP]],
-      ['k-queue', ['hub/next', 'Move', 'More', 'End of the queue', SKIP]],
+      ['k-queue', ['hub/next', 'Move', 'More', 'More', 'End of the queue', SKIP]],
       ['k-queue', ['More', 'hub/parked', SKIP]],
       ['k-queue', [ID, 'Move', 'hub/sync-notes', SKIP]],
       ['k-queue', ['hub/next', 'Park hub/next']],
@@ -189,7 +214,7 @@ describe('picking by touch', () => {
     const w = world(on, { rows: QUEUE, taps: walk.flatMap(([, taps]) => taps), verb: { exitCode: 0, stdout: ' 1  hub/sync-notes\n', stderr: '' } })
     const answers: string[] = []
     for (const [command] of walk) answers.push(await run($, command, '', { kind: 'bridge' }))
-    expect([w.asked.length, w.runs.length]).toEqual([20, 1])
+    expect([w.asked.length, w.runs.length]).toEqual([21, 1])
     for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
     for (const a of answers) expect(a.replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
   })
