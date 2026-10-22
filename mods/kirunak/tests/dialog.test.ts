@@ -228,3 +228,41 @@ describe('picking by touch', () => {
     expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod'], ['approve', 'hub/proposed', '--via', 'mod']])
   })
 })
+
+// The dialog log (kirunak-docs-promo S-1 §3): what each dialog drew and the owner's tap, one line a dialog.
+const logged = (files: Record<string, string>, path = '/home/dev/.kirunak/dialogs.jsonl') => (files[path] ?? '').trimEnd().split('\n').filter(Boolean).map(l => JSON.parse(l))
+
+describe('the dialog log', () => {
+  test('each dialog shown is one line in ~/.kirunak/dialogs.jsonl: the command, what it drew, the tap and its time, and the verb the last tap chose', async ($, on) => {
+    const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed'], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
+    await run($, 'k-approve')
+    const t = Date.UTC(2026, 10, 7, 12, 0)
+    expect(logged(w.files)).toEqual([
+      { t, session: 'sess-1', command: 'k-approve', header: 'Approve', text: ['Waiting for you to approve:', '1. hub/proposed: proposed'], question: 'Which task?', choices: ['hub/proposed', 'Cancel'], tap: 'hub/proposed', tAnswer: t, end: null },
+      { t, session: 'sess-1', command: 'k-approve', header: 'Approve', text: ['hub/proposed: Asks for approval.', 'State: proposed.', 'k would approve it now.'], question: 'Approve it?', choices: ['Approve hub/proposed', 'Back'], tap: 'Approve hub/proposed', tAnswer: t, end: 'approve hub/proposed --via mod' },
+    ])
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
+  })
+
+  test('$KIRUNAK_HOME is the state folder when set; Skip, a dismissal and Cancel each end their line with no tap', async ($, on) => {
+    const w = world(on, { env: { HOME: '/home/dev', KIRUNAK_HOME: '/state' }, taps: [SKIP, null, 'Cancel'] })
+    for (let i = 0; i < 3; i++) await run($, 'k-approve')
+    const lines = logged(w.files, '/state/dialogs.jsonl')
+    expect(lines.map(l => [l.tap, l.end])).toEqual([[null, 'skipped'], [null, 'dismissed'], ['Cancel', 'cancelled']])
+    expect(w.files['/home/dev/.kirunak/dialogs.jsonl']).toBeUndefined()
+  })
+
+  test('words typed that are none of the choices are kept as typed, never as a tap', async ($, on) => {
+    const w = world(on, { taps: ['approve the second one'] })
+    await run($, 'k-approve')
+    const [line] = logged(w.files)
+    expect([line.tap, line.typed, line.end]).toEqual([null, 'approve the second one', 'typed'])
+  })
+
+  test('an unwritable state folder records nothing and changes no answer', async ($, on) => {
+    const w = world(on, { unwritable: true, taps: ['hub/proposed', 'Approve hub/proposed'], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
+    expect(await run($, 'k-approve')).toBe('hub/proposed: queued, place 3')
+    expect(w.files).toEqual({})
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
+  })
+})

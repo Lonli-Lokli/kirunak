@@ -1,0 +1,8 @@
+# The raw capture never comes into git (kirunak-docs-promo S-1 §4): only lines.jsonl, dialogs.jsonl and manifest.json.
+*.raw
+*.times.jsonl
+transcript.jsonl
+transcripts/
+events.jsonl
+complete.json
+.fifo
