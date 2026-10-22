@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
 import { bullet, counts, cut, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
-import { addTask, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
@@ -246,4 +246,41 @@ test('k board --card <id> prints the card; an id that names no task is refused w
   assert.equal(k(w.home, ['board', '--card', 'Not An Id']).status, 2);
   assert.equal(k(w.home, ['board', '--card']).status, 2, '--card needs an id');
   assert.ok(!existsSync(join(w.home, 'board.html')));
+});
+
+test('the drafts after the tasks, before the lock: a group Drafts, one bullet a draft with its id, its title cut to fit and the date written (kirunak-drafts AC-9)', async () => {
+  const w = await fixture();
+  assert.ok(!(await board(w)).includes('## Drafts'), 'no group when no draft waits');
+  draftsAt(w);
+  const text = await board(w);
+  const block = [
+    '## Drafts (2)',
+    '',
+    '- weather/wind-alerts: Wind alerts \\<for\\> cyclis…, written 2026-11-05',
+    '- hub/short-jobs: Short jobs first in the heavy-j…, written 2026-11-06',
+    '',
+    '## Lock, queue and running steps',
+  ].join('\n');
+  assert.ok(text.includes(`- weather/recent: Done this week (3 none)\n\n${block}`), text);
+  for (const l of block.split('\n')) assert.ok(l.length <= 70, l);
+  noHardBreak(text);
+});
+
+test('k board --card <draft id> answers with the draft\'s card, as the mod\'s /k-board asks for a draft tapped in its Drafts group (kirunak-drafts AC-9)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  const r = k(w.home, ['board', '--card', 'weather/wind-alerts']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, [
+    '### weather/wind-alerts',
+    '',
+    'Wind alerts \\<for\\> cyclists',
+    '',
+    "- a draft, written 2026-11-05, waiting for the owner's intake",
+    '- file: kirunak/drafts/wind-alerts.md in weather',
+    '',
+    '/k-drafts shows it whole, and starts its intake or drops it.',
+    '',
+  ].join('\n'));
+  assert.equal(k(w.home, ['board', '--card', 'weather/nope']).status, 1, 'no task and no draft');
 });

@@ -32,6 +32,7 @@ import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
+import * as drafts from '../lib/drafts.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write']);
@@ -56,14 +57,18 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
-          k board --brief: a line per task, for the phone; k board --card <id>: one task's card as markdown
+          k board --brief: a line per task and per draft, for the phone; k board --card <id>: one task's or draft's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
-          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
+          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept, drafts) and what
             each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
+Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
+          k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
+          k drafts: every draft in every repo, one line each (id, title, date written)
+          k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
 Every verb takes --json and --dry-run.`;
 
 export function parseArgs(argv) {
@@ -201,7 +206,8 @@ const VERBS = {
     if (sub === 'start') {
       if (flags['dry-run']) return { text: `would start ${id} in ${taskPaths(ws, id).dir}` };
       const r = await intake.start({ ws, id, from: flags.from, title: flags.title });
-      return { ...r, text: `started ${id}: ${r.dir} (${r.aspects} aspects open)` };
+      const moved = r.draft ? `; the draft is now ${r.draft}${r.staged ? ', the move staged' : ''}: commit it with the intake` : '';
+      return { ...r, text: `started ${id}: ${r.dir} (${r.aspects} aspects open)${moved}` };
     }
     if (sub === 'aspects') {
       const a = await intake.aspects(ws, id);
@@ -447,6 +453,32 @@ const VERBS = {
     return VERBS.queue({ ws, pos: ['show'], flags });
   },
 
+  // A prepared intake for a future task (kirunak-drafts): not the owner's, so any session runs these. Neither `new`
+  // nor `check` commits; the session that writes the draft commits it.
+  async draft({ ws, pos, flags }) {
+    const sub = need(pos[0], 'draft verb: new|check|drop');
+    const id = need(pos[1], 'draft id <repo>/<slug>');
+    const dryRun = !!flags['dry-run'];
+    if (sub === 'new') {
+      const r = drafts.newDraft({ ws, id, title: typeof flags.title === 'string' ? flags.title : '', session: session(flags), dryRun });
+      if (dryRun) return { ...r, text: `would write ${r.path}` };
+      return { ...r, text: `${r.path}: fill in every section, then \`k draft check ${id}\`, and commit it` };
+    }
+    if (sub === 'check') return report(id, drafts.check(ws, id), '');
+    if (sub === 'drop') {
+      const r = drafts.drop({ ws, id, why: typeof flags.why === 'string' ? flags.why : '', dryRun });
+      if (dryRun) return { ...r, text: `would remove ${r.rel} in ${r.repo}${r.tracked ? ` and commit "${r.message}"` : ' (never committed, so no commit)'}` };
+      return { ...r, text: r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit` };
+    }
+    throw usage(`unknown draft verb ${sub}`);
+  },
+
+  // Every draft in every repo, by the date written: for /k-drafts, as an array with --json.
+  async drafts({ ws }) {
+    const rows = drafts.list(ws);
+    return { json: rows, text: drafts.format(rows) };
+  },
+
   async list({ ws, flags }) {
     const rows = await list.rows(ws, { repo: flags.repo, all: !!flags.all });
     return { rows, text: list.format(rows) || 'no task' };
@@ -455,7 +487,8 @@ const VERBS = {
   // What waits for the owner, for the mod's /k-approve and /k-accept with no id (boards.md §4): the proposed tasks
   // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
-  // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs).
+  // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
+  // the owner's intake: a count and their ids (kirunak-drafts AC-8).
   async waiting({ ws }) {
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
@@ -472,14 +505,16 @@ const VERBS = {
     const hold = (await waiting.holdable(ws, all)).map(brief);
     // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
     const start = rows.map(brief);
+    const drafts = waiting.waitingDrafts(ws);
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
       accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
+      waiting.draftsLine(drafts),
     ].join('\n');
-    return { approve, accept, amendments, hold, start, text };
+    return { approve, accept, amendments, hold, start, drafts, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

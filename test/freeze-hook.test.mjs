@@ -161,6 +161,23 @@ test('Bash: k check, k intake answer, k handoff, cat and git log are allowed', (
   }
 });
 
+// kirunak-drafts O-3: a draft is not the owner's, so its verbs and its file are an agent's to run and write.
+test('Bash: k draft new, check and drop, k drafts, and writes to kirunak/drafts/ are allowed', () => {
+  const r = makeRepo();
+  const draft = join(r.repo, 'kirunak', 'drafts', 'wind-alerts.md');
+  for (const command of ['k draft new weather/wind-alerts --title "Wind alerts"', 'k draft check weather/wind-alerts',
+    'k draft drop weather/wind-alerts --why "folded into offline-forecast"', 'k drafts', 'k drafts --json',
+    'node bin/k.mjs draft drop weather/wind-alerts --why "a duplicate"', 'git add kirunak/drafts/wind-alerts.md && git commit -m "a draft"',
+    'git rm kirunak/drafts/wind-alerts.md', 'rm kirunak/drafts/wind-alerts.md', 'echo "1. Which?" >> kirunak/drafts/wind-alerts.md']) {
+    const res = run(bash(command, r.repo), r.home);
+    assert.equal(res.status, 0, command);
+    assert.equal(res.stdout, '', command);
+  }
+  for (const input of [write(draft, '---\nid: weather/wind-alerts\n---\n'), edit(draft, '## Why\n', '## Why\nCyclists asked.\n')]) {
+    assert.equal(run(input, r.home).stdout, '', input.tool_name);
+  }
+});
+
 test('a subagent\'s input (agent_id, agent_type) is treated the same', () => {
   const r = makeRepo();
   const res = run(edit(r.task(FROZEN, 'task.md'), 'something', 'else', { agent_id: 'a1b2', agent_type: 'general-purpose' }), r.home);

@@ -81,3 +81,14 @@ export function sessionsAt(w) {
   writeFileSync(join(w.home, 'sessions', 's3.json'), JSON.stringify({ context: 1000 }));
   writeFileSync(join(w.home, 'running', '7.json'), JSON.stringify({ task: 'hub/reviewed', step: 'S-3', session: 's2', since: '2026-11-07T11:40:00Z' }));
 }
+
+// Two drafts that wait for the owner's intake (kirunak-drafts AC-9), one in each repo, written on two days; the
+// second's title is too long for a pane's line.
+export function draftsAt(w) {
+  const write = (root, slug, title, written) => {
+    mkdirSync(join(root, 'kirunak', 'drafts'), { recursive: true });
+    writeFileSync(join(root, 'kirunak', 'drafts', `${slug}.md`), `---\nid: ${root === w.hub ? 'hub' : 'weather'}/${slug}\ntitle: ${title}\nwritten: ${written}\n---\n\n## Who raised it\nfound by the agent: x\n`);
+  };
+  write(w.hub, 'short-jobs', 'Short jobs first in the heavy-job queue, so a quick test never waits behind a long build', '2026-11-06');
+  write(w.weather, 'wind-alerts', 'Wind alerts <for> cyclists', '2026-11-05');
+}

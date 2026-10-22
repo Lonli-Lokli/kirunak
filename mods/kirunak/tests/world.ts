@@ -1,6 +1,7 @@
-import type { On } from 'claude-code'
+import type { On, PromptOrigin } from 'claude-code'
 import { mock } from 'claude-code/testing'
 
+import type { DraftRow } from '../hooks/drafts'
 import type { Brief } from '../hooks/picks'
 import type { AmendmentRow, Waiting } from '../hooks/waiting'
 import type { KirunakRow, KirunakStatus } from '../types'
@@ -49,9 +50,22 @@ export const AMENDMENTS: AmendmentRow[] = [
   { id: ID, amendment: 'A-4', title: 'The last forecast stays readable offline', name: 'replaces E-1', proposed: '2026-11-06', by: 'session s1', why: 'E-1 is covered by AC-1.', lines: 1, refuse: `${ID} with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have`, file: `${AMENDMENT_DIR}/A-4.md` },
 ]
 
-// Their files, as the mod reads them for `/k-amendments <n>`.
+// The drafts `k drafts --json` gives (kirunak-drafts S-3), by the date written, the undated last; the last one's file
+// cannot be read.
+export const DRAFTS: DraftRow[] = [
+  { id: 'hub/offline-maps', repo: 'hub', slug: 'offline-maps', title: 'Maps that work offline', written: '2026-11-05', path: '/w/hub/kirunak/drafts/offline-maps.md' },
+  { id: 'weather/rain-alerts', repo: 'weather', slug: 'rain-alerts', title: 'Rain alerts', written: '2026-11-06', path: '/w/weather/kirunak/drafts/rain-alerts.md' },
+  { id: 'hub/no-date', repo: 'hub', slug: 'no-date', title: 'no-date', written: null, path: '/w/hub/kirunak/drafts/no-date.md' },
+]
+
+// A draft's file as templates/draft.md shapes it.
+export const DRAFT_FILE = '---\nid: hub/offline-maps\ntitle: Maps that work offline\nwritten: 2026-11-05\n---\n\n## Who raised it\n\n> The maps should work offline too.\n\nowner, 2026-11-05, session s1\n\n## Why\n\nThe forecast works offline; the maps do not.\n\n## What was found\n\n- The tiles load from the network. [file hub/src/Map.kt]\n\n## Questions\n\n1. Which areas are kept?\n2. How old may a tile be?\n'
+
+// Their files, as the mod reads them for `/k-amendments <n>` and /k-drafts.
 export const FILES: Record<string, string> = {
   [`${AMENDMENT_DIR}/A-3.md`]: `---\ntask: ${ID}\nproposed: 2026-11-06\nby: session s1\n---\n\n## Why\nThe age line needs its words. The old one was a time alone.\n\n## Changes\n- replace E-1: A forecast older than a day says "yesterday".\n- replace D-1: Keep the last three days.\n`,
+  '/w/hub/kirunak/drafts/offline-maps.md': DRAFT_FILE,
+  '/w/weather/kirunak/drafts/rain-alerts.md': '---\nid: weather/rain-alerts\ntitle: Rain alerts\nwritten: 2026-11-06\n---\n\n## Why\n\nRain comes fast.\n',
 }
 
 // A brief board as `k board --brief --json` gives it (lib/board-brief.mjs): each group's name and entry lines, the
@@ -74,6 +88,9 @@ export const BRIEF: Brief = briefOf(
   ],
   'Lock: weather unit tests (session s1, since 2026-11-07 11:50), 1 heavy job waiting, 1 of 2 steps running, no device claims.',
 )
+
+// What `k board --card <id>` prints for a draft (kirunak-drafts S-4): its card, markdown.
+export const draftCardOf = (d: DraftRow): string => `### ${d.id}\n\n${d.title}.\n\n- Draft, ${d.written ? `written ${d.written}` : 'no date written'}.\n`
 
 // What `k board --card <id>` prints for a task of `rows`: its card, markdown.
 export const cardOf = (r: KirunakRow): string => `### ${r.id}\n\n${r.title}.\n\n- State: ${r.state}.\n${[...r.ac, ...r.e].map(x => `- ${x.id} ${x.verdict ?? 'no verdict'}: ${x.text}\n`).join('')}`
@@ -110,15 +127,16 @@ export type Asked = { question: string; labels: string[]; header: string }
 
 // The world beneath the mod: a clock, the commands it registers, its session's id (`idRead`: how many dialogs had
 // opened at each read of it), a k that exists and answers `k list` (from `rows`, ROWS unless a test gives its own),
-// `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` (any
+// `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` or a draft (any
 // other id refused) (each owner verb with `verb`), the amendment files,
-// events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
+// `k drafts --json` from `drafts` (each read takes the next, the last again once they run out; null is a k that failed),
+// the prompts the mod submitted (`submitted`), events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
 // dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
 // left dismisses it; the environment (`env`: KIRUNAK_HOME unset, HOME /home/dev unless a test gives its own) and the
 // files the mod wrote (`files`, read back by fs.read; `unwritable` refuses every write).
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
-  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string> }
+  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, submitted: [] as { text: string; origin: PromptOrigin }[] }
   on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
     const q = e.questions[0]
     if (q === undefined) return { deny: 'no question' }
@@ -131,6 +149,10 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
     return { value: { command: e.name } }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('prompt.submit', ($, e) => {
+    w.submitted.push({ text: e.text, origin: e.origin })
+    return { text: e.text }
+  })
   // How many dialogs had opened when the session's id was read.
   on('session.id', () => {
     w.idRead.push(w.asked.length)
@@ -162,7 +184,12 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       const at = e.argv.indexOf('--card')
       const id = at < 0 ? null : (e.argv[at + 1] ?? '')
       const r = rows.find(x => x.id === id)
-      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
+      const d = DRAFTS.find(x => x.id === id)
+      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : d ? { exitCode: 0, stdout: draftCardOf(d), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
+    } else if (what === 'drafts') {
+      w.draftReads++
+      const next = drafts.length > 1 ? drafts.shift() : drafts[0]
+      answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
     } else if (what === 'waiting') {
       w.waits++
       // Each `k waiting` takes the next answer, the last one again once they run out; null is a k that failed.

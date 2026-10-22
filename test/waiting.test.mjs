@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
 import { amendmentName, decline, newAmendment } from '../lib/amend.mjs';
 import { generate } from '../lib/checklist.mjs';
+import { newDraft } from '../lib/drafts.mjs';
+import { draftsLine } from '../lib/waiting.mjs';
 import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 // What k waiting gives the mod's pick lists (kirunak-phone S-4): the amendments waiting, the tasks k hold and k start
@@ -82,7 +84,7 @@ test('k waiting lists the amendments neither applied nor declined, each by its n
   assert.deepEqual(lines.slice(0, 3), ['nothing to approve', 'amendments to approve:', `  ${ID} A-3: Words for the age line  2 lines, can approve`]);
   assert.match(lines[3], new RegExp(`^ {2}${ID} A-4: Drop E-1 {2}1 line, not yet: with A-4 applied fails k check: .+…$`));
   assert.match(lines[4], new RegExp(`^ {2}${ID} A-5: replaces AC-2, AC-3; adds AC-4; removes O-1 {2}4 lines, not yet: does not apply: .+…$`));
-  assert.deepEqual(lines.slice(5), ['nothing to accept', '']);
+  assert.deepEqual(lines.slice(5), ['nothing to accept', "no draft waits for the owner's intake", '']);
   // At most about 60 characters after the task id, besides the name.
   w.amendments.forEach((x, i) => assert.ok(lines[i + 2].length - `: ${x.name}`.length - `  ${ID}`.length <= 60, lines[i + 2]));
 
@@ -166,4 +168,22 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
   gitCommitAll(weather, 'the fix taken back, the checklist ticked');
   assert.deepEqual(row(), [null, 0, false]);
+});
+
+test("k waiting says in one line how many drafts wait for the owner's intake and names /k-drafts; --json gains drafts, every other field kept (kirunak-drafts AC-8)", async () => {
+  const { ws, home } = await makeWorkspace();
+  const keys = ['approve', 'accept', 'amendments', 'hold', 'start', 'drafts'];
+  let w = waiting(home);
+  assert.deepEqual(Object.keys(w), keys);
+  assert.deepEqual(w.drafts, { count: 0, ids: [] });
+  assert.deepEqual(run(home, ['waiting']).stdout.split('\n').slice(-3), ['nothing to accept', "no draft waits for the owner's intake", '']);
+
+  newDraft({ ws, id: 'weather/wind-alerts', title: 'Wind alerts for cyclists', now: NOV5 });
+  newDraft({ ws, id: 'hub/new-queue', title: 'A new queue', now: NOV6 });
+  w = waiting(home);
+  assert.deepEqual(Object.keys(w), keys);
+  assert.deepEqual(w.drafts, { count: 2, ids: ['weather/wind-alerts', 'hub/new-queue'] });
+  const text = run(home, ['waiting']).stdout.split('\n');
+  assert.deepEqual(text.slice(-3), ['nothing to accept', "2 drafts wait for the owner's intake: /k-drafts", '']);
+  assert.equal(draftsLine({ count: 1 }), "1 draft waits for the owner's intake: /k-drafts");
 });

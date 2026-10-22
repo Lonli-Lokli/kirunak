@@ -4,12 +4,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KIRUNAK } from './helpers.mjs';
 
-// The three skills and the README rely on nothing kirunak does not ship (R1, R15, D2): every command they name is one
+// The four skills and the README rely on nothing kirunak does not ship (R1, R15, D2): every command they name is one
 // of an allow-list, every path is in this repo, a task folder or Claude Code's own settings, every skill is kirunak's.
-const FILES = ['skills/k-intake/SKILL.md', 'skills/k-done/SKILL.md', 'skills/k-board-page/SKILL.md', 'README.md'];
+const FILES = ['skills/k-intake/SKILL.md', 'skills/k-done/SKILL.md', 'skills/k-board-page/SKILL.md', 'skills/k-draft/SKILL.md', 'README.md'];
 const COMMANDS = new Set(['k', 'claude', 'git', 'node', 'npm', 'cd']);
-const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-resume', '/k-start', '/kirunak', '/k-board-page', '/clear', '/k-list', '/k-board', '/k-amendments', '/k-approve-amendment', '/k-queue']);
-const SKILLS = new Set(['k-intake', 'k-done', 'k-board-page']);
+const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-resume', '/k-start', '/kirunak', '/k-board-page', '/clear', '/k-list', '/k-board', '/k-amendments', '/k-approve-amendment', '/k-queue', '/k-drafts']);
+const SKILLS = new Set(['k-intake', 'k-done', 'k-board-page', 'k-draft']);
 
 const read = (f) => readFileSync(join(KIRUNAK, f), 'utf8');
 
@@ -59,6 +59,7 @@ test('the skills stay short', () => {
   assert.ok(read('skills/k-intake/SKILL.md').split('\n').length <= 120);
   assert.ok(read('skills/k-done/SKILL.md').split('\n').length <= 60);
   assert.ok(read('skills/k-board-page/SKILL.md').split('\n').length <= 40);
+  assert.ok(read('skills/k-draft/SKILL.md').split('\n').length <= 80);
 });
 
 test('the README is its four parts and the licence line', () => {

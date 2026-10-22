@@ -16,6 +16,12 @@ is done.
   device or a person. A task is done when the owner says so (`/k-done`).
 - **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone a brief board, in the chat
   (`/k-board`: the groups, then a group's tasks, then a task's card) or as a private page you open (`/k-board-page`).
+- **Drafts.** An idea for a task that comes up in the middle of other work is kept in git as a draft, not lost in
+  scratch files: `k draft new <id> --title "..."` writes the skeleton in `kirunak/drafts/`, `k draft check <id>` holds
+  its shape, `k draft drop <id> --why "..."` removes it with the reason in the commit, and `k drafts` lists them. A
+  draft is not a task and nothing in it is a ruling. Start the intake from one (`/k-drafts`, or `k intake start <id>
+  --from kirunak/drafts/<slug>.md`): it moves into the task's folder as background and the intake asks every line
+  again.
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -58,7 +64,7 @@ You need Node 22 or later, git and Claude Code.
    ```
 
    `k install` adds a PreToolUse hook and a SessionStart hook to `~/.claude/settings.json` (keeping yours) and links
-   the `k-intake`, `k-done` and `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as
+   the `k-intake`, `k-draft`, `k-done` and `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as
    a page, below). It also prints one line to add to your
    status line command, so the cache keeper sees each session's context and cache; it never edits your status line
    itself.
@@ -92,6 +98,7 @@ You need Node 22 or later, git and Claude Code.
    | `/k-board` | the board's groups (working on now, queued, done this week and the rest) and how many tasks each holds, at once and without a model turn; tap a group for its tasks, a line each, then a task for its card, or Skip for the brief board as text |
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
+   | `/k-drafts` | the drafts waiting, by the date written, as numbered entries; the one picked shows whole, with Start intake (the session starts the intake from it), Drop (you type the reason, then confirm) and Back |
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |

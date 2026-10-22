@@ -25,7 +25,21 @@ kirunak/
   tasks/<slug>/done.json          the owner's acceptance record (R15)
   tasks/<slug>/cost.md            the task's cost at acceptance, generated from done.json (R12, orchestrator.md §6)
   approvals/<slug>.json           the approval record: the task's hash, the date, who, how (D7)
+  drafts/<slug>.md                a draft: an intake prepared ahead, for a task that does not exist yet (R24)
 ```
+
+`tasks/<slug>/draft.md` is the draft once an intake has started from it (R26).
+
+- A **draft** sits in `kirunak/drafts/`, beside `tasks/`, in the repo its task is for. Its id is `<repo>/<slug>`
+  from the start and the task keeps it (R24). It has front matter (`id`, `title`, `written`) and four sections once
+  each, in order: `## Who raised it`, `## Why`, `## What was found` (each item ends with its source) and
+  `## Questions` (numbered from 1, so they never clash with the intake's Q-n). `k draft check` holds that shape
+  (R26). A draft is not a task: it has no state, no approval record and no queue place, nothing in it is a ruling,
+  and the freeze hooks leave it alone (R25, R27). Judgement: any session writes one unasked, so it must freeze
+  nothing and cost the owner nothing until the owner starts it.
+- `k intake start <id> --from kirunak/drafts/<slug>.md` moves the draft with `git mv` to `tasks/<slug>/draft.md`, so
+  it is never in two places and git follows its history (`intake.md` §1). `k draft drop <id> --why "..."` removes it
+  in a commit of that file alone, with the reason in the message (R27).
 
 - `evidence/` is committed by `k step finish`: the files the step wrote there that are new or changed, and nothing
   else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks; a commit git
@@ -228,5 +242,5 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 
 ## 7. Requirements this file satisfies
 
-R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
+R24 to R27 (§1: drafts), R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
 D4 (§6), D6 (§2 rule 1).

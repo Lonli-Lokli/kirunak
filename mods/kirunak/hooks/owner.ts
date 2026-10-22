@@ -18,16 +18,20 @@ import { kOf, refresh } from './reads'
 //   has no hook on AskUserQuestion, and a tap reaches nothing but the dialog's own loop;
 // - a dialog that runs no verb (`pick`, /k-board's) offers labels alone, no verb choice, and ends on a tap with such a
 //   label, which the command reads; a choice of it may open the next step, always another pick dialog (checked as it
-//   opens), so no verb choice is ever reached from it; it is the turn's one dialog, so no verb is typed after it.
+//   opens), so no verb choice is ever reached from it; it is the turn's one dialog, so no verb is typed after it;
+// - an item's `ends` choice (/k-drafts' Start intake) ends a verb's dialog with nothing run, handing its value to the
+//   command, which runs no verb with it (it submits a prompt); the turn's one dialog, so no verb is typed after it.
 
 // An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
 const COMMIT_MS = 600_000
 
-// The verbs a turn may run: k's owner verbs, never a read or a session's own command.
-const VERBS = /^(?:approve|accept|hold|resume|start|amend decline|queue (?:add|move|remove))$/
+// The verbs a turn may run: k's owner verbs, and `draft drop` (no owner's verb in k, A-11's R27, but a write the mod
+// makes only on the owner's tap); never a read or a session's own command.
+const VERBS = /^(?:approve|accept|hold|resume|start|amend decline|queue (?:add|move|remove)|draft drop)$/
 
-// How a command's turn ends: why nothing ran, or (nothing null) the verb chosen in it, which only this module reads.
-export type Outcome = { readonly nothing: string | null }
+// How a command's turn ends: why nothing ran, or (nothing null) the verb chosen in it, which only this module reads;
+// `ended`, with nothing set, is the value of the `ends` choice that ended the dialog (/k-drafts' Start intake).
+export type Outcome = { readonly nothing: string | null; readonly ended?: string }
 
 // `tapped`: chosen by the dialog's last tap, not typed.
 type Chosen = { turn: object; tapped: boolean; argv: readonly string[]; after: ((ok: boolean) => void) | undefined }
@@ -42,7 +46,8 @@ export type Turn = {
   // The verb the owner typed on the command line itself (`/k-accept <id>`, `/k-accept 2`), run as the hook answers;
   // `after` is told whether k took it.
   typed(argv: readonly string[], after?: (ok: boolean) => void): Outcome
-  // The command's dialog, from `first`, until a verb choice is tapped (its Outcome) or nothing will run (why).
+  // The command's dialog, from `first`, until a verb choice is tapped (its Outcome) or nothing will run (why, and
+  // `ended` when an `ends` choice was tapped).
   dialog(first: Screen): Promise<Outcome>
   // A dialog that runs no verb (/k-board), in steps: the label that ended it, or null for Skip, a dismissal, Cancel or
   // any other answer, at any step.
@@ -54,8 +59,12 @@ export type Turn = {
 // opens, or the verb it runs, the last tap (A-11's Earlier and Later, the task's text above them).
 export type Row = { item: Item; label: string; place?: number | null } & ({ open: () => Screen | Promise<Screen> } | { verb: readonly string[] })
 // An item dialog's choice: one that opens another dialog, or a verb, run if it is the last tap; its `after` is told
-// whether k took it, as a typed verb's is.
-export type Choice = { label: string; open: () => Screen | Promise<Screen> } | { label: string; verb: readonly string[]; after?: (ok: boolean) => void }
+// whether k took it, as a typed verb's is; or one that `ends` the dialog with nothing run, its value the Outcome's
+// `ended`, for the command to read.
+export type Choice =
+  | { label: string; open: () => Screen | Promise<Screen> }
+  | { label: string; verb: readonly string[]; after?: (ok: boolean) => void }
+  | { label: string; ends: string }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
 // - list: `head`, then the rows of one page (three and More when there are more than four; one fewer under Back);
 //   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
@@ -157,7 +166,7 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
 }
 
 function choose(turn: object, tapped: boolean, argv: readonly string[], after?: (ok: boolean) => void): Outcome {
-  const head = argv.slice(0, argv[0] === 'amend' || argv[0] === 'queue' ? 2 : 1).join(' ')
+  const head = argv.slice(0, argv[0] === 'amend' || argv[0] === 'queue' || argv[0] === 'draft' ? 2 : 1).join(' ')
   if (!VERBS.test(head)) throw new Error(`not an owner's verb: ${head}`)
   const out: Outcome = { nothing: null }
   chosen.set(out, { turn, tapped, argv: [...argv], after })
@@ -204,7 +213,7 @@ async function talk($: EngineInterface, name: string, turn: object, first: Scree
     else if (act === 'more') stack.push({ screen: frame.screen, start: frame.start + choices.filter(c => typeof c.act === 'object').length })
     else if (act === 'cancel') return { nothing: 'cancelled' }
     else if ('verb' in act) return choose(turn, true, act.verb, act.after)
-    else if ('pick' in act) return { picked: act.pick }
+    else if ('pick' in act) return frame.screen.kind === 'pick' ? { picked: act.pick } : { nothing: `${tap} ended the dialog`, ended: act.pick }
     else {
       const next = await act.open()
       // A pick's step opens a pick dialog alone, so a dialog that runs no verb never reaches a verb choice.
@@ -248,7 +257,7 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   } else {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
     lines = [...screen.text]
-    if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after } : { open: c.open } })))
+    if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after } : 'ends' in c ? { pick: c.ends } : { open: c.open } })))
     if (screen.kind === 'reason') choices.push({ label: CANCEL, act: 'cancel' })
   }
   if (choices.length + (back ? 1 : 0) === 1) choices.push({ label: CANCEL, act: 'cancel' })
