@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { check } from '../promo/capture/check.mjs';
+import { check, checkDir } from '../promo/capture/check.mjs';
 import { COLS, ROWS, record, refusal } from '../promo/capture/fresh-home.mjs';
 import { read } from '../promo/capture/read.mjs';
 
@@ -15,7 +15,7 @@ const jsonl = (file) => readFileSync(file, 'utf8').split('\n').filter(Boolean).m
 const lines = (pieces) => pieces.map((p) => JSON.stringify(p) + '\n').join('');
 
 // A raw session made by hand: each [ms after START, text] is one chunk the terminal showed.
-function session(chunks, { dialogs = [], events = [], transcript = null, end = true, name = '01-setup' } = {}) {
+function session(chunks, { dialogs = [], events = [], transcript = null, end = true, name = '01-setup', sessionId = 'sess-1', kirunakCommit = null } = {}) {
   const dir = temp();
   let o = 0;
   const bufs = [];
@@ -32,8 +32,8 @@ function session(chunks, { dialogs = [], events = [], transcript = null, end = t
   writeFileSync(join(dir, 'dialogs.jsonl'), lines(dialogs));
   writeFileSync(join(dir, 'events.jsonl'), lines(events));
   mkdirSync(join(dir, 'transcripts'));
-  if (transcript) writeFileSync(join(dir, 'transcripts', 'sess-1.jsonl'), lines(transcript));
-  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name, start: START, end: START + 60_000, cols: COLS, rows: ROWS, home: '/Users/Shared/home', cwd: '/Users/Shared/home', sessionId: 'sess-1', claudeVersion: '2.1.307 (Claude Code)', kirunakCommit: null, shell: '/bin/zsh' }));
+  if (transcript) writeFileSync(join(dir, 'transcripts', `${sessionId}.jsonl`), lines(transcript));
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name, start: START, end: START + 60_000, cols: COLS, rows: ROWS, home: '/Users/Shared/home', cwd: '/Users/Shared/home', sessionId, claudeVersion: '2.1.307 (Claude Code)', kirunakCommit, shell: '/bin/zsh' }));
   return dir;
 }
 
@@ -98,6 +98,18 @@ test('the check refuses a planted token, a PEM key, a private path, a machine na
   const found = check(planted, { deny: ['acmeworks'], names: NAMES });
   assert.deepEqual(found.map((f) => [f.id, f.what]), [['a', 'an Anthropic key'], ['b', 'a PEM block'], ['c', 'a private path'], ['d', 'a name of this machine'], ['e', 'a denied word'], ['f', 'a long base64 run']]);
   assert.ok(found.every((f) => f.excerpt.includes('***')), 'a refusal masks what it found');
+});
+
+test('a real manifest passes: its UUID session id and 40-hex commit are known values, the same shapes elsewhere are refused', async () => {
+  const sessionId = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const kirunakCommit = 'dd0e21f0c3a1b2d4e5f60718293a4b5c6d7e8f90';
+  const out = temp();
+  const r = await read(session([...SCRIPTED, [700, `session ${sessionId}\r\n`]], { transcript: TRANSCRIPT, sessionId, kirunakCommit }), out, { names: NAMES, complete: true });
+  assert.deepEqual([r.refused, r.problems], [[], []]);
+  assert.equal(JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8')).kirunakCommit, kirunakCommit);
+  assert.deepEqual(checkDir(out, { names: NAMES }), [], 'the check run alone passes the written folder too');
+  const other = [{ id: 'a', text: `ref ${'e'.repeat(40)}` }, { id: 'b', text: `id ${sessionId.replace('7c9e', '0000')}` }];
+  assert.deepEqual(check(other, { names: NAMES, known: [sessionId, kirunakCommit] }).map((f) => f.what), ['a long hex run', 'a long base64 run']);
 });
 
 test('the reader writes nothing when a line holds a secret', async () => {

@@ -12,7 +12,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import xterm from '@xterm/headless';
 
-import { check, denyWords, report } from './check.mjs';
+import { check, denyWords, knownOf, report } from './check.mjs';
 
 const jsonl = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
@@ -154,7 +154,7 @@ export async function read(rawDir, outDir, { deny = [], names, complete = false 
   const { raw, capture, ...kept } = manifest;
   const pub = { ...kept, start: new Date(start).toISOString(), end: manifest.end ? new Date(manifest.end).toISOString() : null };
   const items = [...lines.map((l) => ({ id: l.id, text: l.text })), ...dialogs.map((d) => ({ id: d.id, text: [d.command, d.header, ...d.text, d.question, ...d.choices, d.tap, d.typed, d.end].filter((x) => x != null).join('\n') })), ...Object.entries(pub).map(([k, v]) => ({ id: `manifest.${k}`, text: JSON.stringify(v) }))];
-  const found = check(items, { deny, ...(names && { names }) });
+  const found = check(items, { deny, known: knownOf(manifest), ...(names && { names }) });
   if (found.length) return { ok: false, refused: found, problems: [] };
   const missing = complete ? problems(s, lines.map((l) => ({ ...l })), dialogs) : [];
   mkdirSync(outDir, { recursive: true });
