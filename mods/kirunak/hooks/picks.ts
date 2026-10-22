@@ -118,9 +118,10 @@ export type Brief = { made: string; text: string; ids: string[]; groups: BriefGr
 // /k-board with no id (A-9's AC-5), in steps. First the groups: when the board was made, each group's name and count,
 // the machine's line, and the groups that hold a task as the choices (k names group by words, never a digit, so the
 // app's own numbers stand alone). A group picked: its paragraph of the brief board, its tasks as the choices, and
-// Back; the task tapped answers with its card. Both page three and More, as every list does. It runs no verb.
+// Back; the task tapped answers with its card. Both page three and More, as every list does. It runs no verb. The
+// group Drafts (kirunak-drafts S-4: the drafts after the tasks, `k board --card` a draft's card too) asks for a draft.
 export function boardScreen(brief: Brief): PickScreen {
-  const group = (g: BriefGroup): PickScreen => ({ kind: 'pick', header: 'Board', text: [`${g.name} (${g.count})`, ...g.lines], labels: g.ids, question: 'Which task\'s card?' })
+  const group = (g: BriefGroup): PickScreen => ({ kind: 'pick', header: 'Board', text: [`${g.name} (${g.count})`, ...g.lines], labels: g.ids, question: g.name === 'Drafts' ? 'Which draft?' : 'Which task\'s card?' })
   return {
     kind: 'pick',
     header: 'Board',

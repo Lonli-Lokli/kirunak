@@ -5,6 +5,8 @@ import { bandLine, paneLines } from './board'
 import type { Tone } from './board'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
+import { draftsScreen, draftsText, intakePrompt } from './drafts'
+import type { DraftRow } from './drafts'
 import { amendmentsText, amendmentText, briefText, listText } from './lists'
 import { nothingRan, owners } from './owner'
 import type { Outcome, Turn } from './owner'
@@ -174,6 +176,46 @@ async function queueDialog($: EngineInterface, turn: Turn): Promise<string | Out
   return out.nothing === null ? out : nothingRan(out.nothing)
 }
 
+// `/k-drafts` (A-11's R27, R28; kirunak-drafts AC-2, AC-7, E-3): every draft in every repo, as k drafts gives them, as
+// the dialog's choices (drafts.ts); each one's file read before the dialog opens, for the one picked to show whole.
+// When nothing ran, the answer says why and shows the list.
+async function draftsDialog($: EngineInterface, turn: Turn): Promise<string | Outcome> {
+  if (turn.args.trim()) return `/k-drafts takes nothing, not ${turn.args.trim()}.`
+  const r = await $.process.run(['node', turn.k, 'drafts', '--json'])
+  if (r.exitCode !== 0) return refused('k-drafts', r)
+  const rows = JSON.parse(r.stdout) as DraftRow[]
+  if (!rows.length) return draftsText(rows)
+  const files = new Map<string, string>()
+  for (const d of rows) {
+    try {
+      files.set(d.path, await $.fs.read(d.path))
+    } catch {
+      // draftLines says so.
+    }
+  }
+  const out = await turn.dialog(draftsScreen(rows, files))
+  if (out.ended !== undefined) return startIntake($, turn.k, out.ended)
+  return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${draftsText(rows)}`
+}
+
+// Start intake (AC-2, E-3): k drafts read again, and the draft found by its id, so one dropped or taken by an intake
+// since the list was shown is refused by name, never another; then a prompt of its own, once this answer shows, that
+// starts the intake with the k-intake skill (drafts.ts, intakePrompt). It runs no verb. The engine refuses a submit
+// from inside a command.run hook (it would wait on the turn the hook holds: measured under `claude plugin test`), so
+// a timer of the clock's submits it once the hook has answered; the prompt then waits for the session to be idle.
+const SUBMIT_AFTER_MS = 1
+async function startIntake($: EngineInterface, k: string, id: string): Promise<string> {
+  const r = await $.process.run(['node', k, 'drafts', '--json'])
+  if (r.exitCode !== 0) return `Nothing ran: k drafts did not answer, so ${id} could not be found again: ${firstLine(r)}`
+  const d = (JSON.parse(r.stdout) as DraftRow[]).find(x => x.id === id)
+  if (d === undefined) return `Nothing ran: ${id} is no longer a draft. It was dropped, or its intake started, since the list was shown.`
+  const text = intakePrompt(d)
+  $.clock.after(SUBMIT_AFTER_MS, () => {
+    void $.prompt.submit({ text }).catch(err => $.ui.toast(`The intake from ${id} did not start: ${reason(err)}`))
+  })
+  return `The intake from ${id} starts next in this session, with the k-intake skill.`
+}
+
 // `/k-approve-amendment <n>`: `k approve <id> --amendment A-n` for the n-th of the list /k-amendments last showed; k
 // checks it again as it runs (E-2).
 async function approveAmendment($: EngineInterface, turn: Turn): Promise<string | Outcome> {
@@ -200,6 +242,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-amendments', description: 'The amendments waiting for your approval, to approve or decline by touch; with a number, that one in full', argumentHint: '[<n>]' })
     await $.command.register({ name: 'k-approve-amendment', description: 'Approve an amendment /k-amendments listed: k approve --amendment, as your own command', argumentHint: '<n>' })
     await $.command.register({ name: 'k-queue', description: 'Show the kirunak queue and move, park or put back a task by touch' })
+    await $.command.register({ name: 'k-drafts', description: 'The kirunak drafts, intakes prepared ahead: one shown whole, to start its intake or drop it by touch' })
     await $.command.register({ name: 'kirunak', description: 'Show or hide kirunak\'s pane: this session\'s task, the queue and the lock' })
     // A `claude -p` run draws nothing: it gets the commands, which refuse its origin, and no reads.
     if (e.isInteractive) {
@@ -231,6 +274,7 @@ export const register: Register = on => {
   on('command.run', { command: 'k-approve-amendment' }, ($, e) => owners($, e, 'k-approve-amendment', t => approveAmendment($, t))).catch(() => ({ text: FAILED('k-approve-amendment') }))
 
   on('command.run', { command: 'k-queue' }, ($, e) => owners($, e, 'k-queue', t => queueDialog($, t), '\n\n')).catch(() => ({ text: FAILED('k-queue') }))
+  on('command.run', { command: 'k-drafts' }, ($, e) => owners($, e, 'k-drafts', t => draftsDialog($, t), '\n\n')).catch(() => ({ text: FAILED('k-drafts') }))
 
   on('session.end', ($, e, next) => {
     delete offered.approve

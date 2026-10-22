@@ -5,7 +5,8 @@ import type { Engine } from 'claude-code/testing'
 import type { Brief } from '../hooks/picks'
 import type { KirunakRow } from '../types'
 
-import { BRIEF, briefOf, cardOf, ID, ROWS, world } from './world'
+import type { DraftRow } from '../hooks/drafts'
+import { BRIEF, briefOf, cardOf, DRAFTS, draftCardOf, ID, ROWS, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -93,6 +94,18 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     ])
     expect(w.asked[1]?.question).toBe(`${paragraph(BRIEF11, 'Done this week')}\nWhich task's card?`)
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/d2']])
+    expect(w.runs).toEqual([])
+  })
+
+  test('the group Drafts (kirunak-drafts S-4) asks "Which draft?", every other group for a task\'s card; a draft tapped answers with its card', async ($, on) => {
+    const lines = DRAFTS.slice(0, 2).map(d => `${d.id}: ${d.title}, written ${d.written}`)
+    const brief = briefOf([{ name: 'Queued', lines: ['hub/sync-notes: queued, queue 2'] }, { name: 'Drafts', lines }])
+    const w = world(on, { brief: json(brief), taps: ['Drafts', 'hub/offline-maps', 'Queued', SKIP] })
+    expect(await run($, 'k-board')).toBe(draftCardOf(DRAFTS[0] as DraftRow).trimEnd())
+    await run($, 'k-board')
+    expect(w.asked[1]).toEqual({ header: 'Board', question: `Drafts (2)\n${lines.join('\n')}\nWhich draft?`, labels: ['hub/offline-maps', 'weather/rain-alerts', 'Back'] })
+    expect(w.asked[3]?.question).toBe('Queued (1)\nhub/sync-notes: queued, queue 2\nWhich task\'s card?')
+    expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/offline-maps'], ['board', '--brief', '--json']])
     expect(w.runs).toEqual([])
   })
 

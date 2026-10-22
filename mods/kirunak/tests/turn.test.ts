@@ -73,6 +73,22 @@ describe('a turn runs only an Outcome it made (kirunak-phone AC-4, S-7 review)',
     expect([w.asked, w.runs]).toEqual([3, []])
   })
 
+  test('an item\'s ends choice (/k-drafts\' Start intake) ends a verb\'s dialog with its value and nothing run, and no verb is typed after it; k draft drop beside it is a verb the turn may run', async () => {
+    const DROP = ['draft', 'drop', 'hub/d1', '--why', 'not needed']
+    const ENDS: Screen = { kind: 'item', header: 'Drafts', text: ['hub/d1: Draft 1.'], choices: [{ label: 'Start intake', ends: 'hub/d1' }, { label: 'Drop hub/d1', verb: DROP }], question: 'Start it?' }
+    const { $, w } = engine(['Start intake', 'Start intake', 'Start intake', 'Drop hub/d1'])
+    expect(await answer($, async t => (await t.dialog(ENDS)).ended ?? 'none')).toBe('hub/d1')
+    // Returned as it is, it runs nothing and says so.
+    expect(await answer($, t => t.dialog(ENDS))).toBe('Nothing ran: Start intake ended the dialog.')
+    await expect(answer($, async t => {
+      await t.dialog(ENDS)
+      return t.typed(DROP)
+    })).rejects.toThrow('/k-probe: a typed verb after the dialog')
+    expect(w.runs).toEqual([])
+    expect(await answer($, t => t.dialog(ENDS))).toMatch(/^\/k-probe: k did not finish \(the fake k never finishes\)/)
+    expect([w.asked, w.runs]).toEqual([4, [DROP]])
+  })
+
   test('a dialog that runs no verb (/k-board\'s) answers the label tapped, null for Skip or a dismissal; no verb is typed after it, and a verb\'s dialog never ends in a pick', async () => {
     const PICK: PickScreen = { kind: 'pick', header: 'Board', text: ['hub/proposed: proposed.'], labels: ['hub/proposed'], question: 'Which task\'s card?' }
     const LIST: Screen = { kind: 'list', header: 'Approve', head: 'Waiting:', question: 'Which task?', rows: [{ item: { lead: '', name: 'hub/proposed', text: '.' }, label: 'hub/proposed', open: () => PICK }] }
