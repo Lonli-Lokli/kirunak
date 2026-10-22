@@ -126,7 +126,7 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
       if (!open) throw new Error(`/${name}: a dialog after the command answered`)
       if (asked) throw new Error(`/${name}: a second dialog`)
       asked = true
-      const out = await talk($, me, first)
+      const out = await talk($, name, me, first)
       if ('picked' in out) throw new Error(`/${name}: a pick in a verb's dialog`)
       return out
     },
@@ -135,7 +135,7 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
       if (asked) throw new Error(`/${name}: a second dialog`)
       if (first.kind !== 'pick') throw new Error(`/${name}: a pick that opens no pick dialog`)
       asked = true
-      const out = await talk($, me, first)
+      const out = await talk($, name, me, first)
       return 'picked' in out ? out.picked : null
     },
   }
@@ -166,7 +166,8 @@ function choose(turn: object, tapped: boolean, argv: readonly string[], after?: 
 
 // What a dialog's choice does.
 type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[]; after: ((ok: boolean) => void) | undefined } | { pick: string } | 'back' | 'more' | 'cancel'
-type Drawn = { question: string; choices: { label: string; act: Act }[] }
+// `text` and `ask`: the question's lines above it and its last line, as drawn, for the dialog log.
+type Drawn = { question: string; text: string[]; ask: string; choices: { label: string; act: Act }[] }
 type Frame = { screen: Screen; start: number }
 
 // The dialog's loop: each answer acts only when it equals a choice offered (or is a reason typed in a reason dialog);
@@ -174,19 +175,24 @@ type Frame = { screen: Screen; start: number }
 // ends it with that verb, the turn's. Words typed in the free-text row that equal a choice exactly are that choice:
 // $.ui.ask gives one string for a tap and for typed text, and they are the owner's own words, with the id, under the
 // item's text, in the owner's own command's dialog (S-7 review, finding 4; approval.md §5).
-async function talk($: EngineInterface, turn: object, first: Screen): Promise<Outcome | { picked: string }> {
+async function talk($: EngineInterface, name: string, turn: object, first: Screen): Promise<Outcome | { picked: string }> {
   const stack: Frame[] = [{ screen: first, start: 0 }]
   for (;;) {
     const frame = stack[stack.length - 1] as Frame
-    const { question, choices } = draw(frame, stack.length > 1)
+    const drawn = draw(frame, stack.length > 1)
+    const { question, choices } = drawn
+    const shown: Logged = { t: await askedAt($), command: name, header: frame.screen.header, drawn }
     let tap
     try {
       tap = await $.ui.ask(question, { options: choices.map(c => c.label), header: frame.screen.header })
     } catch {
+      await logDialog($, shown, null, 'dismissed')
       return { nothing: 'dismissed' }
     }
+    const act = tap === SKIP ? undefined : choices.find(c => c.label === tap)?.act
+    const ends = tap === SKIP ? 'skipped' : act === undefined ? (frame.screen.kind === 'reason' && tap.trim() && !tap.trim().startsWith('--') ? null : 'typed') : typeof act !== 'object' ? (act === 'cancel' ? 'cancelled' : null) : 'verb' in act ? act.verb.join(' ') : 'pick' in act ? 'picked' : null
+    await logDialog($, shown, tap === SKIP ? null : tap, ends)
     if (tap === SKIP) return { nothing: 'skipped' }
-    const act = choices.find(c => c.label === tap)?.act
     if (act === undefined) {
       if (frame.screen.kind !== 'reason') return { nothing: 'the answer was none of the choices' }
       const why = tap.trim()
@@ -253,5 +259,37 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     throw new Error(`a dialog's choices are 1 to ${CHOICES} short names, unique and not blank: ${labels.join(' | ')}`)
   }
   // Every question's one way out, so no text taken from the task files shows its marks as typed (S-10).
-  return { question: unmarked([...lines, question].join('\n')), choices }
+  return { question: unmarked([...lines, question].join('\n')), text: unmarked(lines.join('\n')).split('\n').filter((l, i, all) => all.length > 1 || l), ask: unmarked(question), choices }
+}
+
+// The dialog log (kirunak-docs-promo S-1 §3): one line a dialog shown, appended to <state>/dialogs.jsonl, where the
+// state folder is $KIRUNAK_HOME else ~/.kirunak, as k finds it. It records the owner's gestures and nothing else: the
+// command, what the dialog drew, the tap (or `typed`, words that were none of the choices) with its time, and `end`,
+// how the dialog closed when it closed there (skipped, dismissed, cancelled, picked, typed, or the verb its tap
+// chose). It never changes an answer: a log that cannot be written is left unwritten.
+type Logged = { t: number | null; command: string; header: string; drawn: Drawn }
+async function askedAt($: EngineInterface): Promise<number | null> {
+  try {
+    return await $.clock.now()
+  } catch {
+    return null
+  }
+}
+async function logDialog($: EngineInterface, shown: Logged, tap: string | null, end: string | null): Promise<void> {
+  try {
+    const [state, home, session, tAnswer] = await Promise.all([$.env.get('KIRUNAK_HOME'), $.env.get('HOME'), $.session.id(), $.clock.now()])
+    const dir = state || (home ? `${home}/.kirunak` : null)
+    if (!dir) return
+    const choices = shown.drawn.choices.map(c => c.label)
+    const isChoice = tap !== null && choices.includes(tap)
+    const line = JSON.stringify({
+      t: shown.t, session, command: shown.command, header: shown.header, text: shown.drawn.text, question: shown.drawn.ask, choices,
+      tap: isChoice ? tap : null, ...(tap !== null && !isChoice && { typed: tap }), tAnswer, end,
+    })
+    const path = `${dir}/dialogs.jsonl`
+    const before = await $.fs.read(path).then(t => String(t), () => '')
+    await $.fs.write(path, `${before}${before && !before.endsWith('\n') ? '\n' : ''}${line}\n`)
+  } catch {
+    // An unwritable state folder: the dialog goes on unrecorded.
+  }
 }

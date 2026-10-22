@@ -114,10 +114,11 @@ export type Asked = { question: string; labels: string[]; header: string }
 // other id refused) (each owner verb with `verb`), the amendment files,
 // events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
 // dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
-// left dismisses it.
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS } = {}) {
+// left dismisses it; the environment (`env`: KIRUNAK_HOME unset, HOME /home/dev unless a test gives its own) and the
+// files the mod wrote (`files`, read back by fs.read; `unwritable` refuses every write).
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
-  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[] }
+  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string> }
   on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
     const q = e.questions[0]
     if (q === undefined) return { deny: 'no question' }
@@ -137,7 +138,13 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
   })
   // `broken` makes the mod's first question about k fail, as a hook that throws.
   on('fs.exists', () => (broken ? { deny: 'the disk is gone' } : { value: true }))
-  on('fs.read', ($, e) => (FILES[e.path] !== undefined ? { value: FILES[e.path] as string } : { deny: `ENOENT: no such file, ${e.path}` }))
+  on('env.get', ($, e) => ({ value: env[e.name] }))
+  on('fs.write', ($, e) => {
+    if (unwritable) return { deny: `EACCES: permission denied, ${e.path}` }
+    w.files[e.path] = e.text
+    return { value: undefined }
+  })
+  on('fs.read', ($, e) => (w.files[e.path] !== undefined ? { value: w.files[e.path] as string } : FILES[e.path] !== undefined ? { value: FILES[e.path] as string } : { deny: `ENOENT: no such file, ${e.path}` }))
   // The mod's folder, or with `linkedTo` a link to that folder.
   on('fs.stat', ($, e) => ({ value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: linkedTo !== null, realPath: linkedTo ?? e.path } }))
   on('prompt.autocomplete', () => ({ suggestions: [{ text: 'engine-row' }] }))
