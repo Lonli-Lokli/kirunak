@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { check, checkDraft, newDraft } from '../lib/drafts.mjs';
+import { check, checkDraft, drop, format, list, newDraft } from '../lib/drafts.mjs';
 import { start } from '../lib/intake.mjs';
-import { makeWorkspace, sh } from './helpers.mjs';
+import { gitCommitAll, makeWorkspace, sh } from './helpers.mjs';
 
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
 
@@ -157,4 +157,88 @@ test('k draft new: a title is required, a dry run writes nothing, and a missing 
   assert.equal(newDraft({ ws: w.ws, id: ID, title: 'Wind', dryRun: true }).path, fileOf(w));
   assert.equal(existsSync(fileOf(w)), false);
   assert.throws(() => check(w.ws, ID), (e) => e.code === 1 && /^no draft weather\/wind-alerts: .* does not exist/.test(e.message));
+});
+
+// The invented workspace with the filled draft committed in weather.
+async function committedDraft() {
+  const w = await makeWorkspace();
+  mkdirSync(join(rootOf(w), 'kirunak', 'drafts'), { recursive: true });
+  writeFileSync(fileOf(w), FILLED);
+  gitCommitAll(w.weather, 'the draft');
+  return { ...w, git: (...args) => sh(w.weather, 'git', args).trim() };
+}
+
+test('k draft drop: removes the draft in a commit of that path alone, the reason in its message; a staged file stays staged', async () => {
+  const w = await committedDraft();
+  writeFileSync(join(w.weather, 'README.md'), 'changed\n');
+  w.git('add', 'README.md');
+  const r = drop({ ws: w.ws, id: ID, why: ' folded into\noffline-forecast ' });
+  assert.equal(existsSync(fileOf(w)), false);
+  assert.equal(r.commit, w.git('rev-parse', '--short', 'HEAD'));
+  assert.equal(w.git('log', '-1', '--format=%s'), 'kirunak: drop the draft weather/wind-alerts: folded into offline-forecast');
+  assert.equal(w.git('show', '--name-status', '--format=', 'HEAD'), 'D\tkirunak/drafts/wind-alerts.md');
+  assert.equal(w.git('diff', '--cached', '--name-only'), 'README.md');
+});
+
+test('k draft drop: refused without a reason, for a missing draft, and a dry run changes nothing', async () => {
+  const w = await committedDraft();
+  const before = w.git('rev-parse', 'HEAD');
+  for (const why of [undefined, '', '  \n ']) {
+    assert.throws(() => drop({ ws: w.ws, id: ID, why }), (e) => e.code === 2 && /needs its reason: --why/.test(e.message));
+  }
+  assert.throws(() => drop({ ws: w.ws, id: 'weather/gusts', why: 'x' }), (e) => e.code === 1 && /^no draft weather\/gusts: /.test(e.message));
+  assert.throws(() => drop({ ws: w.ws, id: 'radio/gusts', why: 'x' }), /Ask the owner to add radio to kirunak's workspace first/);
+  const dry = drop({ ws: w.ws, id: ID, why: 'not now', dryRun: true });
+  assert.equal(dry.message, 'kirunak: drop the draft weather/wind-alerts: not now');
+  assert.equal(dry.tracked, true);
+  assert.equal(existsSync(fileOf(w)), true);
+  assert.equal(w.git('rev-parse', 'HEAD'), before);
+  assert.equal(w.git('status', '--porcelain'), '');
+});
+
+test('k draft drop: a draft never committed is only deleted; a refused commit puts the draft back', async () => {
+  const w = await makeWorkspace();
+  newDraft({ ws: w.ws, id: ID, title: 'Wind' });
+  const head = sh(w.weather, 'git', ['rev-parse', 'HEAD']);
+  assert.equal(drop({ ws: w.ws, id: ID, why: 'a duplicate' }).commit, null);
+  assert.equal(existsSync(fileOf(w)), false);
+  assert.equal(sh(w.weather, 'git', ['rev-parse', 'HEAD']), head);
+
+  const c = await committedDraft();
+  writeFileSync(fileOf(c), FILLED + '\nan edit not committed\n');
+  writeFileSync(join(c.weather, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "refused by the hook" >&2\nexit 1\n');
+  chmodSync(join(c.weather, '.git', 'hooks', 'pre-commit'), 0o755);
+  assert.throws(() => drop({ ws: c.ws, id: ID, why: 'x' }), (e) => e.code === 1 && /refused by the hook/.test(e.message));
+  assert.equal(readFileSync(fileOf(c), 'utf8'), FILLED + '\nan edit not committed\n');
+  assert.equal(c.git('status', '--porcelain'), 'M kirunak/drafts/wind-alerts.md');
+});
+
+test('k drafts: every draft in every repo, by date written then id, an undated one last; other files are no drafts', async () => {
+  const w = await makeWorkspace();
+  const put = (repo, slug, front) => {
+    mkdirSync(join(rootOf(w, repo), 'kirunak', 'drafts'), { recursive: true });
+    writeFileSync(fileOf(w, slug, repo), `---\n${front}---\n`);
+  };
+  put('weather', 'wind-alerts', 'id: weather/wind-alerts\ntitle: Wind alerts\nwritten: 2026-10-22\n');
+  put('hub', 'queue-lanes', 'id: hub/queue-lanes\ntitle: Lanes in the queue\nwritten: 2026-10-22\n');
+  put('weather', 'pollen', 'id: weather/pollen\ntitle: Pollen counts\nwritten: 2026-10-20\n');
+  put('weather', 'undated', 'title: No date\nwritten: someday\n');
+  writeFileSync(fileOf(w, 'README', 'weather'), '# not a draft\n');
+  writeFileSync(join(rootOf(w), 'kirunak', 'drafts', 'notes.txt'), 'not a draft\n');
+  const rows = list(w.ws);
+  assert.deepEqual(rows.map((r) => [r.id, r.title, r.written]), [
+    ['weather/pollen', 'Pollen counts', '2026-10-20'],
+    ['hub/queue-lanes', 'Lanes in the queue', '2026-10-22'],
+    ['weather/wind-alerts', 'Wind alerts', '2026-10-22'],
+    ['weather/undated', 'No date', null],
+  ]);
+  assert.deepEqual(Object.keys(rows[0]), ['id', 'repo', 'slug', 'title', 'written', 'path']);
+  assert.deepEqual([rows[0].repo, rows[0].slug, rows[0].path], ['weather', 'pollen', fileOf(w, 'pollen')]);
+  assert.equal(format(rows), [
+    'weather/pollen       Pollen counts       2026-10-20',
+    'hub/queue-lanes      Lanes in the queue  2026-10-22',
+    'weather/wind-alerts  Wind alerts         2026-10-22',
+    'weather/undated      No date             no date',
+  ].join('\n'));
+  assert.equal(format([]), 'no drafts');
 });
