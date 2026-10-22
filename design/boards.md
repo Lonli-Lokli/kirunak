@@ -42,6 +42,13 @@ command except `git show` for a staged hash when asked).
   "Lock, queue and running steps": the lock, the heavy-job queue, the running steps, the device claims, the task
   queue. Judgement: what the owner is doing comes before everything, and a section that is empty takes no room on a
   small screen.
+- **Drafts** (R28, built 2026-10-22, kirunak-drafts S-4): a group "Drafts" follows the last task group and comes
+  before "Lock, queue and running steps", shown only when a draft waits. In the markdown board it is `## Drafts (n)`
+  with a bullet a draft (`id: title, written <date>`); in the brief board a paragraph with a line a draft, and a last
+  entry of `groups` in `--json`; on the page an h2 and a plain list on the card ground, no control, only the text
+  pairs already held at 4.5:1 in both themes (a test holds them, and that the heading comes after the tasks and
+  before the lock, in reading order). `k board --card <draft id>` answers a draft's card (title, date written, file).
+  `k list` keeps listing tasks only (R28).
 - A task is a **brief row that opens its card in place** (kirunak-phone A-7, built 2026-10-21): a native `<details>`,
   closed at first, whose summary is the brief board's entry (§3) and whose body is the card: the title, the state,
   the queue place, the step and since when, who works on it, and every AC and E in full with its latest verdict in
@@ -144,6 +151,7 @@ What it shows and does, each from the skill's table of shapes:
 | `/k-list [all]`, `/k-board [<id>]`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the board's groups in a dialog, then a group's tasks, and a tapped task's card, `/k-board <id>` that card (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --brief --json` and `k board --card <id>`, `k waiting --json` (the `amendments` rows) |
 | `/k-approve`, `/k-accept`, `/k-hold`, `/k-resume`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json`; for `/k-resume`, the tasks on hold of `k list --json --all` |
 | the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold `, `/k-resume ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
+| `/k-drafts` | the drafts waiting, by the date written: a dialog with one numbered line a draft (id, title, written), three to a page with More; a draft picked is shown whole, with Start intake, Drop and Back. Start intake runs no `k` verb: it reads `k drafts --json` again, refuses a draft that is gone ("no longer a draft"), and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from that draft (`k intake start <id> --from kirunak/drafts/<slug>.md`, which moves it to `kirunak/tasks/<slug>/draft.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, then runs `k draft drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above (R27, R28) | `k drafts --json` |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
 
@@ -281,4 +289,4 @@ As built, where the build chose (each judgement unless marked):
 
 ## 5. Requirements this file satisfies
 
-D5 and R16 (§1, §2), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5).
+D5 and R16 (§1, §2), R28 (§2 the Drafts group, §4 `/k-drafts`), R27 (§4 Drop), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5).
