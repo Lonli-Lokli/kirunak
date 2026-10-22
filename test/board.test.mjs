@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
+import { DRAFT_PAIRS, renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { rows } from '../lib/list.mjs';
-import { fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
   return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
@@ -189,4 +189,48 @@ test('each task a brief row, closed at first, that opens its card in place: nati
   assert.ok(!/\srole=/.test(html), 'no role over the native semantics');
   assert.ok(!/\saria-(?!hidden)/.test(html), 'no aria but on a decorative mark');
   assert.ok(cardOf(html, 'weather/offline-forecast').includes('A forecast older than a day shows its age in words'), 'every AC and E in full');
+});
+
+test('the drafts read in order after the tasks: a heading and a list after the last task group, before the lock, nothing decorative read (kirunak-drafts AC-9, AC-14)', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  queuedAndParked(w);
+  assert.ok(!(await page(w)).includes('<section class="drafts">'), 'no group when no draft waits');
+  draftsAt(w);
+  const html = await page(w);
+  const body = html.slice(html.indexOf('<body>'));
+  assert.deepEqual(h2s(body), ['Working on now', 'proposed', 'queued', 'parked', 'done this week', 'Drafts', 'Lock, queue and running steps']);
+  const at = body.indexOf('<h2>Drafts <span class="n">(2)</span></h2>');
+  assert.ok(at > body.lastIndexOf('</details>') && at > body.indexOf('<div class="states">'), 'the Drafts heading after the last task group');
+  assert.ok(at < body.indexOf('<section class="machine">'), 'and before the lock');
+  assert.match(body.slice(at), new RegExp([
+    '^<h2>Drafts <span class="n">\\(2\\)</span></h2>',
+    '<ul>',
+    '<li><b>weather/wind-alerts</b>: Wind alerts &lt;for&gt; cyclists, <span class="meta">written <time datetime="2026-11-05">2026-11-05</time></span></li>',
+    '<li><b>hub/short-jobs</b>: Short jobs first [^<]*, <span class="meta">written <time datetime="2026-11-06">2026-11-06</time></span></li>',
+    '</ul>',
+    '</section>',
+  ].join('\n')));
+  const section = body.slice(body.indexOf('<section class="drafts">'), body.indexOf('<section class="machine">'));
+  assert.equal(section.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
+    'Drafts (2) weather/wind-alerts: Wind alerts &lt;for&gt; cyclists, written 2026-11-05 hub/short-jobs: Short jobs first in the heavy-job queue, ' +
+    'so a quick test never waits behind a long build, written 2026-11-06', 'read as words, in order, with no mark between them');
+  assert.ok(!/\saria-(?!hidden)|\srole=/.test(section), 'native semantics only');
+  assert.ok(!/content:\s*['"][^'"]/.test(html), 'no CSS mark a reader would speak');
+});
+
+test('the drafts\' text pairs are the page\'s, held at 4.5:1 in the light and the dark theme (kirunak-drafts AC-14)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  const html = await page(w);
+  const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
+  assert.match(style, /\.drafts li \{ background: var\(--card\);/, 'a draft row on the card ground');
+  assert.match(style, /\.meta \{ color: var\(--muted\);/, 'its date muted');
+  assert.doesNotMatch(style, /\.drafts[^{]*\{[^}]*\bcolor:/, 'no colour of its own: text, and muted for the date');
+  const light = tokens(/:root \{([^}]*)\}/.exec(html)[1]);
+  const dark = tokens(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)[1]);
+  for (const [fg, bg] of DRAFT_PAIRS) {
+    assert.ok(TEXT_PAIRS.some(([f, b]) => f === fg && b === bg), `--${fg} on --${bg} is in the page's contrast test`);
+    for (const [name, t] of [['light', light], ['dark', dark]]) assert.ok(ratio(t[fg], t[bg]) >= 4.5, `${name}: --${fg} on --${bg} is ${ratio(t[fg], t[bg]).toFixed(2)}:1`);
+  }
 });
