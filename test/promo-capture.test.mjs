@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
-import { COLS, ROWS, aheadOf, collect, enter, record, refusal } from '../promo/capture/fresh-home.mjs';
+import { COLS, ROWS, aheadOf, collect, enter, loggedInOf, record, refusal } from '../promo/capture/fresh-home.mjs';
 import { gitCommitAll, gitInit, sh } from './helpers.mjs';
 import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
@@ -240,6 +240,22 @@ test('open refuses a home with no Claude Code login and names login, which enter
   assert.equal(code, 0);
   assert.equal(readFileSync(join(home, 'seen'), 'utf8'), `${home}|dev|${realpathSync(home)}|unset`);
   assert.deepEqual(readdirSync(home), ['seen'], 'no terminal.raw, no times, no manifest');
+  assert.match(why, /or its keychain is locked \(HOME=\S+ security unlock-keychain \S+\/Library\/Keychains\/login\.keychain-db\)/);
+});
+
+test('the login is what Claude Code in the home says, in the home\'s own environment, keychain or file alike (S-4 probe 2)', () => {
+  const home = temp();
+  const fake = (body) => {
+    const file = join(temp(), 'claude');
+    writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return file;
+  };
+  const seen = join(home, 'asked');
+  assert.equal(loggedInOf(home, fake(`printf '%s|%s' "$HOME" "$*" > ${seen}; echo '{"loggedIn": true, "authMethod": "claude.ai"}'`)), true);
+  assert.equal(readFileSync(seen, 'utf8'), `${home}|auth status --json`);
+  assert.equal(loggedInOf(home, fake(`echo '{"loggedIn": false, "authMethod": "none"}'`)), false);
+  assert.equal(loggedInOf(home, fake('exit 1')), false, 'a locked keychain or no login at all');
+  assert.equal(loggedInOf(home, fake('echo not json')), false);
 });
 
 test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', async () => {

@@ -6,9 +6,11 @@
 //   node promo/capture/fresh-home.mjs open --home <dir> --capture <raw root> --name <NN-name>
 //
 // `login` opens the same shell in the same home, unrecorded, for Claude Code's one-time login: its sign-in link must
-// never enter a capture (S-4 probe 1). macOS then says "Keychain Not Found" (the fresh home has no keychain); Cancel,
-// as often as it asks, and Claude Code keeps the login in the home's ~/.claude/.credentials.json.
-// `open` refuses while the home has no such login, while the capture's newest session has no complete.json (read.mjs
+// never enter a capture (S-4 probe 1). A home with no keychain of its own cannot keep the login (macOS says "Keychain
+// Not Found", and Claude Code may fail to save it, S-4 probe 2): its owner makes one first, with a password, in
+// ~/Library/Keychains/login.keychain-db, as the home's default, with no auto-lock (`security create-keychain`,
+// `default-keychain -d user -s`, `set-keychain-settings`, each under HOME=<home>).
+// `open` refuses while Claude Code in the home finds no login, while the capture's newest session has no complete.json (read.mjs
 // --check writes it), while the terminal is not 100 columns by 32 rows, and, for a numbered session (01-setup and on),
 // while this checkout's branch is ahead of origin or has no upstream there (the filmed setup clones the pushed
 // kirunak). When the shell exits it copies, from the fresh home, the Claude Code transcripts, the mod's dialogs and
@@ -36,13 +38,22 @@ export function envOf(home) {
   return { HOME: home, USER: 'dev', LOGNAME: 'dev', SHELL: '/bin/zsh', TERM: 'xterm-256color', LANG: 'en_US.UTF-8', TMPDIR: join(home, '.tmp'), PATH: `${home}/.local/bin:${home}/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin` };
 }
 
-// Where Claude Code keeps its login in a home with no keychain.
-export const loginOf = (home) => join(home, '.claude/.credentials.json');
+// Whether Claude Code in the home finds its login, asked of Claude Code itself in the home's own environment: the
+// login is in the home's keychain when it has one, in ~/.claude/.credentials.json when it has none, and unreadable
+// while that keychain is locked.
+export function loggedInOf(home, claude = which('claude')) {
+  try {
+    const out = execFileSync(claude, ['auth', 'status', '--json'], { env: envOf(home), cwd: home, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
+    return JSON.parse(out).loggedIn === true;
+  } catch {
+    return false;
+  }
+}
 
 // Why the session may not open, or null.
 export function refusal({ home, capture, name, cols, rows, ahead, loggedIn }) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) return `the name ${name} is not lower-case letters, digits and dashes`;
-  if (!loggedIn) return `${home} has no Claude Code login yet, and its sign-in link must not be recorded: log in first, unrecorded, with node ${join(HERE, 'fresh-home.mjs')} login --home ${home}`;
+  if (!loggedIn) return `${home} has no Claude Code login yet, or its keychain is locked (HOME=${home} security unlock-keychain ${join(home, 'Library/Keychains/login.keychain-db')}), and its sign-in link must not be recorded: log in first, unrecorded, with node ${join(HERE, 'fresh-home.mjs')} login --home ${home}`;
   if (cols !== COLS || rows !== ROWS) return `the terminal is ${cols}x${rows}; size it to ${COLS}x${ROWS} and do not resize it during the session`;
   if (existsSync(join(capture, name))) return `${join(capture, name)} exists already`;
   const done = existsSync(capture) ? readdirSync(capture).filter((f) => statSync(join(capture, f)).isDirectory()).sort() : [];
@@ -186,16 +197,16 @@ async function login(args) {
   const home = flagOf(args)('--home');
   if (!home) throw new Error(USAGE);
   prepare(home);
-  console.log(`Not recorded: ${home}'s shell, for Claude Code's login. Run claude, log in, press Cancel on "Keychain Not Found" each time it shows, then /exit and exit.`);
+  console.log(`Not recorded: ${home}'s shell, for Claude Code's login. Run claude, log in, then /exit and exit.`);
   await enter(home, ['/bin/zsh', '-l']);
-  console.log(existsSync(loginOf(home)) ? `Logged in: ${home} holds Claude Code's login. Record with open.` : `Still no Claude Code login in ${home}: open will refuse.`);
+  console.log(loggedInOf(home) ? `Logged in: Claude Code in ${home} finds its login. Record with open.` : `Claude Code in ${home} finds no login: open will refuse.`);
 }
 
 async function open(args) {
   const flag = flagOf(args);
   const [home, capture, name] = [flag('--home'), flag('--capture'), flag('--name')];
   if (!home || !capture || !name) throw new Error(USAGE);
-  const why = refusal({ home, capture, name, cols: process.stdout.columns, rows: process.stdout.rows, ahead: aheadOf(join(HERE, '../..')), loggedIn: existsSync(loginOf(home)) });
+  const why = refusal({ home, capture, name, cols: process.stdout.columns, rows: process.stdout.rows, ahead: aheadOf(join(HERE, '../..')), loggedIn: loggedInOf(home) });
   if (why) throw new Error(`refused: ${why}`);
   prepare(home);
   const env = envOf(home);
