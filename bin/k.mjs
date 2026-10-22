@@ -68,6 +68,7 @@ Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n |
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
           k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
           k drafts: every draft in every repo, one line each (id, title, date written)
+          k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
 Every verb takes --json and --dry-run.`;
 
 export function parseArgs(argv) {
@@ -205,7 +206,8 @@ const VERBS = {
     if (sub === 'start') {
       if (flags['dry-run']) return { text: `would start ${id} in ${taskPaths(ws, id).dir}` };
       const r = await intake.start({ ws, id, from: flags.from, title: flags.title });
-      return { ...r, text: `started ${id}: ${r.dir} (${r.aspects} aspects open)` };
+      const moved = r.draft ? `; the draft is now ${r.draft}${r.staged ? ', the move staged' : ''}: commit it with the intake` : '';
+      return { ...r, text: `started ${id}: ${r.dir} (${r.aspects} aspects open)${moved}` };
     }
     if (sub === 'aspects') {
       const a = await intake.aspects(ws, id);

@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { list as listDrafts } from '../lib/drafts.mjs';
 import { answer, aspects, question, start } from '../lib/intake.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
-import { FIXTURES, makeWorkspace, sh } from './helpers.mjs';
+import { FIXTURES, gitCommitAll, k, makeWorkspace, sh } from './helpers.mjs';
 
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
 
@@ -232,4 +233,116 @@ test('answer --ruling yields the Q-n that a task line tag points at', async () =
   assert.deepEqual(pointsAt(checkTaskDir(dirOf(weather), ASPECTS, ID)), []);
   writeFileSync(taskPath, readFileSync(taskPath, 'utf8').replace(r.tag, '[owner 2026-11-02 Q-2]'));
   assert.equal(pointsAt(checkTaskDir(dirOf(weather), ASPECTS, ID)).length, 1);
+});
+
+// A draft of this task (kirunak-drafts AC-5's shape), as `k draft new` and the session that filled it leave it.
+const DRAFT = `---
+id: weather/offline-forecast
+title: The last forecast stays readable offline
+written: 2026-10-22
+---
+
+## Who raised it
+> riders lose signal in tunnels
+owner, 2026-10-22, session 5f0c2a
+
+## Why
+The forecast is blank in a tunnel.
+
+## What was found
+- the forecast is fetched on every open [file src/Forecast.kt]
+
+## Questions
+1. How old may the kept forecast be?
+2. Should the screen say when it was fetched?
+`;
+const DRAFT_REL = 'kirunak/drafts/offline-forecast.md';
+
+function writeDraft(weather, text = DRAFT, rel = DRAFT_REL) {
+  mkdirSync(join(weather, 'kirunak/drafts'), { recursive: true });
+  writeFileSync(join(weather, rel), text);
+}
+
+test('start --from a draft moves it by git mv into the task folder as draft.md, staged, as background; k drafts lists it no more and git keeps its history (kirunak-drafts AC-6)', async () => {
+  const { ws, home, weather } = await makeWorkspace({ finished: false });
+  writeDraft(weather);
+  gitCommitAll(weather, 'kirunak: a draft, weather/offline-forecast');
+  const before = sh(weather, 'git', ['rev-parse', 'HEAD']).trim();
+  assert.deepEqual(listDrafts(ws).map((d) => d.id), [ID]);
+
+  const r = await start({ ws, id: ID, from: DRAFT_REL, now: NOV2 });
+  assert.deepEqual(r, { dir: join(ws.repos[0].root, 'kirunak/tasks/offline-forecast'), aspects: 3, draft: 'kirunak/tasks/offline-forecast/draft.md', staged: true });
+  assert.equal(readFileSync(join(dirOf(weather), 'draft.md'), 'utf8'), DRAFT);
+  assert.equal(existsSync(join(weather, DRAFT_REL)), false);
+  // The title is the draft's; the front matter names the draft as where the task came from: background, not a source.
+  assert.equal(readFileSync(join(dirOf(weather), 'task.md'), 'utf8'),
+    SKELETON.replace('created: 2026-11-02\n', 'created: 2026-11-02\nfrom: kirunak/tasks/offline-forecast/draft.md\n'));
+  assert.equal(readFileSync(join(dirOf(weather), 'notes.md'), 'utf8'), [
+    `# Notes: ${ID}`,
+    '',
+    'Background from the draft kirunak/drafts/offline-forecast.md, written 2026-10-22, now kirunak/tasks/offline-forecast/draft.md, ' +
+      'read 2026-11-02. Background only: nothing in a draft is a ruling, and every line is asked again in the intake, ' +
+      'starting from its questions.',
+    '',
+    '## draft.md',
+    'Headings:',
+    '- Who raised it',
+    '- Why',
+    '- What was found',
+    '- Questions',
+    'Questions:',
+    '1. How old may the kept forecast be?',
+    '2. Should the screen say when it was fetched?',
+    '',
+  ].join('\n'));
+
+  // Staged, not committed: the move is a rename in the index, the intake's own files are untracked.
+  assert.equal(sh(weather, 'git', ['rev-parse', 'HEAD']).trim(), before);
+  assert.deepEqual(sh(weather, 'git', ['status', '--porcelain']).trim().split('\n').sort(), [
+    '?? kirunak/tasks/offline-forecast/intake.md',
+    '?? kirunak/tasks/offline-forecast/notes.md',
+    '?? kirunak/tasks/offline-forecast/task.md',
+    'R  kirunak/drafts/offline-forecast.md -> kirunak/tasks/offline-forecast/draft.md',
+  ]);
+  assert.deepEqual(listDrafts(ws), []);
+  const out = k(home, ['drafts']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.stdout.trim(), 'no drafts');
+
+  gitCommitAll(weather, 'kirunak: weather/offline-forecast intake');
+  const history = sh(weather, 'git', ['log', '--follow', '--format=%s', '--', 'kirunak/tasks/offline-forecast/draft.md']);
+  assert.deepEqual(history.trim().split('\n'), ['kirunak: weather/offline-forecast intake', 'kirunak: a draft, weather/offline-forecast']);
+});
+
+test('k intake start --from a draft never committed renames it, and says where it is now', async () => {
+  const { home, weather } = await makeWorkspace({ finished: false });
+  writeDraft(weather);
+  const r = k(home, ['intake', 'start', ID, '--from', DRAFT_REL, '--title', 'Offline forecast']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /started weather\/offline-forecast: .*kirunak\/tasks\/offline-forecast \(3 aspects open\); the draft is now kirunak\/tasks\/offline-forecast\/draft\.md: commit it with the intake/);
+  assert.equal(readFileSync(join(dirOf(weather), 'draft.md'), 'utf8'), DRAFT);
+  assert.equal(existsSync(join(weather, DRAFT_REL)), false);
+  assert.match(readFileSync(join(dirOf(weather), 'task.md'), 'utf8'), /^title: Offline forecast$/m);
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '?? kirunak/');
+});
+
+test('start --from a draft refuses another id\'s draft naming both, and a draft that is gone by name, and writes nothing', async () => {
+  const { ws, weather } = await makeWorkspace({ finished: false });
+  writeDraft(weather, DRAFT.replace(/offline-forecast/g, 'wind-alerts'), 'kirunak/drafts/wind-alerts.md');
+  await assert.rejects(start({ ws, id: ID, from: 'kirunak/drafts/wind-alerts.md', now: NOV2 }),
+    /--from kirunak\/drafts\/wind-alerts\.md is the draft weather\/wind-alerts, not weather\/offline-forecast/);
+  writeDraft(weather, DRAFT.replace('id: weather/offline-forecast', 'id: weather/other'));
+  await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }),
+    /is the draft weather\/other, not weather\/offline-forecast: its front matter says id: weather\/other/);
+  assert.equal(existsSync(dirOf(weather)), false);
+
+  sh(weather, 'rm', ['-f', join(weather, DRAFT_REL)]);
+  await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }),
+    /the draft weather\/offline-forecast is gone: kirunak\/drafts\/offline-forecast\.md does not exist .*\(dropped, or its intake started elsewhere\); k drafts lists the drafts that wait/);
+  assert.equal(existsSync(dirOf(weather)), false);
+
+  writeDraft(weather);
+  await start({ ws, id: ID, from: DRAFT_REL, now: NOV2 });
+  await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }),
+    /the draft weather\/offline-forecast is gone: .*\(its intake started already, and it is kirunak\/tasks\/offline-forecast\/draft\.md\)/);
 });
