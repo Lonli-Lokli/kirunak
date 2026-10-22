@@ -69,14 +69,21 @@ export async function render(raw, chunks, { cols, rows, name }) {
 
 // The intake's questions: an AskUserQuestion tool call in the transcript and the answer in its tool result. A call
 // that asks several questions is one dialog a question, in their order, each matched to its own answer (S-3 F-4).
+// Claude Code writes a streamed message more than once with the same tool_use id: every entry of an id is one dialog
+// a question, shown at the first entry that has a time (S-4 probe 2).
 export function intakeDialogs(transcript) {
+  const stamp = (entry) => { const t = Date.parse(entry.timestamp); return Number.isNaN(t) ? null : t; };
   const asked = new Map(); // the tool call's id → its questions' dialogs, by index
   const out = [];
   for (const entry of transcript) {
     for (const part of Array.isArray(entry.message?.content) ? entry.message.content : []) {
       if (part.type === 'tool_use' && part.name === 'AskUserQuestion') {
+        if (asked.has(part.id)) {
+          for (const d of asked.get(part.id)) d.t ??= stamp(entry);
+          continue;
+        }
         const qs = part.input?.questions?.length ? part.input.questions : [{}];
-        const ds = qs.map((q) => ({ t: Date.parse(entry.timestamp), command: 'AskUserQuestion', header: q.header ?? '', text: [], question: q.question ?? '', choices: (q.options ?? []).map((o) => o.label), tap: null, tAnswer: null, end: null }));
+        const ds = qs.map((q) => ({ t: stamp(entry), command: 'AskUserQuestion', header: q.header ?? '', text: [], question: q.question ?? '', choices: (q.options ?? []).map((o) => o.label), tap: null, tAnswer: null, end: null }));
         asked.set(part.id, ds);
         out.push(...ds);
       } else if (part.type === 'tool_result' && asked.has(part.tool_use_id)) {
@@ -84,7 +91,7 @@ export function intakeDialogs(transcript) {
         const answers = entry.toolUseResult?.answers;
         for (const d of ds) {
           const answer = answers ? (answers[d.question] ?? (ds.length === 1 ? Object.values(answers)[0] : null)) : null;
-          d.tAnswer = Date.parse(entry.timestamp);
+          d.tAnswer = stamp(entry);
           if (answer == null) d.end = part.is_error ? 'dismissed' : 'answered';
           else if (d.choices.includes(answer)) d.tap = answer;
           else Object.assign(d, { typed: String(answer), end: 'typed' });
@@ -131,7 +138,7 @@ export function problems(s, lines, dialogs) {
   if (!s.transcripts.length) out.push('no Claude Code transcript was found in the session\'s span');
   else if (!s.transcripts.some((t) => t.id === s.manifest.sessionId)) out.push(`the manifest's session ${s.manifest.sessionId} has no transcript`);
   for (const d of dialogs) if (d.tap == null && d.typed == null && d.end == null) out.push(`${d.id} has no tap and no end`);
-  for (const d of dialogs) if (d.t == null) out.push(`${d.id} has no time: the mod could not read its clock when it asked`);
+  for (const d of dialogs) if (!Number.isFinite(d.t)) out.push(`${d.id} has no time: the mod could not read its clock when it asked`);
   const typed = s.transcripts.flatMap((t) => typedCommands(t.entries));
   for (const e of s.events.filter((x) => x.kind === 'approved' || x.kind === 'accepted')) {
     const at = Date.parse(e.time);
