@@ -265,3 +265,22 @@ test('the drafts after the tasks, before the lock: a group Drafts, one bullet a 
   for (const l of block.split('\n')) assert.ok(l.length <= 70, l);
   noHardBreak(text);
 });
+
+test('k board --card <draft id> answers with the draft\'s card, as the mod\'s /k-board asks for a draft tapped in its Drafts group (kirunak-drafts AC-9)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  const r = k(w.home, ['board', '--card', 'weather/wind-alerts']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, [
+    '### weather/wind-alerts',
+    '',
+    'Wind alerts \\<for\\> cyclists',
+    '',
+    "- a draft, written 2026-11-05, waiting for the owner's intake",
+    '- file: kirunak/drafts/wind-alerts.md in weather',
+    '',
+    '/k-drafts shows it whole, and starts its intake or drops it.',
+    '',
+  ].join('\n'));
+  assert.equal(k(w.home, ['board', '--card', 'weather/nope']).status, 1, 'no task and no draft');
+});

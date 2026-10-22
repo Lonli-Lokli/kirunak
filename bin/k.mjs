@@ -57,7 +57,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
-          k board --brief: a line per task, for the phone; k board --card <id>: one task's card as markdown
+          k board --brief: a line per task and per draft, for the phone; k board --card <id>: one task's or draft's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept, drafts) and what
             each verb would refuse; with --json also the tasks k hold and k start take
