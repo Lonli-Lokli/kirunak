@@ -1,0 +1,51 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<<  /Length 840 >>
+stream
+BT /F2 16 Tf 72 747.6 Td (Deposit Return) Tj ET
+BT /F1 11 Tf 72 721.6 Td (Dear Marigold Quellmarsh,) Tj ET
+BT /F1 11 Tf 72 699.6 Td (The lease at 14 Quillfeather Lane ends on 28 February 2027. We will return the deposit) Tj ET
+BT /F1 11 Tf 72 683.6 Td (paid in March 2026 by the tenant named in the lease, Marigold Quell-) Tj ET
+BT /F1 11 Tf 72 667.6 Td (marsh within ten days of the final inspection, less any agreed repairs.) Tj ET
+BT /F1 11 Tf 72 645.6 Td (Deposit reference: 7730 4196) Tj ET
+BT /F1 11 Tf 72 629.6 Td (Please quote 77304196 when you reply.) Tj ET
+BT /F1 11 Tf 72 607.6 Td (TENANT: MARIGOLD QUELLMARSH) Tj ET
+BT /F1 11 Tf 72 591.6 Td (Email: marigold.quellmarsh@example.com) Tj ET
+BT /F1 11 Tf 72 565.6 Td (Yours sincerely,) Tj ET
+BT /F1 11 Tf 72 549.6 Td (Tobias Fenwright, for the tenancy of Marigold Quellmarsh) Tj ET
+
+endstream
+endobj
+7 0 obj
+<< /Title (Deposit return) /Author (Tobias Fenwright) /Producer (kirunak promo fixtures) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000212 00000 n 
+0000000314 00000 n 
+0000000450 00000 n 
+0000001342 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+1449
+%%EOF
