@@ -31,3 +31,6 @@ dist/
 # Tables
 *.tsv
 *.csv
+
+# Fonts of the video (OFL 1.1, licences in promo/licenses/)
+/promo/media/*.ttf
