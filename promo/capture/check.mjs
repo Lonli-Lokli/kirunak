@@ -17,6 +17,38 @@ const DIGEST = /sha256:[0-9a-f]{64}/g;
 // else (a 40-hex run in a line can still be an old GitHub token) (S-3 F-1).
 export const knownOf = (manifest) => [manifest?.sessionId, manifest?.kirunakCommit].filter((v) => typeof v === 'string' && v);
 
+// The span's own Claude Code sessions are known values too (review N-1): each copied transcript's id (its file name,
+// the UUID `claude --resume` prints at each exit), the session ids its lines carry, and Remote Control's id for it,
+// which a `bridge-session` line carries as `cse_<id>` and the terminal prints as https://claude.ai/code/session_<id>.
+// The reader shows each as `<session-n>` in the public part; any other long run is still refused. A value too short to
+// be refused is left as it is, so no word is ever taken for one.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function sessionsOf(transcripts) {
+  const ids = new Set();
+  for (const t of transcripts) {
+    ids.add(t.id);
+    for (const e of t.entries) {
+      for (const v of [e.sessionId, e.session_id]) if (typeof v === 'string' && UUID.test(v)) ids.add(v);
+      if (typeof e.bridgeSessionId === 'string') ids.add(e.bridgeSessionId.replace(/^[a-z]+_/, ''));
+      const url = typeof e.url === 'string' ? e.url.match(/\/code\/session_([A-Za-z0-9]+)/) : null;
+      if (url) ids.add(url[1]);
+    }
+  }
+  return [...ids].filter((v) => v.length >= 16);
+}
+
+// Each of `sessions` met in `texts`, numbered in order of first appearance, → the function that writes each as its
+// `<session-n>`; the same raw gives the same numbers.
+export function placeholdersOf(sessions, texts) {
+  const names = new Map();
+  for (const text of texts) {
+    const met = sessions.filter((v) => !names.has(v) && text.includes(v)).sort((a, b) => text.indexOf(a) - text.indexOf(b));
+    for (const v of met) names.set(v, `<session-${names.size + 1}>`);
+  }
+  const order = [...names].sort(([a], [b]) => b.length - a.length);
+  return (text) => order.reduce((s, [v, name]) => s.replaceAll(v, name), text);
+}
+
 const SHAPES = [
   ['an Anthropic key', /sk-ant-/],
   ['a GitHub token', /\bgh[pousr]_/],

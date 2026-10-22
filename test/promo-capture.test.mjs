@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
-import { COLS, ROWS, aheadOf, collect, record, refusal } from '../promo/capture/fresh-home.mjs';
+import { COLS, ROWS, aheadOf, collect, enter, record, refusal } from '../promo/capture/fresh-home.mjs';
 import { gitCommitAll, gitInit, sh } from './helpers.mjs';
 import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
@@ -125,6 +125,29 @@ test('a real manifest passes: its UUID session id and 40-hex commit are known va
   assert.deepEqual(check(other, { names: NAMES, known: [sessionId, kirunakCommit] }).map((f) => f.what), ['a long hex run', 'a long base64 run']);
 });
 
+test('the span\'s own session ids, as Claude Code and Remote Control print them, are written as <session-n> in order of first appearance; another session\'s id is still refused', async () => {
+  // Made-up ids in the probe's shapes: two transcripts' UUIDs, and Remote Control's id for the first.
+  const [first, resumed] = ['11111111-2222-4333-8444-555555555555', '66666666-7777-4888-8999-aaaaaaaaaaaa'];
+  const remote = '01MadeUpRemoteControlId1';
+  const bridge = [
+    { type: 'bridge-session', sessionId: first, bridgeSessionId: `cse_${remote}`, lastSeqNum: 0 },
+    { type: 'system', subtype: 'bridge_status', timestamp: new Date(START + 50).toISOString(), url: `https://claude.ai/code/session_${remote}`, sessionId: first },
+  ];
+  const at = (t, text) => [t, `${text}\r\n`];
+  const raw = session([...SCRIPTED, at(650, '  /remote-control is active · Continue here, on your phone, or at'), at(660, `  https://claude.ai/code/session_${remote}`), at(700, 'Resume this session with:'), at(710, `claude --resume ${resumed}`), at(800, `claude --resume ${first}`)], { transcript: [...bridge, ...TRANSCRIPT], sessionId: first });
+  writeFileSync(join(raw, 'transcripts', `${resumed}.jsonl`), lines([{ type: 'user', timestamp: new Date(START + 20).toISOString(), sessionId: resumed, message: { content: 'hi' } }]));
+  const out = temp();
+  const r = await read(raw, out, { names: NAMES, complete: true });
+  assert.deepEqual([r.refused, r.problems], [[], []]);
+  assert.deepEqual(jsonl(join(out, 'lines.jsonl')).map((l) => l.text).slice(-4), ['  https://claude.ai/code/session_<session-1>', 'Resume this session with:', 'claude --resume <session-2>', 'claude --resume <session-3>']);
+  assert.equal(JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8')).sessionId, '<session-3>');
+  const written = ['lines.jsonl', 'dialogs.jsonl', 'manifest.json'].map((f) => readFileSync(join(out, f), 'utf8')).join('');
+  for (const id of [first, resumed, remote]) assert.ok(!written.includes(id), 'no session id in the public part');
+  assert.deepEqual(checkDir(out, { names: NAMES }), []);
+  const other = session([...SCRIPTED, at(700, '  https://claude.ai/code/session_01AnotherSessionNotOurs2')], { transcript: [...bridge, ...TRANSCRIPT], sessionId: first });
+  assert.deepEqual((await read(other, temp(), { names: NAMES })).refused.map((f) => f.what), ['a long base64 run']);
+});
+
 test('the check refuses a secret by its shape and passes the words in prose', () => {
   const items = [
     { id: 'a', text: 'export CLIENT_SECRET=x' },
@@ -180,7 +203,7 @@ function appendResize(raw) {
 
 test('the launcher refuses a wrong size, a capture whose newest session is not checked complete, and a numbered session while ahead', () => {
   const capture = temp();
-  const base = { capture, name: '02-t1-intake', cols: COLS, rows: ROWS, ahead: null };
+  const base = { home: '/Users/Shared/home', capture, name: '02-t1-intake', cols: COLS, rows: ROWS, ahead: null, loggedIn: true };
   assert.equal(refusal(base), null);
   assert.match(refusal({ ...base, cols: 80 }), /80x32/);
   assert.match(refusal({ ...base, ahead: 'master...origin/master [ahead 7]' }), /ahead/);
@@ -205,7 +228,18 @@ test('the W-3 gate finds a checkout ahead of origin and a branch with no upstrea
   assert.match(aheadOf(checkout), /\[ahead 1\]/);
   sh(checkout, 'git', ['switch', '-q', '-c', 'promo/capture']);
   assert.equal(aheadOf(checkout), 'promo/capture, with no upstream on origin');
-  assert.match(refusal({ capture: temp(), name: '01-setup', cols: COLS, rows: ROWS, ahead: aheadOf(checkout) }), /not pushed \(promo\/capture, with no upstream/);
+  assert.match(refusal({ capture: temp(), name: '01-setup', cols: COLS, rows: ROWS, ahead: aheadOf(checkout), loggedIn: true }), /not pushed \(promo\/capture, with no upstream/);
+});
+
+test('open refuses a home with no Claude Code login and names login, which enters the same clean home unrecorded', async () => {
+  const home = temp();
+  const why = refusal({ home, capture: temp(), name: 'probe', cols: COLS, rows: ROWS, ahead: null, loggedIn: false });
+  assert.match(why, /no Claude Code login yet/);
+  assert.ok(why.endsWith(`fresh-home.mjs login --home ${home}`), why);
+  const code = await enter(home, ['/bin/sh', '-c', 'printf "%s|%s|%s|%s" "$HOME" "$USER" "$PWD" "${KIRUNAK_HOME-unset}" > seen'], { stdio: 'ignore' });
+  assert.equal(code, 0);
+  assert.equal(readFileSync(join(home, 'seen'), 'utf8'), `${home}|dev|${realpathSync(home)}|unset`);
+  assert.deepEqual(readdirSync(home), ['seen'], 'no terminal.raw, no times, no manifest');
 });
 
 test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', async () => {

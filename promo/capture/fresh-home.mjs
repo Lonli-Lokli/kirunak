@@ -2,13 +2,17 @@
 // The fresh-home launcher and recorder (kirunak-docs-promo S-1 §1, §2): opens a login shell in a home that holds
 // nothing of the machine's owner, under /usr/bin/script, and records every byte the terminal shows with its time.
 //
+//   node promo/capture/fresh-home.mjs login --home <dir>
 //   node promo/capture/fresh-home.mjs open --home <dir> --capture <raw root> --name <NN-name>
 //
-// It refuses to open while the capture's newest session has no complete.json (read.mjs --check writes it), while the
-// terminal is not 100 columns by 32 rows, and, for a numbered session (01-setup and on), while this checkout's branch
-// is ahead of origin or has no upstream there (the filmed setup clones the pushed kirunak). When the shell exits it
-// copies, from the fresh home, the Claude Code transcripts, the mod's dialogs and kirunak's events of the session's
-// span.
+// `login` opens the same shell in the same home, unrecorded, for Claude Code's one-time login: its sign-in link must
+// never enter a capture (S-4 probe 1). macOS then says "Keychain Not Found" (the fresh home has no keychain); Cancel,
+// as often as it asks, and Claude Code keeps the login in the home's ~/.claude/.credentials.json.
+// `open` refuses while the home has no such login, while the capture's newest session has no complete.json (read.mjs
+// --check writes it), while the terminal is not 100 columns by 32 rows, and, for a numbered session (01-setup and on),
+// while this checkout's branch is ahead of origin or has no upstream there (the filmed setup clones the pushed
+// kirunak). When the shell exits it copies, from the fresh home, the Claude Code transcripts, the mod's dialogs and
+// kirunak's events of the session's span.
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { open as openFile } from 'node:fs/promises';
@@ -32,9 +36,13 @@ export function envOf(home) {
   return { HOME: home, USER: 'dev', LOGNAME: 'dev', SHELL: '/bin/zsh', TERM: 'xterm-256color', LANG: 'en_US.UTF-8', TMPDIR: join(home, '.tmp'), PATH: `${home}/.local/bin:${home}/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin` };
 }
 
+// Where Claude Code keeps its login in a home with no keychain.
+export const loginOf = (home) => join(home, '.claude/.credentials.json');
+
 // Why the session may not open, or null.
-export function refusal({ capture, name, cols, rows, ahead }) {
+export function refusal({ home, capture, name, cols, rows, ahead, loggedIn }) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) return `the name ${name} is not lower-case letters, digits and dashes`;
+  if (!loggedIn) return `${home} has no Claude Code login yet, and its sign-in link must not be recorded: log in first, unrecorded, with node ${join(HERE, 'fresh-home.mjs')} login --home ${home}`;
   if (cols !== COLS || rows !== ROWS) return `the terminal is ${cols}x${rows}; size it to ${COLS}x${ROWS} and do not resize it during the session`;
   if (existsSync(join(capture, name))) return `${join(capture, name)} exists already`;
   const done = existsSync(capture) ? readdirSync(capture).filter((f) => statSync(join(capture, f)).isDirectory()).sort() : [];
@@ -159,11 +167,35 @@ export function record(raw, argv, { env, cwd, stdio = 'inherit', size = () => nu
   });
 }
 
+// Runs `argv` in the fresh home's clean environment straight on this terminal: no script, nothing recorded. Answers its
+// exit code.
+export function enter(home, argv, { stdio = 'inherit' } = {}) {
+  const ignore = () => undefined;
+  process.on('SIGINT', ignore);
+  return new Promise((done, fail) => {
+    const child = spawn(argv[0], argv.slice(1), { env: envOf(home), cwd: home, stdio });
+    child.on('error', fail);
+    child.on('exit', (code) => done(code));
+  }).finally(() => process.off('SIGINT', ignore));
+}
+
+const USAGE = 'usage: fresh-home.mjs login --home <dir> | open --home <dir> --capture <raw root> --name <NN-name>';
+const flagOf = (args) => (f) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
+
+async function login(args) {
+  const home = flagOf(args)('--home');
+  if (!home) throw new Error(USAGE);
+  prepare(home);
+  console.log(`Not recorded: ${home}'s shell, for Claude Code's login. Run claude, log in, press Cancel on "Keychain Not Found" each time it shows, then /exit and exit.`);
+  await enter(home, ['/bin/zsh', '-l']);
+  console.log(existsSync(loginOf(home)) ? `Logged in: ${home} holds Claude Code's login. Record with open.` : `Still no Claude Code login in ${home}: open will refuse.`);
+}
+
 async function open(args) {
-  const flag = (f) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
+  const flag = flagOf(args);
   const [home, capture, name] = [flag('--home'), flag('--capture'), flag('--name')];
-  if (!home || !capture || !name) throw new Error('usage: fresh-home.mjs open --home <dir> --capture <raw root> --name <NN-name>');
-  const why = refusal({ capture, name, cols: process.stdout.columns, rows: process.stdout.rows, ahead: aheadOf(join(HERE, '../..')) });
+  if (!home || !capture || !name) throw new Error(USAGE);
+  const why = refusal({ home, capture, name, cols: process.stdout.columns, rows: process.stdout.rows, ahead: aheadOf(join(HERE, '../..')), loggedIn: existsSync(loginOf(home)) });
   if (why) throw new Error(`refused: ${why}`);
   prepare(home);
   const env = envOf(home);
@@ -192,8 +224,9 @@ async function open(args) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const [verb, ...args] = process.argv.slice(2);
   try {
-    if (verb !== 'open') throw new Error('usage: fresh-home.mjs open --home <dir> --capture <raw root> --name <NN-name>');
-    await open(args);
+    if (verb === 'login') await login(args);
+    else if (verb === 'open') await open(args);
+    else throw new Error(USAGE);
   } catch (err) {
     console.error(err.message);
     process.exit(1);

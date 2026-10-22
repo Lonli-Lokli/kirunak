@@ -5,6 +5,7 @@
 //   id, its time from the session's start (t), the last time it was shown (tEnd) and the screen row it first had;
 // - dialogs.jsonl: the mod's dialogs and the intake's questions (AskUserQuestion in the transcript), one shape;
 // - manifest.json: the raw manifest with `start` as ISO UTC and nothing of the raw folder.
+// In all three each of the span's own session ids is written `<session-n>`, for the video to draw a made-up one.
 // `node promo/capture/read.mjs <raw session dir> --out <public dir> [--deny <file>] [--check]`; with --check it also
 // checks the session complete and writes complete.json into the raw folder.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -12,7 +13,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import xterm from '@xterm/headless';
 
-import { check, denyWords, knownOf, report } from './check.mjs';
+import { check, denyWords, knownOf, placeholdersOf, report, sessionsOf } from './check.mjs';
 
 const jsonl = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
@@ -155,11 +156,19 @@ export async function read(rawDir, outDir, { deny = [], names, complete = false 
   const name = manifest.name;
   const start = manifest.start;
   const rel = (t) => (t == null ? null : t - start);
-  const lines = (await render(s.raw, s.chunks, { cols: manifest.cols, rows: manifest.rows, name })).map((l) => ({ ...l, t: rel(l.t), tEnd: rel(l.tEnd) }));
+  const shown = (await render(s.raw, s.chunks, { cols: manifest.cols, rows: manifest.rows, name })).map((l) => ({ ...l, t: rel(l.t), tEnd: rel(l.tEnd) }));
   const all = [...s.dialogs.map((d) => ({ ...d, source: 'mod' })), ...s.transcripts.flatMap((t) => intakeDialogs(t.entries)).map((d) => ({ ...d, source: 'intake' }))].sort((a, b) => a.t - b.t);
-  const dialogs = all.map(({ session, ...d }, i) => ({ id: `${name}:d${String(i + 1).padStart(3, '0')}`, ...d, t: rel(d.t), tAnswer: rel(d.tAnswer) }));
+  const asked = all.map(({ session, ...d }, i) => ({ id: `${name}:d${String(i + 1).padStart(3, '0')}`, ...d, t: rel(d.t), tAnswer: rel(d.tAnswer) }));
   const { raw, capture, ...kept } = manifest;
-  const pub = { ...kept, start: new Date(start).toISOString(), end: manifest.end ? new Date(manifest.end).toISOString() : null };
+  const written = { ...kept, start: new Date(start).toISOString(), end: manifest.end ? new Date(manifest.end).toISOString() : null };
+  // The span's own session ids as <session-n> in every string of the public part (review N-1).
+  const strings = (v) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(strings) : []);
+  const hide = placeholdersOf(sessionsOf(s.transcripts), [...shown.map((l) => l.text), ...asked.flatMap((d) => strings(Object.values(d))), ...strings(Object.values(written))]);
+  const swap = (v) => (typeof v === 'string' ? hide(v) : Array.isArray(v) ? v.map(swap) : v);
+  const each = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, swap(v)]));
+  const lines = shown.map(each);
+  const dialogs = asked.map(each);
+  const pub = each(written);
   const items = [...lines.map((l) => ({ id: l.id, text: l.text })), ...dialogs.map((d) => ({ id: d.id, text: [d.command, d.header, ...d.text, d.question, ...d.choices, d.tap, d.typed, d.end].filter((x) => x != null).join('\n') })), ...Object.entries(pub).map(([k, v]) => ({ id: `manifest.${k}`, text: JSON.stringify(v) }))];
   const found = check(items, { deny, known: knownOf(manifest), ...(names && { names }) });
   if (found.length) return { ok: false, refused: found, problems: [] };
