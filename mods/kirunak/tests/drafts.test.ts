@@ -67,7 +67,7 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     await w.clock.advance(10)
     expect(w.toasts).toEqual([])
     expect(w.submitted).toEqual([{
-      text: 'The owner tapped Start intake on the draft hub/offline-maps in /k-drafts. Start the intake from it now: first load the k-intake skill with the Skill tool (skill "k-intake"), then follow it from this draft: run `k intake start hub/offline-maps --from kirunak/drafts/offline-maps.md`, read the draft (/w/hub/kirunak/drafts/offline-maps.md) as background, and ask the owner every line of the task as the skill says, one question at a time.',
+      text: 'The owner tapped Start intake on the draft hub/offline-maps in /k-drafts. Start the intake from it now: first load the k-intake skill with the Skill tool (skill "k-intake"), then follow it from this draft: run `k intake start hub/offline-maps --from kirunak/drafts/offline-maps.md`, that moves the draft to kirunak/tasks/offline-maps/draft.md, read it there (it is at /w/hub/kirunak/drafts/offline-maps.md until then) as background, and ask the owner every line of the task as the skill says, one question at a time.',
       origin: { kind: 'plugin', name: 'kirunak' },
     }])
     expect([w.draftReads, w.runs]).toEqual([2, []])

@@ -85,5 +85,5 @@ export const intakePrompt = (d: DraftRow): string =>
   [
     `The owner tapped Start intake on the draft ${d.id} in /k-drafts.`,
     `Start the intake from it now: first load the k-intake skill with the Skill tool (skill "k-intake"), then follow it from this draft:`,
-    `run \`k intake start ${d.id} --from kirunak/drafts/${d.slug}.md\`, read the draft (${d.path}) as background, and ask the owner every line of the task as the skill says, one question at a time.`,
+    `run \`k intake start ${d.id} --from kirunak/drafts/${d.slug}.md\`, that moves the draft to kirunak/tasks/${d.slug}/draft.md, read it there (it is at ${d.path} until then) as background, and ask the owner every line of the task as the skill says, one question at a time.`,
   ].join(' ')
