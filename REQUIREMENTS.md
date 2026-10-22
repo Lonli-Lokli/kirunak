@@ -1,6 +1,6 @@
 # kirunak: a task system for Claude Code workspaces. Requirements
 
-kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R23). A change from here on is an
+kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R28). A change from here on is an
 amendment the owner approves (R7 applies to this file too). "The owner" is the person whose workspace kirunak serves:
 the one who approves tasks and says when one is done. A **workspace** is the set of repos one owner works on with
 Claude Code on one machine.
@@ -77,6 +77,32 @@ validation, archives) then go unused, and what the owner needs is not in it:
 - R3 For each aspect the interview proposes edge cases; the owner rules each in or out, and what is out is written down.
 - R4 Every line of a task names its source: the owner's answer (dated), research (linked), or a default the owner
   accepted. A task cannot become ready with an open question.
+
+### Drafts: an intake prepared ahead
+- R24 A **draft** is an intake prepared ahead for a task that does not exist yet. It is kept in git in the repo its
+  task is for, as `kirunak/drafts/<slug>.md` beside `kirunak/tasks/`, and its id is `<repo>/<slug>` from the start;
+  the task started from it keeps that id. A draft for a repo the workspace does not know is refused, and the agent
+  asks the owner to add that repo first. An id that is already a draft or a task is refused, and named.
+- R25 Any session or agent writes a draft without the owner's approval: a draft is not a task, and it approves and
+  freezes nothing. It writes one when the owner names a future task, and when it finds something itself that is
+  worth its own task, instead of keeping it only in scratch files or a session's memory. It then says in one line
+  of its reply that it wrote a draft, and its id.
+- R26 A draft holds its id and a title of a few words; who raised it (the owner's words as typed, with the date and
+  the session, or found by the agent, with what it saw); why; what was already found (files, commands, research),
+  each with its source; and the questions for the owner's turn, numbered. kirunak checks that shape when the draft
+  is written. Nothing in a draft is a ruling: an intake started from it reads it as background, as it reads an
+  openspec change (R20), starts from its questions and still asks the owner every line of the task (R1, R4). That
+  intake moves the draft into the new task's folder, as `kirunak/tasks/<slug>/draft.md`, and out of the drafts, so
+  it never waits twice; git keeps its history.
+- R27 The owner drops a draft from `/k-drafts`, typing the reason; with no reason, nothing runs. An agent may drop
+  one too, and says in its reply which one and why. Either way kirunak removes the file in a commit of that file
+  alone, whose message carries the reason, so git keeps both. Dropping is not one of the owner's verbs: the hooks
+  that guard approval (D7) leave it alone.
+- R28 Drafts show in `/k-drafts`, typed at the terminal or through Remote Control: every draft in every repo of the
+  workspace, one line each (its id, title and the date written), in the owner's own dialog (D14); a draft picked
+  shows whole, with Start intake (the session starts the intake from it), Drop and Back. The waiting summary
+  (`k waiting`) says in one line how many drafts wait and names `/k-drafts`. The board, in brief and as its page
+  (D10, D13), shows a group Drafts after the tasks, one line per draft. The task list (`k list`) lists tasks only.
 
 ### The task is frozen
 - R5 On approval, the task's file is frozen: its goal, numbered acceptance criteria (AC-1, AC-2, ...), numbered edge
