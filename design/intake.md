@@ -18,6 +18,15 @@ Two parts, one in Claude Code and one in `k`:
   write `task.md` while it is a draft (the freeze hook allows it until approval, `approval.md` §2), and `k check`
   judges the result.
 
+- **A draft as `--from`** (R26): `k intake start <id> --from kirunak/drafts/<slug>.md` starts an intake from a draft
+  (`task-files.md` §1). Any other `--from` path is an openspec change, as before (§5). The draft's place and its
+  front-matter `id` must both equal `<id>`, or the start is refused, naming both. A draft that is gone is refused by
+  name ("dropped, or its intake started elsewhere"), before anything is written. The draft moves with `git mv` (staged,
+  never committed; a draft never committed is renamed) to `kirunak/tasks/<slug>/draft.md`, and the intake commits the
+  move with itself. The task's `from:` names the moved file, and `notes.md` says it is background only: nothing in it
+  is a ruling, and the interview starts from its questions and still asks every line again (R1, R4). The `k-intake`
+  skill does this only when the owner asks, never on its own.
+
 Judgement: the model runs the conversation, the tool keeps the ledger. An interview the model wrote straight into
 Markdown would drift from the grammar; an interview run by a tool with no model could not follow up a vague answer.
 
@@ -116,5 +125,5 @@ question, then AC-1 with the owner's answer as its source. 2.1 becomes a questio
 
 ## 6. Requirements this file satisfies
 
-R1 (§1, §2: only through the interview, with kirunak's own method), R2 (§3, §2 step 4), R3 (§2 step 4), R4 (§2
+R26 (§1: a draft as `--from`), R1 (§1, §2: only through the interview, with kirunak's own method), R2 (§3, §2 step 4), R3 (§2 step 4), R4 (§2
 steps 2 to 7), R20 and D6 (§4, §5), D8 (§5: the first repo's migration path), D12 (`k-intake`).
