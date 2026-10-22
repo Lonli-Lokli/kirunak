@@ -10,7 +10,7 @@ import { renderBrief } from '../lib/board-brief.mjs';
 import { entry, lastStepShort, metLine } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
 import { STATES } from '../lib/state.mjs';
-import { addTask, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const brief = async (w) => renderBrief(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
@@ -136,4 +136,29 @@ test('k board --brief prints the text; with --json { made, text, ids, groups, ma
   assert.deepEqual(b.groups.map((g) => [g.name, g.count]), [['Working on now', 0], ['Proposed', 1], ['In progress', 1], ['In review', 1], ['Done this week', 1]]);
   assert.ok(b.text.endsWith(`\n\n${b.machine}`));
   assert.ok(!existsSync(join(w.home, 'board.html')));
+});
+
+test('the drafts after the tasks, before the machine\'s line: a group Drafts, one line a draft with its id, title and date written, its ids after the tasks\' (kirunak-drafts AC-9)', async () => {
+  const w = await fixture();
+  assert.ok(!(await brief(w)).groups.some((g) => g.name === 'Drafts'), 'no group when no draft waits');
+  draftsAt(w);
+  const b = await brief(w);
+  const lines = [
+    'weather/wind-alerts: Wind alerts <for> cyclists, written 2026-11-05',
+    'hub/short-jobs: Short jobs first in the heavy-job queue, so a quick test never waits behind a long build, written 2026-11-06',
+  ];
+  assert.deepEqual(b.groups.at(-1), { name: 'Drafts', count: 2, ids: ['weather/wind-alerts', 'hub/short-jobs'], lines });
+  assert.ok(b.text.endsWith(`Done this week (1)\nweather/recent: done, 0 of 3 met\n\nDrafts (2)\n${lines.join('\n')}\n\n${b.machine}`), b.text);
+  assert.deepEqual(b.ids, b.groups.flatMap((g) => g.ids));
+  assert.deepEqual(b.ids.slice(-2), ['weather/wind-alerts', 'hub/short-jobs']);
+});
+
+test('k board --brief --json gives the Drafts group in groups, as the mod\'s /k-board reads every group', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  const r = k(w.home, ['board', '--brief', '--json']);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(Object.keys(out).sort(), ['groups', 'ids', 'machine', 'made', 'text']);
+  assert.deepEqual(out.groups.map((g) => [g.name, g.count]).at(-1), ['Drafts', 2]);
 });
