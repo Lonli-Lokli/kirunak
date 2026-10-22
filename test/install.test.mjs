@@ -50,16 +50,16 @@ test('the block is written with the absolute path, and every other hook and key 
   }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
-  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page']);
+  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft']);
   for (const s of SKILLS) {
     const link = join(h.skillsDir, s);
     assert.ok(lstatSync(link).isSymbolicLink());
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
-  assert.equal(actions.length, 6);
+  assert.equal(actions.length, 7);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
-  assert.match(actions[4], /added the kirunak SessionStart hook/);
-  assert.ok(actions[5].endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
+  assert.match(actions[1 + SKILLS.length], /added the kirunak SessionStart hook/);
+  assert.ok(actions[2 + SKILLS.length].endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
 });
 
 test('a missing settings file is created; a second run changes nothing', () => {
@@ -135,6 +135,7 @@ test('--print writes nothing and prints everything with the paths filled in', ()
   const all = actions.join('\n');
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`));
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-intake')} -> ${join(h.kirunakRoot, 'skills', 'k-intake')}`));
+  assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-draft')} -> ${join(h.kirunakRoot, 'skills', 'k-draft')}`), 'the k-draft skill is linked like the others');
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`));
   assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"resume"`));
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`));
