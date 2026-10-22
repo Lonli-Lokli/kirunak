@@ -125,6 +125,29 @@ test('a real manifest passes: its UUID session id and 40-hex commit are known va
   assert.deepEqual(check(other, { names: NAMES, known: [sessionId, kirunakCommit] }).map((f) => f.what), ['a long hex run', 'a long base64 run']);
 });
 
+test('the span\'s own session ids, as Claude Code and Remote Control print them, are written as <session-n> in order of first appearance; another session\'s id is still refused', async () => {
+  // Made-up ids in the probe's shapes: two transcripts' UUIDs, and Remote Control's id for the first.
+  const [first, resumed] = ['11111111-2222-4333-8444-555555555555', '66666666-7777-4888-8999-aaaaaaaaaaaa'];
+  const remote = '01MadeUpRemoteControlId1';
+  const bridge = [
+    { type: 'bridge-session', sessionId: first, bridgeSessionId: `cse_${remote}`, lastSeqNum: 0 },
+    { type: 'system', subtype: 'bridge_status', timestamp: new Date(START + 50).toISOString(), url: `https://claude.ai/code/session_${remote}`, sessionId: first },
+  ];
+  const at = (t, text) => [t, `${text}\r\n`];
+  const raw = session([...SCRIPTED, at(650, '  /remote-control is active · Continue here, on your phone, or at'), at(660, `  https://claude.ai/code/session_${remote}`), at(700, 'Resume this session with:'), at(710, `claude --resume ${resumed}`), at(800, `claude --resume ${first}`)], { transcript: [...bridge, ...TRANSCRIPT], sessionId: first });
+  writeFileSync(join(raw, 'transcripts', `${resumed}.jsonl`), lines([{ type: 'user', timestamp: new Date(START + 20).toISOString(), sessionId: resumed, message: { content: 'hi' } }]));
+  const out = temp();
+  const r = await read(raw, out, { names: NAMES, complete: true });
+  assert.deepEqual([r.refused, r.problems], [[], []]);
+  assert.deepEqual(jsonl(join(out, 'lines.jsonl')).map((l) => l.text).slice(-4), ['  https://claude.ai/code/session_<session-1>', 'Resume this session with:', 'claude --resume <session-2>', 'claude --resume <session-3>']);
+  assert.equal(JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8')).sessionId, '<session-3>');
+  const written = ['lines.jsonl', 'dialogs.jsonl', 'manifest.json'].map((f) => readFileSync(join(out, f), 'utf8')).join('');
+  for (const id of [first, resumed, remote]) assert.ok(!written.includes(id), 'no session id in the public part');
+  assert.deepEqual(checkDir(out, { names: NAMES }), []);
+  const other = session([...SCRIPTED, at(700, '  https://claude.ai/code/session_01AnotherSessionNotOurs2')], { transcript: [...bridge, ...TRANSCRIPT], sessionId: first });
+  assert.deepEqual((await read(other, temp(), { names: NAMES })).refused.map((f) => f.what), ['a long base64 run']);
+});
+
 test('the check refuses a secret by its shape and passes the words in prose', () => {
   const items = [
     { id: 'a', text: 'export CLIENT_SECRET=x' },
