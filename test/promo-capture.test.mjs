@@ -98,6 +98,26 @@ test('an intake call that asks two questions is two dialogs, each with its own a
   ]);
 });
 
+test('a tool call written in three entries and answered once is one dialog, with its first time, its tap and its answer\'s time', () => {
+  const at = (ms) => new Date(START + ms).toISOString();
+  const call = { type: 'tool_use', id: 'tu3', name: 'AskUserQuestion', input: { questions: [{ header: 'Goal', question: 'Which one?', options: [{ label: 'Option A' }, { label: 'Option B' }] }] } };
+  const streamed = [
+    { type: 'assistant', timestamp: at(2000), message: { content: [call] } },
+    { type: 'assistant', timestamp: at(2100), message: { content: [call] } },
+    { type: 'assistant', timestamp: at(2200), message: { content: [call] } },
+    { type: 'user', timestamp: at(6000), message: { content: [{ type: 'tool_result', tool_use_id: 'tu3', content: 'answered' }] }, toolUseResult: { questions: [{ question: 'Which one?' }], answers: { 'Which one?': 'Option A' } } },
+  ];
+  assert.deepEqual(intakeDialogs(streamed).map((d) => [d.t - START, d.question, d.tap, d.end, d.tAnswer - START]), [[2000, 'Which one?', 'Option A', null, 6000]]);
+  const late = [{ ...streamed[0], timestamp: undefined }, ...streamed.slice(1)];
+  assert.deepEqual(intakeDialogs(late).map((d) => d.t - START), [2100], 'a first entry with no time gives way to the next that has one');
+});
+
+test('an intake dialog with no time makes the check refuse, naming it', async () => {
+  const noTime = TRANSCRIPT.map((e) => (e.message.content[0]?.type === 'tool_use' ? { ...e, timestamp: undefined } : e));
+  const r = await read(session(SCRIPTED, { transcript: noTime }), temp(), { names: NAMES, complete: true });
+  assert.deepEqual(r.problems, ['01-setup:d001 has no time: the mod could not read its clock when it asked']);
+});
+
 test('the check refuses a planted token, a PEM key, a private path, a machine name and a deny word; a digest and the fresh home pass', () => {
   const planted = [
     { id: 'a', text: 'export KEY=sk-ant-api03-abc' },
