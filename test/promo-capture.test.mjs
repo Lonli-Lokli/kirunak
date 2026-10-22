@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
 import { COLS, ROWS, collect, record, refusal } from '../promo/capture/fresh-home.mjs';
-import { read } from '../promo/capture/read.mjs';
+import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
 const START = Date.UTC(2026, 9, 22, 9, 0);
 const NAMES = ['someones-mac'];
@@ -83,6 +83,18 @@ test('a mod dialog and an intake question are read back with what they drew, the
   ]);
   const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'));
   assert.equal(manifest.start, '2026-10-22T09:00:00.000Z');
+});
+
+test('an intake call that asks two questions is two dialogs, each with its own answer', () => {
+  const at = (ms) => new Date(START + ms).toISOString();
+  const two = [
+    { type: 'assistant', timestamp: at(2000), message: { content: [{ type: 'tool_use', id: 'tu2', name: 'AskUserQuestion', input: { questions: [{ header: 'Goal', question: 'Who is the page for?', options: [{ label: 'Anyone' }, { label: 'Lawyers' }] }, { header: 'Size', question: 'How long?', options: [{ label: 'One page' }, { label: 'Two' }] }] } }] } },
+    { type: 'user', timestamp: at(6000), message: { content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'answered' }] }, toolUseResult: { answers: { 'Who is the page for?': 'Lawyers', 'How long?': 'as short as it can be' } } },
+  ];
+  assert.deepEqual(intakeDialogs(two).map((d) => [d.t - START, d.header, d.question, d.choices, d.tap, d.typed ?? null, d.end, d.tAnswer - START]), [
+    [2000, 'Goal', 'Who is the page for?', ['Anyone', 'Lawyers'], 'Lawyers', null, null, 6000],
+    [2000, 'Size', 'How long?', ['One page', 'Two'], null, 'as short as it can be', 'typed', 6000],
+  ]);
 });
 
 test('the check refuses a planted token, a PEM key, a private path, a machine name and a deny word; a digest and the fresh home pass', () => {

@@ -66,25 +66,28 @@ export async function render(raw, chunks, { cols, rows, name }) {
   return lines;
 }
 
-// The intake's questions: an AskUserQuestion tool call in the transcript and the answer in its tool result.
+// The intake's questions: an AskUserQuestion tool call in the transcript and the answer in its tool result. A call
+// that asks several questions is one dialog a question, in their order, each matched to its own answer (S-3 F-4).
 export function intakeDialogs(transcript) {
-  const asked = new Map();
+  const asked = new Map(); // the tool call's id → its questions' dialogs, by index
   const out = [];
   for (const entry of transcript) {
     for (const part of Array.isArray(entry.message?.content) ? entry.message.content : []) {
       if (part.type === 'tool_use' && part.name === 'AskUserQuestion') {
-        const q = part.input?.questions?.[0] ?? {};
-        const d = { t: Date.parse(entry.timestamp), command: 'AskUserQuestion', header: q.header ?? '', text: [], question: q.question ?? '', choices: (q.options ?? []).map((o) => o.label), tap: null, tAnswer: null, end: null };
-        asked.set(part.id, d);
-        out.push(d);
+        const qs = part.input?.questions?.length ? part.input.questions : [{}];
+        const ds = qs.map((q) => ({ t: Date.parse(entry.timestamp), command: 'AskUserQuestion', header: q.header ?? '', text: [], question: q.question ?? '', choices: (q.options ?? []).map((o) => o.label), tap: null, tAnswer: null, end: null }));
+        asked.set(part.id, ds);
+        out.push(...ds);
       } else if (part.type === 'tool_result' && asked.has(part.tool_use_id)) {
-        const d = asked.get(part.tool_use_id);
+        const ds = asked.get(part.tool_use_id);
         const answers = entry.toolUseResult?.answers;
-        const answer = answers ? (answers[d.question] ?? Object.values(answers)[0]) : null;
-        d.tAnswer = Date.parse(entry.timestamp);
-        if (answer == null) d.end = part.is_error ? 'dismissed' : 'answered';
-        else if (d.choices.includes(answer)) d.tap = answer;
-        else Object.assign(d, { typed: String(answer), end: 'typed' });
+        for (const d of ds) {
+          const answer = answers ? (answers[d.question] ?? (ds.length === 1 ? Object.values(answers)[0] : null)) : null;
+          d.tAnswer = Date.parse(entry.timestamp);
+          if (answer == null) d.end = part.is_error ? 'dismissed' : 'answered';
+          else if (d.choices.includes(answer)) d.tap = answer;
+          else Object.assign(d, { typed: String(answer), end: 'typed' });
+        }
       }
     }
   }
