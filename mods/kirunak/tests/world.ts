@@ -89,6 +89,9 @@ export const BRIEF: Brief = briefOf(
   'Lock: weather unit tests (session s1, since 2026-11-07 11:50), 1 heavy job waiting, 1 of 2 steps running, no device claims.',
 )
 
+// What `k board --card <id>` prints for a draft (kirunak-drafts S-4): its card, markdown.
+export const draftCardOf = (d: DraftRow): string => `### ${d.id}\n\n${d.title}.\n\n- Draft, ${d.written ? `written ${d.written}` : 'no date written'}.\n`
+
 // What `k board --card <id>` prints for a task of `rows`: its card, markdown.
 export const cardOf = (r: KirunakRow): string => `### ${r.id}\n\n${r.title}.\n\n- State: ${r.state}.\n${[...r.ac, ...r.e].map(x => `- ${x.id} ${x.verdict ?? 'no verdict'}: ${x.text}\n`).join('')}`
 
@@ -124,7 +127,7 @@ export type Asked = { question: string; labels: string[]; header: string }
 
 // The world beneath the mod: a clock, the commands it registers, its session's id (`idRead`: how many dialogs had
 // opened at each read of it), a k that exists and answers `k list` (from `rows`, ROWS unless a test gives its own),
-// `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` (any
+// `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` or a draft (any
 // other id refused) (each owner verb with `verb`), the amendment files,
 // `k drafts --json` from `drafts` (each read takes the next, the last again once they run out; null is a k that failed),
 // the prompts the mod submitted (`submitted`), events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
@@ -181,7 +184,8 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       const at = e.argv.indexOf('--card')
       const id = at < 0 ? null : (e.argv[at + 1] ?? '')
       const r = rows.find(x => x.id === id)
-      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
+      const d = DRAFTS.find(x => x.id === id)
+      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : d ? { exitCode: 0, stdout: draftCardOf(d), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
     } else if (what === 'drafts') {
       w.draftReads++
       const next = drafts.length > 1 ? drafts.shift() : drafts[0]
