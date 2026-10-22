@@ -59,7 +59,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
           k board --brief: a line per task, for the phone; k board --card <id>: one task's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
-          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept) and what
+          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept, drafts) and what
             each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
@@ -487,7 +487,8 @@ const VERBS = {
   // What waits for the owner, for the mod's /k-approve and /k-accept with no id (boards.md §4): the proposed tasks
   // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
-  // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs).
+  // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
+  // the owner's intake: a count and their ids (kirunak-drafts AC-8).
   async waiting({ ws }) {
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
@@ -504,14 +505,16 @@ const VERBS = {
     const hold = (await waiting.holdable(ws, all)).map(brief);
     // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
     const start = rows.map(brief);
+    const drafts = waiting.waitingDrafts(ws);
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
       accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
+      waiting.draftsLine(drafts),
     ].join('\n');
-    return { approve, accept, amendments, hold, start, text };
+    return { approve, accept, amendments, hold, start, drafts, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

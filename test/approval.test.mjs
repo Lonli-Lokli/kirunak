@@ -425,7 +425,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   const waiting = () => JSON.parse(run(['waiting', '--json']).stdout);
   const first = waiting();
   const title = first.approve[0].title;
-  const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }] };
+  const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }], drafts: { count: 0, ids: [] } };
   assert.deepEqual(first, { approve: [{ id: ID, title, state: 'proposed', why: null }], accept: [], ...rows });
   await approve({ ws, id: ID, now: NOV5 });
   // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
@@ -455,7 +455,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
   gitCommitAll(weather, 'ticked');
   assert.equal(waiting().accept[0].why, null);
-  assert.match(run(['waiting']).stdout, /^nothing to approve\nno amendment to approve\nto accept:\n {2}weather\/offline-forecast {2}can accept\n$/);
+  assert.match(run(['waiting']).stdout, /^nothing to approve\nno amendment to approve\nto accept:\n {2}weather\/offline-forecast {2}can accept\nno draft waits for the owner's intake\n$/);
   assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), sh(weather, 'git', ['log', '-1', '--format=%s']).trim()], [false, 'ticked']);
   assert.notEqual(headOf(weather), head);
 });
