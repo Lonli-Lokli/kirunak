@@ -260,6 +260,24 @@ board reaches the phone by two commands the owner types and nothing else refresh
   `touch.test.ts`, `rule.test.ts`, `commands.test.ts`, `dialog.test.ts`, `answers.test.ts`, `pick.test.ts`. Numbers:
   `claude plugin test` 122 of 122; `npm test` 369 of 369.
 
+## Drafts: an intake prepared ahead. Closes R24 to R28
+
+Built 2026-10-22 (gulnya/kirunak-drafts S-3 to S-6, amendment A-11), after slice 6 and before slice 7.
+
+- Files: `lib/drafts.mjs` and `templates/draft.md` (`k draft new|check|drop`, `k drafts`; `--json` and `--dry-run` on
+  each); `lib/intake.mjs` (a draft as `--from`, moved by `git mv`); `lib/waiting.mjs` (the `k waiting` line and the
+  `drafts` field); the board model, markdown, brief and page, and `k board --card <draft id>`; `mods/kirunak/hooks/drafts.ts`
+  (`/k-drafts`); `skills/k-draft/SKILL.md` (new) and a section in `skills/k-intake/SKILL.md`; `k install` links four
+  skills and `k doctor` checks them. `design/task-files.md` §1, `intake.md` §1 and `boards.md` say how it works.
+- Tests: `drafts.test.mjs` (the skeleton, every refusal, an unknown repo, a duplicate id, a drop that leaves other
+  staged files staged, a hook refusing the commit, the list), `freeze-hook.test.mjs` (the hook leaves drafts alone),
+  the intake, waiting and board tests (the move and its history, the Drafts group, its order and contrast),
+  `install.test.mjs` and `skills.test.mjs`; the mod's `drafts.test.ts` (each tap, a gone draft, the owner-only rule).
+- Numbers: `npm test` 420 of 420 (407 after the verbs); `claude plugin test` 138 of 138 (126 before).
+- Not yet measured: Start intake in a live session. It sends its prompt from a timer after the command has answered
+  (a prompt cannot be submitted inside the hook the turn waits on), so the owner's phone check is the proof
+  (gulnya/kirunak-drafts S-10).
+
 ## Slice 7, later and not detailed here: R17, R18
 
 Trackers (Linear, It's a Plan, GitHub Issues) and cloud sync as plugins on the `tracker` and `sync` seams, with
