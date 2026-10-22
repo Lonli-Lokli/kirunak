@@ -23,10 +23,15 @@ const SHAPES = [
   ['a bearer token', /Bearer\s/],
   ['a JWT', /eyJ[A-Za-z0-9_-]{8,}/],
   ['a PEM block', /-----BEGIN/],
-  ['a private key', /PRIVATE KEY/i],
-  ['a secret', /secret/i],
+  // A secret has a shape, a word is not one (S-3 F-3): the PEM header's words, a secret given a value, an env name
+  // and an OAuth token or setting are refused, while "the private key stays in the secret store" or "Log in with OAuth"
+  // passes.
+  ['a private key', /PRIVATE KEY/],
+  ['a secret', /secret\s*[=:]\s*\S/i],
+  ['a secret', /(?<![A-Za-z0-9])SECRET(?![A-Za-z0-9])/],
   ['a token in a URL', /token=/i],
-  ['an OAuth word', /oauth/i],
+  ['an OAuth token', /oauth[_-]?token/i],
+  ['an OAuth setting', /oauth\S*\s*[=:]/i],
   ['a credentials file', /\.credentials\.json/],
   ['a long hex run', /[0-9a-fA-F]{32,}/],
   ['a long base64 run', /[A-Za-z0-9+=_-]{32,}/],

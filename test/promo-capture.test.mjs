@@ -112,6 +112,21 @@ test('a real manifest passes: its UUID session id and 40-hex commit are known va
   assert.deepEqual(check(other, { names: NAMES, known: [sessionId, kirunakCommit] }).map((f) => f.what), ['a long hex run', 'a long base64 run']);
 });
 
+test('the check refuses a secret by its shape and passes the words in prose', () => {
+  const items = [
+    { id: 'a', text: 'export CLIENT_SECRET=x' },
+    { id: 'b', text: 'client_secret: x' },
+    { id: 'c', text: 'set GITHUB_SECRET in the function' },
+    { id: 'd', text: 'PRIVATE KEY written' },
+    { id: 'e', text: 'OAUTH_TOKEN' },
+    { id: 'f', text: 'oauthClientId = x' },
+    { id: 'ok1', text: "the private key stays in the function's secret store" },
+    { id: 'ok2', text: 'Log in with OAuth' },
+  ];
+  assert.deepEqual(check(items, { names: NAMES }).map((f) => [f.id, f.what]), [['a', 'a secret'], ['b', 'a secret'], ['c', 'a secret'], ['d', 'a private key'], ['e', 'an OAuth token'], ['f', 'an OAuth setting']]);
+  assert.deepEqual(check([{ id: 'b', text: '-----BEGIN OPENSSH PRIVATE KEY-----' }], { names: NAMES }).map((f) => f.what), ['a PEM block']);
+});
+
 test('the reader writes nothing when a line holds a secret', async () => {
   const out = join(temp(), 'pub');
   const r = await read(session([[0, '~ % echo ghp_abc\r\n']], { transcript: TRANSCRIPT }), out, { names: NAMES });
