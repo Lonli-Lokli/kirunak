@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
-import { COLS, ROWS, aheadOf, collect, record, refusal } from '../promo/capture/fresh-home.mjs';
+import { COLS, ROWS, aheadOf, collect, enter, record, refusal } from '../promo/capture/fresh-home.mjs';
 import { gitCommitAll, gitInit, sh } from './helpers.mjs';
 import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
@@ -180,7 +180,7 @@ function appendResize(raw) {
 
 test('the launcher refuses a wrong size, a capture whose newest session is not checked complete, and a numbered session while ahead', () => {
   const capture = temp();
-  const base = { capture, name: '02-t1-intake', cols: COLS, rows: ROWS, ahead: null };
+  const base = { home: '/Users/Shared/home', capture, name: '02-t1-intake', cols: COLS, rows: ROWS, ahead: null, loggedIn: true };
   assert.equal(refusal(base), null);
   assert.match(refusal({ ...base, cols: 80 }), /80x32/);
   assert.match(refusal({ ...base, ahead: 'master...origin/master [ahead 7]' }), /ahead/);
@@ -205,7 +205,18 @@ test('the W-3 gate finds a checkout ahead of origin and a branch with no upstrea
   assert.match(aheadOf(checkout), /\[ahead 1\]/);
   sh(checkout, 'git', ['switch', '-q', '-c', 'promo/capture']);
   assert.equal(aheadOf(checkout), 'promo/capture, with no upstream on origin');
-  assert.match(refusal({ capture: temp(), name: '01-setup', cols: COLS, rows: ROWS, ahead: aheadOf(checkout) }), /not pushed \(promo\/capture, with no upstream/);
+  assert.match(refusal({ capture: temp(), name: '01-setup', cols: COLS, rows: ROWS, ahead: aheadOf(checkout), loggedIn: true }), /not pushed \(promo\/capture, with no upstream/);
+});
+
+test('open refuses a home with no Claude Code login and names login, which enters the same clean home unrecorded', async () => {
+  const home = temp();
+  const why = refusal({ home, capture: temp(), name: 'probe', cols: COLS, rows: ROWS, ahead: null, loggedIn: false });
+  assert.match(why, /no Claude Code login yet/);
+  assert.ok(why.endsWith(`fresh-home.mjs login --home ${home}`), why);
+  const code = await enter(home, ['/bin/sh', '-c', 'printf "%s|%s|%s|%s" "$HOME" "$USER" "$PWD" "${KIRUNAK_HOME-unset}" > seen'], { stdio: 'ignore' });
+  assert.equal(code, 0);
+  assert.equal(readFileSync(join(home, 'seen'), 'utf8'), `${home}|dev|${realpathSync(home)}|unset`);
+  assert.deepEqual(readdirSync(home), ['seen'], 'no terminal.raw, no times, no manifest');
 });
 
 test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', async () => {
