@@ -32,6 +32,7 @@ import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
+import * as drafts from '../lib/drafts.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write']);
@@ -64,6 +65,9 @@ Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
+Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
+          k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
+          k drafts: every draft in every repo, one line each (id, title, date written)
 Every verb takes --json and --dry-run.`;
 
 export function parseArgs(argv) {
@@ -445,6 +449,32 @@ const VERBS = {
     else if (sub === 'remove') queue.remove(ws, id);
     else throw usage(`unknown queue verb ${sub}`);
     return VERBS.queue({ ws, pos: ['show'], flags });
+  },
+
+  // A prepared intake for a future task (kirunak-drafts): not the owner's, so any session runs these. Neither `new`
+  // nor `check` commits; the session that writes the draft commits it.
+  async draft({ ws, pos, flags }) {
+    const sub = need(pos[0], 'draft verb: new|check|drop');
+    const id = need(pos[1], 'draft id <repo>/<slug>');
+    const dryRun = !!flags['dry-run'];
+    if (sub === 'new') {
+      const r = drafts.newDraft({ ws, id, title: typeof flags.title === 'string' ? flags.title : '', session: session(flags), dryRun });
+      if (dryRun) return { ...r, text: `would write ${r.path}` };
+      return { ...r, text: `${r.path}: fill in every section, then \`k draft check ${id}\`, and commit it` };
+    }
+    if (sub === 'check') return report(id, drafts.check(ws, id), '');
+    if (sub === 'drop') {
+      const r = drafts.drop({ ws, id, why: typeof flags.why === 'string' ? flags.why : '', dryRun });
+      if (dryRun) return { ...r, text: `would remove ${r.rel} in ${r.repo}${r.tracked ? ` and commit "${r.message}"` : ' (never committed, so no commit)'}` };
+      return { ...r, text: r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit` };
+    }
+    throw usage(`unknown draft verb ${sub}`);
+  },
+
+  // Every draft in every repo, by the date written: for /k-drafts, as an array with --json.
+  async drafts({ ws }) {
+    const rows = drafts.list(ws);
+    return { json: rows, text: drafts.format(rows) };
   },
 
   async list({ ws, flags }) {

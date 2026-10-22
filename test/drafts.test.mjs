@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { check, checkDraft, drop, format, list, newDraft } from '../lib/drafts.mjs';
 import { start } from '../lib/intake.mjs';
-import { gitCommitAll, makeWorkspace, sh } from './helpers.mjs';
+import { gitCommitAll, k, makeWorkspace, sh } from './helpers.mjs';
 
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
 
@@ -241,4 +241,42 @@ test('k drafts: every draft in every repo, by date written then id, an undated o
     'weather/undated      No date             no date',
   ].join('\n'));
   assert.equal(format([]), 'no drafts');
+});
+
+test('the verbs: k draft new, check, drop and k drafts, with --json and --dry-run, and in the help', async () => {
+  const w = await makeWorkspace();
+  const run = (...args) => k(w.home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  assert.match(run('help').stdout, /k draft new <repo>\/<slug> --title "\.\.\."[\s\S]*k draft drop <id> --why "\.\.\."[\s\S]*k drafts: /);
+  assert.equal(run('draft', 'new', ID, '--title', 'Wind alerts', '--dry-run').status, 0);
+  assert.equal(existsSync(fileOf(w)), false);
+  const made = run('draft', 'new', ID, '--title', 'Wind alerts', '--session', 's9');
+  assert.equal(made.status, 0, made.stderr);
+  assert.match(readFileSync(fileOf(w), 'utf8'), /session s9/);
+  assert.match(run('draft', 'new', ID, '--title', 'Again').stderr, /^k: weather\/wind-alerts is already a draft: /);
+  assert.equal(run('draft', 'new', 'radio/x', '--title', 'x').status, 1);
+  assert.equal(run('draft', 'new', 'weather/x').status, 2);
+
+  const skeleton = run('draft', 'check', ID);
+  assert.equal(skeleton.status, 1);
+  assert.match(skeleton.stderr, /^weather\/wind-alerts: 4 problems\n {2}line 7: ## Who raised it is empty/);
+  const json = run('draft', 'check', ID, '--json');
+  assert.equal(json.status, 1);
+  assert.equal(JSON.parse(json.stdout).problems.length, 4);
+  writeFileSync(fileOf(w), FILLED);
+  assert.equal(run('draft', 'check', ID).stdout, 'weather/wind-alerts: check passes\n');
+
+  assert.equal(run('drafts').stdout, 'weather/wind-alerts  Wind alerts for cyclists  2026-10-22\n');
+  assert.deepEqual(JSON.parse(run('drafts', '--json').stdout), [
+    { id: ID, repo: 'weather', slug: 'wind-alerts', title: 'Wind alerts for cyclists', written: '2026-10-22', path: fileOf(w) },
+  ]);
+
+  gitCommitAll(w.weather, 'the draft');
+  assert.match(run('draft', 'drop', ID).stderr, /needs its reason/);
+  assert.equal(run('draft', 'drop', ID).status, 2);
+  assert.match(run('draft', 'drop', ID, '--why', 'not now', '--dry-run').stdout, /^would remove kirunak\/drafts\/wind-alerts\.md in weather and commit "kirunak: drop the draft weather\/wind-alerts: not now"/);
+  assert.equal(existsSync(fileOf(w)), true);
+  const dropped = run('draft', 'drop', ID, '--why', 'not now');
+  assert.equal(dropped.stdout, `weather/wind-alerts: dropped in ${sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim()}\n`);
+  assert.deepEqual(JSON.parse(run('drafts', '--json').stdout), []);
+  assert.equal(run('drafts').stdout, 'no drafts\n');
 });
