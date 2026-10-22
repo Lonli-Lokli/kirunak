@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
-import { COLS, ROWS, record, refusal } from '../promo/capture/fresh-home.mjs';
+import { COLS, ROWS, collect, record, refusal } from '../promo/capture/fresh-home.mjs';
 import { read } from '../promo/capture/read.mjs';
 
 const START = Date.UTC(2026, 9, 22, 9, 0);
@@ -126,6 +126,24 @@ test('a session is not complete without the exit, a transcript, a tap or end on 
   assert.equal(r.ok, false);
   assert.equal(existsSync(join(raw, 'complete.json')), false);
   for (const want of [/does not end with the shell's exit/, /resized to 120x40/, /no Claude Code transcript/, /d001 has no tap and no end/, /accepted app\/other .* has no dialog/]) assert.ok(r.problems.some((p) => want.test(p)), `${want}: ${r.problems.join(' | ')}`);
+});
+
+test('an approval with only a typed /k-approve before it and no dialog logged is not complete', async () => {
+  const raw = session(SCRIPTED, { transcript: TRANSCRIPT, events: [{ time: new Date(START + 1500).toISOString(), kind: 'approved', task: 'app/redact' }] });
+  const r = await read(raw, temp(), { names: NAMES, complete: true });
+  assert.deepEqual(r.problems, ['events: approved app/redact at 2026-10-22T09:00:01.500Z: typed /k-approve at 2026-10-22T09:00:01.000Z but no dialog was logged']);
+  assert.equal(existsSync(join(raw, 'complete.json')), false);
+});
+
+test('a dialog the mod logged with no time is collected from the fresh home and is a problem of its own', async () => {
+  const home = temp();
+  mkdirSync(join(home, '.kirunak'));
+  writeFileSync(join(home, '.kirunak', 'dialogs.jsonl'), lines([{ ...DIALOG, t: null }, DIALOG, { ...DIALOG, t: START - 60_000 }]));
+  const raw = session(SCRIPTED, { transcript: TRANSCRIPT });
+  collect(home, raw, START, START + 60_000);
+  assert.deepEqual(jsonl(join(raw, 'dialogs.jsonl')).map((d) => d.t), [null, START + 3000]);
+  const r = await read(raw, temp(), { names: NAMES, complete: true });
+  assert.deepEqual(r.problems, ['01-setup:d001 has no time: the mod could not read its clock when it asked']);
 });
 
 function appendResize(raw) {

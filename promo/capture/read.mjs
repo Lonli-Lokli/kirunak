@@ -127,16 +127,20 @@ export function problems(s, lines, dialogs) {
   if (!s.transcripts.length) out.push('no Claude Code transcript was found in the session\'s span');
   else if (!s.transcripts.some((t) => t.id === s.manifest.sessionId)) out.push(`the manifest's session ${s.manifest.sessionId} has no transcript`);
   for (const d of dialogs) if (d.tap == null && d.typed == null && d.end == null) out.push(`${d.id} has no tap and no end`);
+  for (const d of dialogs) if (d.t == null) out.push(`${d.id} has no time: the mod could not read its clock when it asked`);
   const typed = s.transcripts.flatMap((t) => typedCommands(t.entries));
   for (const e of s.events.filter((x) => x.kind === 'approved' || x.kind === 'accepted')) {
     const at = Date.parse(e.time);
     const verb = e.kind === 'approved' ? 'approve' : 'accept';
     const before = (x) => x <= at + 1000;
     const byDialog = s.dialogs.some((d) => typeof d.end === 'string' && d.end.startsWith(`${verb} ${e.task}`) && before(d.tAnswer));
-    const byTyping = typed.some((c) => c.command === `k-${verb}` && before(c.t));
     // A verb typed at the terminal (`k approve`) is a line of the stream itself.
     const byTerminal = lines.some((l) => new RegExp(`\\bk ${verb} ${e.task.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`).test(l.text) && before(l.t + s.manifest.start));
-    if (!byDialog && !byTyping && !byTerminal) out.push(`events: ${e.kind} ${e.task} at ${e.time} has no dialog, typed command or terminal line before it`);
+    if (byDialog || byTerminal) continue;
+    // A typed /k-approve is the owner's command, not the dialog it opened: with no line of the mod's log the phone
+    // scene has nothing to draw, so the log failing silently fails the session (S-3 F-2).
+    const typedAt = typed.filter((c) => c.command === `k-${verb}` && before(c.t)).at(-1);
+    out.push(typedAt ? `events: ${e.kind} ${e.task} at ${e.time}: typed /k-${verb} at ${new Date(typedAt.t).toISOString()} but no dialog was logged` : `events: ${e.kind} ${e.task} at ${e.time} has no dialog or terminal line before it`);
   }
   if (lines.some((l) => l.text.length > s.manifest.cols)) out.push('a row is wider than the manifest\'s columns');
   return out;

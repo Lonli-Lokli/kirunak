@@ -91,7 +91,8 @@ export function collect(home, raw, start, end) {
   for (const x of found) copyFileSync(x.file, join(raw, 'transcripts', `${x.id}.jsonl`));
   const state = join(home, '.kirunak');
   const inSpan = (t) => t >= start && t <= end;
-  const dialogs = jsonl(join(state, 'dialogs.jsonl')).filter((d) => inSpan(d.t));
+  // A dialog the mod logged with no time (its clock failed) is kept, so the reader reports it (S-3 F-2).
+  const dialogs = jsonl(join(state, 'dialogs.jsonl')).filter((d) => d.t == null || inSpan(d.t));
   const events = jsonl(join(state, 'events.jsonl')).filter((e) => inSpan(Date.parse(e.time)));
   writeFileSync(join(raw, 'dialogs.jsonl'), dialogs.map((d) => JSON.stringify(d) + '\n').join(''));
   writeFileSync(join(raw, 'events.jsonl'), events.map((e) => JSON.stringify(e) + '\n').join(''));
