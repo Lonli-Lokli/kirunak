@@ -221,3 +221,11 @@ test('the recorder keeps every byte through script with each chunk timed, and en
   assert.ok(two.t - chunks[0].t >= 250, `each chunk is stamped as it arrives (${two.t - chunks[0].t} ms apart)`);
   assert.equal(marks.at(-1).end, true);
 });
+
+test('the recorder rejects when script cannot start, with the fifo removed and nothing left waiting on it', async () => {
+  const raw = join(temp(), 'probe');
+  const sigint = process.listenerCount('SIGINT');
+  await assert.rejects(record(raw, ['/bin/sh', '-c', 'true'], { cwd: join(raw, 'missing'), stdio: 'ignore' }), { code: 'ENOENT' });
+  assert.equal(existsSync(join(raw, '.fifo')), false);
+  assert.equal(process.listenerCount('SIGINT'), sigint, 'Ctrl-C reaches the launcher again');
+});

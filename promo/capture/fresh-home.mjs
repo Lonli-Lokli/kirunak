@@ -11,6 +11,7 @@
 // span.
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -134,14 +135,25 @@ export function record(raw, argv, { env, cwd, stdio = 'inherit', size = () => nu
   const child = spawn('/usr/bin/script', ['-q', '-F', '-t', '0', fifo, ...argv], { env, cwd, stdio });
   const ignore = () => undefined;
   process.on('SIGINT', ignore);
+  const finish = () => {
+    process.off('SIGINT', ignore);
+    process.stdout.off('resize', onResize);
+    rmSync(fifo, { force: true });
+  };
   return new Promise((done, fail) => {
-    child.on('error', fail);
+    // script never ran, so nothing opens the fifo to write and the reader would wait on it for ever: open and close it
+    // here, so the reader ends and the launcher can exit, then reject with the fifo removed (S-3 F-8).
+    child.on('error', (err) => {
+      openFile(fifo, 'w').then((f) => f.close(), () => undefined);
+      reading.catch(() => undefined).then(() => {
+        finish();
+        fail(err);
+      });
+    });
     child.on('exit', async (code) => {
       await reading;
-      process.off('SIGINT', ignore);
-      process.stdout.off('resize', onResize);
       appendFileSync(times, JSON.stringify({ end: true, code, t: Date.now() }) + '\n');
-      rmSync(fifo, { force: true });
+      finish();
       done(code);
     });
   });
