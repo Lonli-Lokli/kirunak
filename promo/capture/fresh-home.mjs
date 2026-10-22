@@ -6,8 +6,9 @@
 //
 // It refuses to open while the capture's newest session has no complete.json (read.mjs --check writes it), while the
 // terminal is not 100 columns by 32 rows, and, for a numbered session (01-setup and on), while this checkout's branch
-// is ahead of its remote (the filmed setup clones the pushed kirunak). When the shell exits it copies, from the fresh
-// home, the Claude Code transcripts, the mod's dialogs and kirunak's events of the session's span.
+// is ahead of origin or has no upstream there (the filmed setup clones the pushed kirunak). When the shell exits it
+// copies, from the fresh home, the Claude Code transcripts, the mod's dialogs and kirunak's events of the session's
+// span.
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -38,13 +39,16 @@ export function refusal({ capture, name, cols, rows, ahead }) {
   const done = existsSync(capture) ? readdirSync(capture).filter((f) => statSync(join(capture, f)).isDirectory()).sort() : [];
   const newest = done.at(-1);
   if (newest && !existsSync(join(capture, newest, 'complete.json'))) return `${newest} is not checked complete: run read.mjs ${join(capture, newest)} --out <public dir> --check first`;
-  if (/^\d\d-/.test(name) && ahead) return `this checkout is ahead of its remote (${ahead}); push it first, so the filmed setup clones the mod that ran`;
+  if (/^\d\d-/.test(name) && ahead) return `this checkout is not pushed (${ahead}); push it first, so the filmed setup clones the mod that ran`;
   return null;
 }
 
-function aheadOf(checkout) {
+// What of the checkout's branch is not on origin, or null: commits ahead of it, or no upstream on origin at all (a new
+// branch, a detached HEAD), which shows no `[ahead` and is just as unpushed (S-3 F-5).
+export function aheadOf(checkout) {
   try {
     const head = execFileSync('git', ['-C', checkout, 'status', '-sb'], { encoding: 'utf8' }).split('\n')[0];
+    if (!/\.\.\.origin\//.test(head)) return `${head.replace(/^## /, '')}, with no upstream on origin`;
     return /\[ahead \d+/.test(head) ? head.replace(/^## /, '') : null;
   } catch {
     return 'not a git checkout';

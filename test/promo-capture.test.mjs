@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
-import { COLS, ROWS, collect, record, refusal } from '../promo/capture/fresh-home.mjs';
+import { COLS, ROWS, aheadOf, collect, record, refusal } from '../promo/capture/fresh-home.mjs';
+import { gitCommitAll, gitInit, sh } from './helpers.mjs';
 import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
 const START = Date.UTC(2026, 9, 22, 9, 0);
@@ -188,6 +189,23 @@ test('the launcher refuses a wrong size, a capture whose newest session is not c
   assert.match(refusal(base), /01-setup is not checked complete/);
   writeFileSync(join(capture, '01-setup', 'complete.json'), '{}');
   assert.equal(refusal(base), null);
+});
+
+test('the W-3 gate finds a checkout ahead of origin and a branch with no upstream on origin, and passes one pushed', () => {
+  const origin = temp();
+  gitInit(origin);
+  writeFileSync(join(origin, 'a'), 'a\n');
+  gitCommitAll(origin);
+  const checkout = join(temp(), 'kirunak');
+  sh(origin, 'git', ['clone', '-q', origin, checkout]);
+  gitInit(checkout);
+  assert.equal(aheadOf(checkout), null);
+  writeFileSync(join(checkout, 'b'), 'b\n');
+  gitCommitAll(checkout);
+  assert.match(aheadOf(checkout), /\[ahead 1\]/);
+  sh(checkout, 'git', ['switch', '-q', '-c', 'promo/capture']);
+  assert.equal(aheadOf(checkout), 'promo/capture, with no upstream on origin');
+  assert.match(refusal({ capture: temp(), name: '01-setup', cols: COLS, rows: ROWS, ahead: aheadOf(checkout) }), /not pushed \(promo\/capture, with no upstream/);
 });
 
 test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', async () => {
