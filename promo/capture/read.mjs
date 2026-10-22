@@ -12,7 +12,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import xterm from '@xterm/headless';
 
-import { check, denyWords, report } from './check.mjs';
+import { check, denyWords, knownOf, report } from './check.mjs';
 
 const jsonl = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
@@ -66,25 +66,28 @@ export async function render(raw, chunks, { cols, rows, name }) {
   return lines;
 }
 
-// The intake's questions: an AskUserQuestion tool call in the transcript and the answer in its tool result.
+// The intake's questions: an AskUserQuestion tool call in the transcript and the answer in its tool result. A call
+// that asks several questions is one dialog a question, in their order, each matched to its own answer (S-3 F-4).
 export function intakeDialogs(transcript) {
-  const asked = new Map();
+  const asked = new Map(); // the tool call's id → its questions' dialogs, by index
   const out = [];
   for (const entry of transcript) {
     for (const part of Array.isArray(entry.message?.content) ? entry.message.content : []) {
       if (part.type === 'tool_use' && part.name === 'AskUserQuestion') {
-        const q = part.input?.questions?.[0] ?? {};
-        const d = { t: Date.parse(entry.timestamp), command: 'AskUserQuestion', header: q.header ?? '', text: [], question: q.question ?? '', choices: (q.options ?? []).map((o) => o.label), tap: null, tAnswer: null, end: null };
-        asked.set(part.id, d);
-        out.push(d);
+        const qs = part.input?.questions?.length ? part.input.questions : [{}];
+        const ds = qs.map((q) => ({ t: Date.parse(entry.timestamp), command: 'AskUserQuestion', header: q.header ?? '', text: [], question: q.question ?? '', choices: (q.options ?? []).map((o) => o.label), tap: null, tAnswer: null, end: null }));
+        asked.set(part.id, ds);
+        out.push(...ds);
       } else if (part.type === 'tool_result' && asked.has(part.tool_use_id)) {
-        const d = asked.get(part.tool_use_id);
+        const ds = asked.get(part.tool_use_id);
         const answers = entry.toolUseResult?.answers;
-        const answer = answers ? (answers[d.question] ?? Object.values(answers)[0]) : null;
-        d.tAnswer = Date.parse(entry.timestamp);
-        if (answer == null) d.end = part.is_error ? 'dismissed' : 'answered';
-        else if (d.choices.includes(answer)) d.tap = answer;
-        else Object.assign(d, { typed: String(answer), end: 'typed' });
+        for (const d of ds) {
+          const answer = answers ? (answers[d.question] ?? (ds.length === 1 ? Object.values(answers)[0] : null)) : null;
+          d.tAnswer = Date.parse(entry.timestamp);
+          if (answer == null) d.end = part.is_error ? 'dismissed' : 'answered';
+          else if (d.choices.includes(answer)) d.tap = answer;
+          else Object.assign(d, { typed: String(answer), end: 'typed' });
+        }
       }
     }
   }
@@ -127,16 +130,20 @@ export function problems(s, lines, dialogs) {
   if (!s.transcripts.length) out.push('no Claude Code transcript was found in the session\'s span');
   else if (!s.transcripts.some((t) => t.id === s.manifest.sessionId)) out.push(`the manifest's session ${s.manifest.sessionId} has no transcript`);
   for (const d of dialogs) if (d.tap == null && d.typed == null && d.end == null) out.push(`${d.id} has no tap and no end`);
+  for (const d of dialogs) if (d.t == null) out.push(`${d.id} has no time: the mod could not read its clock when it asked`);
   const typed = s.transcripts.flatMap((t) => typedCommands(t.entries));
   for (const e of s.events.filter((x) => x.kind === 'approved' || x.kind === 'accepted')) {
     const at = Date.parse(e.time);
     const verb = e.kind === 'approved' ? 'approve' : 'accept';
     const before = (x) => x <= at + 1000;
     const byDialog = s.dialogs.some((d) => typeof d.end === 'string' && d.end.startsWith(`${verb} ${e.task}`) && before(d.tAnswer));
-    const byTyping = typed.some((c) => c.command === `k-${verb}` && before(c.t));
     // A verb typed at the terminal (`k approve`) is a line of the stream itself.
     const byTerminal = lines.some((l) => new RegExp(`\\bk ${verb} ${e.task.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`).test(l.text) && before(l.t + s.manifest.start));
-    if (!byDialog && !byTyping && !byTerminal) out.push(`events: ${e.kind} ${e.task} at ${e.time} has no dialog, typed command or terminal line before it`);
+    if (byDialog || byTerminal) continue;
+    // A typed /k-approve is the owner's command, not the dialog it opened: with no line of the mod's log the phone
+    // scene has nothing to draw, so the log failing silently fails the session (S-3 F-2).
+    const typedAt = typed.filter((c) => c.command === `k-${verb}` && before(c.t)).at(-1);
+    out.push(typedAt ? `events: ${e.kind} ${e.task} at ${e.time}: typed /k-${verb} at ${new Date(typedAt.t).toISOString()} but no dialog was logged` : `events: ${e.kind} ${e.task} at ${e.time} has no dialog or terminal line before it`);
   }
   if (lines.some((l) => l.text.length > s.manifest.cols)) out.push('a row is wider than the manifest\'s columns');
   return out;
@@ -154,7 +161,7 @@ export async function read(rawDir, outDir, { deny = [], names, complete = false 
   const { raw, capture, ...kept } = manifest;
   const pub = { ...kept, start: new Date(start).toISOString(), end: manifest.end ? new Date(manifest.end).toISOString() : null };
   const items = [...lines.map((l) => ({ id: l.id, text: l.text })), ...dialogs.map((d) => ({ id: d.id, text: [d.command, d.header, ...d.text, d.question, ...d.choices, d.tap, d.typed, d.end].filter((x) => x != null).join('\n') })), ...Object.entries(pub).map(([k, v]) => ({ id: `manifest.${k}`, text: JSON.stringify(v) }))];
-  const found = check(items, { deny, ...(names && { names }) });
+  const found = check(items, { deny, known: knownOf(manifest), ...(names && { names }) });
   if (found.length) return { ok: false, refused: found, problems: [] };
   const missing = complete ? problems(s, lines.map((l) => ({ ...l })), dialogs) : [];
   mkdirSync(outDir, { recursive: true });

@@ -6,10 +6,12 @@
 //
 // It refuses to open while the capture's newest session has no complete.json (read.mjs --check writes it), while the
 // terminal is not 100 columns by 32 rows, and, for a numbered session (01-setup and on), while this checkout's branch
-// is ahead of its remote (the filmed setup clones the pushed kirunak). When the shell exits it copies, from the fresh
-// home, the Claude Code transcripts, the mod's dialogs and kirunak's events of the session's span.
+// is ahead of origin or has no upstream there (the filmed setup clones the pushed kirunak). When the shell exits it
+// copies, from the fresh home, the Claude Code transcripts, the mod's dialogs and kirunak's events of the session's
+// span.
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -38,13 +40,16 @@ export function refusal({ capture, name, cols, rows, ahead }) {
   const done = existsSync(capture) ? readdirSync(capture).filter((f) => statSync(join(capture, f)).isDirectory()).sort() : [];
   const newest = done.at(-1);
   if (newest && !existsSync(join(capture, newest, 'complete.json'))) return `${newest} is not checked complete: run read.mjs ${join(capture, newest)} --out <public dir> --check first`;
-  if (/^\d\d-/.test(name) && ahead) return `this checkout is ahead of its remote (${ahead}); push it first, so the filmed setup clones the mod that ran`;
+  if (/^\d\d-/.test(name) && ahead) return `this checkout is not pushed (${ahead}); push it first, so the filmed setup clones the mod that ran`;
   return null;
 }
 
-function aheadOf(checkout) {
+// What of the checkout's branch is not on origin, or null: commits ahead of it, or no upstream on origin at all (a new
+// branch, a detached HEAD), which shows no `[ahead` and is just as unpushed (S-3 F-5).
+export function aheadOf(checkout) {
   try {
     const head = execFileSync('git', ['-C', checkout, 'status', '-sb'], { encoding: 'utf8' }).split('\n')[0];
+    if (!/\.\.\.origin\//.test(head)) return `${head.replace(/^## /, '')}, with no upstream on origin`;
     return /\[ahead \d+/.test(head) ? head.replace(/^## /, '') : null;
   } catch {
     return 'not a git checkout';
@@ -91,7 +96,8 @@ export function collect(home, raw, start, end) {
   for (const x of found) copyFileSync(x.file, join(raw, 'transcripts', `${x.id}.jsonl`));
   const state = join(home, '.kirunak');
   const inSpan = (t) => t >= start && t <= end;
-  const dialogs = jsonl(join(state, 'dialogs.jsonl')).filter((d) => inSpan(d.t));
+  // A dialog the mod logged with no time (its clock failed) is kept, so the reader reports it (S-3 F-2).
+  const dialogs = jsonl(join(state, 'dialogs.jsonl')).filter((d) => d.t == null || inSpan(d.t));
   const events = jsonl(join(state, 'events.jsonl')).filter((e) => inSpan(Date.parse(e.time)));
   writeFileSync(join(raw, 'dialogs.jsonl'), dialogs.map((d) => JSON.stringify(d) + '\n').join(''));
   writeFileSync(join(raw, 'events.jsonl'), events.map((e) => JSON.stringify(e) + '\n').join(''));
@@ -129,14 +135,25 @@ export function record(raw, argv, { env, cwd, stdio = 'inherit', size = () => nu
   const child = spawn('/usr/bin/script', ['-q', '-F', '-t', '0', fifo, ...argv], { env, cwd, stdio });
   const ignore = () => undefined;
   process.on('SIGINT', ignore);
+  const finish = () => {
+    process.off('SIGINT', ignore);
+    process.stdout.off('resize', onResize);
+    rmSync(fifo, { force: true });
+  };
   return new Promise((done, fail) => {
-    child.on('error', fail);
+    // script never ran, so nothing opens the fifo to write and the reader would wait on it for ever: open and close it
+    // here, so the reader ends and the launcher can exit, then reject with the fifo removed (S-3 F-8).
+    child.on('error', (err) => {
+      openFile(fifo, 'w').then((f) => f.close(), () => undefined);
+      reading.catch(() => undefined).then(() => {
+        finish();
+        fail(err);
+      });
+    });
     child.on('exit', async (code) => {
       await reading;
-      process.off('SIGINT', ignore);
-      process.stdout.off('resize', onResize);
       appendFileSync(times, JSON.stringify({ end: true, code, t: Date.now() }) + '\n');
-      rmSync(fifo, { force: true });
+      finish();
       done(code);
     });
   });
