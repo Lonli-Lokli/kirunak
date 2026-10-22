@@ -1,6 +1,6 @@
 ---
 name: k-intake
-description: kirunak's intake interview. Turns what the owner wants (or an old planning record, such as an openspec change) into a kirunak task that guesses nothing, one question at a time, with every line sourced. Use when the owner asks for a new task, asks to bring an openspec change into kirunak, types /k-intake, or when a planning tool refuses an edit and names this intake.
+description: kirunak's intake interview. Turns what the owner wants (or an old planning record, such as an openspec change) into a kirunak task that guesses nothing, one question at a time, with every line sourced. Use when the owner asks for a new task, asks to bring an openspec change into kirunak, asks to start one from a draft (Start intake in /k-drafts, or naming the draft), types /k-intake, or when a planning tool refuses an edit and names this intake.
 ---
 
 # k-intake: the interview that leaves nothing to guess
@@ -24,8 +24,10 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
 ## The steps
 
 1. **Start.** `k intake start <repo>/<slug> --title "..."`, or with an old record as background:
-   `k intake start <repo>/<slug> --from <path to the change>`. The slug is lower-case letters, digits and hyphens,
-   at most 40. This writes `kirunak/tasks/<slug>/task.md` (a draft), `intake.md`, and with `--from` a `notes.md`.
+   `k intake start <repo>/<slug> --from <path to the change>`, or from a kirunak draft (below):
+   `k intake start <repo>/<slug> --from kirunak/drafts/<slug>.md`. The slug is lower-case letters, digits and
+   hyphens, at most 40. This writes `kirunak/tasks/<slug>/task.md` (a draft), `intake.md`, and with `--from` a
+   `notes.md`.
 2. **The goal.** Propose one paragraph from the owner's words or the background, then:
    `k intake question <id> --topic goal "<the question>"` → it prints `Q-n`. Ask the owner. Record:
    `k intake answer <id> Q-n "<their words, verbatim>" --ruling "→ Goal"`. Every question and answer goes
@@ -41,7 +43,7 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
    become ready while one is there.
 7. **Check.** `k check <id>` until it passes. Fix what it names; it gives a line number for each problem.
 8. **Commit the intake**: `git add kirunak/tasks/<slug>` and `git commit -m "kirunak: intake <id>"`, in the
-   task's repo, before asking for approval.
+   task's repo, before asking for approval. From a kirunak draft, its staged move goes in the same commit.
 9. **Hand over.** Print the task once, whole. Then say: "Type `! k approve <id>` to freeze and queue it." Stop
    there. If the owner wants a change first, edit the draft, `k check`, commit, and hand over again.
 
@@ -95,6 +97,16 @@ landed (the `notes.md` that `--from` wrote lists commits that touched the change
 another repo becomes an `O-n` line naming where it goes. Every call the old change left open becomes a `Q-n` that
 must close or be ruled out. Each line may keep `[from <path> <item>]` beside its real source. Never write in the old
 record's folder.
+
+## Starting from a kirunak draft
+
+A draft is an intake prepared ahead (`kirunak/drafts/<slug>.md`, the k-draft skill). Start from one only when the
+owner asks: Start intake in `/k-drafts`, or the owner naming it. Run step 1's command with the draft's own id,
+`k intake start <id> --from kirunak/drafts/<slug>.md`. It moves the draft to `kirunak/tasks/<slug>/draft.md`, the
+move staged in git, and the task takes its title. Read `draft.md` as background, never a source: nothing in it is a
+ruling, and the owner's words quoted there are still asked. Its questions come among the first, after the goal, each
+through `k intake question`. Every line of the task is still asked and sourced from the owner's answer;
+`[from kirunak/tasks/<slug>/draft.md]` may sit beside that source, never alone.
 
 ## After approval
 
