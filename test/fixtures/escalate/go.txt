@@ -1,9 +1,0 @@
-Exit code 1
---- FAIL: TestQueueFairTurns (0.00s)
-    queue_test.go:37: turn 3 went to session a, want b
---- FAIL: TestQueueDeadPid (0.01s)
-    --- FAIL: TestQueueDeadPid/stale_lock (0.00s)
-        queue_test.go:58: lock held by dead pid 4242 was kept
-FAIL
-FAIL	example.com/heavylock/queue	0.214s
-FAIL

@@ -24,32 +24,167 @@ const HOOK = fileURLToPath(new URL('../hooks/kirunak-escalate.mjs', import.meta.
 const FREEZE = fileURLToPath(new URL('../hooks/kirunak-freeze.mjs', import.meta.url));
 const FIX = fileURLToPath(new URL('./fixtures/escalate/', import.meta.url));
 const fixture = (name) => readFileSync(join(FIX, name), 'utf8');
-const EXPECTED = JSON.parse(fixture('expected.json'));
 const TITLE = 'Escalation follows measured failures, not self-assessment';
 const ID = 'gulnya/enforced-escalation';
 const NODE_CMD = 'node --test test/ladder.test.mjs';
-const NODE_FAIL = fixture('node-test.txt');
+
+// Made-up failure texts, as a failed Bash call's `error` carries them (`Exit code N` first): per runner only the few
+// lines its signature reads, and a line or two around them.
+const text = (...lines) => `${lines.join('\n')}\n`;
+const NODE_FAIL = text(
+  'Exit code 1', '▶ ladder', '  ✖ climbs one rung (0.771667ms)', '  ✔ stays (0.063292ms)', '✖ ladder (1.22375ms)',
+  '✖ top-level fails (0.041166ms)', 'ℹ fail 2', '', '✖ failing tests:', '', 'test at test/ladder.test.mjs:4:3',
+  '✖ climbs one rung (0.771667ms)', '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+  '      at TestContext.<anonymous> (file:///home/someone/app/test/ladder.test.mjs:4:40)',
+);
+const GRADLE_FAIL = text(
+  'Exit code 1', '> Task :engine:jvmTest', '', 'com.example.words.ScoreTest > adds a word\'s letters() FAILED',
+  '    org.opentest4j.AssertionFailedError at ScoreTest.kt:41', '', 'com.example.words.ScoreTest > doubles on a bonus tile() FAILED',
+  '    org.opentest4j.AssertionFailedError at ScoreTest.kt:57', '', '> Task :engine:jvmTest FAILED', 'BUILD FAILED in 14s',
+);
+// Claude Code's middle truncation: a long head, `... [N characters truncated] ...`, then the tail.
+const truncated = (n) => text(
+  'Exit code 1', 'TAP version 13', '# Subtest: board', '    ok 1 - renders every task',
+  `      duration_ms: 1.2${'x'.repeat(4000)}... [${n} characters truncated] ...    not ok 7 - groups stopped steps first`,
+  '    1..7', 'not ok 3 - board', '# fail 1',
+);
+
+// Each case: the text, the command it came from, and the signature it gives: its kind and items, the first its label.
+const CASES = {
+  'node-test': { text: NODE_FAIL, command: NODE_CMD, kind: 'node', items: ['climbs one rung', 'ladder', 'top-level fails'] },
+  gradle: {
+    text: GRADLE_FAIL, command: './gradlew :engine:jvmTest', kind: 'gradle',
+    items: ['ScoreTest > adds a word\'s letters()', 'ScoreTest > doubles on a bonus tile()'],
+  },
+  'gradle-kotlin': {
+    text: text(
+      'Exit code 1', '> Task :engine:compileKotlinJvm FAILED',
+      'e: file:///home/someone/words/engine/src/commonMain/kotlin/Score.kt:27:16 Unresolved reference \'bonusOf\'.',
+      'e: file:///home/someone/words/engine/src/commonMain/kotlin/Score.kt:40:5 Return type mismatch: expected \'Int\', actual \'Unit\'.',
+      'BUILD FAILED in 6s',
+    ),
+    command: './gradlew :engine:jvmTest', kind: 'gradle',
+    items: ['Score.kt Return type mismatch: expected \'Int\', actual \'Unit\'.', 'Score.kt Unresolved reference \'bonusOf\'.'],
+  },
+  xcodebuild: {
+    text: text(
+      'Exit code 65', 'Test Case \'-[AppTests.BoardTests testRotateKeepsScore]\' started.',
+      '/home/someone/app/AppTests/BoardTests.swift:48: error: -[AppTests.BoardTests testRotateKeepsScore] : XCTAssertEqual failed: ("120") is not equal to ("140")',
+      'Test Case \'-[AppTests.BoardTests testRotateKeepsScore]\' failed (0.012 seconds).',
+      'Test Case \'-[AppTests.BoardTests testUndo]\' passed (0.003 seconds).', '** TEST FAILED **',
+    ),
+    command: 'xcodebuild test -scheme App -destination platform=iOS Simulator,name=iPhone 18 Pro Max', kind: 'xcode',
+    items: ['AppTests.BoardTests testRotateKeepsScore'],
+  },
+  jest: {
+    text: text(
+      'Exit code 1', 'FAIL src/daily.test.js', '  daily puzzle', '    ✓ picks the same puzzle for one date (3 ms)',
+      '    ✕ rolls over at midnight in London (5 ms)', '', '  ● daily puzzle › rolls over at midnight in London', '',
+      '    Expected: "2026-10-26"', '    Received: "2026-10-25"',
+    ),
+    command: 'npm test', kind: 'jest', items: ['daily puzzle › rolls over at midnight in London'],
+  },
+  vitest: {
+    text: text(
+      'Exit code 1', ' RUN  v3.2.4 /home/someone/web', ' ❯ src/share.test.ts (3 tests | 1 failed) 7ms', '   × share > encodes the grid 4ms',
+      ' FAIL  src/share.test.ts > share > encodes the grid', 'AssertionError: expected \'a%20b\' to be \'a+b\' // Object.is equality',
+      ' Test Files  1 failed (1)',
+    ),
+    command: 'npx vitest run', kind: 'vitest', items: ['src/share.test.ts > share > encodes the grid'],
+  },
+  pytest: {
+    text: text(
+      'Exit code 1', 'tests/test_weekly.py ......F.....                                        [100%]', 'tests/test_weekly.py:41: AssertionError',
+      'FAILED tests/test_weekly.py::test_week_starts_sunday_1500 - AssertionError: assert datetime.dat...',
+      '========================= 1 failed, 11 passed in 0.31s =========================',
+    ),
+    command: 'python3 -m pytest tests', kind: 'pytest', items: ['tests/test_weekly.py::test_week_starts_sunday_1500'],
+  },
+  go: {
+    text: text(
+      'Exit code 1', '--- FAIL: TestQueueFairTurns (0.00s)', '    queue_test.go:37: turn 3 went to session a, want b',
+      '--- FAIL: TestQueueDeadPid (0.01s)', '    --- FAIL: TestQueueDeadPid/stale_lock (0.00s)',
+      '        queue_test.go:58: lock held by dead pid 4242 was kept', 'FAIL', 'FAIL\texample.com/app/queue\t0.214s',
+    ),
+    command: 'go test ./queue', kind: 'go', items: ['TestQueueDeadPid', 'TestQueueDeadPid/stale_lock', 'TestQueueFairTurns'],
+  },
+  cargo: {
+    text: text(
+      'Exit code 101', 'running 4 tests', 'test grid::tests::fills_row ... ok', 'test grid::tests::rejects_short_word ... FAILED',
+      'thread \'grid::tests::rejects_short_word\' panicked at src/grid.rs:88:9:',
+      'test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s',
+      'error: test failed, to rerun pass `--lib`',
+    ),
+    command: 'cargo test', kind: 'cargo', items: ['grid::tests::rejects_short_word'],
+  },
+  'cargo-build': {
+    text: text(
+      'Exit code 101', '   Compiling wordgrid v0.3.1 (/home/someone/wordgrid)', 'error[E0425]: cannot find value `bonus` in this scope',
+      '  --> src/score.rs:14:17', 'error: could not compile `wordgrid` (lib) due to 1 previous error',
+    ),
+    command: 'cargo build', kind: 'cargo', items: ['E0425 cannot find value `bonus` in this scope'],
+  },
+  swift: {
+    text: text(
+      'Exit code 1', '◇ Test subtitleFitsThirtyCharacters() started.',
+      '✘ Test subtitleFitsThirtyCharacters() recorded an issue at ListingTests.swift:22:5: Expectation failed: (subtitle.count → 34) <= 30',
+      '✘ Test subtitleFitsThirtyCharacters() failed after 0.002 seconds with 1 issue.',
+      '✔ Test "Keywords stay under 100 characters" passed after 0.001 seconds.',
+      '✘ Test run with 2 tests in 1 suite failed after 0.003 seconds with 1 issue.',
+    ),
+    command: 'swift test', kind: 'xcode', items: ['subtitleFitsThirtyCharacters()'],
+  },
+  compiler: {
+    text: text(
+      'Exit code 1', 'Building for debugging...',
+      '/home/someone/app/Sources/Layout/TextGrowth.swift:31:17: error: cannot find \'scaledFont\' in scope',
+      '/home/someone/app/Sources/Layout/TextGrowth.swift:44:9: error: missing return in instance method expected to return \'CGFloat\'',
+      'error: emit-module command failed with exit code 1 (use -v to see invocation)',
+    ),
+    command: 'swift build', kind: 'compiler',
+    items: ['TextGrowth.swift cannot find \'scaledFont\' in scope', 'TextGrowth.swift missing return in instance method expected to return \'CGFloat\''],
+  },
+  tsc: {
+    text: text(
+      'Exit code 2', 'src/board.ts(41,7): error TS2322: Type \'string\' is not assignable to type \'number\'.',
+      'src/board.ts(58,12): error TS2339: Property \'rung\' does not exist on type \'Step\'.',
+    ),
+    command: 'npx tsc --noEmit', kind: 'tsc',
+    items: ['board.ts TS2322 Type \'string\' is not assignable to type \'number\'.', 'board.ts TS2339 Property \'rung\' does not exist on type \'Step\'.'],
+  },
+  truncated: { text: truncated(48213), command: 'node --test test/board.test.mjs', kind: 'node', items: ['board', 'groups stopped steps first'] },
+  timeout: {
+    text: text('Command timed out after 10m 0s', 'Exit code 143', '> Task :composeApp:linkDebugTestIosSimulatorArm64'),
+    command: './gradlew :composeApp:iosSimulatorArm64Test', kind: 'timeout', items: ['./gradlew :composeApp:iosSimulatorArm64Test timed out'],
+  },
+  other: {
+    text: text(
+      'Exit code 1', '', '> app@0.1.0 test', '> node --test \'test/*.test.mjs\'', '',
+      'Error: Cannot find module \'/home/someone/app/test/helpers-2.mjs\'', 'npm error Lifecycle script `test` failed with error:', 'npm error code 1',
+    ),
+    command: './tools/check.sh', kind: 'other', items: ['./tools/check.sh: npm error code #', 'exit 1'],
+  },
+};
 
 // ---- The signature and the commands that count (R4.3, R4.4) ----
 
 test('each runner\'s failure text gives its signature: kind, label and items, hashed without line numbers', () => {
-  assert.equal(Object.keys(EXPECTED).length, 16);
-  for (const [name, want] of Object.entries(EXPECTED)) {
-    const sig = signatureOf(fixture(name), want.command);
-    assert.deepEqual({ kind: sig.kind, label: sig.label, items: sig.items }, { kind: want.kind, label: want.label, items: want.items }, name);
+  assert.equal(Object.keys(CASES).length, 16);
+  for (const [name, want] of Object.entries(CASES)) {
+    const sig = signatureOf(want.text, want.command);
+    assert.deepEqual({ kind: sig.kind, label: sig.label, items: sig.items }, { kind: want.kind, label: want.items[0], items: want.items }, name);
     assert.equal(sig.hash, createHash('sha1').update(`${want.kind}\n${want.items.join('\n')}`).digest('hex'), name);
     assert.ok(sig.label.length <= 80, name);
   }
 });
 
 test('a moved line, a new test time or a longer truncation leaves the signature as it was', () => {
-  const moved = (text) => text.replace(/:(\d+)(?=[:\s)])/g, (_, n) => `:${Number(n) + 7}`).replace(/\((\d+\.\d+)ms\)/g, '(9.5ms)');
-  for (const name of ['node-test.txt', 'compiler.txt', 'gradle-kotlin.txt', 'tsc.txt']) {
-    const { command } = EXPECTED[name];
-    assert.equal(signatureOf(moved(fixture(name)), command).hash, signatureOf(fixture(name), command).hash, name);
+  const moved = (s) => s.replace(/:(\d+)(?=[:\s)])/g, (_, n) => `:${Number(n) + 7}`).replace(/\((\d+\.\d+)ms\)/g, '(9.5ms)');
+  for (const name of ['node-test', 'compiler', 'gradle-kotlin', 'tsc']) {
+    const { text: failed, command } = CASES[name];
+    assert.equal(signatureOf(moved(failed), command).hash, signatureOf(failed, command).hash, name);
   }
-  const longer = fixture('truncated.txt').replace('48213 characters', '91002 characters');
-  assert.equal(signatureOf(longer, 'node --test').hash, signatureOf(fixture('truncated.txt'), 'node --test').hash);
+  assert.equal(signatureOf(truncated(91002), 'node --test').hash, signatureOf(truncated(48213), 'node --test').hash);
   assert.equal(signatureOf('Error: spawn /bin/zsh ENOENT', 'npm test'), null, 'no exit code: the shell never started');
 });
 
@@ -354,7 +489,7 @@ test('a background build is noted at launch and counted from its notification an
   const h = makeHome();
   hook(start('claude-opus-5-5'), h.home);
   const output = join(h.top, 'bxo7damvu.output');
-  writeFileSync(output, fixture('gradle.txt').split('\n').slice(1).join('\n'));
+  writeFileSync(output, GRADLE_FAIL.split('\n').slice(1).join('\n'));
   const command = 'node ~/sources/gulnya/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
   const launch = (cmd = command, description = 'Run the engine tests') => freeze({
     session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: cmd, description, run_in_background: true },
