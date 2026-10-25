@@ -483,9 +483,9 @@ function untracked(file) {
 }
 
 // An edit marks the failures the escalation hook counts as edited since, so the next one is a fix that failed; a
-// counted build started in the background is noted, so its end can be counted. Done in this process, so the hot
-// path gets no second one; never in a k run step or without the hook's config.json, and the rules load only when
-// there is something to write.
+// counted build or a k run started in the background is noted, so its end can be counted or its push handed on
+// (gulnya/enforced-escalation S-2 design R7.2). Done in this process, so the hot path gets no second one; never in a
+// k run step or without the hook's config.json, and the rules load only when there is something to write.
 async function forEscalation(input) {
   if (process.env.KIRUNAK_STEP) return;
   const edit = EDIT_TOOLS.has(input.tool_name);

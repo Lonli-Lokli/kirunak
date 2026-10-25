@@ -519,3 +519,20 @@ test('decide: the escalation hook\'s state files and log are refused to every ed
     else process.env.KIRUNAK_HOME = was;
   }
 });
+
+// ---- gulnya/enforced-escalation S-7: a k run started in the background is noted, so its end's push is found ----
+
+test('a background k run is noted under its description, however k is invoked; one in the foreground, a k list, or a k run in a k run step is not', () => {
+  const home = blockedHome({ lifted: { by: 'override', at: '2026-10-25T21:05:00.000Z' } });
+  const state = () => JSON.parse(readFileSync(join(home, 'escalate', 's1.json'), 'utf8')).background ?? {};
+  const bg = (command, description) => ({ session_id: 's1', tool_name: 'Bash', tool_input: { command, description, run_in_background: true }, cwd: '/tmp' });
+  for (const input of [bg('k list', 'List the tasks'), bash('k run weather/offline-forecast --watch', '/tmp')]) assert.equal(run(input, home).stdout, '');
+  assert.equal(run(bg('k run weather/offline-forecast --watch', 'Run the task in a step'), home, { KIRUNAK_STEP: 'S-1' }).stdout, '');
+  assert.deepEqual(state(), {}, 'nothing noted');
+  assert.equal(run(bg('cd ~/sources/weather && k run weather/offline-forecast --watch 2>&1', 'Run the weather task'), home).stdout, '');
+  assert.equal(run(bg('node ~/sources/kirunak/bin/k.mjs run weather/radar-tiles', 'Run the radar task'), home).stdout, '');
+  const notes = state();
+  assert.deepEqual(Object.keys(notes), ['Run the weather task', 'Run the radar task']);
+  assert.deepEqual(Object.values(notes).map(({ command, run: kRun }) => [command, kRun]), [['k run weather/offline-forecast', true], ['k run weather/radar-tiles', true]]);
+  assert.ok(Object.values(notes).every((n) => Date.parse(n.at)));
+});

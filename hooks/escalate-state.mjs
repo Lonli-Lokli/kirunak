@@ -59,21 +59,38 @@ const matches = (re, text) => {
   }
 };
 
+// The words of the command a Bash call runs: its first segment past a leading `cd <dir> &&`, without `env` and
+// `VAR=x` words.
+function firstWords(command) {
+  const list = segments(command);
+  let i = 0;
+  while (i < list.length && wordsOf(list[i])[0] === 'cd') i++;
+  return bare(wordsOf(list[i] ?? []));
+}
+
 /**
  * The build or test command a Bash call runs, as its words joined by spaces, or null when it runs none: past a
  * leading `cd <dir> &&`, `env` and `VAR=x` words and heavy-lock.mjs's wrapper, the first segment must match BUILD
  * or one of `extra` (the workspace's `hook.commands`). A failed `ls` or `git` never counts.
  */
 export function commandOf(command, extra = []) {
-  const list = segments(command);
-  let i = 0;
-  while (i < list.length && wordsOf(list[i])[0] === 'cd') i++;
-  let words = bare(wordsOf(list[i] ?? []));
+  let words = firstWords(command);
   const inner = unlocked(words);
   if (inner) words = bare(inner);
   if (!words.length) return null;
   const text = words.join(' ');
   return BUILD.test(text) || (Array.isArray(extra) && extra.some((re) => matches(re, text))) ? text : null;
+}
+
+/**
+ * The `k run <id>` a Bash call starts, or null when it starts none: `k`, or `node …/k.mjs`, with the verb run and a
+ * task id, past what commandOf skips. Its end's output may close with a push for the owner (S-2 design R7.2).
+ */
+export function kRunOf(command) {
+  let words = firstWords(command);
+  if (/(?:^|\/)node(?:js)?$/.test(words[0] ?? '')) words = words.slice(1);
+  if (!/(?:^|\/)k(?:\.mjs)?$/.test(words[0] ?? '') || words[1] !== 'run' || !/^[^-]/.test(words[2] ?? '')) return null;
+  return `k run ${words[2]}`;
 }
 
 // ---- The signature of a failure (R4.4; S-1 §1: one text, `Exit code N` first, maybe middle-truncated or timed out) ----
@@ -463,13 +480,36 @@ export function blockLines({ label, task, rung, subagent = false }) {
 
 const NOTES = 20;
 
-// Notes a counted build started in the background under its description, which is all its end's notification names.
-export function noteBackground(state, description, command, now = new Date()) {
+// Notes a counted build, or a k run (`run: true`), started in the background under its description, which is all its
+// end's notification names.
+export function noteBackground(state, description, command, now = new Date(), run = false) {
   delete state.background[description];
-  state.background[description] = { command, at: now.toISOString() };
+  state.background[description] = { command, at: now.toISOString(), ...(run ? { run: true } : {}) };
   const keys = Object.keys(state.background);
   for (const k of keys.slice(0, Math.max(0, keys.length - NOTES))) delete state.background[k];
 }
+
+// ---- A k run's push (R7.2, E-16; S-1 §8: only the model sends one, with the PushNotification tool) ----
+
+const PUSH_MARK = 'kirunak-push: ';
+const PUSH_TAIL = 4096;
+const PUSH_MAX = 200;
+
+// The push a k run's output closes with (lib/run.mjs prints it as its last line on a stop for the owner), or null.
+export function pushIn(outputFile) {
+  const lines = tail(outputFile, PUSH_TAIL).split('\n').map((l) => l.trim());
+  const line = lines.filter((l) => l.startsWith(PUSH_MARK)).at(-1);
+  const text = line?.slice(PUSH_MARK.length).trim();
+  return text ? text.slice(0, PUSH_MAX).trim() : null;
+}
+
+// What the session is told to do with it: send exactly that text now, as only the model can push; the stop shows in k
+// waiting and the brief board whether or not the push arrives (AC-26 as A-1 words it).
+export const pushLines = (text) => [
+  'kirunak: k run stopped for the owner. Send this with PushNotification now, exactly as written:',
+  text,
+  'k waiting and k board --brief show this stop too.',
+];
 
 // The parts of a `<task-notification>` prompt, or null for any other prompt.
 export function notificationOf(prompt) {
@@ -492,13 +532,15 @@ export function edited(home, input, now = new Date()) {
   if (markEdited(state, now, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
 }
 
-// The freeze hook, after letting a Bash call with `run_in_background` through: a counted build is noted.
+// The freeze hook, after letting a Bash call with `run_in_background` through: a counted build is noted, and a k run,
+// whose end may carry a push for the owner (R7.2, E-16).
 export function startedInBackground(home, input, config, now = new Date()) {
   if (config?.hook?.enabled === false) return;
   const ti = input.tool_input ?? {};
-  const command = commandOf(ti.command, config?.hook?.commands);
+  const run = kRunOf(ti.command);
+  const command = run ?? commandOf(ti.command, config?.hook?.commands);
   if (!command) return;
   const state = readState(home, input.session_id, input.agent_id ?? null);
-  noteBackground(state, String(ti.description || ti.command), command, now);
+  noteBackground(state, String(ti.description || ti.command), command, now, Boolean(run));
   writeState(home, state);
 }
