@@ -41,6 +41,9 @@ outputs: review.md
 - Model and effort: the plan line's, else the workspace's `models.<kind>` (`plugins.md` §3), else none, so Claude
   Code's own default applies. Judgement: the model is a cost choice the workspace makes, and a plan line names one
   only where a step needs it.
+  That is the model of the step's own attempts. After two failures the step runs on the rungs of the workspace's
+  `ladder` (§2), each on the model and effort the rung names, whatever the plan line says; the plan line is never
+  rewritten for a climb. A review step climbs the same way, always in build mode.
 - `covers:` names AC and E ids (or `all`). `k plan check <id>` refuses a plan that leaves an AC or E uncovered, names
   an id the task does not have, or has a step whose `inputs:` no earlier step produces and no file in the repo
   matches (R8, R9), and a plan with no step of kind `review`, since `k accept` takes only a review (`review.md` §3).
@@ -95,17 +98,48 @@ pending  →  ready  →  running  →  done
 - `waiting-owner`: `needs.json` has `{ "owner": "<question>" }`: the orchestrator stops the task, appends the
   question to `progress.md` and `events.jsonl`, and `k list` shows `awaiting owner`. The owner answers in a session
   (`k intake answer` if it changes the task: then an amendment) or by editing `notes.md`; `k run` resumes.
-- `failed` is retried once with a fresh conversation and the failure's report as an extra input; a `needs.json` the
-  failed run left is moved to `steps/S-n/needs-<k>.json` first (one index for every request, answered or not), and
-  the report names it, so the retry never reads it. A second failure stops the task and marks the step `[escalate]`
-  in `plan.md` for the owner's session. When the workspace names `models.escalate`, the mark says which model and
-  effort the owner's session should hand the step to. Judgement: a step that went wrong twice needs a person or a
-  stronger model, and the orchestrator must not loop. Only the step's own failures count: one written because
-  `k run` stopped (`k run was stopped (<signal>)`, or `the k run that started it stopped` after a crash) is not one
-  of the two (nothing went wrong in the step; a person starts every `k run` again, so this does not loop either). A
-  stop writes no failure report, its `failed` line the whole record, and the attempt after a stop reads the step's
-  last own report, if it has one since the last escalation. `k step fail --why` refuses a stop's words: a failure
-  given by hand is the step's own.
+- `failed` climbs the ladder (gulnya/enforced-escalation; **evidence**: its design, S-2, and the builders' reports).
+  The workspace's `ladder` (`plugins.md` §3) is a list of rungs, lowest first; kirunak's default is `sonnet`, then
+  `opus` at high effort in build mode, then `fable` at high effort in design mode, one attempt on each rung above the
+  lowest. A step's own model is the lowest rung's in effect: it gets two attempts, the second with a fresh
+  conversation and the failure's report as an extra input. A `needs.json` the failed run left is moved to
+  `steps/S-n/needs-<k>.json` first (one index for every request, answered or not), and the report names it, so the
+  retry never reads it. After the second failure `k run` goes on by itself: the next pass hands the step to the next
+  rung, which runs it as a fresh conversation with every failure report of the step as input.
+  - **A rung's mode** says who builds. In `build` mode the rung's model does the step. In `design` mode it runs a
+    design conversation first, whose one output is `steps/S-n/design-<k>.md` (brief: `steps/S-n/design-brief.md`,
+    from `templates/design-brief.md`, design only, no agents, no heavy job), and then a fresh run of the rung directly
+    below builds from that design. The two runs are one attempt, and only its end counts. Judgement: the owner's rule
+    that the top model designs and reviews and the cheaper one builds, since building on Fable costs two and a half
+    times what Opus does.
+  - **The rungs run in order**: a Sonnet step goes to Opus, never straight to Fable; a step that began on Opus goes to
+    Fable. A step whose Fable-led attempt fails, or a
+    heavy step after its second failure, **stops the task for the owner**: `plan.md` marks the step `[escalate]` and
+    gets a `failures:` field naming every failure report of the step, and the stop line reads `S-1 failed on every
+    rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md`. Removing the mark retries the
+    step on its own rung. An older plan's `[escalate: <model>, <effort>]` mark still parses.
+  - **What counts**: a step that exits other than 0, ends without its outputs, times out or overruns its budget. Only
+    the step's own failures count: one written because `k run` stopped (`k run was stopped (<signal>)`, or `the k run
+    that started it stopped` after a crash) is not one of them (nothing went wrong in the step; a person starts every
+    `k run` again, so this does not loop). A stop writes no failure report, its `failed` line the whole record, and
+    the attempt after a stop reads the step's last own report, if it has one since the last climb. A review's `not
+    met` verdict is the review's result, never a failure. `k step fail --why` refuses a stop's words: a failure given
+    by hand is the step's own and counts.
+  - **The record**: `progress.md` gets a line `escalated: to <model> (…)` per climb and the stop line; `events.jsonl`
+    gets an `escalate` event per climb or stop (trigger `k run failure count`, the failures, the rung from and to)
+    and an `escalated-run` event when each rung's conversation ends, with its tokens and cost; `k board --card` lists
+    the climbs. The count is read from `progress.md` on every pass (0.13 ms for 2,000 lines, measured), so it needs no
+    state of its own.
+  - **Who is told** (`lib/notice.mjs`): a climb tells no one (a line in `k run`'s output and the card). A stop for the
+    owner, or a question the owner must answer, shows first in `k waiting` and `k board --brief` as at most three
+    lines of at most 80 characters (the title and id, what happened with why, the one thing to do or the folder of
+    the reports), and ends `k run` with a last line `kirunak-push: <text>`. A session that started `k run` as a
+    background command has the hook hand it that text to send with Claude Code's PushNotification tool. **Judgement**
+    (amendment A-1): the push is best effort. S-15 sent five and two never showed, one came two minutes late; delivery
+    and what a tap opens are Claude Code's and the phone's. So `k doctor` says when `agentPushNotifEnabled` is not true
+    in `settings.json`, and the stop is in `k waiting` whether or not the push arrives.
+  - **In a session the same rung rule** is held by the escalation hook (`approval.md` §7), which counts a session's
+    repeated build and test failures; inside a `k run` step it stays quiet, because `k run` counts that step itself.
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready, nothing
   runs and no step is left undecided because `ps` could not answer (above; with `ps` broken for good it waits in
@@ -315,4 +349,4 @@ week: the numbers R11 asks for, and the ones to compare with the workspace's bas
 
 ## 7. Requirements this file satisfies
 
-R8 (§1), R9 (§1 inputs, §2, §3 `--disallowedTools Agent`), R10 (§4), R11 and D9 (§5), R12 (§6).
+R8 (§1), R9 (§1 inputs, §2 including the ladder, §3 `--disallowedTools Agent`), R10 (§4), R11 and D9 (§5), R12 (§6).
