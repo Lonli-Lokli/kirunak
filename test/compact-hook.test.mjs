@@ -141,3 +141,140 @@ test('thresholdOf clamps to [100,000, the model\'s window]; limitOf takes the nu
   assert.equal(userWindow({ configDir: r.configDir, model: 'claude-other-4', wModel: 200_000 }).window, 500000);
   assert.deepEqual(userWindow({ configDir: join(r.top, 'none'), model: MODEL, wModel: 1_000_000 }), { window: 1_000_000, from: { kind: 'none', key: null } });
 });
+
+// ---- §3 Whose compaction it is (R3.3) ----
+
+test('attribute: the five rows, the edge at exactly T - LAG, and a closed turn ten minutes ago', () => {
+  const T = 150000;
+  const now = Date.parse('2026-01-05T12:00:00Z');
+  const open = { state: 'open', at: '2026-01-05T11:59:00Z' };
+  const ago = (min) => ({ state: 'closed', at: new Date(now - min * 60_000).toISOString() });
+  assert.deepEqual(attribute({ turn: null, ctx: T, T, now }), { main: true, row: 1, why: null });
+  assert.equal(attribute({ turn: null, ctx: T - LAG - 1, T, now }).why, 'below threshold');
+  assert.equal(attribute({ turn: open, ctx: T, T, agents: [{ id: 'a1', ctx: T + OVERSHOOT }], now }).why, 'agent past threshold');
+  assert.equal(attribute({ turn: open, ctx: T, T, agents: [{ id: 'a1', ctx: T + OVERSHOOT - 1 }], now }).main, true);
+  assert.equal(attribute({ turn: open, ctx: T - LAG - 1, T, now }).row, 3);
+  assert.deepEqual(attribute({ turn: open, ctx: T - LAG, T, now }), { main: true, row: 5, why: null });
+  assert.equal(attribute({ turn: ago(10), ctx: T, T, now }).why, 'turn closed');
+  assert.equal(attribute({ turn: ago(IDLE_MIN), ctx: T, T, now }).main, true, 'closed long enough for idle compaction');
+  assert.equal(attribute({ turn: ago(10), ctx: 0, T, agents: [], now }).row, 4);
+});
+
+// ---- §4 The rule table, pure: each row reads only what it needs ----
+
+test('decide: the rows in the table\'s order, each fact read only when its row is reached', async () => {
+  const no = (name) => () => assert.fail(`${name} was read`);
+  const base = { trigger: 'auto', config: { compact: { enabled: true } }, session: 's-main', window: { kirunak: true }, ctx: 160000, attribution: { main: true }, limit: 500000, task: 'app/demo', running: ['S-2'] };
+  const row = async (f) => {
+    const d = await decide({ ...base, ...f });
+    return [d.decision, d.row, d.why, d.expect];
+  };
+  assert.deepEqual(await row({ trigger: 'manual', config: no('config') }), ['allow', 'R4.2', 'manual', true]);
+  assert.deepEqual(await row({ config: null, window: no('window') }), ['allow', 'R4.3', 'state unreadable', false]);
+  assert.deepEqual(await row({ config: { compact: { enabled: false } } }), ['allow', 'R4.3', 'state unreadable', false]);
+  assert.deepEqual(await row({ session: '../x' }), ['allow', 'R4.3', 'state unreadable', false]);
+  assert.deepEqual(await row({ window: { kirunak: false }, ctx: no('ctx') }), ['allow', 'R4.3a', "user's window", false]);
+  assert.deepEqual(await row({ ctx: null, attribution: no('attribution') }), ['allow', 'R4.4', 'ctx unknown', false]);
+  assert.deepEqual(await row({ attribution: { main: false, why: 'turn closed' }, limit: no('limit') }), ['allow', 'R4.5', 'turn closed', false]);
+  assert.deepEqual(await row({ ctx: 500000, task: no('task') }), ['allow', 'R4.6', 'limit', true]);
+  assert.deepEqual(await row({ task: null, running: no('running') }), ['block', 'R4.7', 'no task', false]);
+  const d = await decide({ ...base, running: async () => ['S-2', 'S-3'] });
+  assert.equal(d.reason, 'kirunak: S-2, S-3 are running; the compaction waits for the step boundary');
+  assert.deepEqual(await row({ running: null }), ['allow', 'R4.3', 'state unreadable', false]);
+  assert.deepEqual(await row({ running: [] }), ['allow', 'R4.9', 'boundary', true]);
+});
+
+// ---- §4 The hook, run as Claude Code runs it: the event on stdin, a scratch KIRUNAK_HOME and config folder ----
+
+const STARTED = '2026-01-05 10:00 S-2 started (session s-main)\n';
+
+// A home as S-6's k install will write it: config.json with the workspace repo `app` and its `compact` block, session
+// s-main on task app/demo, the task's progress.md, a transcript whose last call is `ctx`, the user's settings file.
+function makeHome({ ctx = 160000, model = MODEL, progress = STARTED, session = { task: 'app/demo', step: 'S-2' }, compact = {}, user, record = null } = {}) {
+  const r = makeRepos(user === undefined ? {} : { user });
+  const home = join(r.top, 'home');
+  writeJson(join(home, 'escalate', 'config.json'), {
+    repos: { app: r.app },
+    compact: { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 'user', roots: [r.app], ...compact },
+  });
+  if (session) writeJson(join(home, 'sessions', 's-main.json'), session);
+  if (record) writeJson(join(home, 'escalate', 's-main.json'), record);
+  const dir = join(r.app, 'kirunak', 'tasks', 'demo');
+  mkdirSync(dir, { recursive: true });
+  if (progress != null) writeFileSync(join(dir, 'progress.md'), progress);
+  const transcript = join(r.top, 'projects', 'p', 's-main.jsonl');
+  if (ctx != null) writeTranscript(transcript, [assistant(ctx, model)]);
+  const input = (extra = {}) => ({
+    session_id: 's-main', transcript_path: transcript, cwd: r.app, prompt_id: 'p1', hook_event_name: 'PreCompact', trigger: 'auto',
+    custom_instructions: null, ...extra,
+  });
+  const log = () => (existsSync(join(home, 'compact.log')) ? readFileSync(join(home, 'compact.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+  const expected = () => (existsSync(join(home, 'compact', 's-main.json')) ? JSON.parse(readFileSync(join(home, 'compact', 's-main.json'), 'utf8')).expect : null);
+  return { ...r, home, dir, transcript, input, log, expected };
+}
+
+// The environment without this session's own kirunak and compaction settings, so a test never reads the real ones.
+function cleanEnv(extra = {}) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^KIRUNAK_|^CLAUDE_CODE_AUTO_COMPACT_WINDOW$|^CLAUDE_CONFIG_DIR$/.test(k)) env[k] = v;
+  return { ...env, ...extra };
+}
+
+function run(h, input = h.input(), env = {}) {
+  const r = spawnSync(process.execPath, [HOOK], {
+    input: typeof input === 'string' ? input : JSON.stringify(input), cwd: h.top, encoding: 'utf8',
+    env: cleanEnv({ KIRUNAK_HOME: h.home, CLAUDE_CONFIG_DIR: h.configDir, ...env }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  return { out: r.stdout ? JSON.parse(r.stdout) : null, line: h.log().at(-1) ?? null };
+}
+
+const allowed = (r, why) => {
+  assert.equal(r.out, null, 'an allow prints nothing');
+  assert.equal(r.line.decision, 'allow');
+  assert.equal(r.line.why, why);
+};
+
+test('R4.8: a step the session started is running: blocked with the reason, logged with every field (AC-4)', () => {
+  const h = makeHome();
+  const r = run(h);
+  assert.deepEqual(r.out, { decision: 'block', reason: 'kirunak: S-2 is running; the compaction waits for the step boundary' });
+  assert.deepEqual(Object.keys(r.line), ['ts', 'session', 'cwd', 'trigger', 'ctx', 'model', 'window', 'T', 'limit', 'turn', 'agents', 'steps', 'decision', 'row', 'why']);
+  assert.deepEqual({ ...r.line, ts: null }, {
+    ts: null, session: 's-main', cwd: h.app, trigger: 'auto', ctx: 160000, model: MODEL,
+    window: { value: 183000, from: { kind: 'local', file: join(h.app, '.claude', 'settings.local.json'), key: 'autoCompactWindow' } },
+    T: 150000, limit: 500000, turn: null, agents: [], steps: ['S-2'], decision: 'block', row: 'R4.8', why: 'running',
+  });
+  assert.equal(h.expected(), null);
+});
+
+test('R4.9: no step of the session running is a boundary: allowed, and expect recorded (AC-1)', () => {
+  const h = makeHome({ progress: `${STARTED}2026-01-05 10:30 S-2 finished\n` });
+  const r = run(h);
+  allowed(r, 'boundary');
+  assert.deepEqual(r.line.steps, []);
+  const e = h.expected();
+  assert.deepEqual({ ...e, at: null }, { at: null, why: 'boundary', ctx: 160000 });
+  assert.equal(e.at, r.line.ts);
+});
+
+test('R4.8 and R1.2: a step started under the chain\'s old id holds the block; one of another session does not', () => {
+  const old = '2026-01-05 10:00 S-2 started (session s-old)\n';
+  assert.equal(run(makeHome({ progress: old, session: { task: 'app/demo', previous: ['s-old'] } })).out.decision, 'block');
+  allowed(run(makeHome({ progress: old })), 'boundary');
+});
+
+test('R4.1: in a k run step the hook reads and writes nothing, though everything else says block (E-6, O-1)', () => {
+  const h = makeHome();
+  const r = run(h, h.input(), { KIRUNAK_STEP: 'S-2' });
+  assert.deepEqual(r, { out: null, line: null });
+  assert.equal(existsSync(join(h.home, 'compact')), false);
+});
+
+test('R4.2: a manual /compact is allowed while a step runs, and expect recorded (E-4)', () => {
+  const h = makeHome();
+  allowed(run(h, h.input({ trigger: 'manual', custom_instructions: 'keep the plan' })), 'manual');
+  assert.equal(h.expected().why, 'manual');
+});
+
