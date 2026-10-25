@@ -499,7 +499,7 @@ const VERBS = {
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
   // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
   // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
-  // stopped at for the owner, each as its notice of at most 3 lines (gulnya/enforced-escalation R7.3, E-15).
+  // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15).
   async waiting({ ws }) {
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
