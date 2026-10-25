@@ -401,6 +401,44 @@ function log(input, reason, off) {
   }
 }
 
+// ---- What the escalation hook needs from a call let through (gulnya/enforced-escalation S-2 design R4.4, R4.5) ----
+
+/** The escalation hook's state file of the session or subagent making the call: hooks/escalate-state.mjs statePath. */
+export function escalationFile(input, home = kirunakHome()) {
+  const id = /^[A-Za-z0-9_-]+$/;
+  const session = input?.session_id;
+  const agent = input?.agent_id;
+  if (!id.test(session ?? '') || (agent != null && !id.test(agent))) return null;
+  return join(home, 'escalate', agent ? `${session}.${agent}.json` : `${session}.json`);
+}
+
+// Whether the file tracks a failure with no edit since, read here so that most edits load nothing more.
+function untracked(file) {
+  if (!existsSync(file)) return false;
+  try {
+    return Object.values(JSON.parse(readFileSync(file, 'utf8')).failures ?? {}).some((f) => f && !f.editedSince);
+  } catch {
+    return false;
+  }
+}
+
+// An edit marks the failures the escalation hook counts as edited since, so the next one is a fix that failed; a
+// counted build started in the background is noted, so its end can be counted. Done in this process, so the hot
+// path gets no second one; never in a k run step or without the hook's config.json, and the rules load only when
+// there is something to write.
+async function forEscalation(input) {
+  if (process.env.KIRUNAK_STEP) return;
+  const edit = EDIT_TOOLS.has(input.tool_name);
+  if (!edit && !(input.tool_name === 'Bash' && input.tool_input?.run_in_background === true)) return;
+  const home = kirunakHome();
+  const file = escalationFile(input, home);
+  if (!file || !existsSync(join(home, 'escalate', 'config.json'))) return;
+  if (edit && !untracked(file)) return;
+  const rules = await import('./escalate-state.mjs');
+  if (edit) rules.edited(home, input);
+  else rules.startedInBackground(home, input, rules.readConfig(home));
+}
+
 async function main() {
   let raw = '';
   for await (const chunk of process.stdin) raw += chunk;
@@ -412,7 +450,14 @@ async function main() {
   }
   if (!input || typeof input !== 'object') return;
   const reason = decide(input);
-  if (!reason) return;
+  if (!reason) {
+    try {
+      await forEscalation(input);
+    } catch {
+      // the escalation hook's notes never change the decision
+    }
+    return;
+  }
   const off = process.env.KIRUNAK_FREEZE_OFF === '1';
   log(input, reason, off);
   if (off) return;
