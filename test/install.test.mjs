@@ -197,3 +197,153 @@ test('a hook kirunak wrote before is rewritten; the new one finds node with a GU
   assert.match(execFileSync('git', ['log', '-1', '--format=%B'], { cwd: r, encoding: 'utf8' }), /SLAP: 0 \(S\)/);
 });
 
+// gulnya/enforced-escalation S-2 design §6: the rung agents, config.json and the escalation hook's blocks.
+const LADDER = [
+  { model: 'sonnet' },
+  { model: 'opus', effort: 'high', mode: 'build' },
+  { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['music-deep'], cacheTtl: '1h' },
+];
+const ws = (extra = {}) => ({ ladder: LADDER, modulePath: '/ws/kirunak/workspace.mjs', hook: { ...DEFAULT_HOOK }, repos: [{ name: 'hub', root: '/ws/hub' }], ...extra });
+const agent = (h, name) => readFileSync(join(h.agentsDir, `${name}.md`), 'utf8');
+
+test('a <model>-step agent for every rung above the lowest, with the rung\'s model or id, effort and cacheTtl', () => {
+  const h = home();
+  const { actions } = install({ ...h, ws: ws() });
+  assert.ok(!existsSync(join(h.agentsDir, 'sonnet-step.md')), 'none for the lowest');
+  assert.ok(!existsSync(join(h.agentsDir, 'music-deep.md')), 'the workspace\'s own agent is not written');
+  const opus = agent(h, 'opus-step');
+  assert.match(opus, /^---\nname: opus-step\ndescription: "One rung up from sonnet on this workspace's ladder: .*It takes the step itself\..*"\nmodel: opus\neffort: high\ntools: "\*"\n---\n/);
+  assert.ok(opus.includes(`\n${MARKER}\n`));
+  assert.ok(!opus.includes('experimental'), 'no cacheTtl, no experimental block');
+  assert.match(opus, /Take the step: read every failure report/);
+  const fable = agent(h, 'fable-step');
+  assert.match(fable, /\nmodel: claude-fable-5-1\neffort: high\ntools: "\*"\nexperimental:\n {2}cacheTtl: 1h\n---\n/);
+  assert.match(fable, /Design and review only: return a design .* Write no production code\./);
+  assert.ok(!/\{\{|gulnya|KatyaFM|music/.test(opus + fable), 'every slot filled, no portfolio word (AC-30)');
+  assert.ok(actions.includes(`wrote the opus-step agent: ${join(h.agentsDir, 'opus-step.md')}`));
+});
+
+test('an agent path that is a link is written through, and the action names the real file', () => {
+  const h = home();
+  const repoAgents = join(h.dir, 'portfolio', 'claude', 'agents');
+  mkdirSync(repoAgents, { recursive: true });
+  mkdirSync(h.agentsDir, { recursive: true });
+  writeFileSync(join(repoAgents, 'fable-step.md'), `---\nname: fable-step\nmodel: fable\n---\n${MARKER}\nold\n`);
+  symlinkSync(join(repoAgents, 'fable-step.md'), join(h.agentsDir, 'fable-step.md'));
+  const { actions } = install({ ...h, ws: ws() });
+  assert.ok(lstatSync(join(h.agentsDir, 'fable-step.md')).isSymbolicLink(), 'the link kept');
+  assert.match(readFileSync(join(repoAgents, 'fable-step.md'), 'utf8'), /model: claude-fable-5-1/);
+  assert.ok(actions.includes(`rewrote the fable-step agent: ${join(h.agentsDir, 'fable-step.md')} → ${realpathSync(join(repoAgents, 'fable-step.md'))}`));
+});
+
+test('an agent kirunak did not write is refused, nothing written, unless --replace-agents', () => {
+  const h = home();
+  mkdirSync(h.agentsDir, { recursive: true });
+  const own = '---\nname: opus-step\nmodel: claude-opus-5-5\neffort: xhigh\n---\nThe owner\'s own.\n';
+  writeFileSync(join(h.agentsDir, 'opus-step.md'), own);
+  const before = readFileSync(h.settingsPath);
+  assert.throws(() => install({ ...h, ws: ws() }), (e) => e.code === 1 && e.message.includes(`${join(h.agentsDir, 'opus-step.md')} is an agent kirunak did not write`) &&
+    e.message.includes('--replace-agents') && e.message.includes('Nothing was written'));
+  assert.ok(readFileSync(h.settingsPath).equals(before), 'settings untouched');
+  assert.equal(agent(h, 'opus-step'), own);
+  assert.ok(!existsSync(join(h.agentsDir, 'fable-step.md')) && !existsSync(join(h.home, 'escalate')) && !existsSync(h.skillsDir));
+  assert.match(install({ ...h, ws: ws(), print: true }).actions.join('\n'), /would refuse: .*opus-step\.md is an agent kirunak did not write/);
+  const { actions } = install({ ...h, ws: ws(), replaceAgents: true });
+  assert.ok(actions.includes(`replaced the opus-step agent: ${join(h.agentsDir, 'opus-step.md')}`));
+  assert.match(agent(h, 'opus-step'), /model: opus\neffort: high/);
+});
+
+test('an agent kirunak wrote is rewritten when the ladder changes and left alone when it has not', () => {
+  const h = home();
+  install({ ...h, ws: ws() });
+  const path = join(h.agentsDir, 'opus-step.md');
+  const mtime = statSync(path).mtimeMs;
+  const again = install({ ...h, ws: ws() }).actions;
+  assert.equal(statSync(path).mtimeMs, mtime, 'not rewritten');
+  assert.ok(again.includes(`${path} is already the opus-step agent the ladder makes`));
+  const xhigh = LADDER.map((r) => (r.model === 'opus' ? { ...r, effort: 'xhigh' } : r));
+  assert.ok(install({ ...h, ws: ws({ ladder: xhigh }) }).actions.includes(`rewrote the opus-step agent: ${path}`));
+  assert.match(agent(h, 'opus-step'), /\neffort: xhigh\n/);
+});
+
+test('a link to nothing is refused by name', () => {
+  const h = home();
+  mkdirSync(h.agentsDir, { recursive: true });
+  symlinkSync(join(h.dir, 'gone.md'), join(h.agentsDir, 'opus-step.md'));
+  assert.throws(() => install({ ...h, ws: ws() }), /opus-step\.md is a link to .*gone\.md, which does not exist/);
+});
+
+test('config.json: the ladder with each rung\'s agents, the hook switches, the repos and the workspace, written every run', () => {
+  const h = home();
+  const now = new Date('2026-10-25T12:00:00Z');
+  install({ ...h, ws: ws({ hook: { ...DEFAULT_HOOK, repeats: 3, commands: ['^bun test'] } }), now });
+  const path = join(h.home, 'escalate', 'config.json');
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
+    written: '2026-10-25T12:00:00.000Z',
+    workspace: '/ws/kirunak/workspace.mjs',
+    ladder: [
+      { model: 'sonnet', id: null, effort: null, mode: null, agents: [] },
+      { model: 'opus', id: null, effort: 'high', mode: 'build', agents: ['opus-step'] },
+      { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['fable-step', 'music-deep'] },
+    ],
+    hook: { enabled: true, block: true, repeats: 3, commands: ['^bun test'] },
+    repos: { hub: '/ws/hub' },
+  });
+  install({ ...h, ws: ws(), now: new Date('2026-10-26T08:00:00Z') });
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).written, '2026-10-26T08:00:00.000Z', 'its time newer than the module\'s');
+  const bare = home();
+  install(bare);
+  const none = JSON.parse(readFileSync(join(bare.home, 'escalate', 'config.json'), 'utf8'));
+  assert.equal(none.workspace, null, 'before k init: kirunak\'s default ladder');
+  assert.deepEqual(none.ladder.map((r) => r.agents), [[], ['opus-step'], ['fable-step']]);
+});
+
+test('the escalation hook on its seven events, SubagentStop matching every agent above the lowest', () => {
+  const h = home();
+  install({ ...h, ws: ws() });
+  const hooks = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
+  const command = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs')}`;
+  const ours = (event) => hooks[event].filter((b) => b.hooks[0].command === command);
+  const matchers = Object.fromEntries(['PostToolUseFailure', 'PostToolUse', 'SubagentStop', 'UserPromptSubmit', 'UserPromptExpansion', 'SessionStart', 'PostModelSwitch']
+    .map((event) => [event, ours(event)]).map(([event, blocks]) => {
+      assert.equal(blocks.length, 1, `one block on ${event}`);
+      assert.deepEqual(blocks[0].hooks, [{ type: 'command', command, timeout: 10 }]);
+      return [event, blocks[0].matcher ?? null];
+    }));
+  assert.deepEqual(matchers, {
+    PostToolUseFailure: 'Bash', PostToolUse: 'Agent', SubagentStop: 'opus-step|fable-step|music-deep', UserPromptSubmit: null,
+    UserPromptExpansion: null, SessionStart: 'startup|resume|clear', PostModelSwitch: null,
+  });
+  assert.ok(!('matcher' in ours('UserPromptSubmit')[0]), 'no matcher key at all');
+  assert.ok(existsSync(join(KIRUNAK, 'hooks', 'kirunak-escalate.mjs')), 'the hook it wires is in this checkout');
+});
+
+test('an older freeze block gets the grown matcher; a changed ladder replaces the SubagentStop matcher, never adds a block', () => {
+  const h = home();
+  const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
+  json.hooks.PreToolUse.push({ matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash|Skill', hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`, timeout: 10 }] });
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  const { actions } = install({ ...h, ws: ws() });
+  assert.ok(actions[0].startsWith('updated the kirunak PreToolUse hook') && actions[0].endsWith('(matcher Edit|Write|MultiEdit|NotebookEdit|Bash|Skill|CronCreate|SendMessage)'));
+  let after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
+  assert.equal(after.PreToolUse.length, 2);
+  assert.equal(after.PreToolUse[1].matcher, FREEZE_MATCHER);
+  const two = [{ model: 'sonnet' }, { model: 'opus', effort: 'high' }];
+  const again = install({ ...h, ws: ws({ ladder: two }) }).actions;
+  after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
+  assert.equal(after.SubagentStop.length, 1);
+  assert.equal(after.SubagentStop[0].matcher, 'opus-step');
+  assert.ok(again.some((a) => /^updated the kirunak SubagentStop hook .*\(matcher opus-step\)$/.test(a)));
+  assert.ok(again.some((a) => a.endsWith('already has the kirunak PostToolUseFailure hook')));
+});
+
+test('--print shows the blocks, the agents and config.json, and writes none of them', () => {
+  const h = home();
+  const before = readFileSync(h.settingsPath);
+  const all = install({ ...h, ws: ws(), print: true }).actions.join('\n');
+  assert.ok(readFileSync(h.settingsPath).equals(before));
+  assert.ok(!existsSync(h.agentsDir) && !existsSync(join(h.home, 'escalate')));
+  assert.ok(all.includes(`would set in ${h.settingsPath} hooks.SubagentStop: {"matcher":"opus-step|fable-step|music-deep"`));
+  assert.ok(all.includes(`would write ${join(h.agentsDir, 'fable-step.md')}:\n---\nname: fable-step\n`));
+  assert.ok(all.includes(`would write ${join(h.home, 'escalate', 'config.json')}:\n{\n  "written": `));
+});
