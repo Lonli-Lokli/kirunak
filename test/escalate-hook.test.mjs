@@ -75,7 +75,7 @@ test('the freeze hook and the rules name the same state file, and read model fam
   for (const m of ['claude-opus-5-5', 'claude-fable-5[1m]', 'sonnet', 'claude-haiku-5-5', '']) assert.equal(hookFamily(m), familyOf(m), m);
 });
 
-test('count: new, a rerun without an edit, a repeat after one, one fire, then only what follows it', () => {
+test('count: new, a rerun without an edit, a repeat after one, one fire, the block, then only what follows it', () => {
   const state = { failures: {} };
   const sig = { kind: 'node', label: 'x', hash: 'h1' };
   const edit = () => { state.failures.h1.editedSince = true; };
@@ -86,7 +86,9 @@ test('count: new, a rerun without an edit, a repeat after one, one fire, then on
   edit();
   assert.equal(count(state, sig, 2), 'fire');
   edit();
+  assert.equal(count(state, sig, 2), 'block', 'the first failure after the fire, edited or not');
   assert.equal(count(state, sig, 2), 'after');
+  edit();
   assert.equal(count(state, sig, 2), 'after');
   assert.equal(count(state, { ...sig, hash: 'h2' }, 2), 'new', 'a new signature after a fire is a new count');
 });
@@ -235,7 +237,7 @@ test('fail, edit, fail, edit, fail fires exactly once: three lines of at most 80
   assert.equal(hook(failure(), h.home).stdout, '', 'never again on the same failures');
   assert.equal(hook(failure(), h.home).stdout, '');
   const log = h.log();
-  assert.deepEqual(log.map((l) => l.trigger), ['hook fired', 'repeat after fire', 'repeat after fire']);
+  assert.deepEqual(log.map((l) => l.trigger), ['hook fired', 'hook blocked', 'repeat after fire']);
   const { time, ...fired } = log[0];
   assert.ok(Date.parse(time));
   assert.deepEqual(fired, {
@@ -389,6 +391,167 @@ test('SessionStart on startup prunes state files untouched for 14 days', () => {
   hook(start('claude-opus-5-5'), h.home);
   assert.deepEqual(h.files(), ['s1.json']);
   assert.ok(existsSync(join(h.home, 'escalate', 'config.json')));
+});
+
+// ---- S-6: the block and what lifts it (S-2 design §5) ----
+
+const FABLE_LADDER = [DEFAULT[0], DEFAULT[1], { ...DEFAULT[2], agents: ['music-deep'] }];
+const OPUS_DENY = [
+  'kirunak: edits blocked: climbs one rung failed again.',
+  'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
+  'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
+];
+const launchOf = (type, agentId, extra = {}) => ({
+  session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type },
+  tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5' }, ...extra,
+});
+const stopOf = (type, agentId) => ({ session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: '/dev/null' });
+const denied = (r) => r.out?.hookSpecificOutput?.permissionDecisionReason ?? null;
+
+// A session on `model` whose test fired and then failed once more: blocked.
+function blocked(model = 'claude-opus-5-5', hookConfig = {}, ladder = FABLE_LADDER) {
+  const h = makeHome(hookConfig, ladder);
+  hook(start(model), h.home);
+  cycle(h, 2);
+  freeze(edit(), h.home);
+  hook(failure(), h.home);
+  return h;
+}
+
+test('fire, then the next failure blocks the session\'s edits with three lines; Read, Bash, Agent and other skills go on (R5.1, E-10)', () => {
+  const h = blocked();
+  const { block } = h.state();
+  assert.deepEqual([block.label, block.rung, block.lifted, block.agent], ['climbs one rung', { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step', 'music-deep'] }, null, null]);
+  for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
+    const reason = denied(freeze(edit({ tool_name: tool, tool_input: { file_path: '/tmp/src/a.mjs', notebook_path: '/tmp/a.ipynb', content: 'x' } }), h.home));
+    assert.deepEqual(reason?.split('\n'), OPUS_DENY, tool);
+  }
+  fits(OPUS_DENY);
+  for (const input of [
+    { tool_name: 'Read', tool_input: { file_path: '/tmp/src/a.mjs' } },
+    { tool_name: 'Bash', tool_input: { command: NODE_CMD } },
+    { tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: 'fable-step', prompt: 'the failure' } },
+    { tool_name: 'Skill', tool_input: { skill: 'k-draft' } },
+  ]) assert.equal(freeze({ session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', ...input }, h.home).stdout, '', input.tool_name);
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'hook blocked']);
+  assert.equal(h.log()[1].signature.label, 'climbs one rung');
+  hook(failure(), h.home);
+  assert.deepEqual(h.log().map((l) => l.trigger).slice(2), ['repeat after fire'], 'a later failure logs, and the block stays as it was');
+  assert.equal(h.state().block.at, block.at);
+  assert.equal(freeze(edit(), h.home, { KIRUNAK_STEP: 'S-3' }).stdout, '', 'a k run step is never blocked (E-12)');
+});
+
+test('hook.block: false, or a block of another session, denies nothing; the fire still says nothing of a block', () => {
+  const h = blocked('claude-opus-5-5', { block: false });
+  assert.equal(h.state().block, null);
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'repeat after fire']);
+  assert.equal(freeze(edit(), h.home).stdout, '');
+  const other = blocked();
+  assert.equal(freeze(edit({ session_id: 's2' }), other.home).stdout, '');
+});
+
+test('only an agent of the rung above, launched after the block, lifts it when it ends (R5.3, E-8)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(launchOf('fable-step', 'aearly'), h.home);
+  cycle(h, 2);
+  freeze(edit(), h.home);
+  hook(failure(), h.home);
+  hook(launchOf('opus-step', 'asame'), h.home);
+  hook(launchOf('fable-step', 'alate'), h.home);
+  hook(launchOf('fable-step', 'anested', { agent_id: 'asame', agent_type: 'opus-step' }), h.home);
+  for (const [type, id] of [['fable-step', 'aearly'], ['opus-step', 'asame'], ['fable-step', 'anested'], ['fable-step', 'aunknown']]) {
+    hook(stopOf(type, id), h.home);
+    assert.equal(h.state().block.lifted, null, `${type} ${id}`);
+    assert.ok(denied(freeze(edit(), h.home)), `${id}: still blocked`);
+  }
+  assert.ok(h.state().agents.alate.at && !h.state().agents.alate.ended, 'the launch alone lifts nothing');
+  assert.ok(denied(freeze(edit(), h.home)));
+  hook(stopOf('fable-step', 'alate'), h.home);
+  const { block, failures } = h.state();
+  assert.deepEqual({ ...block.lifted, at: 0 }, { by: 'agent', agent: 'fable-step', agentId: 'alate', at: 0 });
+  assert.deepEqual(failures, {}, 'the lifted failure is forgotten: its next failure is a new count');
+  assert.equal(freeze(edit(), h.home).stdout, '');
+  const lift = h.log().at(-1);
+  assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'music-deep']]);
+  const deep = blocked();
+  hook(launchOf('music-deep', 'amusic'), deep.home);
+  hook(stopOf('music-deep', 'amusic'), deep.home);
+  assert.equal(deep.state().block.lifted.agent, 'music-deep', 'an agent of the rung\'s `agents` lifts too');
+});
+
+test('a Fable session\'s block names no agent and waits for the owner (E-9)', () => {
+  const h = blocked('claude-fable-5');
+  assert.deepEqual(h.state().block.rung, { from: 'claude-fable-5', to: null, agents: [] });
+  const lines = denied(freeze(edit(), h.home)).split('\n');
+  fits(lines);
+  assert.equal(lines[2], 'Stop and say plainly what is missing; the owner can type /k-go-on.');
+  hook(launchOf('fable-step', 'atop'), h.home);
+  hook(stopOf('fable-step', 'atop'), h.home);
+  assert.equal(h.state().block.lifted, null);
+  hook({ session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' }, h.home);
+  assert.equal(h.state().block.lifted.by, 'override');
+});
+
+test('a subagent\'s failure after its fire blocks its caller\'s session, and its own edits are told NEEDS-FABLE (E-13)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(launchOf('opus-step', 'asub'), h.home);
+  const sub = { agent_id: 'asub', agent_type: 'opus-step' };
+  cycle(h, 2, sub);
+  freeze(edit(sub), h.home);
+  hook(failure(sub), h.home);
+  const { block } = h.state();
+  assert.deepEqual([block.agent, block.agentType, block.rung.from, block.rung.to], ['asub', 'opus-step', 'claude-opus-5-5', 'fable'], 'the rung of the model that failed');
+  assert.equal(h.state('asub').block, undefined, 'the block lives in the caller\'s file');
+  assert.deepEqual(denied(freeze(edit(), h.home)).split('\n'), OPUS_DENY);
+  const own = denied(freeze(edit(sub), h.home)).split('\n');
+  fits(own);
+  assert.equal(own[2], 'Stop and return to your caller marked NEEDS-FABLE; the owner can type /k-go-on.');
+  assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).agent], ['hook blocked', 'asub']);
+  hook({ session_id: 's1', hook_event_name: 'UserPromptExpansion', command_name: 'k-go-on', prompt: '/k-go-on' }, h.home);
+  assert.deepEqual(h.state('asub').failures, {}, 'the override clears the subagent\'s count that set the block');
+});
+
+test('/k-go-on typed lifts the block and clears the counts; the same prompt from a cron, or inside a subagent, does not (E-11)', () => {
+  const h = blocked();
+  const go = { session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' };
+  for (const input of [
+    { session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '/k-go-on' },
+    { ...go, agent_id: 'asub', agent_type: 'general-purpose' },
+    { ...go, command_name: 'k-done', prompt: '/k-done' },
+  ]) {
+    assert.equal(hook(input, h.home).stdout, '');
+    assert.equal(h.state().block.lifted, null, JSON.stringify(input).slice(0, 80));
+  }
+  assert.equal(hook(go, h.home).stdout, '');
+  const { block, failures } = h.state();
+  assert.deepEqual([block.lifted.by, block.lifted.agent, failures], ['override', null, {}]);
+  assert.equal(freeze(edit(), h.home).stdout, '');
+  const last = h.log().at(-1);
+  assert.deepEqual([last.trigger, last.liftedBy, last.signature.hash], ['/k-go-on override', 'override', block.hash]);
+  hook(go, h.home);
+  assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).signature], ['/k-go-on override', null], 'logged even with nothing to lift');
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'hook blocked', '/k-go-on override', '/k-go-on override'], 'every block and override logged (AC-21)');
+});
+
+test('an edit that fails to apply takes back its flag, so the next failure is no repeat (O-2)', () => {
+  const h = makeHome();
+  hook(failure(), h.home);
+  freeze(edit({ tool_use_id: 'toolu_1' }), h.home);
+  assert.equal(Object.values(h.state().failures)[0].editedBy, 'toolu_1');
+  const failed = (id, tool = 'Edit') => hook({
+    session_id: 's1', hook_event_name: 'PostToolUseFailure', tool_name: tool, tool_use_id: id, tool_input: { file_path: '/tmp/x' }, error: 'EACCES: permission denied',
+  }, h.home);
+  assert.equal(failed('toolu_other').stdout, '');
+  assert.equal(Object.values(h.state().failures)[0].editedSince, true, 'another edit\'s failure takes back nothing');
+  failed('toolu_1', 'Write');
+  assert.equal(Object.values(h.state().failures)[0].editedSince, false);
+  hook(failure(), h.home);
+  assert.equal(Object.values(h.state().failures)[0].repeats, 0, 'a rerun, not a fix that failed');
+  freeze(edit({ tool_use_id: 'toolu_2' }), h.home);
+  hook(failure(), h.home);
+  assert.equal(Object.values(h.state().failures)[0].repeats, 1, 'an edit that applied still counts');
 });
 
 // ---- AC-12: the time the hook adds, machine-bound, so only with KIRUNAK_TIMING=1 ----
