@@ -290,11 +290,12 @@ is told to stop and return to its caller marked `NEEDS-OPUS` or `NEEDS-FABLE` (`
 prints nothing in any other call (AC-9).
 
 **The block.** The first failure after a fire sets a block on the session (a subagent's sets it on its caller). The
-freeze hook (§2) then refuses `Edit`, `Write`, `MultiEdit` and `NotebookEdit` there with a reason of three lines naming
-the rung and `/k-go-on`; reading, running tests and launching an agent stay open. Judgement: only an edit is
-blocked, because the session must still be able to run the agent that lifts it. With `hook.block: false` no block is
-set and the failure is only logged. Two things lift a block, and the code has no third (the rule at the top of the
-hook file, which a reviewer can check):
+freeze hook (§2) then refuses `Edit`, `Write`, `MultiEdit` and `NotebookEdit` there with a reason of three lines
+naming the rung and `/k-go-on`; reading, running tests and launching an agent stay open. Judgement: it refuses those
+four tools only (E-10), because the session must still be able to run the agent that lifts it, so a write through the
+shell (`sed -i`, `cat >`, `git apply`) is not refused: the block guards against a mistake, not against a deliberate
+way round it. With `hook.block: false` no block is set and the failure is only logged. Two things lift a block, and
+the code has no third (the rule at the top of the hook file, which a reviewer can check):
 
 1. A finished run of an agent of the rung above the block's, launched by that session after the block was set
    (SubagentStop). An Opus session's block is lifted by `fable-step` (or `music-deep` in gulnya) and not by

@@ -228,10 +228,12 @@ quiet inside a `k run` step (which counts its own), and adds a few milliseconds 
 apart and is told to return to its caller marked `NEEDS-OPUS` or `NEEDS-FABLE`.
 
 **The block.** After the hook has fired, the next failure of the same test blocks Edit, Write, MultiEdit and
-NotebookEdit in that session; the session can still read, run tests and launch the agent. Only a finished run of an
-agent one rung up (`fable-step` in an Opus session) lifts it. Or you can: type `/k-go-on` in the session, at the
-terminal or from the phone over Remote Control. It is yours alone: the skill is closed to the model, a Skill call of
-it is refused, and the hook counts it only when it arrives as your prompt. It also clears the failures counted so far.
+NotebookEdit in that session, and only those, so the session can still read, run tests and launch the agent, and a
+write through the shell (`sed -i`, `cat >`) is not refused: the block guards against a mistake, not against a
+deliberate way round it. Only a finished run of an agent one rung up (`fable-step` in an Opus session) lifts it. Or
+you can: type `/k-go-on` in the session, at the terminal or from the phone over Remote Control. It is yours alone:
+the skill is closed to the model, a Skill call of it is refused, and the hook counts it only when it arrives as your
+prompt. It also clears the failures counted so far.
 
 **Switches.** In the workspace module, `hook: { enabled, block, repeats, commands }`: `enabled: false` turns the hook
 off, `block: false` turns the block off and keeps the message, `repeats` is the repeat that fires (2), and `commands`
