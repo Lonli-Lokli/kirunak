@@ -94,6 +94,12 @@ export default {
   runner: { permissionMode: 'auto' },
   keeper: { intervalMinutes: 50 },
   baseline: './baseline.json',        // R12; optional
+  ladder: [                           // where a failed step goes; these are kirunak's defaults
+    { model: 'sonnet' },
+    { model: 'opus', effort: 'high', mode: 'build', attempts: 1 },
+    { model: 'fable', effort: 'high', mode: 'design', attempts: 1 },
+  ],
+  hook: { enabled: true, block: true, repeats: 2, commands: [] },
 };
 ```
 
@@ -101,8 +107,27 @@ export default {
   default to nothing. Judgement on `models`: which model and effort a kind of step runs on is a cost choice each
   workspace makes, so the core's default is to pass no `--model` and no `--effort` at all (Claude Code's own
   default applies). A workspace sets `models: { agent, review, sync }`, each `{ model, effort }`, and a
-  plan line overrides it per step (`orchestrator.md` §1). A step that failed twice climbs the workspace's `ladder`
-  (lib/ladder.mjs); `models.escalate` is no longer read, and `k doctor` names a workspace that still sets it.
+  plan line overrides it per step (`orchestrator.md` §1). `models.escalate` is no longer read: `k doctor` names a
+  workspace that still sets it.
+- **`ladder`** (lib/ladder.mjs; gulnya/enforced-escalation) holds the rungs a step that failed twice climbs, lowest
+  first, and nothing else sets a rung's model, effort, attempts or mode. A rung is `{ model, id?, effort?, mode?,
+  attempts?, agents?, cacheTtl? }`. `model` is a lower-case alias (`sonnet`); `id` pins a full model id of that family;
+  `effort` is one of low, medium, high, xhigh, max; `mode` is `build` (the default) or `design`; `attempts` is a whole
+  number, default 1; `agents` lists the workspace's own agents that stand on the rung (a `music-deep`, say), beside the
+  generated `<model>-step`; `cacheTtl` is `5m` or `1h`. Judgement: the list is read in order and no rung is special,
+  so no model is named in the code: a workspace with Haiku at the bottom gets a `sonnet-step` agent and its failed
+  Haiku steps go to Sonnet. The workspace is refused at load, naming the rung, for an empty list, a repeated model, an
+  unknown effort or mode, a rung 1 that names `mode`, `attempts` or `agents` (the lowest rung is the step's own model,
+  and its two attempts are `k run`'s), or a design rung with a design rung directly below it (its build run is on the
+  rung below, which must build). A design rung's attempt is a design run on its model and a fresh build run on the rung
+  below.
+- **`hook`** switches the escalation hook (`approval.md` §7): `enabled` (default true; false makes the hook do
+  nothing at all), `block` (default true; false keeps the message and sets no block), `repeats` (default 2, the repeat
+  after a fix that fires), `commands` (a list of regular-expression strings for more commands to count beyond the
+  built-in build and test runners). `k install` copies the ladder and these keys into `$KIRUNAK_HOME/escalate/
+  config.json`, which the hook reads, because the hook imports no workspace module (it runs on every failed Bash
+  call). `k doctor` says `hook off` and `block off` when either is false, and that the file disagrees with the module
+  or is older than it.
 - A plugin module default-exports `{ name, version, provides: { <seam>: implementation } }`. The core loads the
   workspace, then each plugin in order, validates every `provides` entry against the seam's contract (each named
   function present and a function; unknown seam names refused), applies the policy, and only then runs a verb.
@@ -130,6 +155,8 @@ sessions/<id>.json     a session's current task and step, context and cache (set
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)
 events.jsonl           what the front ends show as toasts: build ended, review ready, keep-alive, refusal
 freeze.log             every refusal of the PreToolUse hook (approval.md §2)
+escalate.log           every fire, block, lift and /k-go-on override of the escalation hook, one JSON line each (approval.md §7)
+escalate/              the hook's config.json (written by k install) and its state files per session, pruned after 14 days
 slapignore.json        the repos with the git hooks and the owner's approval of each one's .slapignore (change-size.md §4)
 guard/                 the default resource guard: lock, queue, claims.json, log.jsonl (§2)
 board.html             the generated board (boards.md §2)
