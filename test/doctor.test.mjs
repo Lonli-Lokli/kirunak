@@ -9,11 +9,13 @@ import { k, KIRUNAK, ladderWorkspace } from './helpers.mjs';
 // gulnya/enforced-escalation S-2 design R6.4: k doctor's lines on the ladder, its agents, settings.json's
 // modelSettings, the escalation hook's wiring, its config.json and its switches.
 
-// A workspace with the given keys, k installed for it into temp settings and agents folders.
+// A workspace with the given keys, k installed for it into temp settings and agents folders, push to the phone on as
+// /config turns it on.
 async function installed(extra = {}) {
   const w = await ladderWorkspace(extra);
   const paths = { settingsPath: join(w.dir, 'settings.json'), agentsDir: join(w.dir, 'agents'), skillsDir: join(w.dir, 'skills') };
   install({ ...paths, kirunakRoot: KIRUNAK, home: w.home, ws: w.ws });
+  writeFileSync(paths.settingsPath, JSON.stringify({ ...JSON.parse(readFileSync(paths.settingsPath, 'utf8')), agentPushNotifEnabled: true }, null, 2));
   const check = (ws = w.ws) => ladderChecks({ ws, settingsPath: paths.settingsPath, agentsDir: paths.agentsDir });
   const fails = (ws) => check(ws).filter(([ok]) => !ok).map(([, line]) => line);
   const settings = (change) => {
@@ -34,7 +36,24 @@ test('after k install every ladder line is ok, the ladder first', async () => {
     `rung agent fable-step: ${join(w.agentsDir, 'fable-step.md')}, fable, high`,
     'escalation hook: wired on 7 events',
     'escalate/config.json matches the workspace',
+    `push to the phone: on (agentPushNotifEnabled in ${w.settingsPath})`,
   ]);
+});
+
+test('push to the phone FAILs when settings.json does not set agentPushNotifEnabled true, naming /config from the phone or the terminal (E-16, A-1)', async () => {
+  const w = await installed();
+  const off = `push to the phone: off, agentPushNotifEnabled is not true in ${w.settingsPath}: type /config agentPushNotifEnabled=true in a session, on the phone or in the terminal`;
+  for (const value of [false, 'true', undefined]) {
+    w.settings((json) => {
+      if (value === undefined) delete json.agentPushNotifEnabled;
+      else json.agentPushNotifEnabled = value;
+    });
+    assert.deepEqual(w.fails(), [off], String(value));
+  }
+  rmSync(w.settingsPath);
+  assert.ok(w.fails().includes(off), 'no settings.json');
+  writeFileSync(w.settingsPath, JSON.stringify({ agentPushNotifEnabled: true }));
+  assert.ok(w.check().some(([ok, l]) => ok && l.startsWith('push to the phone: on')));
 });
 
 test('a rung agent missing, of another family or at another effort FAILs, naming k install', async () => {
@@ -144,4 +163,5 @@ test('k doctor --settings --agents prints the ladder lines', async () => {
   assert.match(out, /^ok {3}escalation hook: wired on 7 events$/m);
   assert.match(out, /^ok {3}hook kirunak-escalate\.mjs$/m);
   assert.match(out, /^FAIL models\.escalate is no longer read/m);
+  assert.match(out, /^ok {3}push to the phone: on \(agentPushNotifEnabled in .*settings\.json\)$/m);
 });
