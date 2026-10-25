@@ -527,6 +527,27 @@ test('decide: the escalation hook\'s state files and log are refused to every ed
   }
 });
 
+test('decide: a shell that runs the escalation hook\'s scripts is refused; reading them and node --test are not (S-17)', () => {
+  const bashOf = (command) => decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' });
+  const event = '{"hook_event_name":"UserPromptExpansion","command_name":"k-go-on","session_id":"s1"}';
+  for (const command of [
+    `echo '${event}' | node hooks/kirunak-escalate.mjs`, 'node /Users/x/sources/kirunak/hooks/kirunak-escalate.mjs < f',
+    'cat stop.json | KIRUNAK_HOME=/tmp/h nice node ~/kirunak/hooks/kirunak-escalate.mjs', './hooks/kirunak-escalate.mjs < f',
+    `node -e "import('./hooks/escalate-state.mjs').then((m) => m.writeState())"`, 'node < hooks/kirunak-escalate.mjs',
+  ]) {
+    const reason = bashOf(command);
+    assert.match(reason ?? '', /escalation hook's events come from Claude Code, not from a shell/, command);
+    assert.equal(decide({ tool_name: 'Monitor', tool_input: { command }, cwd: '/tmp' }), reason, `Monitor: ${command}`);
+  }
+  for (const command of [
+    'cat hooks/kirunak-escalate.mjs', 'grep -n x hooks/escalate-state.mjs', 'sed -n 1,40p hooks/kirunak-escalate.mjs',
+    'head -20 hooks/escalate-state.mjs | less', 'node --test test/escalate-hook.test.mjs', 'git log -- hooks/kirunak-escalate.mjs',
+  ]) assert.equal(bashOf(command), null, command);
+  fitsPhone(bashOf('node hooks/kirunak-escalate.mjs'));
+  const r = makeRepo();
+  assert.match(run(bash(`echo '${event}' | node hooks/kirunak-escalate.mjs`, '/tmp'), r.home).reason ?? '', /not from a shell/);
+});
+
 // ---- gulnya/enforced-escalation S-7: a k run started in the background is noted, so its end's push is found ----
 
 test('a background k run is noted under its description, however k is invoked; one in the foreground, a k list, or a k run in a k run step is not', () => {

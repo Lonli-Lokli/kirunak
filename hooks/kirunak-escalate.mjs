@@ -36,11 +36,12 @@ import {
 // here writes `block.lifted`. SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
 // /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone (S-1 §4), which lifts
 // nothing; a claude run from the model's shell has a second claude among this hook's ancestors, however its command
-// line is written. The freeze hook refuses, as a guard against mistakes, the Skill call of k-go-on, a CronCreate,
-// ScheduleWakeup or SendMessage that carries /k-go-on and an Agent prompt that starts with it, a claude run from the
-// shell that resumes a session or carries /k-go-on, and any write to this hook's state files and log (R5.2). Open
-// (S-16): an event written by hand and piped into this script from the model's shell has one claude above it, as the
-// owner's has, and nothing here tells the two apart.
+// line is written. An event written by hand and piped into this script from the model's shell has one claude above
+// it, as the owner's has, and nothing here tells the two apart. So the freeze hook refuses, as a guard against
+// mistakes and not against a deliberate bypass, the Skill call of k-go-on, a CronCreate, ScheduleWakeup or SendMessage
+// that carries /k-go-on and an Agent prompt that starts with it, a claude run from the shell that resumes a session or
+// carries /k-go-on, any write to this hook's state files and log (R5.2), and a shell command that runs this script or
+// escalate-state.mjs, named in it by basename, with node or as itself (S-17); a shell that hides the name gets past.
 
 const OUTPUT_TAIL = 64 * 1024;
 const GO_ON = 'k-go-on';

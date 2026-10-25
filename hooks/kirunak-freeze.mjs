@@ -11,7 +11,7 @@ import { kirunakHome } from '../lib/home.mjs';
 // For the escalation hook (gulnya/enforced-escalation S-2 design §5) it refuses edits while the session's block is in
 // force, and every way the model could reach what lifts the block: the Skill call of k-go-on, a scheduled prompt or a
 // message carrying /k-go-on, an agent's prompt that starts with it, a claude run from the shell that would type it into
-// a session, and the hook's own files.
+// a session, a shell that runs the hook's scripts with an event of its own, and the hook's own files.
 
 const OWNER_VERBS = new Set(['approve', 'accept', 'hold', 'resume', 'queue']);
 const OWNER_SKILLS = new Set(['k-approve', 'k-accept', 'k-hold', 'k-resume', 'k-go-on']);
@@ -25,6 +25,9 @@ const RESUMES = /^(?:--continue|--resume|--session-id)(?:=|$)|^-[A-Za-z]*[cr]/;
 const TICK = /^\s*[-*+]\s+\[[xX]\]/gm;
 const STAMP = /^(applied|declined):/gm;
 const GLOB = /[*?[]/;
+// The escalation hook's two scripts, by basename, whatever the path (S-16's open item, S-17).
+const HOOK_SCRIPT = /(?:^|[^\w.-])(?:kirunak-escalate|escalate-state)\.mjs\b/;
+const RUNTIMES = new Set(['node', 'nodejs', 'bun', 'deno']);
 
 const count = (text, re) => (text.match(re) ?? []).length;
 
@@ -47,6 +50,7 @@ const GO_ON = 'kirunak: /k-go-on is the owner\'s: only the owner, typing it, lif
 const GO_ON_SHELL = 'kirunak: a claude run that resumes a session or types /k-go-on is refused:\n' +
   'only the owner, typing /k-go-on, lifts an escalation block.';
 const HOOK_STATE = 'kirunak: the escalation hook\'s state and log are its own: leave them alone.';
+const HOOK_RUN = 'kirunak: the escalation hook\'s events come from Claude Code, not from a shell.';
 // A block written before its reason was stored: the same three things to say.
 const BLOCKED = 'kirunak: edits are blocked: a test failed again after the hand-up notice.\n' +
   'Launch the agent one rung up on this step.\nThe owner can type /k-go-on to lift it instead.';
@@ -353,10 +357,21 @@ function effects(words, redirected, dir) {
   return { writes, removes };
 }
 
+// Whether a segment runs an escalation hook script: the script itself, or a runtime with the script among its words,
+// its inline code or its stdin. cat, grep or sed of it only reads it; node --test of a test file names neither.
+function runsHook(tokens, words) {
+  const verb = base(words[0]);
+  if (HOOK_SCRIPT.test(verb)) return true;
+  return RUNTIMES.has(verb) && tokens.some((t) => typeof t === 'string' && HOOK_SCRIPT.test(t));
+}
+
 function shell(command, cwd) {
   let dir = cwd;
+  const named = HOOK_SCRIPT.test(command);
   for (const tokens of segments(command)) {
     const { words, redirected } = parse(tokens);
+    // A hand-written event piped into the hook would have one claude above it, as the owner's /k-go-on has.
+    if (named && runsHook(tokens, words)) return HOOK_RUN;
     const k = kArgs(words);
     if (k) {
       const verb = ownerVerbOf(k);
