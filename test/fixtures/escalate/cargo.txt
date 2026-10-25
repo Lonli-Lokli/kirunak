@@ -1,0 +1,26 @@
+Exit code 101
+   Compiling wordgrid v0.3.1 (/Users/volha/sources/wordgrid)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.84s
+     Running unittests src/lib.rs (target/debug/deps/wordgrid-9f2c1d0e8b7a6c5d)
+
+running 4 tests
+test grid::tests::fills_row ... ok
+test grid::tests::rejects_short_word ... FAILED
+test score::tests::bonus ... ok
+test score::tests::empty ... ok
+
+failures:
+
+---- grid::tests::rejects_short_word stdout ----
+
+thread 'grid::tests::rejects_short_word' panicked at src/grid.rs:88:9:
+assertion failed: !grid.accepts("ab")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    grid::tests::rejects_short_word
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

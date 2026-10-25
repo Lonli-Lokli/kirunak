@@ -1,0 +1,4 @@
+Command timed out after 10m 0s
+Exit code 143
+> Task :composeApp:compileKotlinIosSimulatorArm64
+> Task :composeApp:linkDebugTestIosSimulatorArm64

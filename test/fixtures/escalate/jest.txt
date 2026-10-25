@@ -1,0 +1,29 @@
+Exit code 1
+
+> web@1.0.0 test
+> jest
+
+FAIL src/daily.test.js
+  daily puzzle
+    ✓ picks the same puzzle for one date (3 ms)
+    ✕ rolls over at midnight in London (5 ms)
+
+  ● daily puzzle › rolls over at midnight in London
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "2026-10-26"
+    Received: "2026-10-25"
+
+      12 |     const d = puzzleDate(new Date('2026-10-25T23:30:00Z'));
+    > 13 |     expect(d).toBe('2026-10-26');
+         |               ^
+      14 |   });
+
+      at Object.toBe (src/daily.test.js:13:15)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total
+Time:        0.412 s
+Ran all test suites.

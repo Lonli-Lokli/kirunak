@@ -1,0 +1,140 @@
+{
+  "node-test.txt": {
+    "command": "node --test test/ladder.test.mjs",
+    "kind": "node",
+    "label": "climbs one rung",
+    "items": [
+      "climbs one rung",
+      "ladder",
+      "top-level fails"
+    ]
+  },
+  "gradle.txt": {
+    "command": "./gradlew :engine:jvmTest",
+    "kind": "gradle",
+    "label": "ScoreTest > adds a word's letters()",
+    "items": [
+      "ScoreTest > adds a word's letters()",
+      "ScoreTest > doubles on a bonus tile()"
+    ]
+  },
+  "gradle-kotlin.txt": {
+    "command": "./gradlew :engine:jvmTest",
+    "kind": "gradle",
+    "label": "Score.kt Return type mismatch: expected 'Int', actual 'Unit'.",
+    "items": [
+      "Score.kt Return type mismatch: expected 'Int', actual 'Unit'.",
+      "Score.kt Unresolved reference 'bonusOf'."
+    ]
+  },
+  "xcodebuild.txt": {
+    "command": "xcodebuild test -scheme Hronka -destination platform=iOS Simulator,name=iPhone 18 Pro Max",
+    "kind": "xcode",
+    "label": "HronkaTests.BoardTests testRotateKeepsScore",
+    "items": [
+      "HronkaTests.BoardTests testRotateKeepsScore"
+    ]
+  },
+  "jest.txt": {
+    "command": "npm test",
+    "kind": "jest",
+    "label": "daily puzzle › rolls over at midnight in London",
+    "items": [
+      "daily puzzle › rolls over at midnight in London"
+    ]
+  },
+  "vitest.txt": {
+    "command": "npx vitest run",
+    "kind": "vitest",
+    "label": "src/share.test.ts > share > encodes the grid",
+    "items": [
+      "src/share.test.ts > share > encodes the grid"
+    ]
+  },
+  "pytest.txt": {
+    "command": "python3 -m pytest tests",
+    "kind": "pytest",
+    "label": "tests/test_weekly.py::test_week_starts_sunday_1500",
+    "items": [
+      "tests/test_weekly.py::test_week_starts_sunday_1500"
+    ]
+  },
+  "go.txt": {
+    "command": "go test ./queue",
+    "kind": "go",
+    "label": "TestQueueDeadPid",
+    "items": [
+      "TestQueueDeadPid",
+      "TestQueueDeadPid/stale_lock",
+      "TestQueueFairTurns"
+    ]
+  },
+  "cargo.txt": {
+    "command": "cargo test",
+    "kind": "cargo",
+    "label": "grid::tests::rejects_short_word",
+    "items": [
+      "grid::tests::rejects_short_word"
+    ]
+  },
+  "cargo-build.txt": {
+    "command": "cargo build",
+    "kind": "cargo",
+    "label": "E0425 cannot find value `bonus` in this scope",
+    "items": [
+      "E0425 cannot find value `bonus` in this scope"
+    ]
+  },
+  "swift.txt": {
+    "command": "swift test",
+    "kind": "xcode",
+    "label": "subtitleFitsThirtyCharacters()",
+    "items": [
+      "subtitleFitsThirtyCharacters()"
+    ]
+  },
+  "compiler.txt": {
+    "command": "swift build",
+    "kind": "compiler",
+    "label": "TextGrowth.swift cannot find 'scaledFont' in scope",
+    "items": [
+      "TextGrowth.swift cannot find 'scaledFont' in scope",
+      "TextGrowth.swift missing return in instance method expected to return 'CGFloat'"
+    ]
+  },
+  "tsc.txt": {
+    "command": "npx tsc --noEmit",
+    "kind": "tsc",
+    "label": "board.ts TS2322 Type 'string' is not assignable to type 'number'.",
+    "items": [
+      "board.ts TS2322 Type 'string' is not assignable to type 'number'.",
+      "board.ts TS2339 Property 'rung' does not exist on type 'Step'."
+    ]
+  },
+  "truncated.txt": {
+    "command": "node --test test/board.test.mjs",
+    "kind": "node",
+    "label": "board",
+    "items": [
+      "board",
+      "groups stopped steps first"
+    ]
+  },
+  "timeout.txt": {
+    "command": "./gradlew :composeApp:iosSimulatorArm64Test",
+    "kind": "timeout",
+    "label": "./gradlew :composeApp:iosSimulatorArm64Test timed out",
+    "items": [
+      "./gradlew :composeApp:iosSimulatorArm64Test timed out"
+    ]
+  },
+  "other.txt": {
+    "command": "npm test",
+    "kind": "other",
+    "label": "npm test: npm error code #",
+    "items": [
+      "exit 1",
+      "npm test: npm error code #"
+    ]
+  }
+}
