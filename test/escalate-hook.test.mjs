@@ -475,7 +475,7 @@ test('quiet paths print nothing, and what does not count writes nothing (AC-9, O
     failure({}, 'git push', 'Exit code 128\nfatal: no upstream'),
     failure({ is_interrupt: true }),
     { ...failure(), tool_name: 'Edit', tool_input: { file_path: '/tmp/x' }, error: 'String to replace not found' },
-    { session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'run the tests again' },
+    { session_id: 's1', agent_id: 'asub', hook_event_name: 'UserPromptSubmit', prompt: 'run the tests again' },
     { session_id: 's1', hook_event_name: 'UserPromptExpansion', command_name: 'k-done', prompt: '/k-done' },
   ];
   for (const input of quiet) assert.equal(hook(input, h.home).stdout, '', JSON.stringify(input).slice(0, 80));
@@ -1038,4 +1038,127 @@ test('the hook\'s quiet path: median at most 50 ms and node\'s + 12, p95 at most
     assert.ok(r.median <= 50 && r.median <= node.median + 12, `median ${r.median.toFixed(1)} against node's ${node.median.toFixed(1)}`);
     assert.ok(r.p95 <= freezeEdit.p95 + 5, `p95 ${r.p95.toFixed(1)} against the freeze hook's ${freezeEdit.p95.toFixed(1)}`);
   }
+});
+
+// ---- fresh-session-per-step S-5: the agent records and the turn flag the PreCompact hook reads (its S-3 design §3,
+// §6). Every event here is written inline. ----
+
+const promptOf = (extra = {}) => ({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'go on with the next step', prompt_id: 'p1', ...extra });
+const stopEventOf = (tasks = null, extra = {}) => ({ session_id: 's1', hook_event_name: 'Stop', stop_hook_active: false, ...(tasks ? { background_tasks: tasks } : {}), ...extra });
+const stateText = (h) => readFileSync(statePath(h.home, 's1'), 'utf8');
+// A run's transcript closing with its hand-back, written into the test's own folder.
+function handedBack(h) {
+  const path = join(h.top, 'handed-back.jsonl');
+  writeFileSync(path, `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'SubagentHandback', input: { message: 'done' } }] } })}\n`);
+  return path;
+}
+
+test('a launch keeps the name the caller gave and the output file; a foreground agent, launched at its end, is recorded ended (AC-12, R6.1)', () => {
+  const h = makeHome();
+  const out = '/tmp/project/s1/tasks/abg.output';
+  const bg = launchOf('Explore', 'abg', {}, { input: { description: 'find the parser' }, response: { description: 'find the parser', outputFile: out } });
+  assert.equal(hook(bg, h.home).stdout, '', 'a launch says nothing');
+  const a = h.state().agents.abg;
+  assert.deepEqual([a.type, a.description, a.outputFile, a.ended, a.by], ['Explore', 'find the parser', out, null, null]);
+  assert.ok(Date.parse(a.at) > 0);
+  hook(launchOf('Explore', 'aresp', {}, { input: { description: undefined }, response: { description: 'named in the response' } }), h.home);
+  assert.deepEqual([h.state().agents.aresp.description, h.state().agents.aresp.outputFile], ['named in the response', null]);
+  // Foreground (S-1 §7, a -p run): its SubagentStop comes first, then PostToolUse with `completed` and no output file.
+  hook(stopOf('filler', 'afg', '/dev/null', { last_assistant_message: 'filled' }), h.home);
+  const stop = h.state().agents.afg;
+  hook(launchOf('filler', 'afg', {}, { input: { description: 'fill the gap' }, response: { isAsync: undefined, status: 'completed', agentType: 'filler' } }), h.home);
+  const fg = h.state().agents.afg;
+  assert.deepEqual([fg.description, fg.outputFile, fg.ended, fg.finished], ['fill the gap', null, stop.ended, true]);
+  hook(launchOf('filler', 'afg2', {}, { response: { status: 'completed' } }), h.home);
+  assert.equal(h.state().agents.afg2.ended, h.state().agents.afg2.at, 'with no stop before it, ended at its launch');
+});
+
+test('every named agent\'s end is recorded and an internal agent\'s never; the second SubagentStop changes nothing (AC-12, R6.2, R6.3)', () => {
+  const h = makeHome();
+  hook(launchOf('Explore', 'aexp', {}, { response: { outputFile: '/tmp/project/s1/tasks/aexp.output' } }), h.home);
+  assert.equal(hook(stopOf('Explore', 'aexp', '/dev/null', { stop_hook_active: false, last_assistant_message: 'found it' }), h.home).stdout, '');
+  const first = h.state().agents.aexp;
+  assert.ok(first.ended && first.finished === true && first.outputFile, 'ended, so off the running list, and the record kept');
+  const before = stateText(h);
+  hook(stopOf('Explore', 'aexp', handedBack(h), { stop_hook_active: true }), h.home);
+  assert.equal(stateText(h), before, 'the second stop writes nothing');
+  // A first stop that had not finished: the second, after the hand-back, finishes it at the first end's time.
+  hook(launchOf('Explore', 'alate'), h.home);
+  hook(stopOf('Explore', 'alate', '/dev/null', { stop_hook_active: false }), h.home);
+  const unfinished = h.state().agents.alate;
+  assert.equal(unfinished.finished, false);
+  hook(stopOf('Explore', 'alate', handedBack(h), { stop_hook_active: true }), h.home);
+  assert.deepEqual([h.state().agents.alate.finished, h.state().agents.alate.ended], [true, unfinished.ended]);
+  // Claude Code's internal agents have an empty agent_type (S-1 §7): nothing, even past the matcher.
+  const was = stateText(h);
+  hook(stopOf('', 'ainternal', '/dev/null', { last_assistant_message: 'a summary' }), h.home);
+  assert.equal(stateText(h), was);
+  assert.deepEqual(h.log(), [], 'no lift, no line');
+});
+
+test('with every agent\'s end reaching the hook, only a rung agent still lifts the block, and an Explore logs nothing (R6.2)', () => {
+  const h = blocked();
+  const lines = h.log().length;
+  hook(launchOf('Explore', 'aexp'), h.home);
+  hook(stopOf('Explore', 'aexp', '/dev/null', { last_assistant_message: 'found it' }), h.home);
+  assert.equal(h.state().block.lifted, null);
+  assert.equal(h.log().length, lines, 'not even a refusal');
+  assert.ok(h.state().agents.aexp.ended);
+  hook(launchOf('fable-step', 'afable'), h.home);
+  hook(stopOf('fable-step', 'afable', '/dev/null', { last_assistant_message: 'the design' }), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'afable');
+});
+
+test('the turn flag: open on a main-session prompt, closed on Stop, kept by every other writer; never from an agent, a k run step or a hook switched off (R3.1, R6.4, E-6)', async () => {
+  const h = makeHome();
+  assert.equal(hook(promptOf(), h.home).stdout, '', 'a prompt says nothing');
+  const open = h.state().turn;
+  assert.deepEqual([open.state, open.promptId], ['open', 'p1']);
+  assert.ok(Date.parse(open.at) > 0);
+  assert.equal(hook(stopEventOf(), h.home).stdout, '', 'a Stop says nothing');
+  const closed = h.state().turn;
+  assert.deepEqual(Object.keys(closed).sort(), ['at', 'state']);
+  assert.ok(closed.state === 'closed' && Date.parse(closed.at) >= Date.parse(open.at));
+  hook(promptOf({ agent_id: 'asub' }), h.home);
+  hook(stopEventOf(null, { agent_id: 'asub' }), h.home);
+  assert.deepEqual(h.state().turn, closed, 'an agent\'s prompt or stop leaves the main session\'s turn as it was');
+  hook(promptOf({ prompt: '<task-notification>\n<status>completed</status>\n</task-notification>', prompt_id: 'p2' }), h.home);
+  assert.deepEqual([h.state().turn.state, h.state().turn.promptId], ['open', 'p2'], 'a task notification is a prompt too');
+  hook(failure(), h.home);
+  freeze(edit(), h.home);
+  hook(launchOf('Explore', 'aexp'), h.home);
+  assert.equal(h.state().turn.promptId, 'p2', 'a failure counted, the freeze hook\'s edit flag and a launch keep it');
+  // What the PreCompact hook makes of it (hooks/compact-rules.mjs attribute, row 4).
+  hook(stopEventOf(), h.home);
+  const { attribute } = await import('../hooks/compact-rules.mjs');
+  const turn = h.state().turn;
+  assert.equal(attribute({ turn, ctx: 150_000, T: 150_000, agents: [], now: Date.parse(turn.at) + 60_000 }).why, 'turn closed');
+  for (const [name, other, env] of [['a k run step', makeHome(), { KIRUNAK_STEP: 'S-3' }], ['hook.enabled: false', makeHome({ enabled: false }), {}]]) {
+    hook(promptOf(), other.home, env);
+    hook(stopEventOf([]), other.home, env);
+    assert.deepEqual(other.files(), [], `${name}: nothing written`);
+  }
+});
+
+test('Stop keeps the background tasks and marks ended an agent gone from them; one still listed, or launched after the snapshot, stays running (R6.5)', () => {
+  const h = makeHome();
+  for (const id of ['agone', 'alisted']) hook(launchOf('Explore', id), h.home);
+  // Launched while the Stop was taken, so missing from its list: its launch is later than the snapshot.
+  const s = JSON.parse(stateText(h));
+  s.agents.anew = { type: 'Explore', at: new Date(Date.now() + 60_000).toISOString(), ended: null, by: null };
+  writeFileSync(statePath(h.home, 's1'), JSON.stringify(s));
+  const shells = Array.from({ length: 60 }, (_, i) => ({ id: `b${i}`, type: 'shell', status: 'running', description: `job ${i}`, command: `node run.mjs -- ${'x'.repeat(900)}`, more: 'not kept' }));
+  const listed = { id: 'alisted', type: 'subagent', status: 'running', description: 'still looking', agent_type: 'Explore' };
+  hook(stopEventOf([...shells, listed]), h.home);
+  const { agents, tasks, turn } = h.state();
+  assert.deepEqual([agents.agone.ended, agents.agone.endedBy, tasks.at], [turn.at, 'snapshot', turn.at]);
+  assert.deepEqual([agents.alisted.ended, agents.anew.ended], [null, null], 'listed past the 50 kept still counts');
+  assert.equal(tasks.list.length, 50);
+  assert.deepEqual(Object.keys(tasks.list[0]), ['id', 'type', 'status', 'description', 'command']);
+  assert.equal(tasks.list[0].command.length, 500);
+  hook(stopEventOf(), h.home);
+  assert.deepEqual([h.state().agents.alisted.ended, h.state().tasks], [null, tasks], 'a Stop without the list changes no record');
+  hook(stopOf('Explore', 'agone', '/dev/null', { last_assistant_message: 'late' }), h.home);
+  const late = h.state().agents.agone;
+  assert.ok(late.ended > tasks.at && !('endedBy' in late) && late.finished === true, 'its own SubagentStop replaces the inferred end');
 });
