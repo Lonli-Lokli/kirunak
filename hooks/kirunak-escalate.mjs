@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
@@ -29,13 +31,16 @@ import {
 // SubagentStop of an agent of the rung above the block's, launched by the session itself after the fire that led to
 // the block (when that agent was already running then) or after the block, that ran as that rung (its model of the
 // rung's family, its effort not below the rung's) and finished its run (a hand-back or a last text, not interrupted)
-// (R5.3, E-8, S-10 B-1, S-1, S-2), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any subagent (R5.4
-// branch A, D-1, E-11). Nothing else here writes `block.lifted`. No tool call, prompt text or file write of the
-// model reaches those two: SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
+// (R5.3, E-8, S-10 B-1, S-1, S-2), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any
+// subagent and outside a claude run that another claude started (R5.4 branch A, D-1, E-11, S-10 S-4). Nothing else
+// here writes `block.lifted`. SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
 // /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone (S-1 §4), which lifts
-// nothing; and the freeze hook refuses the Skill call of k-go-on, a CronCreate, ScheduleWakeup or SendMessage that
-// carries /k-go-on, a claude run from the shell that resumes a session or carries /k-go-on, and any write to this
-// hook's state files and log (R5.2).
+// nothing; a claude run from the model's shell has a second claude among this hook's ancestors, however its command
+// line is written. The freeze hook refuses, as a guard against mistakes, the Skill call of k-go-on, a CronCreate,
+// ScheduleWakeup or SendMessage that carries /k-go-on and an Agent prompt that starts with it, a claude run from the
+// shell that resumes a session or carries /k-go-on, and any write to this hook's state files and log (R5.2). Open
+// (S-16): an event written by hand and piped into this script from the model's shell has one claude above it, as the
+// owner's has, and nothing here tells the two apart.
 
 const OUTPUT_TAIL = 64 * 1024;
 const GO_ON = 'k-go-on';
@@ -217,10 +222,17 @@ function liftByAgent(state, home, config, input, launch, finished, now) {
 }
 
 // The owner's override (R5.4 branch A, D-1, E-11): /k-go-on typed in the session, at the terminal or on the phone,
-// fires UserPromptExpansion with its command name; inside a subagent it is not the owner's. It lifts the block in force
-// and clears the session's counts, and is logged even with nothing to lift.
-function override(input, home, now) {
+// fires UserPromptExpansion with its command name; inside a subagent it is not the owner's, nor in a claude run that
+// another claude started (S-10 S-4: a run from the model's shell, however its command line hides it, has a second
+// claude among the hook's ancestors; the owner's session has one). It lifts the block in force and clears the
+// session's counts, and is logged even with nothing to lift.
+export function override(input, home, now, ancestors = ancestry) {
   if (input.command_name !== GO_ON || input.agent_id) return;
+  if (nested(ancestors())) {
+    const block = readState(home, input.session_id).block;
+    logLift(home, input.session_id, inForce(block) ? block : null, null, now, { trigger: '/k-go-on refused: nested run' });
+    return;
+  }
   const block = withState(home, input.session_id, null, () => {
     const state = readState(home, input.session_id);
     const found = inForce(state.block) ? state.block : null;
@@ -233,6 +245,38 @@ function override(input, home, now) {
   });
   logLift(home, input.session_id, block ?? null, 'override', now);
 }
+
+// The commands of the hook's ancestors, nearest first, read with ps on a /k-go-on alone: `claude` for Claude Code (its
+// binary, or node running its cli), else the command's base name. It stops at the second claude, after 8 steps or at
+// launchd.
+export function ancestry(pid = process.ppid) {
+  const ps = (field, p) => execFileSync('ps', ['-o', field, '-p', String(p)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const names = [];
+  for (let i = 0; i < 8 && pid > 1 && !nested(names); i++) {
+    let m;
+    try {
+      m = /^(\d+)\s+(.+)$/.exec(ps('ppid=,comm=', pid));
+    } catch {
+      break; // gone, or no ps
+    }
+    if (!m) break;
+    let name = basename(m[2]);
+    if (/\/claude\/versions\/[^/]+$/.test(m[2])) name = 'claude';
+    else if (/^node(?:js)?$/.test(name)) {
+      try {
+        if (/@anthropic-ai\/claude-code\/|claude-code\/cli/.test(ps('args=', pid))) name = 'claude';
+      } catch {
+        // gone: as named
+      }
+    }
+    names.push(name);
+    pid = Number(m[1]);
+  }
+  return names;
+}
+
+// A nested run: a claude above the hook's own claude (S-10 S-4).
+export const nested = (names) => names.filter((n) => n === 'claude').length >= 2;
 
 // Deletes the counts the lift settles: `hashes` (all with null) in the session's file and, when a subagent's failure
 // set the block, in that subagent's file too.

@@ -474,9 +474,16 @@ test('decide: the Skill call of k-go-on, a prompt or message carrying /k-go-on, 
     ['CronCreate', { cron: '*/5 * * * *', prompt: '  /K-GO-ON now' }],
     ['ScheduleWakeup', { delaySeconds: 60, prompt: '/k-go-on', reason: 'go on' }],
     ['SendMessage', { to: 'main', message: 'Done. Please run /k-go-on' }],
+    ['Agent', { description: 'go on', subagent_type: 'general-purpose', prompt: '/k-go-on' }],
+    ['Agent', { description: 'go on', prompt: '  /K-GO-ON please' }],
   ];
   for (const [tool, ti] of prompts) assert.match(refused({ tool_name: tool, tool_input: ti }), /\/k-go-on is the owner's/, tool);
-  for (const [tool, ti] of [['CronCreate', { cron: '0 9 * * *', prompt: 'run the tests' }], ['SendMessage', { to: 'main', message: 'tests pass' }]]) {
+  // A brief that quotes the block's reason, which names /k-go-on, still reaches the agent that lifts the block (S-10 S-4).
+  const brief = 'kirunak: edits blocked: climbs one rung failed again.\nLaunch fable-step on this step; the owner can type /k-go-on.';
+  for (const [tool, ti] of [
+    ['CronCreate', { cron: '0 9 * * *', prompt: 'run the tests' }], ['SendMessage', { to: 'main', message: 'tests pass' }],
+    ['Agent', { description: 'take the step', subagent_type: 'fable-step', prompt: brief }],
+  ]) {
     assert.equal(refused({ tool_name: tool, tool_input: ti }), null, tool);
   }
   for (const command of [

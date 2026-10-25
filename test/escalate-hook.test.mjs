@@ -10,6 +10,7 @@ import {
   commandOf, count, EFFORTS as HOOK_EFFORTS, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, runEnd,
   rungFor, signatureOf, statePath, unfitFor, withState,
 } from '../hooks/escalate-state.mjs';
+import { ancestry, nested, override } from '../hooks/kirunak-escalate.mjs';
 import { escalationFile } from '../hooks/kirunak-freeze.mjs';
 import { escalateConfig } from '../lib/install.mjs';
 import { familyOf } from '../lib/ladder.mjs';
@@ -554,6 +555,12 @@ test('only an agent of the rung above, launched after the block, lifts it when i
   assert.equal(deep.state().block.lifted.agent, 'music-deep', 'an agent of the rung\'s `agents` lifts too');
 });
 
+// /k-go-on as the owner types it, run in this process with the owner's ancestry (one claude), so the tests hold
+// wherever they run, a nested claude included; the real walk has its own test.
+const GO = { session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' };
+const OWNER = () => ['sh', 'claude', 'zsh', 'login', 'ghostty'];
+const goOn = (home, input = GO, ancestors = OWNER) => override(input, home, new Date(), ancestors);
+
 test('a Fable session\'s block names no agent and waits for the owner (E-9)', () => {
   const h = blocked('claude-fable-5');
   assert.deepEqual(h.state().block.rung, { from: 'claude-fable-5', to: null, agents: [] });
@@ -563,7 +570,7 @@ test('a Fable session\'s block names no agent and waits for the owner (E-9)', ()
   hook(launchOf('fable-step', 'atop'), h.home);
   hook(stopOf('fable-step', 'atop'), h.home);
   assert.equal(h.state().block.lifted, null);
-  hook({ session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' }, h.home);
+  goOn(h.home);
   assert.equal(h.state().block.lifted.by, 'override');
 });
 
@@ -583,28 +590,26 @@ test('a subagent\'s failure after its fire blocks its caller\'s session, and its
   fits(own);
   assert.equal(own[2], 'Stop and return to your caller marked NEEDS-FABLE; the owner can type /k-go-on.');
   assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).agent], ['hook blocked', 'asub']);
-  hook({ session_id: 's1', hook_event_name: 'UserPromptExpansion', command_name: 'k-go-on', prompt: '/k-go-on' }, h.home);
+  goOn(h.home);
   assert.deepEqual(h.state('asub').failures, {}, 'the override clears the subagent\'s count that set the block');
 });
 
 test('/k-go-on typed lifts the block and clears the counts; the same prompt from a cron, or inside a subagent, does not (E-11)', () => {
   const h = blocked();
-  const go = { session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' };
-  for (const input of [
-    { session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '/k-go-on' },
-    { ...go, agent_id: 'asub', agent_type: 'general-purpose' },
-    { ...go, command_name: 'k-done', prompt: '/k-done' },
-  ]) {
-    assert.equal(hook(input, h.home).stdout, '');
+  const go = GO;
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '/k-go-on' }, h.home).stdout, '');
+  assert.equal(h.state().block.lifted, null, 'a scheduled prompt');
+  for (const input of [{ ...go, agent_id: 'asub', agent_type: 'general-purpose' }, { ...go, command_name: 'k-done', prompt: '/k-done' }]) {
+    goOn(h.home, input);
     assert.equal(h.state().block.lifted, null, JSON.stringify(input).slice(0, 80));
   }
-  assert.equal(hook(go, h.home).stdout, '');
+  goOn(h.home);
   const { block, failures } = h.state();
   assert.deepEqual([block.lifted.by, block.lifted.agent, failures], ['override', null, {}]);
   assert.equal(freeze(edit(), h.home).stdout, '');
   const last = h.log().at(-1);
   assert.deepEqual([last.trigger, last.liftedBy, last.signature.hash], ['/k-go-on override', 'override', block.hash]);
-  hook(go, h.home);
+  goOn(h.home);
   assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).signature], ['/k-go-on override', null], 'logged even with nothing to lift');
   assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'hook blocked', '/k-go-on override', '/k-go-on override'], 'every block and override logged (AC-21)');
 });
@@ -812,6 +817,24 @@ test('a state file\'s lock held by another hook is skipped within about 100 ms, 
   assert.equal(withState(h.home, 's1', null, () => 'ran'), 'ran', 'a lock older than 2 s is a crashed hook\'s');
   assert.ok(!existsSync(lock));
   assert.equal(withState(h.home, 's1', null, () => 'again'), 'again', 'released after the run');
+});
+
+test('/k-go-on in a claude run that another claude started lifts nothing and is logged; the owner\'s lifts (S-10 S-4)', () => {
+  assert.equal(nested(OWNER()), false);
+  assert.equal(nested(['sh', 'claude', 'zsh', 'claude', 'zsh', 'login']), true);
+  assert.equal(nested([]), false);
+  const h = blocked();
+  goOn(h.home, GO, () => ['sh', 'claude', 'zsh', 'claude', 'zsh']);
+  assert.equal(h.state().block.lifted, null);
+  assert.deepEqual([lastRow(h).trigger, lastRow(h).liftedBy, lastRow(h).signature.label], ['/k-go-on refused: nested run', null, 'climbs one rung']);
+  goOn(h.home);
+  assert.equal(h.state().block.lifted.by, 'override');
+  const names = ancestry();
+  assert.ok(names.length <= 8 && names.every((n) => typeof n === 'string' && n), JSON.stringify(names));
+  // The real walk, as Claude Code runs the hook: here the test runner, its shells and whatever claude runs them.
+  const real = blocked();
+  hook(GO, real.home);
+  assert.equal(real.state().block.lifted?.by ?? null, nested(names) ? null : 'override', JSON.stringify(names));
 });
 
 // ---- AC-12: the time the hook adds, machine-bound, so only with KIRUNAK_TIMING=1 ----
