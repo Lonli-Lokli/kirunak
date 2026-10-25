@@ -303,3 +303,120 @@ test('in a k run step neither hook writes anything (E-12), and hook.enabled: fal
   hook(start('claude-opus-5-5'), off.home);
   assert.deepEqual([offOut.map((r) => r.stdout).join(''), off.files(), off.log()], ['', [], []]);
 });
+
+test('a subagent counts in its own file apart from its caller, and is told to return marked NEEDS-FABLE (E-13, E-14)', () => {
+  const h = makeHome();
+  hook(start('claude-sonnet-5'), h.home);
+  hook({
+    session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'fix it', subagent_type: 'opus-step' },
+    tool_response: { isAsync: true, status: 'async_launched', agentId: 'a8e3f33bc6f2f458e', resolvedModel: 'claude-opus-5-5' },
+  }, h.home);
+  hook(failure(), h.home);
+  const sub = { agent_id: 'a8e3f33bc6f2f458e', agent_type: 'opus-step' };
+  const out = cycle(h, 2, sub);
+  const lines = textOf(out[2]).split('\n');
+  fits(lines);
+  assert.equal(lines[2], 'Stop and return to your caller with this failure marked NEEDS-FABLE.');
+  const caller = h.state();
+  assert.deepEqual(Object.values(caller.failures).map((f) => [f.repeats, f.editedSince]), [[0, false]], 'the subagent\'s edits are not the caller\'s');
+  assert.equal(caller.agents.a8e3f33bc6f2f458e.model, 'claude-opus-5-5');
+  assert.equal(Object.values(h.state('a8e3f33bc6f2f458e').failures)[0].fired, true);
+  assert.equal(h.state('a8e3f33bc6f2f458e').agents, undefined, 'launches live in the session\'s file only');
+  assert.deepEqual([h.log()[0].agent, h.log()[0].agentType, h.log()[0].rung.to], ['a8e3f33bc6f2f458e', 'opus-step', 'fable']);
+  hook({ ...sub, session_id: 's1', hook_event_name: 'SubagentStop', agent_transcript_path: '/dev/null' }, h.home);
+  assert.ok(Date.parse(h.state().agents.a8e3f33bc6f2f458e.ended), 'its end is recorded for S-6\'s lift');
+});
+
+test('a background build is noted at launch and counted from its notification and output file (R4.5)', () => {
+  const h = makeHome();
+  hook(start('claude-opus-5-5'), h.home);
+  const output = join(h.top, 'bxo7damvu.output');
+  writeFileSync(output, fixture('gradle.txt').split('\n').slice(1).join('\n'));
+  const command = 'node ~/sources/gulnya/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
+  const launch = (cmd = command, description = 'Run the engine tests') => freeze({
+    session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: cmd, description, run_in_background: true },
+  }, h.home);
+  const ended = (status = 'failed', description = 'Run the engine tests') => hook({
+    session_id: 's1', hook_event_name: 'UserPromptSubmit',
+    prompt: `<task-notification>\n<task-id>bxo7damvu</task-id>\n<tool-use-id>toolu_01</tool-use-id>\n<output-file>${output}</output-file>\n<status>${status}</status>\n<summary>Background command "${description}" ${status === 'failed' ? 'failed with exit code 1' : 'completed (exit code 0)'}</summary>\n</task-notification>`,
+  }, h.home);
+  launch('sleep 30', 'Wait');
+  freeze({ ...edit(), tool_name: 'Bash', tool_input: { command: './gradlew test' } }, h.home);
+  assert.deepEqual(h.state().background, {}, 'a non-build in the background and a foreground build are not noted');
+  launch();
+  assert.equal(h.state().background['Run the engine tests'].command, './gradlew :engine:jvmTest');
+  assert.equal(ended().stdout, '');
+  assert.deepEqual(Object.values(h.state().failures).map((f) => f.label), ['ScoreTest > adds a word\'s letters()']);
+  assert.deepEqual(h.state().background, {});
+  assert.equal(ended().stdout, '', 'a notification with no note is ignored');
+  launch();
+  assert.equal(ended('completed').stdout, '');
+  assert.deepEqual(h.state().background, {}, 'a build that passed takes its note away');
+  for (let i = 0; i < 2; i++) {
+    freeze(edit(), h.home);
+    launch();
+    const r = ended();
+    if (i === 1) {
+      assert.equal(r.out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+      fits(textOf(r).split('\n'));
+      assert.match(textOf(r), /^kirunak: ScoreTest > adds a word's letters\(\) failed again after 2 fixes\./);
+    } else assert.equal(r.stdout, '');
+  }
+});
+
+test('the rung comes from PostModelSwitch, else the transcript\'s tail; a model on no rung is the lowest, logged', () => {
+  const fable = makeHome();
+  hook(start('claude-sonnet-5'), fable.home);
+  hook({ session_id: 's1', hook_event_name: 'PostModelSwitch', from_model: 'claude-sonnet-5', to_model: 'claude-fable-5', source: 'command' }, fable.home);
+  assert.equal(fable.state().model, 'claude-fable-5');
+  assert.equal(textOf(cycle(fable, 2)[2]).split('\n')[2], 'This is the top of the ladder: stop and say plainly what is missing.');
+  const tail = makeHome({}, [...DEFAULT.slice(0, 2), { ...DEFAULT[2], agents: ['music-deep'] }]);
+  const transcript = join(tail.top, 's1.jsonl');
+  writeFileSync(transcript, fixture('transcript.jsonl'));
+  assert.equal(textOf(cycle(tail, 2, { transcript_path: transcript })[2]).split('\n')[2], 'Hand this step to fable-step (or music-deep); its next failure blocks edits.');
+  const haiku = makeHome({ block: false });
+  hook(start('claude-haiku-5-5'), haiku.home);
+  assert.equal(textOf(cycle(haiku, 2)[2]).split('\n')[2], 'Hand this step to opus-step with what you tried.');
+  assert.deepEqual([haiku.log()[0].rungUnknown, haiku.log()[0].rung], [true, { from: 'claude-haiku-5-5', to: 'opus', agents: ['opus-step'] }]);
+});
+
+test('SessionStart on startup prunes state files untouched for 14 days', () => {
+  const h = makeHome();
+  const old = (Date.now() - 15 * 24 * 3600 * 1000) / 1000;
+  writeFileSync(join(h.home, 'escalate', 'gone.json'), '{}');
+  utimesSync(join(h.home, 'escalate', 'gone.json'), old, old);
+  utimesSync(join(h.home, 'escalate', 'config.json'), old, old);
+  hook(start('claude-opus-5-5'), h.home);
+  assert.deepEqual(h.files(), ['s1.json']);
+  assert.ok(existsSync(join(h.home, 'escalate', 'config.json')));
+});
+
+// ---- AC-12: the time the hook adds, machine-bound, so only with KIRUNAK_TIMING=1 ----
+
+// Median and p95 of 30 runs after one warm-up, as S-1 §6 measured (spawnSync, the event on stdin).
+function timing(args, input, env) {
+  const once = () => {
+    const t = process.hrtime.bigint();
+    spawnSync(process.execPath, args, { input, env, encoding: 'utf8' });
+    return Number(process.hrtime.bigint() - t) / 1e6;
+  };
+  once();
+  const ms = Array.from({ length: 30 }, once).sort((a, b) => a - b);
+  return { median: (ms[14] + ms[15]) / 2, p95: ms[Math.ceil(0.95 * ms.length) - 1] };
+}
+
+test('the hook\'s quiet path: median at most 50 ms and node\'s + 12, p95 at most the freeze hook\'s + 5 (AC-12)', { skip: process.env.KIRUNAK_TIMING !== '1' }, (t) => {
+  const h = makeHome();
+  const env = cleanEnv({ KIRUNAK_HOME: h.home });
+  hook(failure(), h.home);
+  const node = timing(['-e', ''], '', env);
+  const freezeEdit = timing([FREEZE], JSON.stringify(edit({ tool_input: { file_path: fileURLToPath(new URL('../lib/home.mjs', import.meta.url)), old_string: 'a', new_string: 'b' } })), env);
+  const other = timing([HOOK], JSON.stringify(failure({}, 'ls nope', 'Exit code 1\nls: nope: No such file or directory')), env);
+  const build = timing([HOOK], JSON.stringify(failure()), env);
+  const show = (name, r) => `${name}: median=${r.median.toFixed(1)}ms p95=${r.p95.toFixed(1)}ms`;
+  for (const [name, r] of [['node -e ""', node], ['freeze Edit', freezeEdit], ['escalate non-matching', other], ['escalate matching', build]]) t.diagnostic(show(name, r));
+  for (const r of [other, build]) {
+    assert.ok(r.median <= 50 && r.median <= node.median + 12, `median ${r.median.toFixed(1)} against node's ${node.median.toFixed(1)}`);
+    assert.ok(r.p95 <= freezeEdit.p95 + 5, `p95 ${r.p95.toFixed(1)} against the freeze hook's ${freezeEdit.p95.toFixed(1)}`);
+  }
+});
