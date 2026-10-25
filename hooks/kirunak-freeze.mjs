@@ -10,7 +10,8 @@ import { kirunakHome } from '../lib/home.mjs';
 // It imports nothing but node: modules and lib/home.mjs, because it runs on every Edit, Write and Bash call.
 // For the escalation hook (gulnya/enforced-escalation S-2 design §5) it refuses edits while the session's block is in
 // force, and every way the model could reach what lifts the block: the Skill call of k-go-on, a scheduled prompt or a
-// message carrying /k-go-on, a claude run from the shell that would type it into a session, and the hook's own files.
+// message carrying /k-go-on, an agent's prompt that starts with it, a claude run from the shell that would type it into
+// a session, and the hook's own files.
 
 const OWNER_VERBS = new Set(['approve', 'accept', 'hold', 'resume', 'queue']);
 const OWNER_SKILLS = new Set(['k-approve', 'k-accept', 'k-hold', 'k-resume', 'k-go-on']);
@@ -19,6 +20,7 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // task, a /loop's next wakeup, a message to an agent or another session.
 const PROMPT_TOOLS = new Set(['CronCreate', 'ScheduleWakeup', 'SendMessage']);
 const GO_ON_TEXT = /\/k-go-on/i;
+const GO_ON_START = /^\s*\/k-go-on\b/i;
 const RESUMES = /^(?:--continue|--resume|--session-id)(?:=|$)|^-[A-Za-z]*[cr]/;
 const TICK = /^\s*[-*+]\s+\[[xX]\]/gm;
 const STAMP = /^(applied|declined):/gm;
@@ -399,6 +401,9 @@ export function decide(input) {
     return name === 'k-go-on' ? GO_ON : ownerVerb(name.slice(2));
   }
   if (PROMPT_TOOLS.has(tool)) return GO_ON_TEXT.test(JSON.stringify(ti)) ? GO_ON : null;
+  // A subagent's prompt is a prompt into a session (S-10 S-4); only its start would expand, and a brief that quotes the
+  // block's reason, which names /k-go-on, must still reach the agent that lifts it.
+  if (tool === 'Agent') return GO_ON_START.test(String(ti.prompt ?? '')) ? GO_ON : null;
   // Monitor runs a shell command as Bash does, under Bash's permission rules (tools reference).
   if (tool === 'Bash' || tool === 'Monitor') return shell(String(ti.command ?? ''), cwd);
   return null;

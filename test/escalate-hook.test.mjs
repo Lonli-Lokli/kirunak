@@ -1,17 +1,20 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  commandOf, count, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, rungFor, signatureOf, statePath,
+  commandOf, count, EFFORTS as HOOK_EFFORTS, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, runEnd,
+  rungFor, signatureOf, statePath, unfitFor, withState,
 } from '../hooks/escalate-state.mjs';
+import { ancestry, nested, override } from '../hooks/kirunak-escalate.mjs';
 import { escalationFile } from '../hooks/kirunak-freeze.mjs';
 import { escalateConfig } from '../lib/install.mjs';
 import { familyOf } from '../lib/ladder.mjs';
+import { EFFORTS } from '../lib/plan.mjs';
 import { stopNotice } from '../lib/notice.mjs';
 
 // gulnya/enforced-escalation S-5: the escalation hook counts a build or test failing again on the same test or error
@@ -74,6 +77,23 @@ test('the freeze hook and the rules name the same state file, and read model fam
   assert.equal(escalationFile({ session_id: '../x' }, home), null);
   assert.equal(statePath(home, '../x'), null);
   for (const m of ['claude-opus-5-5', 'claude-fable-5[1m]', 'sonnet', 'claude-haiku-5-5', '']) assert.equal(hookFamily(m), familyOf(m), m);
+  assert.deepEqual(HOOK_EFFORTS, EFFORTS, 'the effort levels in lib/plan.mjs\'s order');
+});
+
+test('a runner the hook knows with none of its lines left counts nothing; a workspace command keeps the fallback (S-10 S-5)', () => {
+  const xcode = 'Exit code 65\n... [91002 characters truncated] ...\n** TEST FAILED **\n';
+  const gradle = 'Exit code 1\n... [48213 characters truncated] ...\nBUILD FAILED in 12s\n';
+  assert.equal(signatureOf(xcode, 'xcodebuild test -scheme Hronka'), null);
+  assert.equal(signatureOf(gradle, './gradlew :engine:jvmTest'), null);
+  assert.equal(signatureOf(xcode, './tools/check.sh').kind, 'other', 'a workspace command keeps the fallback');
+  const h = makeHome();
+  for (const [command, text] of [['xcodebuild test -scheme Hronka', xcode], ['./gradlew :engine:jvmTest', gradle]]) {
+    for (let i = 0; i < 4; i++) {
+      assert.equal(hook(failure({}, command, text), h.home).stdout, '', command);
+      freeze(edit(), h.home);
+    }
+  }
+  assert.deepEqual([h.files(), h.log()], [[], []], 'nothing counted, nothing logged');
 });
 
 test('count: new, a rerun without an edit, a repeat after one, one fire, the block, then only what follows it', () => {
@@ -451,11 +471,15 @@ const OPUS_DENY = [
   'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
   'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
 ];
-const launchOf = (type, agentId, extra = {}) => ({
-  session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type },
-  tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5' }, ...extra,
+const launchOf = (type, agentId, extra = {}, { input = {}, response = {} } = {}) => ({
+  session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type, ...input },
+  tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5', ...response }, ...extra,
 });
-const stopOf = (type, agentId) => ({ session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: '/dev/null' });
+// A run that finished: its transcript closes with a SubagentHandback (S-1 §2).
+const FINISHED = join(FIX, 'transcript-handback.jsonl');
+const stopOf = (type, agentId, transcript = FINISHED, extra = {}) => ({
+  session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: transcript, ...extra,
+});
 const denied = (r) => r.out?.hookSpecificOutput?.permissionDecisionReason ?? null;
 
 // A session on `model` whose test fired and then failed once more: blocked.
@@ -524,11 +548,18 @@ test('only an agent of the rung above, launched after the block, lifts it when i
   assert.equal(freeze(edit(), h.home).stdout, '');
   const lift = h.log().at(-1);
   assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'music-deep']]);
+  assert.equal(lift.transcriptBytes, statSync(FINISHED).size, 'the run\'s size is logged with the lift');
   const deep = blocked();
   hook(launchOf('music-deep', 'amusic'), deep.home);
   hook(stopOf('music-deep', 'amusic'), deep.home);
   assert.equal(deep.state().block.lifted.agent, 'music-deep', 'an agent of the rung\'s `agents` lifts too');
 });
+
+// /k-go-on as the owner types it, run in this process with the owner's ancestry (one claude), so the tests hold
+// wherever they run, a nested claude included; the real walk has its own test.
+const GO = { session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' };
+const OWNER = () => ['sh', 'claude', 'zsh', 'login', 'ghostty'];
+const goOn = (home, input = GO, ancestors = OWNER) => override(input, home, new Date(), ancestors);
 
 test('a Fable session\'s block names no agent and waits for the owner (E-9)', () => {
   const h = blocked('claude-fable-5');
@@ -539,7 +570,7 @@ test('a Fable session\'s block names no agent and waits for the owner (E-9)', ()
   hook(launchOf('fable-step', 'atop'), h.home);
   hook(stopOf('fable-step', 'atop'), h.home);
   assert.equal(h.state().block.lifted, null);
-  hook({ session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' }, h.home);
+  goOn(h.home);
   assert.equal(h.state().block.lifted.by, 'override');
 });
 
@@ -559,28 +590,26 @@ test('a subagent\'s failure after its fire blocks its caller\'s session, and its
   fits(own);
   assert.equal(own[2], 'Stop and return to your caller marked NEEDS-FABLE; the owner can type /k-go-on.');
   assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).agent], ['hook blocked', 'asub']);
-  hook({ session_id: 's1', hook_event_name: 'UserPromptExpansion', command_name: 'k-go-on', prompt: '/k-go-on' }, h.home);
+  goOn(h.home);
   assert.deepEqual(h.state('asub').failures, {}, 'the override clears the subagent\'s count that set the block');
 });
 
 test('/k-go-on typed lifts the block and clears the counts; the same prompt from a cron, or inside a subagent, does not (E-11)', () => {
   const h = blocked();
-  const go = { session_id: 's1', hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'k-go-on', command_args: '', prompt: '/k-go-on' };
-  for (const input of [
-    { session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '/k-go-on' },
-    { ...go, agent_id: 'asub', agent_type: 'general-purpose' },
-    { ...go, command_name: 'k-done', prompt: '/k-done' },
-  ]) {
-    assert.equal(hook(input, h.home).stdout, '');
+  const go = GO;
+  assert.equal(hook({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: '/k-go-on' }, h.home).stdout, '');
+  assert.equal(h.state().block.lifted, null, 'a scheduled prompt');
+  for (const input of [{ ...go, agent_id: 'asub', agent_type: 'general-purpose' }, { ...go, command_name: 'k-done', prompt: '/k-done' }]) {
+    goOn(h.home, input);
     assert.equal(h.state().block.lifted, null, JSON.stringify(input).slice(0, 80));
   }
-  assert.equal(hook(go, h.home).stdout, '');
+  goOn(h.home);
   const { block, failures } = h.state();
   assert.deepEqual([block.lifted.by, block.lifted.agent, failures], ['override', null, {}]);
   assert.equal(freeze(edit(), h.home).stdout, '');
   const last = h.log().at(-1);
   assert.deepEqual([last.trigger, last.liftedBy, last.signature.hash], ['/k-go-on override', 'override', block.hash]);
-  hook(go, h.home);
+  goOn(h.home);
   assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).signature], ['/k-go-on override', null], 'logged even with nothing to lift');
   assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'hook blocked', '/k-go-on override', '/k-go-on override'], 'every block and override logged (AC-21)');
 });
@@ -602,6 +631,210 @@ test('an edit that fails to apply takes back its flag, so the next failure is no
   freeze(edit({ tool_use_id: 'toolu_2' }), h.home);
   hook(failure(), h.home);
   assert.equal(Object.values(h.state().failures)[0].repeats, 1, 'an edit that applied still counts');
+});
+
+// ---- S-16: the review's findings (S-10 review.md) ----
+
+const lastRow = (h) => h.log().at(-1);
+
+test('unfitFor: a launch runs as a rung when its models are of the rung\'s family and its effort not below; runEnd: a run finished with a hand-back or a last text, not interrupted (S-10 B-1, S-2)', () => {
+  const ladder = [{ model: 'sonnet' }, { model: 'fable', id: 'claude-fable-5[1m]', effort: 'high' }];
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5' }), null, 'the rung\'s id names its family');
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', effort: 'medium' }), 'effort below high');
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', effort: 'max' }), null);
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', asked: 'haiku' }), 'model not fable', 'the Agent call\'s own model counts');
+  assert.equal(unfitFor(ladder, 'fable', {}), 'model unknown');
+  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  assert.deepEqual(runEnd(t('handback')), { finished: true, bytes: statSync(t('handback')).size });
+  assert.equal(runEnd(t('text')).finished, true, 'a last assistant text');
+  assert.equal(runEnd(t('interrupted')).finished, false);
+  assert.equal(runEnd(t('interrupted'), 'Reading the failure.').finished, false, 'the interrupt wins over a last message');
+  assert.equal(runEnd(t('prompt')).finished, false, 'the prompt alone, never answered');
+  assert.deepEqual(runEnd('/dev/null'), { finished: false, bytes: 0 });
+  assert.equal(runEnd('/nonexistent/agent-x.jsonl', 'Done: the design.').finished, true, 'SubagentStop\'s last_assistant_message');
+});
+
+test('a rung agent launched on a cheaper model or a lower effort ends and the block stays; at Fable it lifts (S-10 B-1)', () => {
+  const h = blocked();
+  for (const [id, opts, why] of [
+    ['ahaiku', { response: { resolvedModel: 'claude-haiku-5-5' } }, 'model not fable'],
+    ['aasked', { input: { model: 'haiku' } }, 'model not fable'],
+    ['alow', { input: { effort: 'low' } }, 'effort below high'],
+    ['anone', { response: { resolvedModel: undefined } }, 'model unknown'],
+  ]) {
+    hook(launchOf('fable-step', id, {}, opts), h.home);
+    hook(stopOf('fable-step', id), h.home);
+    assert.equal(h.state().block.lifted, null, id);
+    assert.ok(denied(freeze(edit(), h.home)), `${id}: still blocked`);
+    const row = lastRow(h);
+    assert.deepEqual([row.trigger, row.refused.agentId, row.refused.why], ['lift refused', id, why], id);
+  }
+  assert.deepEqual([lastRow(h).refused.model, h.log().at(-2).refused.effort, h.log().at(-3).refused.asked], [null, 'low', 'haiku']);
+  hook(launchOf('fable-step', 'afable', {}, { input: { model: 'fable', effort: 'xhigh' } }), h.home);
+  hook(stopOf('fable-step', 'afable'), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'afable', 'Fable at an effort above the rung\'s lifts');
+});
+
+test('a rung agent that was interrupted or said nothing lifts nothing; one that finished lifts, its size logged (S-10 S-2)', () => {
+  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  const h = blocked();
+  for (const [id, transcript] of [['astopped', t('interrupted')], ['aempty', '/dev/null'], ['aprompt', t('prompt')]]) {
+    hook(launchOf('fable-step', id), h.home);
+    hook(stopOf('fable-step', id, transcript), h.home);
+    assert.equal(h.state().block.lifted, null, id);
+    assert.deepEqual([lastRow(h).trigger, lastRow(h).refused.why], ['lift refused', 'not finished'], id);
+    assert.equal(h.state().agents[id].finished, false);
+  }
+  hook(launchOf('fable-step', 'adone'), h.home);
+  hook(stopOf('fable-step', 'adone', t('text')), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'adone');
+  assert.deepEqual([lastRow(h).trigger, lastRow(h).transcriptBytes], ['block lifted', statSync(t('text')).size]);
+});
+
+test('a Sonnet subagent\'s block in an Opus session is lifted by opus-step\'s finished run, one rung above the model that failed (A-2, N-1)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(launchOf('general-purpose', 'asub', {}, { response: { resolvedModel: 'claude-sonnet-5' } }), h.home);
+  const sub = { agent_id: 'asub', agent_type: 'general-purpose' };
+  cycle(h, 2, sub);
+  freeze(edit(sub), h.home);
+  hook(failure(sub), h.home);
+  assert.deepEqual(h.state().block.rung, { from: 'claude-sonnet-5', to: 'opus', agents: ['opus-step'] });
+  // A-2's E-8: "Only an agent one rung up from the model that failed lifts the block", so fable-step, two rungs above
+  // Sonnet, does not.
+  hook(launchOf('fable-step', 'afable'), h.home);
+  hook(stopOf('fable-step', 'afable'), h.home);
+  assert.equal(h.state().block.lifted, null);
+  hook(launchOf('opus-step', 'aopus'), h.home);
+  hook(stopOf('opus-step', 'aopus', join(FIX, 'transcript-text.jsonl')), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'aopus');
+});
+
+test('fire, fable-step finishes, the test fails again: the block names no agent and waits for the owner (S-10 S-1)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  cycle(h, 2);
+  hook(launchOf('fable-step', 'adesign'), h.home);
+  hook(stopOf('fable-step', 'adesign'), h.home);
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired'], 'no block yet, so nothing to lift');
+  freeze(edit(), h.home);
+  hook(failure(), h.home);
+  const { block } = h.state();
+  assert.deepEqual(block.rung, { from: 'claude-opus-5-5', to: null, agents: [], failedOn: 'fable' });
+  const lines = denied(freeze(edit(), h.home)).split('\n');
+  fits(lines);
+  assert.equal(lines[2], 'Stop and say plainly what is missing; the owner can type /k-go-on.');
+  hook(launchOf('fable-step', 'again'), h.home);
+  hook(stopOf('fable-step', 'again'), h.home);
+  assert.equal(h.state().block.lifted, null, 'a second Fable run lifts nothing');
+  const sonnet = makeHome({}, FABLE_LADDER);
+  hook(start('claude-sonnet-5'), sonnet.home);
+  cycle(sonnet, 2);
+  hook(launchOf('opus-step', 'abuild'), sonnet.home);
+  hook(stopOf('opus-step', 'abuild', join(FIX, 'transcript-text.jsonl')), sonnet.home);
+  freeze(edit(), sonnet.home);
+  hook(failure(), sonnet.home);
+  assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'music-deep'], failedOn: 'opus' });
+  assert.equal(denied(freeze(edit(), sonnet.home)).split('\n')[2], 'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.');
+});
+
+test('fire, fable-step launched, the test fails again, fable-step ends: lifted by that one run (S-10 S-1)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  cycle(h, 2);
+  hook(launchOf('fable-step', 'adesign'), h.home);
+  freeze(edit(), h.home);
+  hook(failure(), h.home);
+  const { block, failures } = h.state();
+  assert.equal(block.firedAt, Object.values(failures)[0].firedAt, 'the threshold is the fire');
+  assert.deepEqual(block.rung.agents, ['fable-step', 'music-deep']);
+  assert.ok(denied(freeze(edit(), h.home)));
+  hook(stopOf('fable-step', 'adesign'), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'adesign');
+  assert.equal(freeze(edit(), h.home).stdout, '');
+});
+
+test('a signature blocked while another block was in force blocks once that one is lifted (S-10 N-3)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  const other = 'Exit code 1\nnot ok 3 - reads the queue\n';
+  const both = () => [hook(failure(), h.home), hook(failure({}, NODE_CMD, other), h.home)];
+  both();
+  for (let i = 0; i < 2; i++) {
+    freeze(edit(), h.home);
+    both();
+  }
+  freeze(edit(), h.home);
+  both();
+  const first = h.state().block;
+  assert.equal(first.label, 'climbs one rung');
+  const queue = Object.values(h.state().failures).find((f) => f.label === 'reads the queue');
+  assert.deepEqual([queue.fired, queue.blocked], [true, true], 'blocked while the first block was in force');
+  hook(launchOf('fable-step', 'alift'), h.home);
+  hook(stopOf('fable-step', 'alift'), h.home);
+  assert.ok(h.state().block.lifted);
+  hook(failure({}, NODE_CMD, other), h.home);
+  const { block } = h.state();
+  assert.deepEqual([block.label, block.lifted], ['reads the queue', null]);
+  assert.equal(lastRow(h).trigger, 'hook blocked');
+  assert.ok(denied(freeze(edit(), h.home)));
+});
+
+// A hook run as Claude Code runs it, not waited for, so several run at once.
+const hookAsync = (script, input, home) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [script], { env: cleanEnv({ KIRUNAK_HOME: home }), stdio: ['pipe', 'ignore', 'ignore'] });
+  child.on('error', reject);
+  child.on('close', resolve);
+  child.stdin.end(JSON.stringify(input));
+});
+
+test('writers at once all land: each waits for the state file\'s lock (S-10 S-3)', async () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(failure(), h.home);
+  const lock = `${statePath(h.home, 's1')}.lock`;
+  mkdirSync(lock);
+  const ids = ['ap1', 'ap2'];
+  const runs = [...ids.map((id) => hookAsync(HOOK, launchOf('fable-step', id), h.home)), hookAsync(FREEZE, edit(), h.home)];
+  setTimeout(() => rmdirSync(lock), 25);
+  assert.deepEqual(await Promise.all(runs), [0, 0, 0]);
+  const state = h.state();
+  assert.deepEqual(ids.filter((id) => state.agents[id]), ids, 'every launch recorded');
+  assert.equal(Object.values(state.failures)[0].editedSince, true, 'and the edit\'s flag');
+  assert.ok(!existsSync(lock), 'the lock is gone');
+});
+
+test('a state file\'s lock held by another hook is skipped within about 100 ms, and one older than 2 s taken over (S-10 S-3)', () => {
+  const h = makeHome();
+  hook(failure(), h.home);
+  const lock = `${statePath(h.home, 's1')}.lock`;
+  mkdirSync(lock);
+  const t = Date.now();
+  assert.equal(withState(h.home, 's1', null, () => 'ran'), undefined, 'a held lock: skipped, not waited on');
+  assert.ok(Date.now() - t < 1000, `waited ${Date.now() - t} ms`);
+  const old = new Date(Date.now() - 3000);
+  utimesSync(lock, old, old);
+  assert.equal(withState(h.home, 's1', null, () => 'ran'), 'ran', 'a lock older than 2 s is a crashed hook\'s');
+  assert.ok(!existsSync(lock));
+  assert.equal(withState(h.home, 's1', null, () => 'again'), 'again', 'released after the run');
+});
+
+test('/k-go-on in a claude run that another claude started lifts nothing and is logged; the owner\'s lifts (S-10 S-4)', () => {
+  assert.equal(nested(OWNER()), false);
+  assert.equal(nested(['sh', 'claude', 'zsh', 'claude', 'zsh', 'login']), true);
+  assert.equal(nested([]), false);
+  const h = blocked();
+  goOn(h.home, GO, () => ['sh', 'claude', 'zsh', 'claude', 'zsh']);
+  assert.equal(h.state().block.lifted, null);
+  assert.deepEqual([lastRow(h).trigger, lastRow(h).liftedBy, lastRow(h).signature.label], ['/k-go-on refused: nested run', null, 'climbs one rung']);
+  goOn(h.home);
+  assert.equal(h.state().block.lifted.by, 'override');
+  const names = ancestry();
+  assert.ok(names.length <= 8 && names.every((n) => typeof n === 'string' && n), JSON.stringify(names));
+  // The real walk, as Claude Code runs the hook: here the test runner, its shells and whatever claude runs them.
+  const real = blocked();
+  hook(GO, real.home);
+  assert.equal(real.state().block.lifted?.by ?? null, nested(names) ? null : 'override', JSON.stringify(names));
 });
 
 // ---- AC-12: the time the hook adds, machine-bound, so only with KIRUNAK_TIMING=1 ----

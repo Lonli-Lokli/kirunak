@@ -129,12 +129,12 @@
     ]
   },
   "other.txt": {
-    "command": "npm test",
+    "command": "./tools/check.sh",
     "kind": "other",
-    "label": "npm test: npm error code #",
+    "label": "./tools/check.sh: npm error code #",
     "items": [
-      "exit 1",
-      "npm test: npm error code #"
+      "./tools/check.sh: npm error code #",
+      "exit 1"
     ]
   }
 }
