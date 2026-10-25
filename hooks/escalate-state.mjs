@@ -301,3 +301,156 @@ export function markEdited(state, now = new Date()) {
   state.edited = now.toISOString();
   return true;
 }
+
+// ---- The rung (R4.8, R1.2) ----
+
+// The family word of a model id or alias, as lib/ladder.mjs familyOf reads it (`claude-opus-5-5` → opus).
+export function familyOf(model) {
+  const s = String(model ?? '').toLowerCase().replace(/\[.*$/, '').trim();
+  return s.startsWith('claude-') ? s.slice('claude-'.length).split('-')[0] : s;
+}
+
+/**
+ * Where `model` stands on config.json's ladder and who stands above: { from, up, agents, unknown }, `up` null at
+ * the top (E-9). A model on no rung, or none known, is treated as the lowest and marked `unknown`.
+ */
+export function rungFor(ladder, model) {
+  const list = Array.isArray(ladder) ? ladder : [];
+  let i = model ? list.findIndex((r) => r.id && r.id === model) : -1;
+  if (i < 0 && model) i = list.findIndex((r) => r.model === familyOf(model));
+  const unknown = i < 0;
+  if (unknown) i = 0;
+  const up = list[i + 1] ?? null;
+  return { from: list[i]?.model ?? null, up: up?.model ?? null, agents: up?.agents ?? [], unknown };
+}
+
+// The last `size` bytes of a file as text; '' when it cannot be read.
+export function tail(path, size) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const total = fstatSync(fd).size;
+    const length = Math.min(size, total);
+    const buf = Buffer.alloc(length);
+    readSync(fd, buf, 0, length, total - length);
+    return buf.toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+// The model of the newest assistant entry in a transcript's last 128 KB (S-1 §3: it may lag, so the newest wins).
+export function modelFromTranscript(path) {
+  if (typeof path !== 'string' || !path) return null;
+  return [...tail(path, 128 * 1024).matchAll(/"model"\s*:\s*"(claude-[^"]+)"/g)].at(-1)?.[1] ?? null;
+}
+
+// The model that failed (R4.8): the session's recorded one, else its transcript's; for a subagent, the model its
+// launch resolved (in the caller's file), else its own transcript's (`<session>/subagents/agent-<id>.jsonl`).
+export function modelOf(input, caller) {
+  const agent = input.agent_id;
+  if (!agent) return caller.model ?? modelFromTranscript(input.transcript_path);
+  if (caller.agents?.[agent]?.model) return caller.agents[agent].model;
+  const t = typeof input.transcript_path === 'string' ? input.transcript_path : '';
+  if (!t) return null;
+  for (const dir of [t.replace(/\.jsonl$/, ''), dirname(t)]) {
+    const m = modelFromTranscript(join(dir, 'subagents', `agent-${agent}.jsonl`));
+    if (m) return m;
+  }
+  return null;
+}
+
+// The session's task (kirunak's sessions/<id>.json) with the title of its task.md, found through config.repos;
+// null when the session names none.
+export function taskOf(home, session, config) {
+  const s = ID.test(session ?? '') ? readJson(join(home, 'sessions', `${session}.json`)) : null;
+  if (typeof s?.task !== 'string' || !s.task) return null;
+  const [repo, slug] = s.task.split('/');
+  const root = config?.repos?.[repo];
+  let title = null;
+  if (root && slug) {
+    try {
+      const front = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(root, 'kirunak', 'tasks', slug, 'task.md'), 'utf8'))?.[1] ?? '';
+      title = /^title:\s*["']?(.+?)["']?\s*$/m.exec(front)?.[1] ?? null;
+    } catch {
+      // no task.md: the id alone
+    }
+  }
+  return { id: s.task, step: s.step ?? null, title };
+}
+
+// ---- The message (R4.9, AC-10, AC-23..AC-25) ----
+
+export const WIDTH = 80;
+const cut = (s, n) => (s.length <= n ? s : `${s.slice(0, Math.max(0, n - 1))}…`);
+
+/**
+ * What the hook says when it fires: three lines of at most 80 characters, what failed, the task by title and id, and
+ * the one thing to do. A subagent is told to return to its caller marked NEEDS-<MODEL> (E-13); the top of the ladder
+ * to stop and say what is missing (E-9). `block` adds that the next failure blocks edits (S-6's block).
+ */
+export function message({ label, repeats, task, rung, subagent = false, block = true }) {
+  const end = ` failed again after ${repeats} fix${repeats === 1 ? '' : 'es'}.`;
+  const head = `kirunak: ${cut(label, WIDTH - 'kirunak: '.length - end.length)}${end}`;
+  let named = 'No task named in this session.';
+  if (task?.id) {
+    const id = task.title ? ` (${task.id}).` : `${task.id}.`;
+    named = task.title ? `Task: ${cut(task.title, WIDTH - 'Task: '.length - id.length)}${id}` : `Task: ${id}`;
+  }
+  let next;
+  if (subagent) next = `Stop and return to your caller with this failure marked NEEDS-${(rung?.up ?? 'owner').toUpperCase()}.`;
+  else if (!rung?.up) next = 'This is the top of the ladder: stop and say plainly what is missing.';
+  else {
+    const [first, ...rest] = rung.agents.length ? rung.agents : [`${rung.up}-step`];
+    const who = rest.length ? `${first} (or ${rest.join(', ')})` : first;
+    const blocks = `Hand this step to ${who}; its next failure blocks edits.`;
+    next = block && blocks.length <= WIDTH ? blocks : `Hand this step to ${who} with what you tried.`;
+  }
+  return [head, cut(named, WIDTH), cut(next, WIDTH)];
+}
+
+// ---- A background build (R4.5; S-1 §8) and the freeze hook's notes ----
+
+const NOTES = 20;
+
+// Notes a counted build started in the background under its description, which is all its end's notification names.
+export function noteBackground(state, description, command, now = new Date()) {
+  delete state.background[description];
+  state.background[description] = { command, at: now.toISOString() };
+  const keys = Object.keys(state.background);
+  for (const k of keys.slice(0, Math.max(0, keys.length - NOTES))) delete state.background[k];
+}
+
+// The parts of a `<task-notification>` prompt, or null for any other prompt.
+export function notificationOf(prompt) {
+  const p = String(prompt ?? '');
+  if (!p.startsWith('<task-notification>')) return null;
+  const tag = (name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(p)?.[1].trim() ?? null;
+  const summary = tag('summary') ?? '';
+  const code = /exit code (\d+)/.exec(summary);
+  return {
+    status: tag('status'),
+    outputFile: tag('output-file'),
+    description: /^Background command "([\s\S]*)"\s/.exec(summary)?.[1] ?? null,
+    code: code ? Number(code[1]) : null,
+  };
+}
+
+// The freeze hook, after letting an Edit, Write, MultiEdit or NotebookEdit through.
+export function edited(home, input, now = new Date()) {
+  const state = readState(home, input.session_id, input.agent_id ?? null);
+  if (markEdited(state, now)) writeState(home, state);
+}
+
+// The freeze hook, after letting a Bash call with `run_in_background` through: a counted build is noted.
+export function startedInBackground(home, input, config, now = new Date()) {
+  if (config?.hook?.enabled === false) return;
+  const ti = input.tool_input ?? {};
+  const command = commandOf(ti.command, config?.hook?.commands);
+  if (!command) return;
+  const state = readState(home, input.session_id, input.agent_id ?? null);
+  noteBackground(state, String(ti.description || ti.command), command, now);
+  writeState(home, state);
+}
