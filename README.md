@@ -221,25 +221,33 @@ a push.
 
 **The hook.** In an interactive session the escalation hook counts a build or test command (also through
 `heavy-lock.mjs`) that fails again on the same test or error after the session edited something in between; a test
-written red and then fixed is not counted, and a failed edit is not an edit. On the second such repeat it fires, once,
-with a message of three lines naming the task: a Sonnet session is told to hand the step to `opus-step`, an Opus session
-to `fable-step`, a Fable session to stop and say what is missing. The hook prints nothing in any other call, stays
-quiet inside a `k run` step (which counts its own), and adds a few milliseconds to a tool call. A subagent is counted
-apart and is told to return to its caller marked `NEEDS-OPUS` or `NEEDS-FABLE`.
+written red and then fixed is not counted, a failed edit is not an edit, and a runner's log cut short before its failure
+line counts nothing. On the second such repeat it fires, once, with a message of three lines naming the task: a Sonnet
+session is told to hand the step to `opus-step`, an Opus session to `fable-step`, a Fable session to stop and say what
+is missing. The hook prints nothing in any other call, stays quiet inside a `k run` step (which counts its own), and
+adds a few milliseconds to a tool call. A subagent is counted apart and is told to return to its caller marked
+`NEEDS-OPUS` or `NEEDS-FABLE`.
 
 **The block.** After the hook has fired, the next failure of the same test blocks Edit, Write, MultiEdit and
 NotebookEdit in that session, and only those, so the session can still read, run tests and launch the agent, and a
 write through the shell (`sed -i`, `cat >`) is not refused: the block guards against a mistake, not against a
-deliberate way round it. Only a finished run of an agent one rung up (`fable-step` in an Opus session) lifts it. Or
-you can: type `/k-go-on` in the session, at the terminal or from the phone over Remote Control. It is yours alone:
-the skill is closed to the model, a Skill call of it is refused, and the hook counts it only when it arrives as your
-prompt. It also clears the failures counted so far.
+deliberate way round it. Only an agent one rung up lifts it: `fable-step` in an Opus session, and for a block a
+subagent's failure set, one rung above the subagent's model, so `opus-step` lifts a Sonnet builder's block. It lifts
+only when it ran as that rung (a model of the rung's family, an effort not below the rung's) and finished its run (a
+hand-back or a final message, not interrupted); otherwise `escalate.log` records `lift refused` and why. The agent the
+session launched after the warning counts too: if it already finished when the block comes, the step failed on that
+rung as well, and the block names the rung above (at the top, your `/k-go-on`). Or you can lift it: type `/k-go-on`
+in the session, at the terminal or from the phone over Remote Control, which also clears the failures counted so far.
+It is yours alone: the skill is closed to the model, a Skill call of it is refused, the hook counts it only when it
+arrives as your prompt, and in a `claude` run that another claude started it lifts nothing. A shell command that runs
+the hook's scripts is refused as well, since the hook's events come from Claude Code.
 
 **Switches.** In the workspace module, `hook: { enabled, block, repeats, commands }`: `enabled: false` turns the hook
 off, `block: false` turns the block off and keeps the message, `repeats` is the repeat that fires (2), and `commands`
 is a list of regular expressions for more commands to count beyond the usual test and build runners. `k doctor` says
-when the hook or the block is off. Every fire, block and override is a line in `escalate.log` in the state folder, with
-the trigger, the rung and the signature counted.
+when the hook or the block is off. Every fire, block, lift, refused lift and override is a line in `escalate.log` in
+the state folder, with the trigger, the rung and the signature counted. The hook's state files take a lock, so two
+hook calls at one instant do not lose a block or a lift.
 
 **What `k install` and `k doctor` do for it.** `k install` writes `~/.claude/agents/<model>-step.md` from the ladder
 (model and effort of the rung), through a link when the file is one, and refuses an agent file it did not write unless
