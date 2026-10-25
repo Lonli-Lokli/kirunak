@@ -152,6 +152,18 @@ validation, archives) then go unused, and what the owner needs is not in it:
   records its hash; the git hook refuses a commit whose `.slapignore` differs from the approved hash, and an agent's
   edit of it, or the approve command from an agent, is refused as for a task.
 
+### Escalation
+- R24 A step that fails twice goes up a model ladder on its own (gulnya/enforced-escalation). The workspace's `ladder`
+  lists the rungs; kirunak's default is Sonnet, Opus at high effort building, and Fable at high effort designing for
+  a fresh Opus run to build, one attempt a rung. `k run` counts the failures, never a stop or a review's `not met`
+  verdict, and stops the task for the owner only when the top rung has failed, naming every failure report. In an
+  interactive session an installed hook counts repeated build and test failures, tells the session once to hand the
+  step one rung up, and blocks edits at the next failure until an agent of that rung has run or the owner types
+  `/k-go-on`, which the model cannot run. A workspace can turn the hook or the block off, and `k doctor` says so.
+  Every escalation is recorded; every notice is at most three lines, names the task by title and id, and says what to
+  do next; the push to the phone is best effort. `design/orchestrator.md` §2, `design/plugins.md` §3,
+  `design/approval.md` §7.
+
 ### Visibility, cloud, trackers
 - R16 Tasks are readable files in git. A list and a generated board page can be seen locally (D5, D10).
 - R17 Storage and sync are plugins, so the same tasks can later live in the cloud.
