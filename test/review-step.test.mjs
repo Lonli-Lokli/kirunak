@@ -252,6 +252,8 @@ test('an output check that throws fails the step, so the retry and [escalate] ap
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
   assert.match(r.stopped, /^S-2 is marked \[escalate\]/);
   const progress = readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
-  assert.equal((progress.match(/S-2 failed: kirunak stopped the step: EISDIR/g) || []).length, 2);
+  // Its own two attempts, then one on each rung above, in build mode: a review is not built from a design.
+  assert.equal((progress.match(/S-2 failed: kirunak stopped the step: EISDIR/g) || []).length, 4);
+  assert.match(progress, /S-2 escalated: to fable \(high, build\) after 1 failure on opus\n/);
   assert.ok(!/S-2 finished/.test(progress));
 });

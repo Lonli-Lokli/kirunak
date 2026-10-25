@@ -86,25 +86,32 @@ test('a review step refuses a session another step ran, and starts in a fresh on
   assert.equal(typeof patch, 'string', 'the diff from the approved commit is written for the review');
 });
 
-test('a second failure marks the step [escalate], with models.escalate when the workspace names one', async () => {
+test('a second failure leaves the step failed for k run to climb; past the top, escalate marks it [escalate] and names every report', async () => {
   const w = await approvedWorkspace(PLAN);
-  w.ws.models = { escalate: { model: 'opus', effort: 'xhigh' } };
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1' });
   const one = steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'the cache test does not build' });
-  assert.deepEqual([one.failures, one.escalated], [1, null]);
+  assert.deepEqual(Object.keys(one), ['report', 'failures'], 'fail climbs nothing');
+  assert.equal(one.failures, 1);
   assert.match(readFileSync(one.report, 'utf8'), /S-1 failed\n\n.*: the cache test does not build/);
   assert.deepEqual(statesOf(w), { 'S-1': 'ready', 'S-2': 'pending' });
-  assert.equal(steps.load(w.ws, w.id).states.get('S-1').retry, true);
+  assert.deepEqual(steps.load(w.ws, w.id).states.get('S-1').retry, { reports: ['steps/S-1/failure-1.md'], rung: null, phase: 'build', design: null });
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1' });
-  const two = steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'still' });
-  assert.deepEqual(two.escalated, { model: 'opus', effort: 'xhigh' });
-  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate: opus, xhigh\]$/m);
-  assert.match(progress(w), /S-1 escalated: opus, xhigh\n$/);
+  assert.equal(steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'still' }).failures, 2);
+  assert.deepEqual([statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').why], ['failed', 'failed 2 times']);
+  assert.doesNotMatch(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /\[escalate/, 'plan.md changes only at the stop');
+  const e = steps.escalate({ ws: w.ws, id: w.id, step: 'S-1' });
+  assert.deepEqual(e, { failures: ['steps/S-1/failure-1.md', 'steps/S-1/failure-2.md'], last: 'steps/S-1/failure-2.md', why: 'failed on every rung (sonnet 2)' });
+  const plan = readFileSync(join(w.p.dir, 'plan.md'), 'utf8');
+  assert.match(plan, /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]\n(?:.+\n)*failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md\n\n### S-2 /m);
+  assert.deepEqual(steps.load(w.ws, w.id).plan.steps[0].failures, ['steps/S-1/failure-1.md', 'steps/S-1/failure-2.md']);
+  assert.match(progress(w), /S-1 escalated: stopped for the owner, failed on every rung \(sonnet 2\)\n$/);
   assert.equal(statesOf(w)['S-1'], 'escalated');
-  assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"escalate","task":"weather\/offline-forecast","step":"S-1"/);
+  const event = JSON.parse(readFileSync(join(w.home, 'events.jsonl'), 'utf8').trim().split('\n').at(-1));
+  assert.deepEqual({ ...event, time: 0 }, { time: 0, kind: 'escalate', trigger: 'k run failure count', task: 'weather/offline-forecast', step: 'S-1', failures: 2, from: { model: 'sonnet' }, to: null, stopped: true });
   // The owner's session takes the mark off: the step is tried again, fresh.
   writeFileSync(join(w.p.dir, 'plan.md'), PLAN);
   assert.deepEqual(statesOf(w), { 'S-1': 'ready', 'S-2': 'pending' });
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').retry, null);
 });
 
 test('a stop of k run is not one of the step\'s two failures and writes no report; the retry after it reads the last own one', async () => {
@@ -112,21 +119,22 @@ test('a stop of k run is not one of the step\'s two failures and writes no repor
   const failOnce = async (why) => (await steps.start({ ws: w.ws, id: w.id, step: 'S-1' }), steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why }));
   const dir = join(w.p.dir, 'steps', 'S-1');
   const reports = () => (existsSync(dir) ? readdirSync(dir).filter((f) => /^failure-/.test(f)) : []);
-  // Stopped twice while it ran: retried, not escalated, no report written, and no retry is told an attempt failed.
+  const retry = () => steps.load(w.ws, w.id).states.get('S-1').retry;
+  // Stopped twice while it ran: retried, not failed, no report written, and no retry is told an attempt failed.
   for (const why of [steps.STOPPED.bySignal('SIGINT'), steps.STOPPED.orphan]) {
     const r = await failOnce(why);
-    assert.deepEqual([r.escalated, r.report, statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').retry], [null, null, 'ready', false], why);
+    assert.deepEqual([r.failures, r.report, statesOf(w)['S-1'], retry()], [0, null, 'ready', null], why);
   }
   assert.deepEqual(reports(), []);
   // One failure of its own, then a stop: still retried, and the retry still reads the own failure's report.
-  assert.equal((await failOnce('the cache test does not build')).escalated, null);
-  assert.equal(steps.load(w.ws, w.id).states.get('S-1').retry, true);
-  assert.equal((await failOnce(steps.STOPPED.bySignal('SIGTERM'))).escalated, null);
-  assert.deepEqual([statesOf(w)['S-1'], steps.historyOf(progress(w), 'S-1').failures, steps.load(w.ws, w.id).states.get('S-1').retry], ['ready', 1, true]);
+  assert.equal((await failOnce('the cache test does not build')).failures, 1);
+  assert.deepEqual(retry().reports, ['steps/S-1/failure-1.md']);
+  assert.equal((await failOnce(steps.STOPPED.bySignal('SIGTERM'))).failures, 1);
+  assert.deepEqual([statesOf(w)['S-1'], steps.historyOf(progress(w), 'S-1').failures, retry().reports], ['ready', 1, ['steps/S-1/failure-1.md']]);
   assert.deepEqual(reports(), ['failure-1.md']);
-  // A second failure of its own escalates, the stops between them aside.
-  assert.notEqual((await failOnce('still')).escalated, null);
-  assert.equal(statesOf(w)['S-1'], 'escalated');
+  // A second failure of its own fails it, the stops between them aside: k run climbs it.
+  assert.equal((await failOnce('still')).failures, 2);
+  assert.equal(statesOf(w)['S-1'], 'failed');
   assert.equal(steps.isStop('k run was stopped by hand, it said'), false);
 });
 

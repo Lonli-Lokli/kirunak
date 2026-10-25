@@ -120,17 +120,25 @@ test('no --model or --effort when neither the plan nor the config names one; the
   assert.ok(!second.includes('--effort'));
 });
 
-test('a missing output fails the step; the retry is a fresh conversation that reads the failure; a second failure marks [escalate]', async () => {
+test('a missing output fails the step; the retry is a fresh conversation that reads the failure; then it climbs the ladder, and past the top it is marked [escalate]', async () => {
   const w = await approvedWorkspace(PLAN);
+  const lines = [];
   const calls = fakeRunner(w, () => 'nothing');
-  const r = await watch(w);
-  assert.match(r.stopped, /S-1 is marked \[escalate\] in plan\.md/);
-  assert.equal(calls.length, 2);
-  assert.notEqual(calls[0].sessionId, calls[1].sessionId);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  // Its own two attempts on the default model (the lowest rung), then Opus at high and Fable at high (S-2 design R2.2).
+  assert.deepEqual(calls.map((c) => [c.model, c.effort]), [[null, null], [null, null], ['opus', 'high'], ['fable', 'high']]);
+  assert.equal(new Set(calls.map((c) => c.sessionId)).size, 4, 'every attempt is a fresh conversation');
   assert.match(calls[1].prompt, /kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-1\.md \(the last attempt failed: read why first\)/);
+  assert.match(calls[2].prompt, /## Why this step is yours\n\nIt failed 2 times \(sonnet 2\)\. Read every report first, in order: each says what that attempt tried\.\n\n- kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-1\.md\n- kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-2\.md\n/);
+  assert.match(calls[3].prompt, /It failed 3 times \(sonnet 2, opus 1\)\.[^]*failure-3\.md\n/);
   assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8'), /missing outputs: steps\/S-1\/report\.md, evidence\/S-1-cache-sizes\.tsv/);
+  assert.match(r.stopped, /^S-1 is marked \[escalate\] in plan\.md: it failed on every rung \(sonnet 2, opus 1, fable 1\); the owner's session decides$/);
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
-  assert.equal((progress(w).match(/S-1 failed: missing outputs/g) || []).length, 2);
+  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md, steps\/S-1\/failure-3\.md, steps\/S-1\/failure-4\.md$/m);
+  assert.equal((progress(w).match(/S-1 failed: missing outputs/g) || []).length, 4);
+  assert.match(progress(w), /S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n.*S-1 started \(opus high, session [0-9a-f-]{36}, rung opus\)\n/);
+  assert.match(progress(w), /S-1 escalated: to fable \(high, design\) after 1 failure on opus\n.*S-1 started \(fable high, session [0-9a-f-]{36}, rung fable\)\n/);
+  assert.ok(lines.includes(`${w.id} S-1 climbs to opus high`) && lines.includes(`${w.id} S-1 climbs to fable high`), lines.join('\n'));
   assert.equal(r.states['S-2'], 'pending');
 });
 
