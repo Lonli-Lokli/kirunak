@@ -8,10 +8,18 @@ import { kirunakHome } from '../lib/home.mjs';
 // PreToolUse (approval.md §2): refuses the model's write to what only the owner's commands write, and the owner's
 // verbs run through the Bash tool. A guard against mistakes, not against a deliberate bypass; it fails open.
 // It imports nothing but node: modules and lib/home.mjs, because it runs on every Edit, Write and Bash call.
+// For the escalation hook (gulnya/enforced-escalation S-2 design §5) it refuses edits while the session's block is in
+// force, and every way the model could reach what lifts the block: the Skill call of k-go-on, a scheduled prompt or a
+// message carrying /k-go-on, a claude run from the shell that would type it into a session, and the hook's own files.
 
 const OWNER_VERBS = new Set(['approve', 'accept', 'hold', 'resume', 'queue']);
-const OWNER_SKILLS = new Set(['k-approve', 'k-accept', 'k-hold', 'k-resume']);
+const OWNER_SKILLS = new Set(['k-approve', 'k-accept', 'k-hold', 'k-resume', 'k-go-on']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// The tools that put a prompt into a session, now or later (2.1.310's tools reference): a session-scoped scheduled
+// task, a /loop's next wakeup, a message to an agent or another session.
+const PROMPT_TOOLS = new Set(['CronCreate', 'ScheduleWakeup', 'SendMessage']);
+const GO_ON_TEXT = /\/k-go-on/i;
+const RESUMES = /^(?:--continue|--resume|--session-id)(?:=|$)|^-[A-Za-z]*[cr]/;
 const TICK = /^\s*[-*+]\s+\[[xX]\]/gm;
 const STAMP = /^(applied|declined):/gm;
 const GLOB = /[*?[]/;
@@ -33,6 +41,22 @@ const SLAPIGNORE = 'kirunak: .slapignore is the owner\'s (R23): say which patter
   'owner to edit it and type `! k slapignore approve <repo>`';
 const SLAP_RECORD = 'kirunak: only the owner\'s own command writes the .slapignore approvals: ask them to type ' +
   '`! k slapignore approve <repo>`';
+const GO_ON = 'kirunak: /k-go-on is the owner\'s: only the owner, typing it, lifts a block.';
+const GO_ON_SHELL = 'kirunak: a claude run that resumes a session or types /k-go-on is refused:\n' +
+  'only the owner, typing /k-go-on, lifts an escalation block.';
+const HOOK_STATE = 'kirunak: the escalation hook\'s state and log are its own: leave them alone.';
+// A block written before its reason was stored: the same three things to say.
+const BLOCKED = 'kirunak: edits are blocked: a test failed again after the hand-up notice.\n' +
+  'Launch the agent one rung up on this step.\nThe owner can type /k-go-on to lift it instead.';
+
+// Whether `path` is the escalation hook's state (a file under $KIRUNAK_HOME/escalate/) or its log; `removing` also
+// guards a folder that holds them (rm -r, mv).
+function hookState(path, removing = false) {
+  const home = kirunakHome();
+  const dir = join(home, 'escalate');
+  if (path === dir || path.startsWith(`${dir}/`) || path === join(home, 'escalate.log')) return true;
+  return removing && `${dir}/`.startsWith(path.endsWith('/') ? path : `${path}/`);
+}
 
 // Where a path sits in a repo's kirunak/ folder; the repo is the directory that holds it.
 function locate(path) {
@@ -80,6 +104,7 @@ function frozenReason(root, found) {
  * that holds protected files (rm -r, mv).
  */
 function verdict(path, change, removing = false) {
+  if (hookState(path, removing)) return HOOK_STATE;
   if (basename(path) === '.slapignore') return SLAPIGNORE;
   if (path === join(kirunakHome(), 'slapignore.json')) return SLAP_RECORD;
   const at = locate(path);
@@ -321,7 +346,7 @@ function effects(words, redirected, dir) {
     else if (sub === 'rm' || sub === 'mv') removes.push(...paths);
   } else if (['node', 'nodejs', 'bun', 'deno'].includes(verb)) {
     const code = args.filter((a) => WRITE_API.test(a)).join('\n');
-    for (const m of code.matchAll(/[^\s'"`(),]*(?:kirunak\/(?:approvals|tasks)\/[^\s'"`(),]*|\.slapignore\b)/g)) writes.push(absolute(m[0], dir));
+    for (const m of code.matchAll(/[^\s'"`(),]*(?:kirunak\/(?:approvals|tasks)\/[^\s'"`(),]*|\.slapignore\b|escalate(?:\/[^\s'"`(),]*|\.log\b))/g)) writes.push(absolute(m[0], dir));
   }
   return { writes, removes };
 }
@@ -335,6 +360,9 @@ function shell(command, cwd) {
       const verb = ownerVerbOf(k);
       if (verb) return ownerVerb(verb);
     }
+    // A claude run from the shell that resumes a session (its prompt may come from a file) or carries /k-go-on would
+    // fire UserPromptExpansion in that session as if the owner typed it.
+    if (base(words[0]) === 'claude' && (GO_ON_TEXT.test(command) || words.slice(1).some((w) => RESUMES.test(w)))) return GO_ON_SHELL;
     if (words[0] === 'cd') {
       dir = absolute(words[1] ?? '~', dir);
       continue;
@@ -359,15 +387,47 @@ export function decide(input) {
   const cwd = typeof input?.cwd === 'string' ? input.cwd : process.cwd();
   if (EDIT_TOOLS.has(tool)) {
     const path = ti.file_path ?? ti.notebook_path;
+    if (typeof path === 'string' && hookState(absolute(path, cwd))) return HOOK_STATE;
+    const blocked = blockOf(input);
+    if (blocked) return blocked;
     if (typeof path !== 'string' || !/kirunak\/|\.slapignore$|slapignore\.json$/.test(path)) return null;
     return verdict(absolute(path, cwd), changeOf(tool, ti));
   }
   if (tool === 'Skill') {
     const name = String(ti.skill ?? '').split(':').pop();
-    return OWNER_SKILLS.has(name) ? ownerVerb(name.slice(2)) : null;
+    if (!OWNER_SKILLS.has(name)) return null;
+    return name === 'k-go-on' ? GO_ON : ownerVerb(name.slice(2));
   }
-  if (tool === 'Bash') return shell(String(ti.command ?? ''), cwd);
+  if (PROMPT_TOOLS.has(tool)) return GO_ON_TEXT.test(JSON.stringify(ti)) ? GO_ON : null;
+  // Monitor runs a shell command as Bash does, under Bash's permission rules (tools reference).
+  if (tool === 'Bash' || tool === 'Monitor') return shell(String(ti.command ?? ''), cwd);
   return null;
+}
+
+/**
+ * The deny reason of the escalation block in force in the session (S-2 design R5.1, E-10), or null: read from the
+ * session's state file, which a subagent's edit shares with its caller (E-13), while `block.lifted` is null,
+ * config.json has the hook and `hook.block` on, and no k run step runs (E-12). One existsSync when there is no file.
+ */
+function blockOf(input) {
+  if (process.env.KIRUNAK_STEP) return null;
+  const home = kirunakHome();
+  const file = escalationFile({ session_id: input?.session_id }, home);
+  if (!file || !existsSync(file)) return null;
+  const { block } = readJson(file) ?? {};
+  if (!block || typeof block !== 'object' || block.lifted != null) return null;
+  const config = readJson(join(home, 'escalate', 'config.json'));
+  if (!config || config.hook?.enabled === false || config.hook?.block === false) return null;
+  const reason = input.agent_id ? block.subagentReason : block.reason;
+  return typeof reason === 'string' && reason ? reason : BLOCKED;
+}
+
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 // Every refusal, and every call KIRUNAK_FREEZE_OFF let through, goes to freeze.log; a refusal also to events.jsonl.
