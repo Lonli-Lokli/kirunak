@@ -149,3 +149,89 @@ test('a rung\'s attempts are the workspace\'s (AC-5); a review climbs in build m
   assert.deepEqual(climb(hv), { to: null, from: null, failures: 2 });
   assert.equal(steps.escalate({ ws: hv.ws, id: hv.id, step: 'S-1' }).why, 'failed 2 times');
 });
+
+test('historyOf: the rung of the last climb, a design attempt counted once, stops never, and any other escalated line starts afresh', () => {
+  const at = (lines) => lines.map((l, i) => `2026-11-03 1${i % 10}:00 S-1 ${l}`).join('\n') + '\n';
+  const climbed = at([
+    'started (default model, session a)', 'failed: exit 1', 'started (default model, session b)', 'failed: exit 1',
+    'escalated: to opus (high, build) after 2 failures on sonnet', 'started (opus high, session c, rung opus)', 'failed: exit 1',
+    'escalated: to fable (high, design) after 1 failure on opus',
+    'started (fable high, session d, rung fable design)', 'started (opus high, session e, rung fable build on opus high)',
+    `failed: ${steps.STOPPED.bySignal('SIGINT')}`,
+  ]);
+  const h = steps.historyOf(climbed, 'S-1');
+  assert.deepEqual(h, {
+    last: 'failed', failures: 0, stopped: true, rung: 'fable', total: 3, building: true,
+    climbs: [{ to: 'opus', after: 2, from: 'sonnet' }, { to: 'fable', after: 1, from: 'opus' }],
+  });
+  // The build run's failure ends the attempt: one failure, the design run's start not another.
+  const failed = steps.historyOf(`${climbed}2026-11-03 12:00 S-1 started (opus high, session f, rung fable build on opus high)\n2026-11-03 12:30 S-1 failed: exit 1\n`, 'S-1');
+  assert.deepEqual([failed.failures, failed.total, failed.building], [1, 4, false]);
+  // An old plan's escalated line, or a stop's, starts the count afresh on the step's own rung.
+  for (const old of ['escalated', 'escalated: opus, xhigh', 'escalated: stopped for the owner, failed on every rung (sonnet 2, opus 1, fable 1)']) {
+    const after = steps.historyOf(`${climbed}2026-11-03 13:00 S-1 ${old}\n`, 'S-1');
+    assert.deepEqual([after.rung, after.failures, after.total, after.climbs], [null, 0, 0, []], old);
+  }
+  assert.deepEqual(steps.historyOf(climbed.replaceAll('S-1 ', 'S-10 '), 'S-1').last, null, 'S-10 is not S-1');
+});
+
+test('an old plan\'s [escalate: fable, xhigh] still means stopped; after a stopped build run the design attempt resumes at its build', async () => {
+  const w = await approvedWorkspace(plan('agent, sonnet'));
+  writeFileSync(join(w.p.dir, 'plan.md'), plan('agent, sonnet').replace('[agent, sonnet]', '[agent, sonnet] [escalate: fable, xhigh]'));
+  steps.note(w.p, 'S-1', 'failed: exit 1');
+  steps.note(w.p, 'S-1', 'failed: exit 1');
+  steps.note(w.p, 'S-1', 'escalated: fable, xhigh');
+  assert.equal(state(w).state, 'escalated');
+
+  const d = await approvedWorkspace(plan('agent, opus'));
+  await fail(d);
+  await fail(d);
+  climb(d);
+  steps.note(d.p, 'S-1', 'started (fable high, session d-1, rung fable design)');
+  put(d, 'steps/S-1/design-1.md');
+  put(d, 'steps/S-1/design-2.md');
+  steps.note(d.p, 'S-1', 'started (opus high, session b-1, rung fable build on opus high)');
+  steps.fail({ ws: d.ws, id: d.id, step: 'S-1', why: steps.STOPPED.orphan });
+  assert.deepEqual(state(d).retry, { reports: reports(2), rung: d.ws.ladder[2], phase: 'build', design: 'steps/S-1/design-2.md' });
+});
+
+test('the briefs: the own retry names its report in the inputs; a rung attempt lists every report in order; a build after a design reads the design first; a design run writes design-<k>.md', async () => {
+  const w = await approvedWorkspace(plan('agent, sonnet'));
+  const rel = (f) => `kirunak/tasks/offline-forecast/steps/S-1/${f}`;
+  const brief = (retry) => steps.brief({ ws: w.ws, id: w.id, step: 'S-1', retry });
+  await fail(w);
+  const own = (await brief(state(w).retry)).text;
+  assert.ok(own.includes(`- ${rel('failure-1.md')} (the last attempt failed: read why first)`), own);
+  assert.doesNotMatch(own, /Why this step is yours|\{\{/);
+  await fail(w);
+  climb(w);
+  await fail(w);
+  climb(w);
+  const retry = state(w).retry;
+  const build = (await brief({ ...retry, phase: 'build' })).text;
+  assert.ok(build.includes(`## Why this step is yours\n\nIt failed 3 times (sonnet 2, opus 1). Read every report first, in order: each says what that attempt tried.\n\n- ${rel('failure-1.md')}\n- ${rel('failure-2.md')}\n- ${rel('failure-3.md')}\n\n## Outputs: write every one`), build);
+  assert.doesNotMatch(build, /the last attempt failed|\{\{/, 'a rung attempt names its reports once, in its own section');
+
+  const designed = await brief(retry);
+  assert.deepEqual([designed.path, designed.design], [join(w.p.dir, 'steps/S-1/design-brief.md'), 'steps/S-1/design-1.md']);
+  for (const s of [`\`${rel('design-1.md')}\`: the files and functions to change`, `Design only: write \`${rel('design-1.md')}\` and nothing under the step's outputs; the caller builds.`,
+    `- ${rel('failure-3.md')}\n`, 'kirunak/tasks/offline-forecast/evidence/S-1-cache-sizes.tsv', '- docs/offline.md']) {
+    assert.ok(designed.text.includes(s), s);
+  }
+  assert.doesNotMatch(designed.text, /\{\{|Build exactly this design/);
+
+  const after = (await brief({ ...retry, phase: 'build', design: 'steps/S-1/design-1.md' })).text;
+  assert.ok(after.includes(`Read the design first, then every report, in order: each says what that attempt tried.\n\n- ${rel('design-1.md')}: the design. Build exactly this design; where it is wrong, say so in the report.\n- ${rel('failure-1.md')}\n- ${rel('failure-2.md')}\n- ${rel('failure-3.md')}\n`), after);
+});
+
+test('historyOf takes under 5 ms on a progress.md of 2,000 lines (it runs on every pass)', () => {
+  const verbs = ['started (opus high, session 7c1e, rung opus)', 'failed: exit 1', 'waiting for a heavy job: tests', 'resumed (session 7c1e)', 'finished'];
+  const text = Array.from({ length: 2000 }, (_, i) => `2026-11-03 14:${String(i % 60).padStart(2, '0')} S-${(i % 12) + 1} ${verbs[i % verbs.length]}`).join('\n') + '\n';
+  for (let i = 0; i < 20; i++) steps.historyOf(text, 'S-3');
+  const times = Array.from({ length: 50 }, () => {
+    const t0 = process.hrtime.bigint();
+    steps.historyOf(text, 'S-3');
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  }).sort((a, b) => a - b);
+  assert.ok(times[25] < 5, `median ${times[25].toFixed(3)} ms`);
+});
