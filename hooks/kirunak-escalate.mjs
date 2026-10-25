@@ -3,8 +3,8 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  commandOf, count, logLine, message, modelOf, notificationOf, prune, readConfig, readState, repeatsOf, rungFor,
-  signatureOf, statePath, tail, taskOf, writeState,
+  blockLines, commandOf, count, logLine, message, modelOf, notificationOf, prune, readConfig, readState, repeatsOf,
+  rungFor, signatureOf, statePath, tail, taskOf, unmarkEdited, writeState,
 } from './escalate-state.mjs';
 
 // The escalation hook (gulnya/enforced-escalation S-2 design §4). In an interactive session it counts a build or test
@@ -13,14 +13,38 @@ import {
 // step, which counts its own failures (E-12), and does nothing at all with `hook.enabled: false`. It imports nothing
 // but node: modules, lib/home.mjs and its rules, because it runs on every failed Bash call (AC-12).
 //
-// Its events (R4.1): PostToolUseFailure on Bash counts; PostToolUse on Agent records a launch; SubagentStop records an
-// agent's end; UserPromptSubmit counts the end of a noted background build (R4.5); SessionStart and PostModelSwitch
-// record the session's model. The block and what lifts it are S-6's.
+// Its events (R4.1): PostToolUseFailure on Bash counts, and on an edit tool takes back that edit's flag (O-2);
+// PostToolUse on Agent records a launch; SubagentStop records an agent's end and may lift the block; UserPromptSubmit
+// counts the end of a noted background build (R4.5); UserPromptExpansion of /k-go-on is the owner's override;
+// SessionStart and PostModelSwitch record the session's model.
+//
+// The block (S-2 design §5). The first failure after a fire sets the session's `block` (the caller's, for a
+// subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted.
+//
+// The rule a reviewer can check, held by the code's shape: the block is lifted only by liftByAgent(), which runs on a
+// SubagentStop of an agent of the rung above the block's, launched by the session itself after the block was set
+// (R5.3, E-8), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any subagent (R5.4
+// branch A, D-1, E-11). Nothing else here writes `block.lifted`. No tool call, prompt text or file write of the
+// model reaches those two: SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
+// /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone (S-1 §4), which lifts
+// nothing; and the freeze hook refuses the Skill call of k-go-on, a CronCreate, ScheduleWakeup or SendMessage that
+// carries /k-go-on, a claude run from the shell that resumes a session or carries /k-go-on, and any write to this
+// hook's state files and log (R5.2).
 
 const OUTPUT_TAIL = 64 * 1024;
+const GO_ON = 'k-go-on';
+const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
-// Counts one failure into the file of the session or subagent that ran it (E-14), logs a fire and every failure after
-// it (R3.2), and returns the message's lines when it fires.
+// The agents whose end lifts a block at `rung` (R4.8): the rung above's, as config.json lists them (its generated
+// <model>-step first), or that <model>-step alone; none at the top of the ladder (E-9).
+const liftersOf = (rung) => (!rung.up ? [] : rung.agents.length ? rung.agents : [`${rung.up}-step`]);
+
+// The block in force: set and not lifted.
+const inForce = (block) => Boolean(block && typeof block === 'object' && block.lifted == null);
+
+// Counts one failure into the file of the session or subagent that ran it (E-14); on the first failure after a fire
+// sets the block in the session's file (the caller's, E-13) unless one is in force or `hook.block` is off; logs a
+// fire, the block and every failure after them (R3.2); and returns the message's lines when it fires.
 function countFailure({ input, home, config, command, error, now }) {
   const sig = signatureOf(error, command);
   if (!sig) return null;
@@ -29,12 +53,28 @@ function countFailure({ input, home, config, command, error, now }) {
   const state = readState(home, session, agent);
   const what = count(state, sig, repeatsOf(config), now);
   if (what === 'rerun') return null;
-  writeState(home, state);
-  if (what !== 'fire' && what !== 'after') return null;
-  const model = modelOf(input, agent ? readState(home, session) : state);
+  if (what !== 'fire' && what !== 'block' && what !== 'after') {
+    writeState(home, state);
+    return null;
+  }
+  const caller = agent ? readState(home, session) : state;
+  const model = modelOf(input, caller);
   const rung = rungFor(config.ladder, model);
   const task = taskOf(home, session, config);
   const { repeats } = state.failures[sig.hash];
+  const blocks = what === 'block' && config.hook?.block !== false;
+  if (blocks && !inForce(caller.block)) {
+    const lines = (subagent) => blockLines({ label: sig.label, task, rung, subagent }).join('\n');
+    caller.block = {
+      hash: sig.hash, kind: sig.kind, label: sig.label, at: now.toISOString(),
+      rung: { from: model ?? rung.from, to: rung.up, agents: liftersOf(rung) },
+      agent, agentType: input.agent_type ?? null, task: task?.id ?? null, step: task?.step ?? null, count: repeats,
+      reason: lines(false), subagentReason: lines(true), lifted: null,
+    };
+  }
+  writeState(home, state);
+  if (agent && blocks) writeState(home, caller);
+  const triggers = { fire: 'hook fired', block: blocks ? 'hook blocked' : 'repeat after fire', after: 'repeat after fire' };
   logLine(home, {
     time: now.toISOString(),
     session,
@@ -42,7 +82,7 @@ function countFailure({ input, home, config, command, error, now }) {
     agentType: input.agent_type ?? null,
     task: task?.id ?? null,
     step: task?.step ?? null,
-    trigger: what === 'fire' ? 'hook fired' : 'repeat after fire',
+    trigger: triggers[what],
     rung: { from: model ?? rung.from, to: rung.up, agents: rung.agents },
     ...(rung.unknown ? { rungUnknown: true } : {}),
     signature: { kind: sig.kind, label: sig.label, hash: sig.hash },
@@ -51,6 +91,12 @@ function countFailure({ input, home, config, command, error, now }) {
   });
   if (what !== 'fire') return null;
   return message({ label: sig.label, repeats, task, rung, subagent: Boolean(agent), block: config.hook?.block !== false });
+}
+
+// An edit that failed to apply takes back the flag it set (O-2), in the file of the session or subagent that made it.
+function editFailed(input, home) {
+  const state = readState(home, input.session_id, input.agent_id ?? null);
+  if (unmarkEdited(state, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
 }
 
 // A background build's end (S-1 §8): counted when it failed and this session noted it at launch; its output is the
@@ -81,13 +127,79 @@ function launched(input, home, now) {
   writeState(home, state);
 }
 
-// An agent of a rung above the lowest finished (the matcher names them); S-6 lifts the block from here.
+// An agent of a rung above the lowest finished (the matcher names them): its end is recorded, and it may lift the block.
 function ended(input, home, now) {
   const id = input.agent_id;
   if (typeof id !== 'string' || !id || !input.agent_type) return;
   const state = readState(home, input.session_id);
-  state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...state.agents[id], ended: now.toISOString() };
+  const launch = state.agents[id] ?? null;
+  state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: now.toISOString() };
+  const lifted = liftByAgent(state, home, input, launch, now);
   writeState(home, state);
+  if (lifted) logLift(home, input.session_id, lifted, { agent: lifted.lifted.agent, agentId: id }, now);
+}
+
+// The lift by an agent one rung up (R5.3, E-8): the agent that ended is of the rung above the block's (the generated
+// <model>-step or one of that rung's `agents`, the part after a plugin's `:`), and the session itself launched it
+// after the block was set. The end counts, not the launch; a launch before the block, a launch by a subagent and an
+// agent of the block's own rung lift nothing; a Fable session's block lists no agent (E-9). Returns the block it
+// lifted, or null.
+function liftByAgent(state, home, input, launch, now) {
+  const { block } = state;
+  if (!inForce(block) || !launch || launch.by != null) return null;
+  const type = String(input.agent_type).split(':').pop();
+  const agents = Array.isArray(block.rung?.agents) ? block.rung.agents : [];
+  if (!agents.includes(type)) return null;
+  if (!(Date.parse(launch.at) > Date.parse(block.at))) return null;
+  block.lifted = { by: 'agent', agent: type, agentId: input.agent_id, at: now.toISOString() };
+  forget(state, home, block, [block.hash]);
+  return block;
+}
+
+// The owner's override (R5.4 branch A, D-1, E-11): /k-go-on typed in the session, at the terminal or on the phone,
+// fires UserPromptExpansion with its command name; inside a subagent it is not the owner's. It lifts the block in force
+// and clears the session's counts, and is logged even with nothing to lift.
+function override(input, home, now) {
+  if (input.command_name !== GO_ON || input.agent_id) return;
+  const state = readState(home, input.session_id);
+  const block = inForce(state.block) ? state.block : null;
+  if (block) block.lifted = { by: 'override', agent: null, agentId: null, at: now.toISOString() };
+  const counted = Object.keys(state.failures).length > 0;
+  if (block || counted) {
+    forget(state, home, block, null);
+    writeState(home, state);
+  }
+  logLift(home, input.session_id, block, 'override', now);
+}
+
+// Deletes the counts the lift settles: `hashes` (all with null) in the session's file and, when a subagent's failure
+// set the block, in that subagent's file too.
+function forget(state, home, block, hashes) {
+  const clear = (s) => {
+    for (const h of hashes ?? Object.keys(s.failures)) delete s.failures[h];
+  };
+  clear(state);
+  if (!block?.agent) return;
+  const sub = readState(home, state.session, block.agent);
+  clear(sub);
+  writeState(home, sub);
+}
+
+// A lift's line in escalate.log (R3.2, AC-21): `block lifted` with the agent and its id, or `/k-go-on override`.
+function logLift(home, session, block, liftedBy, now) {
+  logLine(home, {
+    time: now.toISOString(),
+    session,
+    agent: block?.agent ?? null,
+    agentType: block?.agentType ?? null,
+    task: block?.task ?? null,
+    step: block?.step ?? null,
+    trigger: liftedBy === 'override' ? '/k-go-on override' : 'block lifted',
+    rung: block?.rung ?? null,
+    signature: block ? { kind: block.kind ?? null, label: block.label ?? null, hash: block.hash ?? null } : null,
+    count: block?.count ?? null,
+    liftedBy,
+  });
 }
 
 function recordModel(input, home, model) {
@@ -115,17 +227,22 @@ function main() {
   if (process.env.KIRUNAK_STEP || !input || typeof input !== 'object') return;
   const event = input.hook_event_name;
   // The cheap answers first, so most calls end before reading a file.
-  if (event === 'PostToolUseFailure' && (input.tool_name !== 'Bash' || input.is_interrupt === true)) return;
+  if (event === 'PostToolUseFailure' && !(input.tool_name === 'Bash' ? input.is_interrupt !== true : EDITS.has(input.tool_name))) return;
   if (event === 'UserPromptSubmit' && !String(input.prompt ?? '').startsWith('<task-notification>')) return;
+  if (event === 'UserPromptExpansion' && input.command_name !== GO_ON) return;
   const home = kirunakHome();
   if (!statePath(home, input.session_id)) return;
   const config = readConfig(home);
   if (!config || config.hook?.enabled === false) return;
   const now = new Date();
-  if (event === 'PostToolUseFailure') {
+  if (event === 'PostToolUseFailure' && input.tool_name !== 'Bash') {
+    editFailed(input, home);
+  } else if (event === 'PostToolUseFailure') {
     const command = commandOf(input.tool_input?.command, config.hook?.commands);
     const lines = command && countFailure({ input, home, config, command, error: input.error, now });
     if (lines) say(event, lines);
+  } else if (event === 'UserPromptExpansion') {
+    override(input, home, now);
   } else if (event === 'UserPromptSubmit') {
     const lines = notified(input, home, config, now);
     if (lines) say(event, lines);
