@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import { basename } from 'node:path';
+import {
+  appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync,
+  unlinkSync, writeFileSync,
+} from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { segments } from './kirunak-freeze.mjs';
 
 // The escalation hook's rules (gulnya/enforced-escalation S-2 design §4), shared by hooks/kirunak-escalate.mjs, the
@@ -27,14 +31,14 @@ function wordsOf(tokens) {
   return words;
 }
 
-// The words past `env` (and its options) and `VAR=x` assignments.
+// The words past `env` (and its options, `-u NAME` with its name) and `VAR=x` assignments.
 function bare(words) {
   let w = words;
   for (;;) {
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0] ?? '')) w = w.slice(1);
     else if (w[0] === 'env') {
       w = w.slice(1);
-      while (w[0]?.startsWith('-')) w = w.slice(1);
+      while (w[0]?.startsWith('-')) w = w.slice(['-u', '-C', '-P', '-S'].includes(w[0]) ? 2 : 1);
     } else return w;
   }
 }
@@ -165,4 +169,135 @@ export function signatureOf(error, command = '') {
   const last = numberless(lines.filter((l) => l.trim()).at(-1) ?? '');
   const label = last ? `${command}: ${last}` : command;
   return sign('other', [label, `exit ${code}`], label);
+}
+
+// ---- The state files (R4.6, E-14) ----
+
+const ID = /^[A-Za-z0-9_-]+$/;
+const DAY = 24 * 60 * 60 * 1000;
+export const KEEP_DAYS = 14;
+
+export const configPath = (home) => join(home, 'escalate', 'config.json');
+export const logPath = (home) => join(home, 'escalate.log');
+
+// The main session's file, or a subagent's, whose failures are counted apart (E-14); null for an id that is not one.
+export function statePath(home, session, agent = null) {
+  if (!ID.test(session ?? '') || (agent != null && !ID.test(agent))) return null;
+  return join(home, 'escalate', agent ? `${session}.${agent}.json` : `${session}.json`);
+}
+
+function readJson(path) {
+  try {
+    const x = JSON.parse(readFileSync(path, 'utf8'));
+    return x && typeof x === 'object' && !Array.isArray(x) ? x : null;
+  } catch {
+    return null;
+  }
+}
+
+// What k install wrote from the workspace (R4.2); null when it is not there.
+export const readConfig = (home) => readJson(configPath(home));
+
+const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+
+// The state of a session or a subagent. The launches (`agents`) and the block live in the session's file only, the
+// caller's (E-13).
+export function readState(home, session, agent = null) {
+  const path = statePath(home, session, agent);
+  const known = (path && readJson(path)) ?? {};
+  return {
+    session,
+    agent: agent ?? null,
+    model: known.model ?? null,
+    edited: known.edited ?? null,
+    failures: obj(known.failures),
+    background: obj(known.background),
+    ...(agent ? {} : { agents: obj(known.agents), block: known.block ?? null }),
+  };
+}
+
+// Written whole and renamed, as lib/keeper.mjs updateSession writes a session's file.
+export function writeState(home, state) {
+  const path = statePath(home, state.session, state.agent);
+  if (!path) return;
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(state) + '\n');
+  renameSync(tmp, path);
+}
+
+// Removes the state files untouched for 14 days and the temp files a crash left, never config.json; the count.
+export function prune(home, now = Date.now()) {
+  const dir = join(home, 'escalate');
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (name === 'config.json' || !/\.json(?:\.\d+\.tmp)?$/.test(name)) continue;
+    try {
+      if (now - statSync(join(dir, name)).mtimeMs > KEEP_DAYS * DAY) {
+        unlinkSync(join(dir, name));
+        removed++;
+      }
+    } catch {
+      // gone already
+    }
+  }
+  return removed;
+}
+
+// One line of escalate.log (R3.2); a record, never a reason to fail.
+export function logLine(home, line) {
+  try {
+    mkdirSync(home, { recursive: true });
+    appendFileSync(logPath(home), JSON.stringify(line) + '\n');
+  } catch {
+    // the same
+  }
+}
+
+// ---- The counting (R4.4, E-5, E-6, AC-11) ----
+
+// The repeats that fire: the workspace's `hook.repeats`, else 2 (fail, edit, fail, edit, fail; E-6).
+export const repeatsOf = (config) =>
+  (Number.isInteger(config?.hook?.repeats) && config.hook.repeats >= 1 ? config.hook.repeats : 2);
+
+/**
+ * Counts a failure with signature `sig` into `state.failures` and says what it was: `new` (first seen), `rerun`
+ * (seen, with no edit since: a rerun is not a fix that failed, and nothing changes), `repeat` (seen again after an
+ * edit), `fire` (that repeat reached `repeats`; once a signature, AC-11) or `after` (a failure of one that fired).
+ * A test written red and then fixed is one failure and no repeat (E-5). S-6 turns the first `after` into the block.
+ */
+export function count(state, sig, repeats, now = new Date()) {
+  const at = now.toISOString();
+  const f = state.failures[sig.hash];
+  if (!f) {
+    state.failures[sig.hash] = { repeats: 0, editedSince: false, fired: false, blocked: false, kind: sig.kind, label: sig.label, last: at };
+    return 'new';
+  }
+  if (f.fired) {
+    f.last = at;
+    return 'after';
+  }
+  if (!f.editedSince) return 'rerun';
+  f.repeats += 1;
+  f.editedSince = false;
+  f.last = at;
+  if (f.repeats < repeats) return 'repeat';
+  f.fired = true;
+  return 'fire';
+}
+
+// An allowed edit makes the next failure of every tracked signature a fix that failed; false when nothing changed,
+// so nothing is written.
+export function markEdited(state, now = new Date()) {
+  const open = Object.values(state.failures).filter((f) => f && !f.editedSince);
+  if (!open.length) return false;
+  for (const f of open) f.editedSince = true;
+  state.edited = now.toISOString();
+  return true;
 }
