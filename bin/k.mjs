@@ -22,6 +22,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
+import { ladderChecks } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -35,12 +36,13 @@ import * as waiting from '../lib/waiting.mjs';
 import * as drafts from '../lib/drafts.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
-Setup     k init --workspace <module> | k install [--settings <file>] [--skills <dir>] [--git <repo>]... [--print]
-          k plugins | k doctor
+Setup     k init --workspace <module> | k plugins | k doctor [--settings <file>] [--agents <dir>]
+          k install [--settings <file>] [--skills <dir>] [--agents <dir>] [--replace-agents] [--git <repo>]... [--print]:
+            the hooks, the skills, and a <model>-step agent for every rung of the workspace's ladder above the lowest
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
@@ -143,10 +145,15 @@ const VERBS = {
   },
 
   async install({ flags }) {
+    // Before k init there is no workspace yet: the rung agents and config.json then come from kirunak's default ladder.
+    const ws = existsSync(join(kirunakHome(), 'workspace')) ? await loadWorkspace() : null;
     const r = await install({
       settingsPath: flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json'),
       kirunakRoot: KIRUNAK,
       skillsDir: flags.skills ? resolve(expandHome(flags.skills)) : join(homedir(), '.claude', 'skills'),
+      agentsDir: flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents'),
+      replaceAgents: !!flags['replace-agents'],
+      ws,
       git: flags.git ? [flags.git].flat().map((g) => resolve(expandHome(g))) : undefined,
       print: !!(flags.print || flags['dry-run']),
     });
@@ -158,7 +165,7 @@ const VERBS = {
     return { plugins: rows, text: rows.map((l) => `${l.seam.padEnd(14)} ${l.plugin.padEnd(22)} ${l.module}`).join('\n') };
   },
 
-  async doctor({ ws }) {
+  async doctor({ ws, flags }) {
     const lines = [];
     let bad = 0;
     const say = (ok, line) => {
@@ -173,13 +180,15 @@ const VERBS = {
     for (const a of aspects) {
       say((a.sources || []).length > 0 && (a.edgeCases || []).length > 0, `aspect ${a.id} has a source and an edge case`);
     }
-    for (const name of ['kirunak-freeze.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
-    const settings = join(homedir(), '.claude', 'settings.json');
+    for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
+    const settings = flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json');
     const wired = existsSync(settings) && readFileSync(settings, 'utf8').includes('hooks/kirunak-freeze.mjs');
     say(wired, `the freeze hook is wired in ${settings}${wired ? '' : ' (run k install)'}`);
     for (const s of SKILLS) {
       say(existsSync(join(homedir(), '.claude', 'skills', s, 'SKILL.md')), `skill ${s} is linked (k install)`);
     }
+    const agentsDir = flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents');
+    for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);
@@ -314,7 +323,8 @@ const VERBS = {
     // A stop's words are k run's own: such a failure would not count, a way around the two failures.
     if (steps.isStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is k run's own reason for a stop; say what went wrong`);
     const r = steps.fail({ ws, id, step, why });
-    return { ...r, text: `${id} ${step}: failed, ${r.report}${r.escalated ? '; marked [escalate] in plan.md' : ''}` };
+    // k run's next pass climbs a step that failed as often as it may, or stops past the top rung.
+    return { ...r, text: `${id} ${step}: failed, ${r.report}` };
   },
 
   async run({ ws, pos, flags }) {
@@ -488,7 +498,8 @@ const VERBS = {
   // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
   // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
-  // the owner's intake: a count and their ids (kirunak-drafts AC-8).
+  // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
+  // stopped at for the owner, each as its notice of at most 3 lines (gulnya/enforced-escalation R7.3, E-15).
   async waiting({ ws }) {
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
@@ -506,15 +517,17 @@ const VERBS = {
     // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
     const start = rows.map(brief);
     const drafts = waiting.waitingDrafts(ws);
+    const stopped = waiting.stoppedFor(all);
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
+      ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
       accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
-    return { approve, accept, amendments, hold, start, drafts, text };
+    return { approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

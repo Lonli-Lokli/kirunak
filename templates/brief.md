@@ -13,7 +13,7 @@ You run one step of a task whose file the owner approved and froze. Do this step
 ## Inputs
 
 {{inputs}}
-
+{{history}}
 ## Outputs: write every one
 
 {{outputs}}

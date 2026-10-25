@@ -108,3 +108,15 @@ export function reviewsRan(taskDir, files = ['review.md']) {
 // The lines of $KIRUNAK_HOME/events.jsonl, parsed; none when the file is not there.
 export const events = (home) =>
   existsSync(join(home, 'events.jsonl')) ? readFileSync(join(home, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+
+// A workspace module of its own in a temp folder, with no repos and the given keys (a ladder, hook switches, models),
+// loaded with its own $KIRUNAK_HOME: { dir, home, modulePath, ws }.
+export async function ladderWorkspace(extra = {}) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-ladder-')));
+  const modulePath = join(dir, 'workspace.mjs');
+  writeFileSync(modulePath, `export default ${JSON.stringify({ repos: [], queue: './queue.md', ...extra }, null, 2)};\n`);
+  const home = join(dir, 'state');
+  process.env.KIRUNAK_HOME = home;
+  const { loadWorkspaceModule } = await import('../lib/workspace.mjs');
+  return { dir, home, modulePath, ws: await loadWorkspaceModule(modulePath) };
+}

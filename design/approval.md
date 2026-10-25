@@ -266,7 +266,91 @@ the owner (the openspec text is background; every line is re-asked); (3) progres
 `progress.md` and `notes.md`, never to openspec. Tell the owner what you were about to change in openspec, so
 nothing is lost."
 
-## 7. Requirements this file satisfies
+## 7. The escalation hook, its block and `/k-go-on` (gulnya/enforced-escalation)
+
+A guard of another kind: not against an agent editing what is frozen, but against a session that keeps trying the
+same fix. Evidence is the task's design (S-2), its probes (S-1) and the Claude Code pages fetched on 2026-10-25; the
+rest is marked as judgement. The ladder and what `k run` does is `orchestrator.md` §2.
+
+**What the hook counts.** `hooks/kirunak-escalate.mjs` (with `hooks/escalate-state.mjs`) is wired by `k install` on seven
+events: PostToolUseFailure of `Bash`, `Edit`, `Write`, `MultiEdit` and `NotebookEdit`; PostToolUse of `Agent`;
+SubagentStop of the rung agents; UserPromptSubmit; UserPromptExpansion; SessionStart; PostModelSwitch. A failed build or
+test command is given a signature (the runner, and the failing test or error with line numbers and times left out;
+`heavy-lock.mjs`'s wrapped command counts as the command, and `hook.commands` adds more). It is counted as a repeat
+when the same signature fails again after the session edited something in between. A rerun with no edit, a green run,
+a test written red and then fixed, and an edit that did not apply are not repeats. A known runner's log with no
+failure line left in it (an xcodebuild or Gradle output cut short) counts nothing; a command known only from the
+workspace is signed by its exit code. The count is per session; a subagent's is kept apart from its caller's. Inside a
+`k run` step (`KIRUNAK_STEP` set) it does nothing.
+
+**When it fires.** At `hook.repeats` repeats (2: fail, edit, fail, edit, fail), once for that signature, never again
+on the same failures. Its message is three lines: the label and the count, the task by title and id (or that the
+session names none), and the one thing to do. Judgement: the design wanted the first line to carry both and could not
+in 80 characters. An Opus session is told to launch `fable-step` (or the workspace's own agent on that rung) and a
+Sonnet session `opus-step`; a Fable session is told it is at the top: stop and say plainly what is missing. A subagent
+is told to stop and return to its caller marked `NEEDS-OPUS` or `NEEDS-FABLE` (`NEEDS-OWNER` at the top). The hook
+prints nothing in any other call (AC-9).
+
+**The block.** The first failure after a fire sets a block on the session (a subagent's sets it on its caller). The
+freeze hook (§2) then refuses `Edit`, `Write`, `MultiEdit` and `NotebookEdit` there with a reason of three lines
+naming the rung and `/k-go-on`; reading, running tests and launching an agent stay open. Judgement: it refuses those
+four tools only (E-10), because the session must still be able to run the agent that lifts it, so a write through the
+shell (`sed -i`, `cat >`, `git apply`) is not refused: the block guards against a mistake, not against a deliberate
+way round it. With `hook.block: false` no block is set and the failure is only logged. Two things lift a block, and
+the code has no third (the rule at the top of the hook file, which a reviewer can check):
+
+1. A finished run of an agent of the rung above the block's (SubagentStop), launched by that session after the block
+   was set, or after the fire when it was still running at the block. It lifts only when it ran as that rung (each
+   model the launch names of the rung's family, its effort not below the rung's) and finished its run (a hand-back, or
+   a last message with no tool call, and not interrupted); else `escalate.log` gets `lift refused` with the model, the
+   effort and why. An Opus session's block is lifted by `fable-step` (or `music-deep` in gulnya) and not by
+   `opus-step`; a block a subagent's failure set in its caller's session is lifted one rung above the subagent's
+   model, so `opus-step` lifts a Sonnet builder's block in an Opus session (amendment A-2); a Fable session's has no
+   agent that lifts it. The agent launched after the fire counts: if it already finished when the block is set, the
+   step failed on that rung too, and the block names the rung above it (at the top, the owner's `/k-go-on`).
+2. The owner's `/k-go-on`.
+
+**`/k-go-on` is the owner's gesture, typed.** It is the skill `skills/k-go-on/SKILL.md` with
+`disable-model-invocation: true`, so Claude Code lists it for the owner and does not let the model call it. Typed at the
+terminal or in Remote Control from the phone, it fires UserPromptExpansion; the hook counts that, and only that, as the
+override, ignores one inside a subagent or in a `claude` run that another claude started (on `/k-go-on` alone it walks
+its ancestors with `ps`, at most 8 steps, and logs `/k-go-on refused: nested run`), lifts the block and clears the
+counted failures. The skill's text then tells
+the session to say in one line what it does next and go on. **Evidence** for the route (S-1): a typed `/k-go-on` fires
+UserPromptExpansion; a scheduled prompt fires UserPromptSubmit alone; a prompt sent with `claude -p` fires
+UserPromptExpansion too and carries no origin.
+
+What the model cannot do, held by the freeze hook's deny rules (all of them refused with a line, none through the hook
+that lifts): call the Skill tool on `k-go-on`; carry `/k-go-on` in a CronCreate, ScheduleWakeup or SendMessage, or at
+the start of an Agent prompt (a brief that quotes the block's reason still goes); run `claude` from the shell with a
+resume flag, or with `/k-go-on` in the command (`Monitor`'s command is read as Bash's); run `kirunak-escalate.mjs` or
+`escalate-state.mjs` from the shell, named by basename, with node or as itself, so a hand-written event piped in is
+refused before it arrives ("the escalation hook's events come from Claude Code, not from a shell"; reading them and
+`node --test` stay open); write to `$KIRUNAK_HOME/escalate/` or `escalate.log` with an edit tool, a redirect, `rm`/`mv`
+of a parent or `node -e`. Judgement: like the rest of this file, it guards against mistakes, not a deliberate bypass: a
+script file, python, a computed path or a shell that hides the script's name can still reach the hook's state unseen.
+**Open**: an edit refused at a permission prompt fires no failure event, so its flag stays and the hook may fire one
+repeat late, never early.
+
+**Switches and records.** `hook.enabled`, `hook.block`, `hook.repeats` and `hook.commands` in the workspace
+(`plugins.md` §3); `k doctor` says when the hook or the block is off. Every fire, block, lift, refusal and override is
+a line in `$KIRUNAK_HOME/escalate.log` (time, session, agent, task, step, trigger `hook fired`, `hook blocked`, `block
+lifted`, `/k-go-on override`, `lift refused` or `/k-go-on refused: nested run`, the rung from and to, the signature). A failure
+of the log never fails the call. State files sit in `$KIRUNAK_HOME/escalate/` and are removed after 14 days. Every
+read-modify-write of one takes a `<file>.lock` folder: it waits at most 100 ms, takes over a lock older than 2 s, and
+when it cannot take it skips the write rather than fail the call, so two hooks at one instant no longer lose a block
+or a lift.
+
+**Cost** (measured on this machine, S-5 and S-6, 30 spawns each after a warm-up): the freeze hook on an edit with no
+state file 23.8 ms median, the escalate hook on a matching failed call 26.8 ms median, 30.2 ms at the 95th percentile,
+against a bare `node -e ""` of 20.8 ms; the limit is 50 ms (AC-12). The timing test runs with `KIRUNAK_TIMING=1`.
+
+**The push of a stop.** The hook also hands a session the push of a `k run` it started in the background that stopped
+for the owner (`orchestrator.md` §2): the last `kirunak-push:` line of the output, in three lines of additional context
+that tell the session to send it with PushNotification. Best effort (amendment A-1).
+
+## 8. Requirements this file satisfies
 
 D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
 R15 (`k accept`, with `review.md`).
+The escalation hook, its block and the owner's `/k-go-on` (§7): gulnya/enforced-escalation AC-8 to AC-14, AC-27, AC-29.

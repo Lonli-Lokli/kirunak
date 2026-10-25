@@ -68,7 +68,9 @@ You need Node 22 or later, git and Claude Code.
    a page, below). It also prints one line to add to your
    status line command, so the cache keeper sees each session's context and cache; it never edits your status line
    itself.
-   `--print` shows what it would do and writes nothing. A repo that already
+   It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
+   ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on seven events, and the
+   `k-go-on` skill. `--print` shows what it would do and writes nothing. A repo that already
    has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
    `.slapignore`, the files left out of a commit's size (R21), when the repo has none: read it, type
    `! k slapignore approve ~/code/app`, and commit it.
@@ -181,5 +183,78 @@ task is started by hand, one task per session:
    unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
    task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict.
+
+### Escalation: a step that keeps failing goes one model up
+
+kirunak counts failures and hands a step up a **ladder** of models; a session's own opinion of its depth is not the
+trigger. It is on by default, installed by `k install`, and the design is `design/orchestrator.md` §2, `design/plugins.md`
+§3 and `design/approval.md` §7.
+
+**The default ladder.** A step runs on its own model (Sonnet, or what its plan line names). After its second failure
+`k run` goes on without you and hands it to the next rung, one at a time:
+
+| Rung | Effort | What it does | Attempts |
+| --- | --- | --- | --- |
+| `sonnet` | the step's own | the step's own two attempts | 2, as always |
+| `opus` | high | designs and builds the step | 1 |
+| `fable` | high | designs the step; a fresh Opus run, at high, builds from the design | 1 |
+
+A Sonnet step that fails on Opus climbs once more, to Fable; if the Fable-led attempt fails, the task stops for you
+with every failure report of the step named in `plan.md`. Nothing ever goes from Sonnet straight to Fable.
+
+**Changing it.** The workspace module takes a `ladder`, a list of rungs, lowest first. A rung is `{ model, effort,
+mode, attempts, agents }`: `mode` is `build` (this model does the step) or `design` (this model designs it and the rung
+below builds from the design, so a design rung needs a build rung directly under it), `attempts` is how many tries the
+rung gets, `agents` names your own agents that stand on the rung besides the generated one, and `id` pins a model id.
+The lowest rung names only its model. Put Haiku at the bottom and `k install` writes a `sonnet-step` agent, and failed
+Haiku steps go to Sonnet. Nothing else sets the ladder: `models.escalate` is no longer read. Shape and refusals:
+`design/plugins.md` §3.
+
+**What `k run` counts.** A step that exits other than 0, ends without its outputs, times out or overruns its budget
+has failed. A stop (you killed `k run`, or the `k run` that started the step is gone) never counts, and a review's
+`not met` verdict is the review's result, not a failure. The record is in `progress.md` (a line per climb and per
+stop), `plan.md` (the stopped step is marked `[escalate]` and gets a `failures:` field listing every report), and
+`events.jsonl` (each climb with its trigger, and each rung's run with its tokens and cost). A climb the ladder carries
+on with sends you nothing; a stop shows first in `k waiting` and `k board --brief`, with the title, the reason and the
+folder of the reports, and a `k run` that a session started in the background ends with a line that session sends as
+a push.
+
+**The hook.** In an interactive session the escalation hook counts a build or test command (also through
+`heavy-lock.mjs`) that fails again on the same test or error after the session edited something in between; a test
+written red and then fixed is not counted, a failed edit is not an edit, and a runner's log cut short before its failure
+line counts nothing. On the second such repeat it fires, once, with a message of three lines naming the task: a Sonnet
+session is told to hand the step to `opus-step`, an Opus session to `fable-step`, a Fable session to stop and say what
+is missing. The hook prints nothing in any other call, stays quiet inside a `k run` step (which counts its own), and
+adds a few milliseconds to a tool call. A subagent is counted apart and is told to return to its caller marked
+`NEEDS-OPUS` or `NEEDS-FABLE`.
+
+**The block.** After the hook has fired, the next failure of the same test blocks Edit, Write, MultiEdit and
+NotebookEdit in that session, and only those, so the session can still read, run tests and launch the agent, and a
+write through the shell (`sed -i`, `cat >`) is not refused: the block guards against a mistake, not against a
+deliberate way round it. Only an agent one rung up lifts it: `fable-step` in an Opus session, and for a block a
+subagent's failure set, one rung above the subagent's model, so `opus-step` lifts a Sonnet builder's block. It lifts
+only when it ran as that rung (a model of the rung's family, an effort not below the rung's) and finished its run (a
+hand-back or a final message, not interrupted); otherwise `escalate.log` records `lift refused` and why. The agent the
+session launched after the warning counts too: if it already finished when the block comes, the step failed on that
+rung as well, and the block names the rung above (at the top, your `/k-go-on`). Or you can lift it: type `/k-go-on`
+in the session, at the terminal or from the phone over Remote Control, which also clears the failures counted so far.
+It is yours alone: the skill is closed to the model, a Skill call of it is refused, the hook counts it only when it
+arrives as your prompt, and in a `claude` run that another claude started it lifts nothing. A shell command that runs
+the hook's scripts is refused as well, since the hook's events come from Claude Code.
+
+**Switches.** In the workspace module, `hook: { enabled, block, repeats, commands }`: `enabled: false` turns the hook
+off, `block: false` turns the block off and keeps the message, `repeats` is the repeat that fires (2), and `commands`
+is a list of regular expressions for more commands to count beyond the usual test and build runners. `k doctor` says
+when the hook or the block is off. Every fire, block, lift, refused lift and override is a line in `escalate.log` in
+the state folder, with the trigger, the rung and the signature counted. The hook's state files take a lock, so two
+hook calls at one instant do not lose a block or a lift.
+
+**What `k install` and `k doctor` do for it.** `k install` writes `~/.claude/agents/<model>-step.md` from the ladder
+(model and effort of the rung), through a link when the file is one, and refuses an agent file it did not write unless
+you pass `--replace-agents`. `k doctor` names every rung agent, and every `modelSettings` entry in `settings.json`,
+whose model or effort disagrees with the ladder; a Fable entry with any effort; a missing hook event or
+`escalate/config.json`; and a push that is off. The push is best effort: the session sends it with Claude Code's
+PushNotification tool when `agentPushNotifEnabled` is true in `settings.json`, whether it reaches the phone and what a
+tap opens are Claude Code's, and every stop shows in `k waiting` and `k board --brief` regardless.
 
 MIT licence: `LICENSE`.

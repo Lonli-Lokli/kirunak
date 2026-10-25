@@ -235,6 +235,35 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   assert.equal(readFileSync(join(dir, 'in', 'failure-1.md'), 'utf8'), failure);
 });
 
+test('a review that fails k review check twice climbs in build mode; its `not met` verdict is its result: it finishes and climbs no further (E-4)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | not met | file docs/offline.md:1 |`);
+  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: not met (AC-1, AC-2, AC-3, E-1)\n`;
+  const calls = [];
+  w.ws.seams.runner = {
+    start(step) {
+      const n = calls.push(step);
+      const child = spawn('sleep', ['0.05'], { detached: true });
+      const done = new Promise((resolve) => child.on('exit', () => {
+        if (step.env.KIRUNAK_STEP === 'S-1') for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
+        else put(w, 'review.md', review(n <= 3 ? rows.slice(1) : rows));
+        resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });
+      }));
+      return { pid: child.pid, sessionId: step.sessionId, done };
+    },
+    keepAlive: () => null,
+  };
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'done' });
+  assert.equal(r.stopped, null);
+  assert.deepEqual(calls.map((c) => [c.env.KIRUNAK_STEP, c.model, c.effort]), [['S-1', null, null], ['S-2', null, null], ['S-2', null, null], ['S-2', 'opus', 'high']]);
+  assert.match(calls[3].prompt, /^# weather\/offline-forecast S-2: Review\n/);
+  const progress = readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
+  assert.match(progress, /S-2 escalated: to opus \(high, build\) after 2 failures on sonnet\n.*S-2 started \(opus high, session [0-9a-f-]{36}, rung opus\)\n.*S-2 finished \(review\.md sha256:[0-9a-f]{64}\)\n$/);
+  assert.ok(!/escalated: to fable|\[escalate\]/.test(progress + readFileSync(join(w.p.dir, 'plan.md'), 'utf8')));
+});
+
 test('an output check that throws fails the step, so the retry and [escalate] apply, never leaving it running', async () => {
   const w = await approvedWorkspace(PLAN);
   w.ws.seams.runner = {
@@ -250,8 +279,11 @@ test('an output check that throws fails the step, so the retry and [escalate] ap
     keepAlive: () => null,
   };
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
-  assert.match(r.stopped, /^S-2 is marked \[escalate\]/);
+  assert.equal(r.stopped, 'S-2 failed on every rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-2/failure-4.md');
+  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-2 Review \[review\] \[escalate\]$/m);
   const progress = readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
-  assert.equal((progress.match(/S-2 failed: kirunak stopped the step: EISDIR/g) || []).length, 2);
+  // Its own two attempts, then one on each rung above, in build mode: a review is not built from a design.
+  assert.equal((progress.match(/S-2 failed: kirunak stopped the step: EISDIR/g) || []).length, 4);
+  assert.match(progress, /S-2 escalated: to fable \(high, build\) after 1 failure on opus\n/);
   assert.ok(!/S-2 finished/.test(progress));
 });

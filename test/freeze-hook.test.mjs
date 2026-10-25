@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { blockLines } from '../hooks/escalate-state.mjs';
 import { decide } from '../hooks/kirunak-freeze.mjs';
 
 // D7: the PreToolUse hook refuses the model's writes to what only the owner's commands write (approval.md §2).
@@ -404,4 +405,162 @@ test('Bash: writes to .slapignore and `k slapignore approve` are denied; reading
     'k slapignore approve --all --dry-run', 'k slap --staged', 'git diff -- .slapignore']) {
     assert.equal(run(bash(command, r.repo), r.home).reason, null, command);
   }
+});
+
+// ---- gulnya/enforced-escalation S-6: the block, and what lifts it kept from the model (S-2 design R5.1, R5.2) ----
+
+const fitsPhone = (reason) => {
+  const ls = reason.split('\n');
+  assert.ok(ls.length <= 3 && ls.every((l) => l.length <= 80), reason);
+};
+
+// A home whose session s1 is blocked as the escalation hook leaves it, with config.json as k install writes it.
+function blockedHome({ hook = {}, lifted = null } = {}) {
+  const home = join(mkdtempSync(join(tmpdir(), 'kirunak-freeze-block-')), 'home');
+  mkdirSync(join(home, 'escalate'), { recursive: true });
+  writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify({ hook: { enabled: true, block: true, repeats: 2, commands: [], ...hook } }));
+  const rung = { from: 'claude-opus-5-5', up: 'fable', agents: ['fable-step', 'music-deep'] };
+  const task = { id: 'gulnya/enforced-escalation', title: 'Escalation follows measured failures, not self-assessment' };
+  const lines = (subagent) => blockLines({ label: 'climbs one rung', task, rung, subagent }).join('\n');
+  writeFileSync(join(home, 'escalate', 's1.json'), JSON.stringify({
+    session: 's1', failures: {}, agents: {},
+    block: { hash: 'h1', label: 'climbs one rung', at: '2026-10-25T21:00:00.000Z', rung: { ...rung, to: 'fable' }, reason: lines(false), subagentReason: lines(true), lifted },
+  }));
+  return home;
+}
+
+test('a block in force denies Edit, Write, MultiEdit and NotebookEdit with three lines; Read, Bash, Agent and other skills go on (E-10)', () => {
+  const home = blockedHome();
+  const want = [
+    'kirunak: edits blocked: climbs one rung failed again.',
+    'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
+    'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
+  ];
+  const nb = { session_id: 's1', tool_name: 'NotebookEdit', tool_input: { notebook_path: '/tmp/a.ipynb', new_source: 'x' } };
+  const multi = { session_id: 's1', tool_name: 'MultiEdit', tool_input: { file_path: '/tmp/a.mjs', edits: [{ old_string: 'a', new_string: 'b' }] } };
+  for (const input of [edit('/tmp/a.mjs', 'a', 'b'), write('/tmp/a.mjs', 'x'), multi, nb]) {
+    assert.deepEqual(run(input, home).reason?.split('\n'), want, input.tool_name);
+  }
+  assert.equal(lines(join(home, 'freeze.log')).length, 4, 'each refusal logged');
+  for (const input of [
+    { tool_name: 'Read', tool_input: { file_path: '/tmp/a.mjs' } },
+    { tool_name: 'Bash', tool_input: { command: 'npm test' } },
+    { tool_name: 'Agent', tool_input: { subagent_type: 'fable-step', prompt: 'the failure and what was tried' } },
+    { tool_name: 'Skill', tool_input: { skill: 'k-draft' } },
+  ]) assert.equal(run({ session_id: 's1', ...input }, home).stdout, '', input.tool_name);
+  assert.match(run({ ...write('/tmp/a.mjs', 'x'), agent_id: 'a1', agent_type: 'opus-step' }, home).reason, /\nStop and return to your caller marked NEEDS-FABLE; the owner can type \/k-go-on\.$/);
+});
+
+test('no deny when the block is lifted or off, the hook is off, config.json is gone, another session edits, or a k run step runs', () => {
+  const cases = [
+    [blockedHome({ lifted: { by: 'override', at: '2026-10-25T21:05:00.000Z' } }), {}],
+    [blockedHome({ hook: { block: false } }), {}],
+    [blockedHome({ hook: { enabled: false } }), {}],
+    [blockedHome(), { KIRUNAK_STEP: 'S-3' }],
+  ];
+  for (const [home, env] of cases) assert.equal(run(write('/tmp/a.mjs', 'x'), home, env).stdout, '', JSON.stringify(env));
+  const other = blockedHome();
+  assert.equal(run({ ...write('/tmp/a.mjs', 'x'), session_id: 's2' }, other).stdout, '');
+  const bare = blockedHome();
+  rmSync(join(bare, 'escalate', 'config.json'));
+  assert.equal(run(write('/tmp/a.mjs', 'x'), bare).stdout, '');
+});
+
+test('decide: the Skill call of k-go-on, a prompt or message carrying /k-go-on, and a claude run that could type it are refused (R5.2)', () => {
+  const refused = (input) => decide({ cwd: '/tmp', ...input });
+  for (const skill of ['k-go-on', 'kirunak:k-go-on']) assert.match(refused({ tool_name: 'Skill', tool_input: { skill } }), /\/k-go-on is the owner's/);
+  const prompts = [
+    ['CronCreate', { cron: '44 19 25 10 *', prompt: '/k-go-on', recurring: false }],
+    ['CronCreate', { cron: '*/5 * * * *', prompt: '  /K-GO-ON now' }],
+    ['ScheduleWakeup', { delaySeconds: 60, prompt: '/k-go-on', reason: 'go on' }],
+    ['SendMessage', { to: 'main', message: 'Done. Please run /k-go-on' }],
+    ['Agent', { description: 'go on', subagent_type: 'general-purpose', prompt: '/k-go-on' }],
+    ['Agent', { description: 'go on', prompt: '  /K-GO-ON please' }],
+  ];
+  for (const [tool, ti] of prompts) assert.match(refused({ tool_name: tool, tool_input: ti }), /\/k-go-on is the owner's/, tool);
+  // A brief that quotes the block's reason, which names /k-go-on, still reaches the agent that lifts the block (S-10 S-4).
+  const brief = 'kirunak: edits blocked: climbs one rung failed again.\nLaunch fable-step on this step; the owner can type /k-go-on.';
+  for (const [tool, ti] of [
+    ['CronCreate', { cron: '0 9 * * *', prompt: 'run the tests' }], ['SendMessage', { to: 'main', message: 'tests pass' }],
+    ['Agent', { description: 'take the step', subagent_type: 'fable-step', prompt: brief }],
+  ]) {
+    assert.equal(refused({ tool_name: tool, tool_input: ti }), null, tool);
+  }
+  for (const command of [
+    'claude -p "/k-go-on"', 'cd ~/sources/x && npx claude -p /k-go-on', 'claude --resume 80b2e863 -p "go on"', 'claude -c -p < prompt.txt',
+    'claude --continue', 'claude -r', 'claude --session-id=80b2e863 -p hi', 'echo /k-go-on > p.txt; claude -p < p.txt',
+  ]) {
+    const reason = refused({ tool_name: 'Bash', tool_input: { command } });
+    assert.match(reason ?? '', /a claude run that resumes a session or types \/k-go-on is refused/, command);
+    assert.equal(refused({ tool_name: 'Monitor', tool_input: { command } }), reason, `Monitor: ${command}`);
+  }
+  for (const command of ['claude -p "summarise this diff"', 'claude --version', 'grep -rn "/k-go-on" skills', 'tail -f build.log']) {
+    assert.equal(refused({ tool_name: 'Bash', tool_input: { command } }), null, command);
+  }
+});
+
+test('decide: the escalation hook\'s state files and log are refused to every edit tool and to shell writes (R5.2)', () => {
+  const home = join(mkdtempSync(join(tmpdir(), 'kirunak-freeze-state-')), 'home');
+  const was = process.env.KIRUNAK_HOME;
+  process.env.KIRUNAK_HOME = home;
+  try {
+    const state = join(home, 'escalate', 's1.json');
+    const log = join(home, 'escalate.log');
+    const tools = [
+      edit(state, '"lifted":null', '"lifted":{}'), write(join(home, 'escalate', 'config.json'), '{}'), write(log, ''),
+      { tool_name: 'MultiEdit', tool_input: { file_path: state, edits: [] } }, { tool_name: 'NotebookEdit', tool_input: { notebook_path: join(home, 'escalate', 'x.ipynb') } },
+    ];
+    for (const input of tools) assert.match(decide(input) ?? '', /escalation hook's state and log are its own/, input.tool_name);
+    for (const command of [
+      `echo '{}' > ${state}`, `rm ${state}`, `rm -rf ${home}`, `mv ${join(home, 'escalate')} /tmp/x`, `sed -i '' s/null/1/ ${log}`,
+      `cd ${home} && rm -r escalate`, `cp /tmp/x.json ${join(home, 'escalate')}/`, `node -e "require('fs').writeFileSync('${state}', '{}')"`,
+    ]) assert.match(decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' }) ?? '', /escalation hook's state/, command);
+    for (const command of [`cat ${state}`, `ls ${join(home, 'escalate')}`, `tail -5 ${log}`, `echo x > ${join(home, 'escalate-notes.txt')}`]) {
+      assert.equal(decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' }), null, command);
+    }
+    assert.equal(decide(write(join(home, 'escalate-notes.txt'), 'x')), null);
+    const reasons = [decide(write(log, '')), decide({ tool_name: 'Skill', tool_input: { skill: 'k-go-on' } }), decide({ tool_name: 'Bash', tool_input: { command: 'claude -c' } })];
+    reasons.forEach(fitsPhone);
+  } finally {
+    if (was === undefined) delete process.env.KIRUNAK_HOME;
+    else process.env.KIRUNAK_HOME = was;
+  }
+});
+
+test('decide: a shell that runs the escalation hook\'s scripts is refused; reading them and node --test are not (S-17)', () => {
+  const bashOf = (command) => decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' });
+  const event = '{"hook_event_name":"UserPromptExpansion","command_name":"k-go-on","session_id":"s1"}';
+  for (const command of [
+    `echo '${event}' | node hooks/kirunak-escalate.mjs`, 'node /Users/x/sources/kirunak/hooks/kirunak-escalate.mjs < f',
+    'cat stop.json | KIRUNAK_HOME=/tmp/h nice node ~/kirunak/hooks/kirunak-escalate.mjs', './hooks/kirunak-escalate.mjs < f',
+    `node -e "import('./hooks/escalate-state.mjs').then((m) => m.writeState())"`, 'node < hooks/kirunak-escalate.mjs',
+  ]) {
+    const reason = bashOf(command);
+    assert.match(reason ?? '', /escalation hook's events come from Claude Code, not from a shell/, command);
+    assert.equal(decide({ tool_name: 'Monitor', tool_input: { command }, cwd: '/tmp' }), reason, `Monitor: ${command}`);
+  }
+  for (const command of [
+    'cat hooks/kirunak-escalate.mjs', 'grep -n x hooks/escalate-state.mjs', 'sed -n 1,40p hooks/kirunak-escalate.mjs',
+    'head -20 hooks/escalate-state.mjs | less', 'node --test test/escalate-hook.test.mjs', 'git log -- hooks/kirunak-escalate.mjs',
+  ]) assert.equal(bashOf(command), null, command);
+  fitsPhone(bashOf('node hooks/kirunak-escalate.mjs'));
+  const r = makeRepo();
+  assert.match(run(bash(`echo '${event}' | node hooks/kirunak-escalate.mjs`, '/tmp'), r.home).reason ?? '', /not from a shell/);
+});
+
+// ---- gulnya/enforced-escalation S-7: a k run started in the background is noted, so its end's push is found ----
+
+test('a background k run is noted under its description, however k is invoked; one in the foreground, a k list, or a k run in a k run step is not', () => {
+  const home = blockedHome({ lifted: { by: 'override', at: '2026-10-25T21:05:00.000Z' } });
+  const state = () => JSON.parse(readFileSync(join(home, 'escalate', 's1.json'), 'utf8')).background ?? {};
+  const bg = (command, description) => ({ session_id: 's1', tool_name: 'Bash', tool_input: { command, description, run_in_background: true }, cwd: '/tmp' });
+  for (const input of [bg('k list', 'List the tasks'), bash('k run weather/offline-forecast --watch', '/tmp')]) assert.equal(run(input, home).stdout, '');
+  assert.equal(run(bg('k run weather/offline-forecast --watch', 'Run the task in a step'), home, { KIRUNAK_STEP: 'S-1' }).stdout, '');
+  assert.deepEqual(state(), {}, 'nothing noted');
+  assert.equal(run(bg('cd ~/sources/weather && k run weather/offline-forecast --watch 2>&1', 'Run the weather task'), home).stdout, '');
+  assert.equal(run(bg('node ~/sources/kirunak/bin/k.mjs run weather/radar-tiles', 'Run the radar task'), home).stdout, '');
+  const notes = state();
+  assert.deepEqual(Object.keys(notes), ['Run the weather task', 'Run the radar task']);
+  assert.deepEqual(Object.values(notes).map(({ command, run: kRun }) => [command, kRun]), [['k run weather/offline-forecast', true], ['k run weather/radar-tiles', true]]);
+  assert.ok(Object.values(notes).every((n) => Date.parse(n.at)));
 });

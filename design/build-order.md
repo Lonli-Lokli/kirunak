@@ -278,6 +278,32 @@ Built 2026-10-22 (gulnya/kirunak-drafts S-3 to S-6, amendment A-11), after slice
   (a prompt cannot be submitted inside the hook the turn waits on), so the owner's phone check is the proof
   (gulnya/kirunak-drafts S-10).
 
+## Escalation on the ladder (gulnya/enforced-escalation, built 2026-10-25 on branches `escalate/ladder`, `escalate/hook`, `escalate/run`)
+
+Not a slice of its own: it extends slice 2 (`k run`), slice 1's `k install` and `k doctor`, and the freeze hook, and
+ships on by default.
+
+- Files: `lib/ladder.mjs` (the default ladder and hook switches, the refusals, `rungOf`, `above`, `agentsOf`,
+  `buildRungFor`), `lib/workspace.mjs` (the `ladder` and `hook` keys), `lib/steps.mjs` (`historyOf`, the failure count
+  by rung, `climb`, `escalate`, the briefs), `lib/run.mjs` (`attemptStep`: a build attempt, or a design run then a fresh
+  build run; the events and the push line), `lib/notice.mjs` (the three-line notices), `lib/waiting.mjs`,
+  `lib/board-brief.mjs` and `lib/board-md.mjs` (the stop group and the card's climbs), `lib/install.mjs` and
+  `templates/rung-agent.md` (the `<model>-step` agents, `escalate/config.json`, the seven hook events),
+  `lib/doctor.mjs` (the ladder, agent, settings, hook and push checks), `hooks/kirunak-escalate.mjs` and
+  `hooks/escalate-state.mjs` (the hook), `hooks/kirunak-freeze.mjs` (the block and the refusals), `skills/k-go-on/SKILL.md`,
+  `templates/design-brief.md`. `design/orchestrator.md` §2, `plugins.md` §3 and `approval.md` §7 say how it works.
+- `k install` also takes `--agents <dir>` and `--replace-agents`; `k doctor` takes `--settings <file>` and `--agents <dir>`.
+- Tests: `ladder.test.mjs`, `climb.test.mjs`, `run.test.mjs` and `review-step.test.mjs` (the sequences per rung, a stop
+  never counting, a review not climbing on its verdict), `notice.test.mjs`, `waiting.test.mjs`, `board-brief.test.mjs`,
+  `doctor.test.mjs`, `install.test.mjs`, the hook's own tests, `freeze-hook.test.mjs` (the block and every refusal), and
+  `skills.test.mjs` (`k-go-on` closed to the model).
+- Numbers: `npm test` 528 tests, 527 pass, 1 skipped (the hook's timing test, run with `KIRUNAK_TIMING=1`); the hook
+  adds about 26.8 ms median, 30.2 ms at the 95th percentile, to a failed call on a Mac where `node -e ""` takes 20.8 ms
+  (limit 50 ms); the freeze hook on an edit is unchanged within 0.4 ms; `historyOf` on 2,000 lines of `progress.md`
+  0.13 ms median.
+- Not yet measured: `/k-go-on` over Remote Control from the phone (the task's S-16); whether the push arrives is
+  Claude Code's (amendment A-1).
+
 ## Slice 7, later and not detailed here: R17, R18
 
 Trackers (Linear, It's a Plan, GitHub Issues) and cloud sync as plugins on the `tracker` and `sync` seams, with
