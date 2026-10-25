@@ -12,6 +12,7 @@ import {
 import { escalationFile } from '../hooks/kirunak-freeze.mjs';
 import { escalateConfig } from '../lib/install.mjs';
 import { familyOf } from '../lib/ladder.mjs';
+import { stopNotice } from '../lib/notice.mjs';
 
 // gulnya/enforced-escalation S-5: the escalation hook counts a build or test failing again on the same test or error
 // after an edit, and says so once (S-2 design §4).
@@ -364,6 +365,55 @@ test('a background build is noted at launch and counted from its notification an
       assert.match(textOf(r), /^kirunak: ScoreTest > adds a word's letters\(\) failed again after 2 fixes\./);
     } else assert.equal(r.stdout, '');
   }
+});
+
+// ---- k run's push (S-2 design R7.2, E-16; S-7) ----
+
+test('a noted k run whose output closes with kirunak-push: has the model told to send exactly that text; without the marker, or not noted, nothing (AC-9)', () => {
+  const h = makeHome();
+  hook(start('claude-opus-5-5'), h.home);
+  const output = join(h.top, 'b2run.output');
+  // The push k run prints (lib/run.mjs), from the task's title and the stop k waiting shows.
+  const push = stopNotice({ title: TITLE, id: ID }, {
+    step: 'S-7', kind: 'escalated', what: 'stopped, failed on every rung', why: 'exit 1', dir: 'kirunak/tasks/enforced-escalation/steps/S-7/',
+    reports: [1, 2, 3, 4].map((k) => `steps/S-7/failure-${k}.md`),
+  }).one;
+  const launch = (description = 'Run the escalation task') => freeze({
+    session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: `k run ${ID} --watch`, description, run_in_background: true },
+  }, h.home);
+  const ended = (description = 'Run the escalation task', env = {}) => hook({
+    session_id: 's1', hook_event_name: 'UserPromptSubmit',
+    prompt: `<task-notification>\n<task-id>b2run</task-id>\n<tool-use-id>toolu_02</tool-use-id>\n<output-file>${output}</output-file>\n<status>completed</status>\n<summary>Background command "${description}" completed (exit code 0)</summary>\n</task-notification>`,
+  }, h.home, env);
+  writeFileSync(output, `${ID} S-7 starts\n${ID} S-7 failed\n${ID} stopped: S-7 failed on every rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-7/failure-4.md\nkirunak-push: ${push}\n`);
+  launch();
+  assert.deepEqual(h.state().background['Run the escalation task'].run, true);
+  // To the model alone, as additionalContext: the push is its to send (S-1 §8).
+  assert.deepEqual(ended().out, { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [
+    'kirunak: k run stopped for the owner. Send this with PushNotification now, exactly as written:',
+    push,
+    'k waiting and k board --brief show this stop too.',
+  ].join('\n') } });
+  assert.deepEqual(h.state().background, {}, 'its note is taken away');
+  assert.equal(ended().stdout, '', 'the same notification again finds no note');
+  assert.equal(h.log().length, 0, 'a k run\'s end is never counted as a failure');
+  // Not noted: another command's end, or a k run run in the foreground.
+  launch();
+  assert.equal(ended('Run something else').stdout, '');
+  // A k run that climbed and went on, or ended at no stop, printed no marker.
+  writeFileSync(output, `${ID} S-7 climbs to opus (high): attempt 1 of 1\n${ID} S-7 finished\n`);
+  assert.equal(ended().stdout, '');
+  // Never more than a push holds (200 characters, one line).
+  writeFileSync(output, `kirunak-push: ${'word '.repeat(60)}\n`);
+  launch();
+  assert.equal(textOf(ended()).split('\n')[1], 'word '.repeat(40).trim());
+  // Quiet in a k run step, and with the hook off.
+  writeFileSync(output, `kirunak-push: ${push}\n`);
+  launch();
+  assert.equal(ended(undefined, { KIRUNAK_STEP: 'S-2' }).stdout, '');
+  const config = join(h.home, 'escalate', 'config.json');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, 'utf8')), hook: { enabled: false } }));
+  assert.equal(ended().stdout, '');
 });
 
 test('the rung comes from PostModelSwitch, else the transcript\'s tail; a model on no rung is the lowest, logged', () => {

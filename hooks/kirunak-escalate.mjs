@@ -3,19 +3,21 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  blockLines, commandOf, count, logLine, message, modelOf, notificationOf, prune, readConfig, readState, repeatsOf,
-  rungFor, signatureOf, statePath, tail, taskOf, unmarkEdited, writeState,
+  blockLines, commandOf, count, logLine, message, modelOf, notificationOf, prune, pushIn, pushLines, readConfig,
+  readState, repeatsOf, rungFor, signatureOf, statePath, tail, taskOf, unmarkEdited, writeState,
 } from './escalate-state.mjs';
 
 // The escalation hook (gulnya/enforced-escalation S-2 design §4). In an interactive session it counts a build or test
 // failing again on the same test or error after an edit, and once, on the configured repeat, tells the session to
-// hand the step one rung up the ladder (AC-8..AC-11). It prints nothing unless it fires (AC-9), stays quiet in a k run
-// step, which counts its own failures (E-12), and does nothing at all with `hook.enabled: false`. It imports nothing
-// but node: modules, lib/home.mjs and its rules, because it runs on every failed Bash call (AC-12).
+// hand the step one rung up the ladder (AC-8..AC-11). It prints nothing unless it fires or hands the session the push
+// of a k run it started in the background that stopped for the owner (AC-9, E-16), stays quiet in a k run step,
+// which counts its own failures (E-12), and does nothing at all with `hook.enabled: false`. It imports nothing but
+// node: modules, lib/home.mjs and its rules, because it runs on every failed Bash call (AC-12).
 //
 // Its events (R4.1): PostToolUseFailure on Bash counts, and on an edit tool takes back that edit's flag (O-2);
 // PostToolUse on Agent records a launch; SubagentStop records an agent's end and may lift the block; UserPromptSubmit
-// counts the end of a noted background build (R4.5); UserPromptExpansion of /k-go-on is the owner's override;
+// counts the end of a noted background build (R4.5) and hands on the push a noted k run's end carries (R7.2);
+// UserPromptExpansion of /k-go-on is the owner's override;
 // SessionStart and PostModelSwitch record the session's model.
 //
 // The block (S-2 design §5). The first failure after a fire sets the session's `block` (the caller's, for a
@@ -100,7 +102,8 @@ function editFailed(input, home) {
 }
 
 // A background build's end (S-1 §8): counted when it failed and this session noted it at launch; its output is the
-// tail of the file the notification names.
+// tail of the file the notification names. A noted k run's end: the push its output closes with, when it stopped for
+// the owner (R7.2, E-16). → { lines } of a fire, { push }, or null
 function notified(input, home, config, now) {
   const n = notificationOf(input.prompt);
   if (!n?.description) return null;
@@ -109,9 +112,14 @@ function notified(input, home, config, now) {
   if (!note) return null;
   delete state.background[n.description];
   writeState(home, state);
+  if (note.run) {
+    const push = pushIn(n.outputFile);
+    return push && { push };
+  }
   if (n.status !== 'failed') return null;
   const error = `Exit code ${n.code ?? 1}\n${tail(n.outputFile, OUTPUT_TAIL)}`;
-  return countFailure({ input, home, config, command: note.command, error, now });
+  const lines = countFailure({ input, home, config, command: note.command, error, now });
+  return lines && { lines };
 }
 
 // An agent's launch (S-1 §2: PostToolUse on Agent fires at launch, with the id and the model it resolved), in the
@@ -244,8 +252,10 @@ function main() {
   } else if (event === 'UserPromptExpansion') {
     override(input, home, now);
   } else if (event === 'UserPromptSubmit') {
-    const lines = notified(input, home, config, now);
+    const { lines, push } = notified(input, home, config, now) ?? {};
     if (lines) say(event, lines);
+    // The push is the model's to send (S-1 §8), so it goes to the model alone.
+    if (push) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: pushLines(push).join('\n') } }));
   } else if (event === 'PostToolUse') {
     launched(input, home, now);
   } else if (event === 'SubagentStop') {
