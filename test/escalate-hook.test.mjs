@@ -76,6 +76,22 @@ test('the freeze hook and the rules name the same state file, and read model fam
   for (const m of ['claude-opus-5-5', 'claude-fable-5[1m]', 'sonnet', 'claude-haiku-5-5', '']) assert.equal(hookFamily(m), familyOf(m), m);
 });
 
+test('a runner the hook knows with none of its lines left counts nothing; a workspace command keeps the fallback (S-10 S-5)', () => {
+  const xcode = 'Exit code 65\n... [91002 characters truncated] ...\n** TEST FAILED **\n';
+  const gradle = 'Exit code 1\n... [48213 characters truncated] ...\nBUILD FAILED in 12s\n';
+  assert.equal(signatureOf(xcode, 'xcodebuild test -scheme Hronka'), null);
+  assert.equal(signatureOf(gradle, './gradlew :engine:jvmTest'), null);
+  assert.equal(signatureOf(xcode, './tools/check.sh').kind, 'other', 'a workspace command keeps the fallback');
+  const h = makeHome();
+  for (const [command, text] of [['xcodebuild test -scheme Hronka', xcode], ['./gradlew :engine:jvmTest', gradle]]) {
+    for (let i = 0; i < 4; i++) {
+      assert.equal(hook(failure({}, command, text), h.home).stdout, '', command);
+      freeze(edit(), h.home);
+    }
+  }
+  assert.deepEqual([h.files(), h.log()], [[], []], 'nothing counted, nothing logged');
+});
+
 test('count: new, a rerun without an edit, a repeat after one, one fire, the block, then only what follows it', () => {
   const state = { failures: {} };
   const sig = { kind: 'node', label: 'x', hash: 'h1' };

@@ -163,8 +163,10 @@ const sign = (kind, items, label) => {
 /**
  * The failure's signature { kind, label, hash, items } from a failed call's `error` text and its command, or null
  * when the text has neither an `Exit code N` line nor a timeout (the shell never started). When no runner's lines are
- * there: a timed-out command is `<command> timed out`; anything else is the command, the exit code and its last line
- * without numbers.
+ * there: a timed-out command is `<command> timed out`; a runner this file knows (BUILD) is null, since its lines were
+ * cut from the text (the 64 KB tail, Claude Code's middle truncation) and `** TEST FAILED **` or `BUILD FAILED` alone
+ * would make every failure one: a count lost, never a false fire (S-10 S-5); anything else, a workspace's
+ * `hook.commands`, is the command, the exit code and its last line without numbers.
  */
 export function signatureOf(error, command = '') {
   const raw = String(error ?? '').replace(ANSI, '').replace(TRUNCATED, '\n').split(/\r?\n/);
@@ -183,6 +185,7 @@ export function signatureOf(error, command = '') {
     if (items.length) return sign(kind, items);
   }
   if (timedOut) return sign('timeout', [`${command} timed out`]);
+  if (BUILD.test(command)) return null;
   const last = numberless(lines.filter((l) => l.trim()).at(-1) ?? '');
   const label = last ? `${command}: ${last}` : command;
   return sign('other', [label, `exit ${code}`], label);
