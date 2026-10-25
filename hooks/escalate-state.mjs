@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
-  appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync,
-  unlinkSync, writeFileSync,
+  appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync,
+  statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { segments } from './kirunak-freeze.mjs';
@@ -244,6 +244,56 @@ export function writeState(home, state) {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(state) + '\n');
   renameSync(tmp, path);
+}
+
+const LOCK_WAIT = 100;
+const LOCK_STEP = 2;
+const LOCK_STALE = 2000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Runs `fn`, a read, change and write of the state file of a session or subagent, under that file's advisory lock
+ * (S-10 S-3): two hooks of one session at once (parallel tool calls, a subagent and its caller) would otherwise lose one
+ * write. The lock is the folder `<file>.lock`; a lock older than 2 s is a crashed hook's and is taken over. → what `fn`
+ * returned, or undefined without running it when the lock is not free within about 100 ms: the hook fails open, a
+ * write skipped, never a session held. A path that writes nothing takes no lock.
+ */
+export function withState(home, session, agent, fn) {
+  const path = statePath(home, session, agent);
+  if (!path) return undefined;
+  const lock = `${path}.lock`;
+  const until = Date.now() + LOCK_WAIT;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch (e) {
+      if (e?.code === 'ENOENT') {
+        mkdirSync(dirname(path), { recursive: true });
+        continue;
+      }
+      if (e?.code !== 'EEXIST') return undefined;
+    }
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE) {
+        rmdirSync(lock);
+        continue;
+      }
+    } catch {
+      continue; // released between the two calls
+    }
+    if (Date.now() >= until) return undefined;
+    pause(LOCK_STEP);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      rmdirSync(lock);
+    } catch {
+      // taken over as stale: nothing left to remove
+    }
+  }
 }
 
 // Removes the state files untouched for 14 days and the temp files a crash left, never config.json; the count.
@@ -531,8 +581,11 @@ export function notificationOf(prompt) {
 
 // The freeze hook, after letting an Edit, Write, MultiEdit or NotebookEdit through.
 export function edited(home, input, now = new Date()) {
-  const state = readState(home, input.session_id, input.agent_id ?? null);
-  if (markEdited(state, now, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
+  const agent = input.agent_id ?? null;
+  withState(home, input.session_id, agent, () => {
+    const state = readState(home, input.session_id, agent);
+    if (markEdited(state, now, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
+  });
 }
 
 // The freeze hook, after letting a Bash call with `run_in_background` through: a counted build is noted, and a k run,
@@ -543,7 +596,10 @@ export function startedInBackground(home, input, config, now = new Date()) {
   const run = kRunOf(ti.command);
   const command = run ?? commandOf(ti.command, config?.hook?.commands);
   if (!command) return;
-  const state = readState(home, input.session_id, input.agent_id ?? null);
-  noteBackground(state, String(ti.description || ti.command), command, now, Boolean(run));
-  writeState(home, state);
+  const agent = input.agent_id ?? null;
+  withState(home, input.session_id, agent, () => {
+    const state = readState(home, input.session_id, agent);
+    noteBackground(state, String(ti.description || ti.command), command, now, Boolean(run));
+    writeState(home, state);
+  });
 }

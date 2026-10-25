@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   commandOf, count, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, rungFor, signatureOf, statePath,
+  withState,
 } from '../hooks/escalate-state.mjs';
 import { escalationFile } from '../hooks/kirunak-freeze.mjs';
 import { escalateConfig } from '../lib/install.mjs';
@@ -618,6 +619,23 @@ test('an edit that fails to apply takes back its flag, so the next failure is no
   freeze(edit({ tool_use_id: 'toolu_2' }), h.home);
   hook(failure(), h.home);
   assert.equal(Object.values(h.state().failures)[0].repeats, 1, 'an edit that applied still counts');
+});
+
+// ---- S-16: the review's findings (S-10 review.md) ----
+
+test('a state file\'s lock held by another hook is skipped within about 100 ms, and one older than 2 s taken over (S-10 S-3)', () => {
+  const h = makeHome();
+  hook(failure(), h.home);
+  const lock = `${statePath(h.home, 's1')}.lock`;
+  mkdirSync(lock);
+  const t = Date.now();
+  assert.equal(withState(h.home, 's1', null, () => 'ran'), undefined, 'a held lock: skipped, not waited on');
+  assert.ok(Date.now() - t < 1000, `waited ${Date.now() - t} ms`);
+  const old = new Date(Date.now() - 3000);
+  utimesSync(lock, old, old);
+  assert.equal(withState(h.home, 's1', null, () => 'ran'), 'ran', 'a lock older than 2 s is a crashed hook\'s');
+  assert.ok(!existsSync(lock));
+  assert.equal(withState(h.home, 's1', null, () => 'again'), 'again', 'released after the run');
 });
 
 // ---- AC-12: the time the hook adds, machine-bound, so only with KIRUNAK_TIMING=1 ----
