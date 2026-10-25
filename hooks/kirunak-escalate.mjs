@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
@@ -248,8 +248,9 @@ export function override(input, home, now, ancestors = ancestry) {
 
 // The commands of the hook's ancestors, nearest first, read with ps on a /k-go-on alone: `claude` for Claude Code (its
 // binary, or node running its cli), else the command's base name. It stops at the second claude, after 8 steps or at
-// launchd.
+// launchd. node:child_process loads here alone, so no other call pays for it (AC-12).
 export function ancestry(pid = process.ppid) {
+  const { execFileSync } = createRequire(import.meta.url)('node:child_process');
   const ps = (field, p) => execFileSync('ps', ['-o', field, '-p', String(p)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   const names = [];
   for (let i = 0; i < 8 && pid > 1 && !nested(names); i++) {
