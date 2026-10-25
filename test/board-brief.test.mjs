@@ -162,3 +162,20 @@ test('k board --brief --json gives the Drafts group in groups, as the mod\'s /k-
   assert.deepEqual(Object.keys(out).sort(), ['groups', 'ids', 'machine', 'made', 'text']);
   assert.deepEqual(out.groups.map((g) => [g.name, g.count]).at(-1), ['Drafts', 2]);
 });
+
+test('a step k run stopped for the owner: the brief board opens with Stopped for you, its notice in at most 3 lines of 80 characters with the title and id (gulnya/enforced-escalation R7.3, E-15)', async () => {
+  const w = await fixture();
+  const list = await rows(w.ws, { all: true });
+  const stop = { step: 'S-2', kind: 'escalated', what: 'stopped, failed on every rung', why: 'exit 1', dir: 'kirunak/tasks/hourly-chart/steps/S-2/', reports: ['steps/S-2/failure-1.md', 'steps/S-2/failure-2.md', 'steps/S-2/failure-3.md', 'steps/S-2/failure-4.md'] };
+  const r = list.find((x) => x.id === 'weather/hourly-chart');
+  const b = renderBrief(list.map((x) => (x === r ? { ...x, stops: [stop] } : x)), snapshot(w.ws), NOW);
+  const [first] = b.groups;
+  assert.deepEqual([first.name, first.count, first.ids], ['Stopped for you', 1, ['weather/hourly-chart']]);
+  // The title and id fill the first line, so what happened opens the second, before why.
+  assert.deepEqual(first.lines, [`${r.title} (weather/hourly-chart)`, 'S-2 stopped, failed on every rung: exit 1', 'read kirunak/tasks/hourly-chart/steps/S-2/ (failure-1.md … failure-4.md)']);
+  assert.ok(first.lines.length <= 3 && first.lines.every((l) => l.length <= 80), first.lines.join('\n'));
+  assert.ok(b.text.startsWith(`Made at 2026-11-07 12:00.\n\nStopped for you (1)\n${first.lines.join('\n')}\n\nWorking on now (`), b.text);
+  assert.equal(b.ids[0], 'weather/hourly-chart');
+  // With nothing stopped the board is as it was.
+  assert.ok(!renderBrief(list, snapshot(w.ws), NOW).groups.some((g) => g.name === 'Stopped for you'));
+});
