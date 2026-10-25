@@ -323,7 +323,8 @@ const VERBS = {
     // A stop's words are k run's own: such a failure would not count, a way around the two failures.
     if (steps.isStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is k run's own reason for a stop; say what went wrong`);
     const r = steps.fail({ ws, id, step, why });
-    return { ...r, text: `${id} ${step}: failed, ${r.report}${r.escalated ? '; marked [escalate] in plan.md' : ''}` };
+    // k run's next pass climbs a step that failed as often as it may, or stops past the top rung.
+    return { ...r, text: `${id} ${step}: failed, ${r.report}` };
   },
 
   async run({ ws, pos, flags }) {
