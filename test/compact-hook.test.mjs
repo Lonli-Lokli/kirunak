@@ -12,7 +12,7 @@ import { factsOf } from '../hooks/kirunak-compact.mjs';
 import { runningBy } from '../lib/steps.mjs';
 import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
 
-// gulnya/fresh-session-per-step S-4: the step boundary and the PreCompact hook (S-3 design §1-§4).
+// The step boundary and the PreCompact hook (design/orchestrator.md §5).
 
 const HOOK = fileURLToPath(new URL('../hooks/kirunak-compact.mjs', import.meta.url));
 const FIX = fileURLToPath(new URL('./fixtures/compact/', import.meta.url));
@@ -188,7 +188,7 @@ test('decide: the rows in the table\'s order, each fact read only when its row i
 
 const STARTED = '2026-01-05 10:00 S-2 started (session s-main)\n';
 
-// A home as S-6's k install will write it: config.json with the workspace repo `app` and its `compact` block, session
+// A home as k install writes it: config.json with the workspace repo `app` and its `compact` block, session
 // s-main on task app/demo, the task's progress.md, a transcript whose last call is `ctx`, the user's settings file.
 function makeHome({ ctx = 160000, model = MODEL, progress = STARTED, session = { task: 'app/demo', step: 'S-2' }, compact = {}, user, record = null } = {}) {
   const r = makeRepos(user === undefined ? {} : { user });

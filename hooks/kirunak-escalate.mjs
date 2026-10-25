@@ -23,8 +23,7 @@ import {
 // (R4.5) and hands on the push a noted k run's end carries (R7.2); Stop closes the turn and keeps the session's
 // background tasks; UserPromptExpansion of /k-go-on is the owner's override;
 // SessionStart and PostModelSwitch record the session's model. The agent records and the turn flag are what the
-// PreCompact hook reads (gulnya/fresh-session-per-step S-3 design §3, §6); they print nothing, so no agent is told
-// anything by them.
+// PreCompact hook reads (design/orchestrator.md §5); they print nothing, so no agent is told anything by them.
 //
 // The block (approval.md §7). The first failure after a fire sets the session's `block` (the caller's, for a
 // subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted. It

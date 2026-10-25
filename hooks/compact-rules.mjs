@@ -2,30 +2,30 @@ import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-// The PreCompact hook's rules (gulnya/fresh-session-per-step S-3 design §1-§4), shared by hooks/kirunak-compact.mjs
+// The PreCompact hook's rules (design/orchestrator.md §5), shared by hooks/kirunak-compact.mjs
 // and the tests: the context and the model from the transcript, the window Claude Code uses and where it comes from,
 // the threshold and the mid-step limit, whose compaction a fire is, and the rule table. It imports nothing but node:
 // modules, because it runs in a hook before a request.
 
 // ---- The constants (design, the table above §1) ----
 
-// Claude Code compacts at window − min(max output, 20,000) − 13,000 (S-1 §3); every model on the ladder has max
+// Claude Code compacts at window − min(max output, 20,000) − 13,000; every model on the ladder has max
 // output ≥ 20,000.
 export const SLACK = 33_000;
 // The most one request adds past the transcript's last usage (R2.2): the transcript lags the request being checked.
 export const LAG = 50_000;
 // An agent this far past the threshold is having its compactions blocked by us: the block is lifted (R3.3 row 2).
 export const OVERSHOOT = 50_000;
-// Idle compaction fires after about 54 minutes on the 1-hour cache (S-1 §3), so a fire within this of a Stop is not
+// Idle compaction fires after about 54 minutes on the 1-hour cache, so a fire within this of a Stop is not
 // the main session's (R3.3 row 4).
 export const IDLE_MIN = 50;
-// An additionalContext string over 10,000 characters is filed (S-1 §6); 500 left for the label (S-5b).
+// An additionalContext string over 10,000 characters is filed (hooks.md); 500 left for the label.
 export const CAP = 9_500;
 // Which folder's .claude/settings.local.json a session reads (R2.7): `main`, the repository root (the main checkout's
-// for a worktree), as settings.md says, or `cwd`. S-4's probe, 2026-10-25, Claude Code 2.1.310: a root file of
+// for a worktree), as settings.md says, or `cwd`. Probed 2026-10-25, Claude Code 2.1.310: a root file of
 // 100000 gave effectiveWindow=80000 from the root, a subdirectory and a worktree alike, so `main`.
 export const PROJECT_ROOT = 'main';
-// The setting's range (S-1 §3), and the window of a model the table does not know (R2.4).
+// The setting's range, and the window of a model the table does not know (R2.4).
 export const MIN_WINDOW = 100_000;
 export const DEFAULT_WINDOW = 200_000;
 const MILLION = 1_000_000;
@@ -88,7 +88,7 @@ function usageIn(text) {
   return null;
 }
 
-// The context of a transcript's last request, the status line's own formula (S-1 §5), and its model: 256 KB of its
+// The context of a transcript's last request, the status line's own formula, and its model: 256 KB of its
 // tail first, then 1 MB when the first held no usage (a few large tool results); null when 1 MB holds none.
 export function lastUsage(path) {
   if (typeof path !== 'string' || !path) return null;
@@ -160,7 +160,7 @@ export function projectRoot(cwd, { homeDir = homedir(), mode = PROJECT_ROOT } = 
 }
 
 // The window one settings file sets for `model`: its `modelSettings.<model>.autoCompactWindow` (a number) beats its
-// top-level `autoCompactWindow` (S-1 §3). `model` may be a function, called only when the file has modelSettings, so
+// top-level `autoCompactWindow`. `model` may be a function, called only when the file has modelSettings, so
 // the transcript is read for it only then (§4's reading order).
 function windowIn(x, model) {
   if (!x) return null;
@@ -215,7 +215,7 @@ export const limitOf = ({ midStepLimit, user, wModel }) =>
 
 // ---- Whose compaction it is (R3.3, E-6) ----
 
-// PreCompact names no agent (S-1 §4), so a fire is attributed from the turn flag and the contexts, the first row that
+// PreCompact names no agent, so a fire is attributed from the turn flag and the contexts, the first row that
 // applies deciding: an unknown turn is open (1); a running agent at least OVERSHOOT past the threshold is starving
 // under our blocks (2); an open turn whose context is more than LAG under the threshold cannot have crossed it (3);
 // a turn closed less than IDLE_MIN ago makes no request (4); else the main session's (5). `agents`: [{ id, ctx }].

@@ -1040,8 +1040,8 @@ test('the hook\'s quiet path: median at most 50 ms and node\'s + 12, p95 at most
   }
 });
 
-// ---- fresh-session-per-step S-5: the agent records and the turn flag the PreCompact hook reads (its S-3 design §3,
-// §6). Every event here is written inline. ----
+// ---- the agent records and the turn flag the PreCompact hook reads (design/orchestrator.md §5). Every event here is
+// written inline. ----
 
 const promptOf = (extra = {}) => ({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'go on with the next step', prompt_id: 'p1', ...extra });
 const stopEventOf = (tasks = null, extra = {}) => ({ session_id: 's1', hook_event_name: 'Stop', stop_hook_active: false, ...(tasks ? { background_tasks: tasks } : {}), ...extra });

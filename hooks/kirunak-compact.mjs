@@ -9,13 +9,13 @@ import {
   windowSetting,
 } from './compact-rules.mjs';
 
-// The PreCompact hook (gulnya/fresh-session-per-step S-3 design §4). In a session started in a workspace repo whose
+// The PreCompact hook (design/orchestrator.md §5). In a session started in a workspace repo whose
 // own .claude/settings.local.json sets kirunak's handover window, it blocks an automatic compaction while a step the
 // session started is running, and lets it through at the next step boundary (AC-1, AC-4), past the mid-step limit
 // (E-1, E-8), for a manual /compact (E-4), for an agent's fire as far as the hook can tell one (E-6, R3.3), and
 // whenever it cannot read kirunak's state (E-7). Outside the workspace's repos it never blocks (E-10). It exits at
-// once in a k run step (E-6, O-1). A block shows nothing and costs no tokens (S-1 §2); every decision is one line of
-// compact.log, and each allow it gives the main session records `expect` for SessionStart (R5.2, S-5b).
+// once in a k run step (E-6, O-1). A block shows nothing and costs no tokens; every decision is one line of
+// compact.log, and each allow it gives the main session records `expect` for SessionStart (R5.2).
 //
 // It imports nothing but node: modules, lib/home.mjs and its rules; lib/steps.mjs, for the running steps, is loaded
 // only when the table reaches R4.8, so no other fire pays for it. Not wired by k install until S-6.
