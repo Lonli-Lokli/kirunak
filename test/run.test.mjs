@@ -7,6 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
 import { run } from '../lib/run.mjs';
+import { renderBrief } from '../lib/board-brief.mjs';
+import { snapshot } from '../lib/board.mjs';
+import { card } from '../lib/board-md.mjs';
+import { rows } from '../lib/list.mjs';
+import { stoppedFor } from '../lib/waiting.mjs';
 import * as queue from '../lib/queue.mjs';
 import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
@@ -45,6 +50,10 @@ const BOTH = { 'S-1': 'done', 'S-2': 'done', 'S-3': 'ready', 'S-4': 'pending' };
 
 const OUTPUTS = { 'S-1': ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv'], 'S-2': ['steps/S-2/report.md'] };
 
+// Every fake run's usage, and the tokens R3.1's events read from it (lib/cost.mjs's names).
+const RUN_USAGE = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 };
+const TOKENS = { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 };
+
 // A fake runner seam: each run is a real short process (so its pid is alive while it runs); when it exits,
 // `act(step, n, w)` does the step's work and the result names the conversation.
 function fakeRunner(w, act = () => 'write') {
@@ -58,7 +67,7 @@ function fakeRunner(w, act = () => 'write') {
         child.on('exit', (code, signal) => {
           const what = act(step, n, w, child.pid);
           if (what === 'write') for (const o of OUTPUTS[step.env.KIRUNAK_STEP]) put(w, o);
-          resolve({ exitCode: what === 'exit 1' ? 1 : signal ? 143 : 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: sessionId, total_cost_usd: 0.1 } });
+          resolve({ exitCode: what === 'exit 1' ? 1 : signal ? 143 : 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: sessionId, total_cost_usd: 0.1, usage: RUN_USAGE } });
         }),
       );
       return { pid: child.pid, sessionId, done };
@@ -120,7 +129,7 @@ test('no --model or --effort when neither the plan nor the config names one; the
   assert.ok(!second.includes('--effort'));
 });
 
-test('a missing output fails the step; the retry is a fresh conversation that reads the failure; then it climbs the ladder, and past the top it is marked [escalate]', async () => {
+test('a missing output fails the step; the retry is a fresh conversation that reads the failure; then it climbs the ladder, and a design run with no design spends the top rung: k run stops for the owner', async () => {
   const w = await approvedWorkspace(PLAN);
   const lines = [];
   const calls = fakeRunner(w, () => 'nothing');
@@ -130,16 +139,151 @@ test('a missing output fails the step; the retry is a fresh conversation that re
   assert.equal(new Set(calls.map((c) => c.sessionId)).size, 4, 'every attempt is a fresh conversation');
   assert.match(calls[1].prompt, /kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-1\.md \(the last attempt failed: read why first\)/);
   assert.match(calls[2].prompt, /## Why this step is yours\n\nIt failed 2 times \(sonnet 2\)\. Read every report first, in order: each says what that attempt tried\.\n\n- kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-1\.md\n- kirunak\/tasks\/offline-forecast\/steps\/S-1\/failure-2\.md\n/);
-  assert.match(calls[3].prompt, /It failed 3 times \(sonnet 2, opus 1\)\.[^]*failure-3\.md\n/);
+  assert.match(calls[3].prompt, /^# weather\/offline-forecast S-1: Keep the last forecast on disk, its design\n[^]*It failed 3 times \(sonnet 2, opus 1\)\.[^]*failure-3\.md\n/);
   assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8'), /missing outputs: steps\/S-1\/report\.md, evidence\/S-1-cache-sizes\.tsv/);
-  assert.match(r.stopped, /^S-1 is marked \[escalate\] in plan\.md: it failed on every rung \(sonnet 2, opus 1, fable 1\); the owner's session decides$/);
+  // The design run's one required output is its design (R2.4): without it the attempt fails, and the top rung is spent.
+  assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-4.md'), 'utf8'), /: missing outputs: steps\/S-1\/design-1\.md\n/);
+  assert.equal(r.stopped, 'S-1 failed on every rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md');
+  assert.equal(lines.at(-1), `${w.id} stopped: ${r.stopped}`);
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md, steps\/S-1\/failure-3\.md, steps\/S-1\/failure-4\.md$/m);
   assert.equal((progress(w).match(/S-1 failed: missing outputs/g) || []).length, 4);
   assert.match(progress(w), /S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n.*S-1 started \(opus high, session [0-9a-f-]{36}, rung opus\)\n/);
-  assert.match(progress(w), /S-1 escalated: to fable \(high, design\) after 1 failure on opus\n.*S-1 started \(fable high, session [0-9a-f-]{36}, rung fable\)\n/);
-  assert.ok(lines.includes(`${w.id} S-1 climbs to opus high`) && lines.includes(`${w.id} S-1 climbs to fable high`), lines.join('\n'));
+  assert.match(progress(w), /S-1 escalated: to fable \(high, design\) after 1 failure on opus\n.*S-1 started \(fable high, session [0-9a-f-]{36}, rung fable design\)\n.*S-1 failed: /);
+  assert.ok(lines.includes(`${w.id} S-1 climbs to opus (high): attempt 1 of 1`) && lines.includes(`${w.id} S-1 climbs to fable (high): attempt 1 of 1`), lines.join('\n'));
   assert.equal(r.states['S-2'], 'pending');
+});
+
+test('a step that fails twice climbs to opus and k run goes on by itself: an event and a plain line, nothing for the owner, a line on the card (AC-1, E-17)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const lines = [];
+  const calls = fakeRunner(w, (step, n) => (n <= 2 ? 'nothing' : 'write'));
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(r.states, BOTH);
+  assert.match(r.stopped, /^S-3 waits for the owner/, 'k run went on to the next step, and stops only at the owner\'s');
+  assert.deepEqual(calls.map((c) => [c.env.KIRUNAK_STEP, c.model, c.effort]), [['S-1', null, null], ['S-1', null, null], ['S-1', 'opus', 'high'], ['S-2', null, null]]);
+  assert.ok(lines.includes(`${w.id} S-1 climbs to opus (high): attempt 1 of 1`), lines.join('\n'));
+  const time = (e) => ({ ...e, time: typeof e.time });
+  assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map(time), [
+    { time: 'string', kind: 'escalate', trigger: 'k run failure count', task: w.id, step: 'S-1', failures: 2, from: { model: 'sonnet' }, to: { model: 'opus', effort: 'high', mode: 'build', attempt: 1 } },
+    { time: 'string', kind: 'escalated-run', task: w.id, step: 'S-1', rung: { model: 'opus', effort: 'high', mode: 'build' }, phase: 'build', passed: true, tokens: TOKENS, costUsd: 0.1, record: 'steps/S-1/run-3.json' },
+  ]);
+  const list = await rows(w.ws, { all: true });
+  assert.deepEqual(stoppedFor(list), [], 'k waiting shows nothing');
+  assert.ok(!renderBrief(list, snapshot(w.ws)).groups.some((g) => g.name === 'Stopped for you'), 'nor does the brief board');
+  assert.match(await card(w.ws, w.id), /\nClimbs:\n\n- \d{4}-\d\d-\d\d \d\d:\d\d S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n/);
+});
+
+test('a Sonnet step whose Opus attempt fails: Fable designs it (design-1.md its one output), a fresh Opus run builds it; when that fails too, k run stops with every report, the stop line, the events with tokens and the notices (AC-4, AC-6, AC-7, AC-21, E-15)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const lines = [];
+  const calls = fakeRunner(w, (step, n, w2) => {
+    if (n === 4) put(w2, 'steps/S-1/design-1.md', '# the design');
+    return 'nothing';
+  });
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => [c.model, c.effort]), [[null, null], [null, null], ['opus', 'high'], ['fable', 'high'], ['opus', 'high']]);
+  assert.equal(new Set(calls.map((c) => c.sessionId)).size, 5, 'the build run is a fresh conversation');
+  const T = 'kirunak/tasks/offline-forecast/steps/S-1';
+  const [design, build] = [calls[3].prompt, calls[4].prompt];
+  assert.match(design, /^# weather\/offline-forecast S-1: Keep the last forecast on disk, its design\n/);
+  assert.ok(design.includes(`## Your one output\n\n\`${T}/design-1.md\`: the files and functions to change`), design);
+  assert.ok(design.includes(`- Design only: write \`${T}/design-1.md\` and nothing under the step's outputs; the caller builds.`), design);
+  assert.ok(design.includes(`It failed 3 times (sonnet 2, opus 1). Read every report first, in order: each says what that attempt tried.\n\n- ${T}/failure-1.md\n- ${T}/failure-2.md\n- ${T}/failure-3.md\n`), design);
+  assert.match(build, /^# weather\/offline-forecast S-1: Keep the last forecast on disk\n/);
+  assert.ok(build.includes(`It failed 3 times (sonnet 2, opus 1). Read the design first, then every report, in order: each says what that attempt tried.\n\n- ${T}/design-1.md: the design. Build exactly this design; where it is wrong, say so in the report.\n- ${T}/failure-1.md\n- ${T}/failure-2.md\n- ${T}/failure-3.md\n`), build);
+  assert.match(progress(w), /S-1 started \(fable high, session [0-9a-f-]{36}, rung fable design\)\n.*S-1 started \(opus high, session [0-9a-f-]{36}, rung fable build on opus high\)\n.*S-1 failed: missing outputs: steps\/S-1\/report\.md, evidence\/S-1-cache-sizes\.tsv\n.*S-1 escalated: stopped for the owner, failed on every rung \(sonnet 2, opus 1, fable 1\)\n$/);
+  assert.ok(lines.includes(`${w.id} S-1 builds steps/S-1/design-1.md on opus high`), lines.join('\n'));
+  // The stop (AC-7, R2.7): the mark, every report in plan.md, one line naming the newest.
+  assert.equal(r.stopped, 'S-1 failed on every rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md');
+  const plan = readFileSync(join(w.p.dir, 'plan.md'), 'utf8');
+  assert.match(plan, /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
+  assert.match(plan, /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md, steps\/S-1\/failure-3\.md, steps\/S-1\/failure-4\.md$/m);
+  // Every escalation and every rung run in events.jsonl, its tokens from the run record (AC-21, R3.1).
+  const run1 = (k, mode, phase, passed) => ({ kind: 'escalated-run', task: w.id, step: 'S-1', rung: mode === 'build' ? { model: 'opus', effort: 'high', mode } : { model: 'fable', effort: 'high', mode }, phase, passed, tokens: TOKENS, costUsd: 0.1, record: `steps/S-1/run-${k}.json` });
+  assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map(({ time, ...e }) => e), [
+    { kind: 'escalate', trigger: 'k run failure count', task: w.id, step: 'S-1', failures: 2, from: { model: 'sonnet' }, to: { model: 'opus', effort: 'high', mode: 'build', attempt: 1 } },
+    run1(3, 'build', 'build', false),
+    { kind: 'escalate', trigger: 'k run failure count', task: w.id, step: 'S-1', failures: 1, from: { model: 'opus' }, to: { model: 'fable', effort: 'high', mode: 'design', attempt: 1 } },
+    run1(4, 'design', 'design', true),
+    run1(5, 'design', 'build', false),
+    { kind: 'escalate', trigger: 'k run failure count', task: w.id, step: 'S-1', failures: 4, from: { model: 'fable' }, to: null, stopped: true },
+  ]);
+  // The notices (R7.1, R7.3): at most 3 lines of at most 80 characters, the task's title and id first, the one thing
+  // to do last; k waiting indents its lines two spaces.
+  const list = await rows(w.ws, { all: true });
+  const brief = renderBrief(list, snapshot(w.ws)).groups[0];
+  // The title and id fill the first line, so what happened opens the second.
+  assert.deepEqual(brief.lines, [
+    'The last forecast stays readable offline (weather/offline-forecast)',
+    'S-1 stopped, failed on every rung: missing outputs: steps/S-1/report.md, eviden…',
+    'read kirunak/tasks/offline-forecast/steps/S-1/ (failure-1.md … failure-4.md)',
+  ]);
+  assert.deepEqual([brief.name, brief.count, brief.ids], ['Stopped for you', 1, [w.id]]);
+  const [waiting] = stoppedFor(list);
+  for (const ls of [brief.lines, waiting.lines]) {
+    assert.ok(ls.length <= 3 && ls.every((l) => l.length <= 80), ls.join('\n'));
+    assert.equal(ls[0], 'The last forecast stays readable offline (weather/offline-forecast)');
+    assert.match(ls.at(-1), /^read kirunak\/tasks\/offline-forecast\/steps\/S-1\/ \(failure-1\.md … failure-4\.md\)$/);
+  }
+  assert.ok(waiting.lines.every((l) => l.length <= 78), 'k waiting indents them two spaces');
+  assert.ok(waiting.one.length <= 200 && !waiting.one.includes('\n'));
+});
+
+test('a timeout counts as a failure, so the step climbs (E-2)', async () => {
+  const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nbudget: 0.005 minutes\n'));
+  const calls = fakeRunner(w, (step, n) => (n <= 2 ? 'nothing' : 'write'));
+  const original = w.ws.seams.runner.start;
+  let n = 0;
+  w.ws.seams.runner.start = (step) => original({ ...step, sleep: ++n <= 2 ? '30' : '0.05' });
+  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.deepEqual(calls.slice(0, 3).map((c) => c.model), [null, null, 'opus']);
+  assert.equal((progress(w).match(/S-1 failed: no end within the budget's 0\.005 minutes\n/g) || []).length, 2);
+  assert.match(progress(w), /S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n.*S-1 started .*\n.*S-1 finished\n/);
+});
+
+test('a stop is not a failure: after an own failure and a stop the step retries on its own rung, and climbs after its second own failure (E-3)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', label: 'session s-1' });
+  steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'exit 1' });
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', label: 'session s-2' });
+  steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: steps.STOPPED.bySignal('SIGTERM') });
+  const calls = fakeRunner(w, (step, n) => (n === 1 ? 'nothing' : 'write'));
+  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.deepEqual(calls.slice(0, 2).map((c) => c.model), [null, 'opus']);
+  assert.match(calls[0].prompt, /steps\/S-1\/failure-1\.md \(the last attempt failed: read why first\)/);
+  assert.match(calls[1].prompt, /It failed 2 times \(sonnet 2\)\.[^]*failure-1\.md\n- [^\n]*failure-2\.md\n/);
+  assert.ok(!existsSync(join(w.p.dir, 'steps', 'S-1', 'failure-3.md')), 'a stop writes no report');
+});
+
+test('a design run that asks the owner a question: the next k run resumes it on its rung, then the build run follows on the rung below', async () => {
+  const w = await approvedWorkspace(PLAN.replace('### S-1 Keep the last forecast on disk [agent]', '### S-1 Keep the last forecast on disk [agent, opus, high]'));
+  const calls = fakeRunner(w, (step, n, w2) => {
+    if (n === 3) put(w2, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Which cache size?' }));
+    if (n === 4) put(w2, 'steps/S-1/design-1.md', '# the design');
+    return n === 5 ? 'write' : 'nothing';
+  });
+  const first = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.match(first.stopped, /^S-1 waits for the owner: Which cache size\?/);
+  assert.deepEqual(stoppedFor(await rows(w.ws, { all: true })).map((x) => x.lines.at(-1)), ['answer in a session or in notes.md, then start k run again']);
+  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  // An Opus step: opus twice, then Fable designs (asked, then resumed) and a fresh Opus run builds.
+  assert.deepEqual(calls.slice(0, 5).map((c) => [c.model, c.resume ? 'resume' : 'fresh']), [['opus', 'fresh'], ['opus', 'fresh'], ['fable', 'fresh'], ['fable', 'resume'], ['opus', 'fresh']]);
+  assert.equal(calls[3].sessionId, calls[2].sessionId);
+  assert.ok(calls[4].prompt.includes('steps/S-1/design-1.md: the design. Build exactly this design'), calls[4].prompt);
+  assert.match(progress(w), /S-1 started \(opus high, session [0-9a-f-]{36}, rung fable build on opus high\)\n.*S-1 finished\n/);
+});
+
+test('a heavy step has no rung: its second failure stops the task with every report named (R2.5)', async () => {
+  const w = await approvedWorkspace(PLAN.replace('### S-1 Keep the last forecast on disk [agent]\ncovers: AC-1, AC-2, E-1\ninputs: task, docs/offline.md\n', '### S-1 Keep the last forecast on disk [heavy]\ncovers: AC-1, AC-2, E-1\ncommand: npm test\n'));
+  w.ws.seams.resourceGuard = { run: () => ({ exitCode: 1, log: 'red' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(calls.length, 0);
+  assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
+  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md$/m);
+  assert.ok(!/escalated: to /.test(progress(w)));
+  assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map((e) => [e.kind, e.to, e.stopped]), [['escalate', null, true]]);
 });
 
 test('exit 1 fails the step with its exit code', async () => {
