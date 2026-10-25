@@ -9,10 +9,10 @@ import {
 import { escalateConfig, install } from '../lib/install.mjs';
 import { ladderWorkspace } from './helpers.mjs';
 
-// gulnya/enforced-escalation S-2 design §1: the ladder's shape, its refusals at load, and the rules that read it.
+// design/plugins.md §3: the ladder's shape, its refusals at load, and the rules that read it.
 
-const FABLE = { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['music-deep'], cacheTtl: '1h' };
-const GULNYA = [{ model: 'sonnet' }, { model: 'opus', effort: 'high', mode: 'build' }, FABLE];
+const FABLE = { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['domain-deep'], cacheTtl: '1h' };
+const CUSTOM = [{ model: 'sonnet' }, { model: 'opus', effort: 'high', mode: 'build' }, FABLE];
 // E-18: Haiku at the bottom, and nothing in the code names a model.
 const HAIKU = [{ model: 'haiku' }, { model: 'sonnet', effort: 'high' }, { model: 'opus', effort: 'high', mode: 'design' }];
 
@@ -33,7 +33,7 @@ test('a workspace\'s ladder replaces the default whole; its hook switches are me
   const { ws } = await ladderWorkspace({ ladder: HAIKU, hook: { block: false } });
   assert.deepEqual(ws.ladder, HAIKU);
   assert.deepEqual(ws.hook, { ...DEFAULT_HOOK, block: false });
-  assert.deepEqual(checkLadder(GULNYA), []);
+  assert.deepEqual(checkLadder(CUSTOM), []);
   assert.deepEqual(checkLadder(HAIKU), []);
 });
 
@@ -95,8 +95,8 @@ test('refused: a design rung directly above another; a design rung above a build
 
 test('refused: agents that are not names, a cacheTtl other than 5m or 1h', () => {
   const top = (r) => checkLadder([{ model: 'sonnet' }, { model: 'opus', ...r }]);
-  assert.deepEqual(top({ agents: ['music-deep', 'a_b2'], cacheTtl: '1h' }), []);
-  for (const agents of ['music-deep', ['music deep'], ['../x'], [3]]) assert.match(top({ agents })[0], /^rung 2: agents must be a list of agent names/);
+  assert.deepEqual(top({ agents: ['domain-deep', 'a_b2'], cacheTtl: '1h' }), []);
+  for (const agents of ['domain-deep', ['domain deep'], ['../x'], [3]]) assert.match(top({ agents })[0], /^rung 2: agents must be a list of agent names/);
   assert.match(top({ cacheTtl: '30m' })[0], /^rung 2: cacheTtl must be 5m or 1h, not "30m"/);
 });
 
@@ -108,12 +108,12 @@ test('familyOf: the word after claude-, the alias itself, a context suffix left 
 });
 
 test('rungOf: by alias, by the rung\'s pinned id, and by an id\'s family; null for a model on no rung', () => {
-  assert.equal(rungOf(GULNYA, 'opus'), GULNYA[1]);
-  assert.equal(rungOf(GULNYA, 'claude-fable-5-1'), GULNYA[2]);
-  assert.equal(rungOf(GULNYA, 'claude-fable-6-0'), GULNYA[2], 'another id of the family');
-  assert.equal(rungOf(GULNYA, 'claude-sonnet-4-6'), GULNYA[0]);
-  assert.equal(rungOf(GULNYA, 'claude-haiku-4-5'), null);
-  assert.equal(rungOf(GULNYA, ''), null);
+  assert.equal(rungOf(CUSTOM, 'opus'), CUSTOM[1]);
+  assert.equal(rungOf(CUSTOM, 'claude-fable-5-1'), CUSTOM[2]);
+  assert.equal(rungOf(CUSTOM, 'claude-fable-6-0'), CUSTOM[2], 'another id of the family');
+  assert.equal(rungOf(CUSTOM, 'claude-sonnet-4-6'), CUSTOM[0]);
+  assert.equal(rungOf(CUSTOM, 'claude-haiku-4-5'), null);
+  assert.equal(rungOf(CUSTOM, ''), null);
   const pinned = [{ model: 'sonnet' }, { model: 'opus', id: 'claude-opus-5-5' }];
   assert.equal(rungOf(pinned, 'claude-opus-5-5'), pinned[1]);
 });
@@ -126,10 +126,10 @@ test('above: the next rung up, by rung or by alias; null at the top and for a mo
 });
 
 test('agentsOf: none on the lowest; the generated <model>-step, then the workspace\'s own', () => {
-  assert.deepEqual(agentsOf(GULNYA, GULNYA[0]), []);
-  assert.deepEqual(agentsOf(GULNYA, 'opus'), ['opus-step']);
-  assert.deepEqual(agentsOf(GULNYA, FABLE), ['fable-step', 'music-deep']);
-  assert.deepEqual(agentsOf(GULNYA, 'haiku'), []);
+  assert.deepEqual(agentsOf(CUSTOM, CUSTOM[0]), []);
+  assert.deepEqual(agentsOf(CUSTOM, 'opus'), ['opus-step']);
+  assert.deepEqual(agentsOf(CUSTOM, FABLE), ['fable-step', 'domain-deep']);
+  assert.deepEqual(agentsOf(CUSTOM, 'haiku'), []);
 });
 
 test('buildRungFor: a build rung builds itself; a design rung\'s build run is the rung directly below', () => {

@@ -63,7 +63,7 @@ test('the skills stay short', () => {
   assert.ok(read('skills/k-go-on/SKILL.md').split('\n').length <= 20);
 });
 
-test('k-go-on is the owner\'s alone: the model may not invoke it (gulnya/enforced-escalation E-11)', () => {
+test('k-go-on is the owner\'s alone: the model may not invoke it (design/approval.md §7, E-11)', () => {
   const front = /^---\n([\s\S]*?)\n---/.exec(read('skills/k-go-on/SKILL.md'))[1];
   assert.match(front, /^name: k-go-on$/m);
   assert.match(front, /^disable-model-invocation: true$/m);

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { approvedWorkspace } from './helpers.mjs';
 
-// A k run step's climb up the ladder (gulnya/enforced-escalation, S-2 design R2.2, R2.6, R2.7), driven through
+// A k run step's climb up the ladder (design/orchestrator.md §2), driven through
 // steps.start, fail, climb and escalate as k run drives them, on kirunak's default ladder: sonnet, opus (high,
 // build), fable (high, design).
 

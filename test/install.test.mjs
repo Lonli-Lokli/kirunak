@@ -198,11 +198,11 @@ test('a hook kirunak wrote before is rewritten; the new one finds node with a GU
   assert.match(execFileSync('git', ['log', '-1', '--format=%B'], { cwd: r, encoding: 'utf8' }), /SLAP: 0 \(S\)/);
 });
 
-// gulnya/enforced-escalation S-2 design §6: the rung agents, config.json and the escalation hook's blocks.
+// design/plugins.md §3, design/approval.md §7: the rung agents, config.json and the escalation hook's blocks.
 const LADDER = [
   { model: 'sonnet' },
   { model: 'opus', effort: 'high', mode: 'build' },
-  { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['music-deep'], cacheTtl: '1h' },
+  { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['domain-deep'], cacheTtl: '1h' },
 ];
 const ws = (extra = {}) => ({ ladder: LADDER, modulePath: '/ws/kirunak/workspace.mjs', hook: { ...DEFAULT_HOOK }, repos: [{ name: 'hub', root: '/ws/hub' }], ...extra });
 const agent = (h, name) => readFileSync(join(h.agentsDir, `${name}.md`), 'utf8');
@@ -211,7 +211,7 @@ test('a <model>-step agent for every rung above the lowest, with the rung\'s mod
   const h = home();
   const { actions } = install({ ...h, ws: ws() });
   assert.ok(!existsSync(join(h.agentsDir, 'sonnet-step.md')), 'none for the lowest');
-  assert.ok(!existsSync(join(h.agentsDir, 'music-deep.md')), 'the workspace\'s own agent is not written');
+  assert.ok(!existsSync(join(h.agentsDir, 'domain-deep.md')), 'the workspace\'s own agent is not written');
   const opus = agent(h, 'opus-step');
   assert.match(opus, /^---\nname: opus-step\ndescription: "One rung up from sonnet on this workspace's ladder: .*It takes the step itself\..*"\nmodel: opus\neffort: high\ntools: "\*"\n---\n/);
   assert.ok(opus.includes(`\n${MARKER}\n`));
@@ -220,7 +220,7 @@ test('a <model>-step agent for every rung above the lowest, with the rung\'s mod
   const fable = agent(h, 'fable-step');
   assert.match(fable, /\nmodel: claude-fable-5-1\neffort: high\ntools: "\*"\nexperimental:\n {2}cacheTtl: 1h\n---\n/);
   assert.match(fable, /Design and review only: return a design .* Write no production code\./);
-  assert.ok(!/\{\{|gulnya|KatyaFM|music/.test(opus + fable), 'every slot filled, no portfolio word (AC-30)');
+  assert.ok(!/\{\{|domain/.test(opus + fable), 'every slot filled, no word of the workspace\'s own agents (AC-30)');
   assert.ok(actions.includes(`wrote the opus-step agent: ${join(h.agentsDir, 'opus-step.md')}`));
 });
 
@@ -285,7 +285,7 @@ test('config.json: the ladder with each rung\'s agents, the hook switches, the r
     ladder: [
       { model: 'sonnet', id: null, effort: null, mode: null, agents: [] },
       { model: 'opus', id: null, effort: 'high', mode: 'build', agents: ['opus-step'] },
-      { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['fable-step', 'music-deep'] },
+      { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['fable-step', 'domain-deep'] },
     ],
     hook: { enabled: true, block: true, repeats: 3, commands: ['^bun test'] },
     repos: { hub: '/ws/hub' },
@@ -312,7 +312,7 @@ test('the escalation hook on its seven events, SubagentStop matching every agent
       return [event, blocks[0].matcher ?? null];
     }));
   assert.deepEqual(matchers, {
-    PostToolUseFailure: 'Bash|Edit|Write|MultiEdit|NotebookEdit', PostToolUse: 'Agent', SubagentStop: 'opus-step|fable-step|music-deep', UserPromptSubmit: null,
+    PostToolUseFailure: 'Bash|Edit|Write|MultiEdit|NotebookEdit', PostToolUse: 'Agent', SubagentStop: 'opus-step|fable-step|domain-deep', UserPromptSubmit: null,
     UserPromptExpansion: null, SessionStart: 'startup|resume|clear', PostModelSwitch: null,
   });
   assert.ok(!('matcher' in ours('UserPromptSubmit')[0]), 'no matcher key at all');
@@ -344,7 +344,7 @@ test('--print shows the blocks, the agents and config.json, and writes none of t
   const all = install({ ...h, ws: ws(), print: true }).actions.join('\n');
   assert.ok(readFileSync(h.settingsPath).equals(before));
   assert.ok(!existsSync(h.agentsDir) && !existsSync(join(h.home, 'escalate')));
-  assert.ok(all.includes(`would set in ${h.settingsPath} hooks.SubagentStop: {"matcher":"opus-step|fable-step|music-deep"`));
+  assert.ok(all.includes(`would set in ${h.settingsPath} hooks.SubagentStop: {"matcher":"opus-step|fable-step|domain-deep"`));
   assert.ok(all.includes(`would write ${join(h.agentsDir, 'fable-step.md')}:\n---\nname: fable-step\n`));
   assert.ok(all.includes(`would write ${join(h.home, 'escalate', 'config.json')}:\n{\n  "written": `));
 });

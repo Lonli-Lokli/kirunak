@@ -6,7 +6,7 @@ import { frontmatter, ladderChecks } from '../lib/doctor.mjs';
 import { install } from '../lib/install.mjs';
 import { k, KIRUNAK, ladderWorkspace } from './helpers.mjs';
 
-// gulnya/enforced-escalation S-2 design R6.4: k doctor's lines on the ladder, its agents, settings.json's
+// design/plugins.md §3: k doctor's lines on the ladder, its agents, settings.json's
 // modelSettings, the escalation hook's wiring, its config.json and its switches.
 
 // A workspace with the given keys, k installed for it into temp settings and agents folders, push to the phone on as
@@ -70,16 +70,16 @@ test('a rung agent missing, of another family or at another effort FAILs, naming
 });
 
 test('the workspace\'s own agents on a rung are checked the same, through a link, and fixed by hand', async () => {
-  const ladder = [{ model: 'sonnet' }, { model: 'opus', effort: 'high' }, { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['music-deep'] }];
+  const ladder = [{ model: 'sonnet' }, { model: 'opus', effort: 'high' }, { model: 'fable', id: 'claude-fable-5-1', effort: 'high', mode: 'design', agents: ['domain-deep'] }];
   const w = await installed({ ladder });
-  const path = join(w.agentsDir, 'music-deep.md');
-  assert.ok(w.fails().includes(`rung agent music-deep (the workspace's own): ${path} is missing (write it, or take it off the fable rung's agents)`));
+  const path = join(w.agentsDir, 'domain-deep.md');
+  assert.ok(w.fails().includes(`rung agent domain-deep (the workspace's own): ${path} is missing (write it, or take it off the fable rung's agents)`));
   const repo = join(w.dir, 'portfolio');
   mkdirSync(repo);
-  writeFileSync(join(repo, 'music-deep.md'), '---\nname: music-deep\nmodel: claude-fable-5-1\neffort: xhigh\ntools: "*"\n---\nMusic.\n');
-  symlinkSync(join(repo, 'music-deep.md'), path);
+  writeFileSync(join(repo, 'domain-deep.md'), '---\nname: domain-deep\nmodel: claude-fable-5-1\neffort: xhigh\ntools: "*"\n---\nDomain.\n');
+  symlinkSync(join(repo, 'domain-deep.md'), path);
   const real = realpathSync(path);
-  assert.deepEqual(w.fails(), [`rung agent music-deep (the workspace's own): ${path} → ${real}, claude-fable-5-1, xhigh: the ladder says high (set it in ${real})`]);
+  assert.deepEqual(w.fails(), [`rung agent domain-deep (the workspace's own): ${path} → ${real}, claude-fable-5-1, xhigh: the ladder says high (set it in ${real})`]);
   writeFileSync(real, readFileSync(real, 'utf8').replace('xhigh', 'high'));
   assert.deepEqual(w.fails(), []);
   assert.ok(w.check().some(([ok, l]) => ok && l === `rung agent fable-step: ${join(w.agentsDir, 'fable-step.md')}, claude-fable-5-1, high`));
