@@ -415,6 +415,27 @@ export function rungFor(ladder, model) {
   return { from: list[i]?.model ?? null, up: up?.model ?? null, agents: up?.agents ?? [], unknown };
 }
 
+// The effort levels in order, as lib/plan.mjs EFFORTS lists them (the test holds the two the same).
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * Why a launch ({ model: the model it resolved, asked: the Agent call's `model`, effort: its `effort` }) is not a run
+ * of the ladder's rung `to`, or null when it is (S-10 B-1): the Agent call's `model` overrides the agent file's, so a
+ * fable-step launched with `model: "haiku"` runs Haiku. Every model the launch names must be of the rung's family
+ * (its `id` when config.json has one, else its `model`), one at least, and an effort asked must not be below the
+ * rung's.
+ */
+export function unfitFor(ladder, to, launch) {
+  const rung = (Array.isArray(ladder) ? ladder : []).find((r) => r?.model === to);
+  const family = familyOf(rung?.id || rung?.model || to);
+  const models = [launch?.model, launch?.asked].filter((m) => typeof m === 'string' && m);
+  if (!models.length) return 'model unknown';
+  if (models.some((m) => familyOf(m) !== family)) return `model not ${family}`;
+  const effort = launch?.effort;
+  if (rung?.effort && effort != null && EFFORTS.indexOf(effort) < EFFORTS.indexOf(rung.effort)) return `effort below ${rung.effort}`;
+  return null;
+}
+
 // The last `size` bytes of a file as text; '' when it cannot be read.
 export function tail(path, size) {
   let fd;
@@ -436,6 +457,39 @@ export function tail(path, size) {
 export function modelFromTranscript(path) {
   if (typeof path !== 'string' || !path) return null;
   return [...tail(path, 128 * 1024).matchAll(/"model"\s*:\s*"(claude-[^"]+)"/g)].at(-1)?.[1] ?? null;
+}
+
+const INTERRUPTED = '[Request interrupted';
+
+/**
+ * Whether an agent that stopped finished its run (S-10 S-2), from its transcript's last 64 KB: a SubagentHandback
+ * tool_use, or a last assistant entry of text with no tool call, and no `[Request interrupted` after that entry; or
+ * SubagentStop's `last_assistant_message`, which Claude Code sends when the agent did not hand back. A stopped or
+ * empty run is not finished; a short one that finished is, and its size goes to the log. → { finished, bytes }
+ */
+export function runEnd(path, lastMessage = null) {
+  let bytes = 0;
+  try {
+    bytes = statSync(path).size;
+  } catch {
+    // no transcript: the last message alone
+  }
+  const entries = (bytes ? tail(path, 64 * 1024) : '').split('\n').flatMap((l) => {
+    try {
+      const x = JSON.parse(l);
+      return x && typeof x === 'object' ? [x] : [];
+    } catch {
+      return []; // the line the tail cut, or none
+    }
+  });
+  const blocks = (x) => (Array.isArray(x.message?.content) ? x.message.content : [{ type: 'text', text: String(x.message?.content ?? '') }]);
+  const last = entries.findLastIndex((x) => x.type === 'assistant');
+  const interrupted = entries.slice(last + 1).some((x) => JSON.stringify(x.message?.content ?? '').includes(INTERRUPTED));
+  const handback = entries.some((x) => x.type === 'assistant' && blocks(x).some((b) => b?.type === 'tool_use' && b.name === 'SubagentHandback'));
+  const end = last < 0 ? [] : blocks(entries[last]);
+  const text = end.some((b) => b?.type === 'text' && String(b.text ?? '').trim()) && !end.some((b) => b?.type === 'tool_use');
+  const said = typeof lastMessage === 'string' && lastMessage.trim() !== '';
+  return { finished: !interrupted && (handback || text || said), bytes };
 }
 
 // The model that failed (R4.8): the session's recorded one, else its transcript's; for a subagent, the model its

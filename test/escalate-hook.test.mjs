@@ -1,18 +1,19 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  commandOf, count, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, rungFor, signatureOf, statePath,
-  withState,
+  commandOf, count, EFFORTS as HOOK_EFFORTS, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, runEnd,
+  rungFor, signatureOf, statePath, unfitFor, withState,
 } from '../hooks/escalate-state.mjs';
 import { escalationFile } from '../hooks/kirunak-freeze.mjs';
 import { escalateConfig } from '../lib/install.mjs';
 import { familyOf } from '../lib/ladder.mjs';
+import { EFFORTS } from '../lib/plan.mjs';
 import { stopNotice } from '../lib/notice.mjs';
 
 // gulnya/enforced-escalation S-5: the escalation hook counts a build or test failing again on the same test or error
@@ -75,6 +76,7 @@ test('the freeze hook and the rules name the same state file, and read model fam
   assert.equal(escalationFile({ session_id: '../x' }, home), null);
   assert.equal(statePath(home, '../x'), null);
   for (const m of ['claude-opus-5-5', 'claude-fable-5[1m]', 'sonnet', 'claude-haiku-5-5', '']) assert.equal(hookFamily(m), familyOf(m), m);
+  assert.deepEqual(HOOK_EFFORTS, EFFORTS, 'the effort levels in lib/plan.mjs\'s order');
 });
 
 test('a runner the hook knows with none of its lines left counts nothing; a workspace command keeps the fallback (S-10 S-5)', () => {
@@ -622,6 +624,23 @@ test('an edit that fails to apply takes back its flag, so the next failure is no
 });
 
 // ---- S-16: the review's findings (S-10 review.md) ----
+
+test('unfitFor: a launch runs as a rung when its models are of the rung\'s family and its effort not below; runEnd: a run finished with a hand-back or a last text, not interrupted (S-10 B-1, S-2)', () => {
+  const ladder = [{ model: 'sonnet' }, { model: 'fable', id: 'claude-fable-5[1m]', effort: 'high' }];
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5' }), null, 'the rung\'s id names its family');
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', effort: 'medium' }), 'effort below high');
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', effort: 'max' }), null);
+  assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', asked: 'haiku' }), 'model not fable', 'the Agent call\'s own model counts');
+  assert.equal(unfitFor(ladder, 'fable', {}), 'model unknown');
+  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  assert.deepEqual(runEnd(t('handback')), { finished: true, bytes: statSync(t('handback')).size });
+  assert.equal(runEnd(t('text')).finished, true, 'a last assistant text');
+  assert.equal(runEnd(t('interrupted')).finished, false);
+  assert.equal(runEnd(t('interrupted'), 'Reading the failure.').finished, false, 'the interrupt wins over a last message');
+  assert.equal(runEnd(t('prompt')).finished, false, 'the prompt alone, never answered');
+  assert.deepEqual(runEnd('/dev/null'), { finished: false, bytes: 0 });
+  assert.equal(runEnd('/nonexistent/agent-x.jsonl', 'Done: the design.').finished, true, 'SubagentStop\'s last_assistant_message');
+});
 
 // A hook run as Claude Code runs it, not waited for, so several run at once.
 const hookAsync = (script, input, home) => new Promise((resolve, reject) => {

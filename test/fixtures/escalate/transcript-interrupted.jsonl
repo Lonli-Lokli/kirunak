@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Reading the failure."}]},"isSidechain":true}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"node --test test/ladder.test.mjs"}}]},"isSidechain":true}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Interrupted by user","is_error":true}]},"isSidechain":true}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"isSidechain":true}
