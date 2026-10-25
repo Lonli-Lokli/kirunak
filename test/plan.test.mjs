@@ -136,6 +136,21 @@ test('an [escalate] mark parses with and without a model', () => {
   assert.equal(steps[2].escalate, null);
 });
 
+test('a stop\'s failures: field parses as a list, and k plan check accepts it beside an old [escalate: fable, xhigh] mark', async () => {
+  const stopped = PLAN.replace('[agent, sonnet, high]\n', '[agent, sonnet, high] [escalate: fable, xhigh]\n')
+    .replace('brief: steps/S-1/brief.md\n', 'brief: steps/S-1/brief.md\nfailures: steps/S-1/failure-1.md, steps/S-1/failure-2.md, steps/S-1/failure-3.md\n');
+  const { steps, problems } = parsePlan(stopped);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(steps[0].failures, ['steps/S-1/failure-1.md', 'steps/S-1/failure-2.md', 'steps/S-1/failure-3.md']);
+  assert.deepEqual(steps[0].escalate, { model: 'fable', effort: 'xhigh' });
+  assert.deepEqual(steps[1].failures, [], 'a step that never stopped has none');
+  const w = await fixture();
+  writeFileSync(join(w.p.dir, 'plan.md'), stopped);
+  const r = k(w.home, ['plan', 'check', ID]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /plan: check passes/);
+});
+
 test('k plan check reports the problems and exits 1, and passes a good plan', async () => {
   const w = await fixture();
   writeFileSync(join(w.p.dir, 'plan.md'), PLAN.replace('AC-2, E-1', 'AC-2').replace('covers: all\n', 'covers: AC-3\n'));
