@@ -22,6 +22,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
+import { ladderChecks } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -35,12 +36,13 @@ import * as waiting from '../lib/waiting.mjs';
 import * as drafts from '../lib/drafts.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
-Setup     k init --workspace <module> | k install [--settings <file>] [--skills <dir>] [--git <repo>]... [--print]
-          k plugins | k doctor
+Setup     k init --workspace <module> | k plugins | k doctor [--settings <file>] [--agents <dir>]
+          k install [--settings <file>] [--skills <dir>] [--agents <dir>] [--replace-agents] [--git <repo>]... [--print]:
+            the hooks, the skills, and a <model>-step agent for every rung of the workspace's ladder above the lowest
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
@@ -143,10 +145,15 @@ const VERBS = {
   },
 
   async install({ flags }) {
+    // Before k init there is no workspace yet: the rung agents and config.json then come from kirunak's default ladder.
+    const ws = existsSync(join(kirunakHome(), 'workspace')) ? await loadWorkspace() : null;
     const r = await install({
       settingsPath: flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json'),
       kirunakRoot: KIRUNAK,
       skillsDir: flags.skills ? resolve(expandHome(flags.skills)) : join(homedir(), '.claude', 'skills'),
+      agentsDir: flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents'),
+      replaceAgents: !!flags['replace-agents'],
+      ws,
       git: flags.git ? [flags.git].flat().map((g) => resolve(expandHome(g))) : undefined,
       print: !!(flags.print || flags['dry-run']),
     });
@@ -158,7 +165,7 @@ const VERBS = {
     return { plugins: rows, text: rows.map((l) => `${l.seam.padEnd(14)} ${l.plugin.padEnd(22)} ${l.module}`).join('\n') };
   },
 
-  async doctor({ ws }) {
+  async doctor({ ws, flags }) {
     const lines = [];
     let bad = 0;
     const say = (ok, line) => {
@@ -173,13 +180,15 @@ const VERBS = {
     for (const a of aspects) {
       say((a.sources || []).length > 0 && (a.edgeCases || []).length > 0, `aspect ${a.id} has a source and an edge case`);
     }
-    for (const name of ['kirunak-freeze.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
-    const settings = join(homedir(), '.claude', 'settings.json');
+    for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
+    const settings = flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json');
     const wired = existsSync(settings) && readFileSync(settings, 'utf8').includes('hooks/kirunak-freeze.mjs');
     say(wired, `the freeze hook is wired in ${settings}${wired ? '' : ' (run k install)'}`);
     for (const s of SKILLS) {
       say(existsSync(join(homedir(), '.claude', 'skills', s, 'SKILL.md')), `skill ${s} is linked (k install)`);
     }
+    const agentsDir = flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents');
+    for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);

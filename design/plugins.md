@@ -100,9 +100,9 @@ export default {
 - Every key but `repos` and `queue` is optional and has the default shown, except `models` and `baseline`, which
   default to nothing. Judgement on `models`: which model and effort a kind of step runs on is a cost choice each
   workspace makes, so the core's default is to pass no `--model` and no `--effort` at all (Claude Code's own
-  default applies). A workspace sets `models: { agent, review, sync, escalate }`, each `{ model, effort }`, and a
-  plan line overrides it per step (`orchestrator.md` §1). `escalate` is what a step that failed twice is retried on,
-  when the workspace names one (`orchestrator.md` §2).
+  default applies). A workspace sets `models: { agent, review, sync }`, each `{ model, effort }`, and a
+  plan line overrides it per step (`orchestrator.md` §1). A step that failed twice climbs the workspace's `ladder`
+  (lib/ladder.mjs); `models.escalate` is no longer read, and `k doctor` names a workspace that still sets it.
 - A plugin module default-exports `{ name, version, provides: { <seam>: implementation } }`. The core loads the
   workspace, then each plugin in order, validates every `provides` entry against the seam's contract (each named
   function present and a function; unknown seam names refused), applies the policy, and only then runs a verb.
