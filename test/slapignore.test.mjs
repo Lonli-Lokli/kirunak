@@ -48,7 +48,7 @@ test('k install --git writes the starter, registers the repo, and keeps a .slapi
   const s = setup();
   const kirunakRoot = mkdtempSync(join(tmpdir(), 'kirunak-root-'));
   for (const n of ['k-intake', 'k-done']) mkdirSync(join(kirunakRoot, 'skills', n), { recursive: true });
-  const opts = { settingsPath: join(s.dir, 'settings.json'), skillsDir: join(s.dir, 'skills'), kirunakRoot, home: s.home, git: s.repo };
+  const opts = { settingsPath: join(s.dir, 'settings.json'), skillsDir: join(s.dir, 'skills'), agentsDir: join(s.dir, 'agents'), kirunakRoot, home: s.home, git: s.repo };
   const printed = install({ ...opts, print: true }).actions.join('\n');
   assert.match(printed, /would write .*\.slapignore, a starter for the owner to approve/);
   assert.ok(!existsSync(join(s.repo, '.slapignore')) && !existsSync(recordFile(s.home)), '--print writes nothing');
