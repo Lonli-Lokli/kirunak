@@ -470,11 +470,15 @@ const OPUS_DENY = [
   'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
   'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
 ];
-const launchOf = (type, agentId, extra = {}) => ({
-  session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type },
-  tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5' }, ...extra,
+const launchOf = (type, agentId, extra = {}, { input = {}, response = {} } = {}) => ({
+  session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type, ...input },
+  tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5', ...response }, ...extra,
 });
-const stopOf = (type, agentId) => ({ session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: '/dev/null' });
+// A run that finished: its transcript closes with a SubagentHandback (S-1 §2).
+const FINISHED = join(FIX, 'transcript-handback.jsonl');
+const stopOf = (type, agentId, transcript = FINISHED, extra = {}) => ({
+  session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: transcript, ...extra,
+});
 const denied = (r) => r.out?.hookSpecificOutput?.permissionDecisionReason ?? null;
 
 // A session on `model` whose test fired and then failed once more: blocked.
@@ -543,6 +547,7 @@ test('only an agent of the rung above, launched after the block, lifts it when i
   assert.equal(freeze(edit(), h.home).stdout, '');
   const lift = h.log().at(-1);
   assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'music-deep']]);
+  assert.equal(lift.transcriptBytes, statSync(FINISHED).size, 'the run\'s size is logged with the lift');
   const deep = blocked();
   hook(launchOf('music-deep', 'amusic'), deep.home);
   hook(stopOf('music-deep', 'amusic'), deep.home);
@@ -625,6 +630,8 @@ test('an edit that fails to apply takes back its flag, so the next failure is no
 
 // ---- S-16: the review's findings (S-10 review.md) ----
 
+const lastRow = (h) => h.log().at(-1);
+
 test('unfitFor: a launch runs as a rung when its models are of the rung\'s family and its effort not below; runEnd: a run finished with a hand-back or a last text, not interrupted (S-10 B-1, S-2)', () => {
   const ladder = [{ model: 'sonnet' }, { model: 'fable', id: 'claude-fable-5[1m]', effort: 'high' }];
   assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5' }), null, 'the rung\'s id names its family');
@@ -640,6 +647,62 @@ test('unfitFor: a launch runs as a rung when its models are of the rung\'s famil
   assert.equal(runEnd(t('prompt')).finished, false, 'the prompt alone, never answered');
   assert.deepEqual(runEnd('/dev/null'), { finished: false, bytes: 0 });
   assert.equal(runEnd('/nonexistent/agent-x.jsonl', 'Done: the design.').finished, true, 'SubagentStop\'s last_assistant_message');
+});
+
+test('a rung agent launched on a cheaper model or a lower effort ends and the block stays; at Fable it lifts (S-10 B-1)', () => {
+  const h = blocked();
+  for (const [id, opts, why] of [
+    ['ahaiku', { response: { resolvedModel: 'claude-haiku-5-5' } }, 'model not fable'],
+    ['aasked', { input: { model: 'haiku' } }, 'model not fable'],
+    ['alow', { input: { effort: 'low' } }, 'effort below high'],
+    ['anone', { response: { resolvedModel: undefined } }, 'model unknown'],
+  ]) {
+    hook(launchOf('fable-step', id, {}, opts), h.home);
+    hook(stopOf('fable-step', id), h.home);
+    assert.equal(h.state().block.lifted, null, id);
+    assert.ok(denied(freeze(edit(), h.home)), `${id}: still blocked`);
+    const row = lastRow(h);
+    assert.deepEqual([row.trigger, row.refused.agentId, row.refused.why], ['lift refused', id, why], id);
+  }
+  assert.deepEqual([lastRow(h).refused.model, h.log().at(-2).refused.effort, h.log().at(-3).refused.asked], [null, 'low', 'haiku']);
+  hook(launchOf('fable-step', 'afable', {}, { input: { model: 'fable', effort: 'xhigh' } }), h.home);
+  hook(stopOf('fable-step', 'afable'), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'afable', 'Fable at an effort above the rung\'s lifts');
+});
+
+test('a rung agent that was interrupted or said nothing lifts nothing; one that finished lifts, its size logged (S-10 S-2)', () => {
+  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  const h = blocked();
+  for (const [id, transcript] of [['astopped', t('interrupted')], ['aempty', '/dev/null'], ['aprompt', t('prompt')]]) {
+    hook(launchOf('fable-step', id), h.home);
+    hook(stopOf('fable-step', id, transcript), h.home);
+    assert.equal(h.state().block.lifted, null, id);
+    assert.deepEqual([lastRow(h).trigger, lastRow(h).refused.why], ['lift refused', 'not finished'], id);
+    assert.equal(h.state().agents[id].finished, false);
+  }
+  hook(launchOf('fable-step', 'adone'), h.home);
+  hook(stopOf('fable-step', 'adone', t('text')), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'adone');
+  assert.deepEqual([lastRow(h).trigger, lastRow(h).transcriptBytes], ['block lifted', statSync(t('text')).size]);
+});
+
+test('a Sonnet subagent\'s block in an Opus session is lifted by opus-step\'s finished run, one rung above the model that failed (A-2, N-1)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(launchOf('general-purpose', 'asub', {}, { response: { resolvedModel: 'claude-sonnet-5' } }), h.home);
+  const sub = { agent_id: 'asub', agent_type: 'general-purpose' };
+  cycle(h, 2, sub);
+  freeze(edit(sub), h.home);
+  hook(failure(sub), h.home);
+  assert.deepEqual(h.state().block.rung, { from: 'claude-sonnet-5', to: 'opus', agents: ['opus-step'] });
+  // A-2's E-8: "Only an agent one rung up from the model that failed lifts the block", so fable-step, two rungs above
+  // Sonnet, does not.
+  hook(launchOf('fable-step', 'afable'), h.home);
+  hook(stopOf('fable-step', 'afable'), h.home);
+  assert.equal(h.state().block.lifted, null);
+  hook(launchOf('opus-step', 'aopus'), h.home);
+  hook(stopOf('opus-step', 'aopus', join(FIX, 'transcript-text.jsonl')), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'aopus');
 });
 
 // A hook run as Claude Code runs it, not waited for, so several run at once.

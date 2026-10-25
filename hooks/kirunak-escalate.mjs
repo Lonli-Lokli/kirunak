@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
   blockLines, commandOf, count, logLine, message, modelOf, notificationOf, prune, pushIn, pushLines, readConfig,
-  readState, repeatsOf, rungFor, signatureOf, statePath, tail, taskOf, unmarkEdited, withState, writeState,
+  readState, repeatsOf, runEnd, rungFor, signatureOf, statePath, tail, taskOf, unfitFor, unmarkEdited, withState,
+  writeState,
 } from './escalate-state.mjs';
 
 // The escalation hook (gulnya/enforced-escalation S-2 design §4). In an interactive session it counts a build or test
@@ -24,8 +25,9 @@ import {
 // subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted.
 //
 // The rule a reviewer can check, held by the code's shape: the block is lifted only by liftByAgent(), which runs on a
-// SubagentStop of an agent of the rung above the block's, launched by the session itself after the block was set
-// (R5.3, E-8), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any subagent (R5.4
+// SubagentStop of an agent of the rung above the block's, launched by the session itself after the block was set,
+// that ran as that rung (its model of the rung's family, its effort not below the rung's) and finished its run (a
+// hand-back or a last text, not interrupted) (R5.3, E-8, S-10 B-1, S-2), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any subagent (R5.4
 // branch A, D-1, E-11). Nothing else here writes `block.lifted`. No tool call, prompt text or file write of the
 // model reaches those two: SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
 // /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone (S-1 §4), which lifts
@@ -134,50 +136,62 @@ function notified(input, home, config, now) {
 }
 
 // An agent's launch (S-1 §2: PostToolUse on Agent fires at launch, with the id and the model it resolved), in the
-// session's file; `by` names the subagent that launched it, if one did.
+// session's file, with the Agent call's own `model` and `effort`, which override the agent file's (S-10 B-1); `by`
+// names the subagent that launched it, if one did.
 function launched(input, home, now) {
   const r = input.tool_response ?? {};
   const id = r.agentId ?? r.agent_id;
   if (input.tool_name !== 'Agent' || typeof id !== 'string' || !id) return;
+  const ti = input.tool_input ?? {};
   withState(home, input.session_id, null, () => {
     const state = readState(home, input.session_id);
     state.agents[id] = {
-      type: input.tool_input?.subagent_type ?? null, model: r.resolvedModel ?? null, at: now.toISOString(), ended: null, by: input.agent_id ?? null,
+      type: ti.subagent_type ?? null, model: r.resolvedModel ?? null, asked: ti.model ?? null, effort: ti.effort ?? null,
+      at: now.toISOString(), ended: null, by: input.agent_id ?? null,
     };
     writeState(home, state);
   });
 }
 
-// An agent of a rung above the lowest finished (the matcher names them): its end is recorded, and it may lift the block.
-function ended(input, home, now) {
+// An agent of a rung above the lowest stopped (the matcher names them): its end is recorded, with whether it finished
+// its run (S-10 S-2), and it may lift the block.
+function ended(input, home, config, now) {
   const id = input.agent_id;
   if (typeof id !== 'string' || !id || !input.agent_type) return;
-  const lifted = withState(home, input.session_id, null, () => {
+  const { finished, bytes } = runEnd(input.agent_transcript_path, input.last_assistant_message);
+  const result = withState(home, input.session_id, null, () => {
     const state = readState(home, input.session_id);
     const launch = state.agents[id] ?? null;
-    state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: now.toISOString() };
-    const out = liftByAgent(state, home, input, launch, now);
+    state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: now.toISOString(), finished };
+    const out = liftByAgent(state, home, config, input, launch, finished, now);
     writeState(home, state);
     return out;
   });
-  if (lifted) logLift(home, input.session_id, lifted, { agent: lifted.lifted.agent, agentId: id }, now);
+  if (!result) return;
+  const run = { agent: String(input.agent_type).split(':').pop(), agentId: id };
+  if (result.lifted) logLift(home, input.session_id, result.block, run, now, { transcriptBytes: bytes });
+  else logLift(home, input.session_id, result.block, null, now, { trigger: 'lift refused', refused: { ...run, ...result.refused, transcriptBytes: bytes } });
 }
 
-// The lift by an agent one rung up (R5.3, E-8): the agent that ended is of the rung above the block's (the generated
-// <model>-step or one of that rung's `agents`, the part after a plugin's `:`), and the session itself launched it
-// after the block was set. The end counts, not the launch; a launch before the block, a launch by a subagent and an
-// agent of the block's own rung lift nothing; a Fable session's block lists no agent (E-9). Returns the block it
-// lifted, or null.
-function liftByAgent(state, home, input, launch, now) {
+// The lift by an agent one rung up (R5.3, E-8): the agent that stopped is of the rung above the block's (the generated
+// <model>-step or one of that rung's `agents`, the part after a plugin's `:`), the session itself launched it after
+// the block was set, it ran as that rung, its model of the rung's family and its effort not below the rung's (S-10
+// B-1), and it finished
+// its run (S-10 S-2). The end counts, not the launch; a launch before the block, a launch by a subagent and an agent
+// of the block's own rung lift nothing; a Fable session's block lists no agent (E-9). → { lifted: true, block },
+// { lifted: false, block, refused } for an agent of that rung that may not lift, which is logged, or null.
+function liftByAgent(state, home, config, input, launch, finished, now) {
   const { block } = state;
   if (!inForce(block) || !launch || launch.by != null) return null;
   const type = String(input.agent_type).split(':').pop();
   const agents = Array.isArray(block.rung?.agents) ? block.rung.agents : [];
   if (!agents.includes(type)) return null;
   if (!(Date.parse(launch.at) > Date.parse(block.at))) return null;
+  const why = unfitFor(config.ladder, block.rung.to, launch) ?? (finished ? null : 'not finished');
+  if (why) return { lifted: false, block, refused: { model: launch.model ?? null, asked: launch.asked ?? null, effort: launch.effort ?? null, why } };
   block.lifted = { by: 'agent', agent: type, agentId: input.agent_id, at: now.toISOString() };
   forget(state, home, block, [block.hash]);
-  return block;
+  return { lifted: true, block };
 }
 
 // The owner's override (R5.4 branch A, D-1, E-11): /k-go-on typed in the session, at the terminal or on the phone,
@@ -213,8 +227,10 @@ function forget(state, home, block, hashes) {
   });
 }
 
-// A lift's line in escalate.log (R3.2, AC-21): `block lifted` with the agent and its id, or `/k-go-on override`.
-function logLift(home, session, block, liftedBy, now) {
+// A lift's line in escalate.log (R3.2, AC-21): `block lifted` with the agent, its id and its transcript's size (a
+// short run that finished lifts, and the usage review can see it), or `/k-go-on override`; `extra` names a refusal
+// instead (`lift refused`, `/k-go-on refused: nested run`).
+function logLift(home, session, block, liftedBy, now, extra = {}) {
   logLine(home, {
     time: now.toISOString(),
     session,
@@ -227,6 +243,7 @@ function logLift(home, session, block, liftedBy, now) {
     signature: block ? { kind: block.kind ?? null, label: block.label ?? null, hash: block.hash ?? null } : null,
     count: block?.count ?? null,
     liftedBy,
+    ...extra,
   });
 }
 
@@ -280,7 +297,7 @@ function main() {
   } else if (event === 'PostToolUse') {
     launched(input, home, now);
   } else if (event === 'SubagentStop') {
-    ended(input, home, now);
+    ended(input, home, config, now);
   } else if (event === 'SessionStart') {
     if (input.source === 'startup') prune(home, now.getTime());
     recordModel(input, home, input.model);
