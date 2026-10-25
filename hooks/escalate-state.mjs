@@ -341,7 +341,8 @@ export const repeatsOf = (config) =>
  * (seen, with no edit since: a rerun is not a fix that failed, and nothing changes), `repeat` (seen again after an
  * edit), `fire` (that repeat reached `repeats`; once a signature, AC-11), `block` (the first failure after the fire,
  * edited or not, R4.4 step 4) or `after` (any later one). A test written red and then fixed is one failure and no
- * repeat (E-5).
+ * repeat (E-5). The fire's time is kept (`firedAt`), so an agent launched on the fire's word counts at the block
+ * (S-10 S-1).
  */
 export function count(state, sig, repeats, now = new Date()) {
   const at = now.toISOString();
@@ -363,6 +364,7 @@ export function count(state, sig, repeats, now = new Date()) {
   f.last = at;
   if (f.repeats < repeats) return 'repeat';
   f.fired = true;
+  f.firedAt = at;
   return 'fire';
 }
 

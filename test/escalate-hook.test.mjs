@@ -705,6 +705,76 @@ test('a Sonnet subagent\'s block in an Opus session is lifted by opus-step\'s fi
   assert.equal(h.state().block.lifted.agentId, 'aopus');
 });
 
+test('fire, fable-step finishes, the test fails again: the block names no agent and waits for the owner (S-10 S-1)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  cycle(h, 2);
+  hook(launchOf('fable-step', 'adesign'), h.home);
+  hook(stopOf('fable-step', 'adesign'), h.home);
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired'], 'no block yet, so nothing to lift');
+  freeze(edit(), h.home);
+  hook(failure(), h.home);
+  const { block } = h.state();
+  assert.deepEqual(block.rung, { from: 'claude-opus-5-5', to: null, agents: [], failedOn: 'fable' });
+  const lines = denied(freeze(edit(), h.home)).split('\n');
+  fits(lines);
+  assert.equal(lines[2], 'Stop and say plainly what is missing; the owner can type /k-go-on.');
+  hook(launchOf('fable-step', 'again'), h.home);
+  hook(stopOf('fable-step', 'again'), h.home);
+  assert.equal(h.state().block.lifted, null, 'a second Fable run lifts nothing');
+  const sonnet = makeHome({}, FABLE_LADDER);
+  hook(start('claude-sonnet-5'), sonnet.home);
+  cycle(sonnet, 2);
+  hook(launchOf('opus-step', 'abuild'), sonnet.home);
+  hook(stopOf('opus-step', 'abuild', join(FIX, 'transcript-text.jsonl')), sonnet.home);
+  freeze(edit(), sonnet.home);
+  hook(failure(), sonnet.home);
+  assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'music-deep'], failedOn: 'opus' });
+  assert.equal(denied(freeze(edit(), sonnet.home)).split('\n')[2], 'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.');
+});
+
+test('fire, fable-step launched, the test fails again, fable-step ends: lifted by that one run (S-10 S-1)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  cycle(h, 2);
+  hook(launchOf('fable-step', 'adesign'), h.home);
+  freeze(edit(), h.home);
+  hook(failure(), h.home);
+  const { block, failures } = h.state();
+  assert.equal(block.firedAt, Object.values(failures)[0].firedAt, 'the threshold is the fire');
+  assert.deepEqual(block.rung.agents, ['fable-step', 'music-deep']);
+  assert.ok(denied(freeze(edit(), h.home)));
+  hook(stopOf('fable-step', 'adesign'), h.home);
+  assert.equal(h.state().block.lifted.agentId, 'adesign');
+  assert.equal(freeze(edit(), h.home).stdout, '');
+});
+
+test('a signature blocked while another block was in force blocks once that one is lifted (S-10 N-3)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  const other = 'Exit code 1\nnot ok 3 - reads the queue\n';
+  const both = () => [hook(failure(), h.home), hook(failure({}, NODE_CMD, other), h.home)];
+  both();
+  for (let i = 0; i < 2; i++) {
+    freeze(edit(), h.home);
+    both();
+  }
+  freeze(edit(), h.home);
+  both();
+  const first = h.state().block;
+  assert.equal(first.label, 'climbs one rung');
+  const queue = Object.values(h.state().failures).find((f) => f.label === 'reads the queue');
+  assert.deepEqual([queue.fired, queue.blocked], [true, true], 'blocked while the first block was in force');
+  hook(launchOf('fable-step', 'alift'), h.home);
+  hook(stopOf('fable-step', 'alift'), h.home);
+  assert.ok(h.state().block.lifted);
+  hook(failure({}, NODE_CMD, other), h.home);
+  const { block } = h.state();
+  assert.deepEqual([block.label, block.lifted], ['reads the queue', null]);
+  assert.equal(lastRow(h).trigger, 'hook blocked');
+  assert.ok(denied(freeze(edit(), h.home)));
+});
+
 // A hook run as Claude Code runs it, not waited for, so several run at once.
 const hookAsync = (script, input, home) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [script], { env: cleanEnv({ KIRUNAK_HOME: home }), stdio: ['pipe', 'ignore', 'ignore'] });

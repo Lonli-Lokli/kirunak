@@ -22,12 +22,14 @@ import {
 // SessionStart and PostModelSwitch record the session's model.
 //
 // The block (S-2 design §5). The first failure after a fire sets the session's `block` (the caller's, for a
-// subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted.
+// subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted. It
+// names the rung above, or the one above that when that rung's agent already finished on the fire's word (S-10 S-1).
 //
 // The rule a reviewer can check, held by the code's shape: the block is lifted only by liftByAgent(), which runs on a
-// SubagentStop of an agent of the rung above the block's, launched by the session itself after the block was set,
-// that ran as that rung (its model of the rung's family, its effort not below the rung's) and finished its run (a
-// hand-back or a last text, not interrupted) (R5.3, E-8, S-10 B-1, S-2), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any subagent (R5.4
+// SubagentStop of an agent of the rung above the block's, launched by the session itself after the fire that led to
+// the block (when that agent was already running then) or after the block, that ran as that rung (its model of the
+// rung's family, its effort not below the rung's) and finished its run (a hand-back or a last text, not interrupted)
+// (R5.3, E-8, S-10 B-1, S-1, S-2), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any subagent (R5.4
 // branch A, D-1, E-11). Nothing else here writes `block.lifted`. No tool call, prompt text or file write of the
 // model reaches those two: SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
 // /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone (S-1 §4), which lifts
@@ -48,7 +50,8 @@ const inForce = (block) => Boolean(block && typeof block === 'object' && block.l
 
 // Counts one failure into the file of the session or subagent that ran it (E-14); on the first failure after a fire
 // sets the block in the session's file (the caller's, E-13) unless one is in force or `hook.block` is off; logs a
-// fire, the block and every failure after them (R3.2); and returns the message's lines when it fires.
+// fire, the block and every failure after them (R3.2); and returns the message's lines when it fires. A signature
+// blocked while another block was in force blocks again once none is (S-10 N-3).
 function countFailure({ input, home, config, command, error, now }) {
   const sig = signatureOf(error, command);
   if (!sig) return null;
@@ -61,26 +64,23 @@ function countFailure({ input, home, config, command, error, now }) {
     return { what, f: state.failures[sig.hash] };
   });
   if (!counted || !['fire', 'block', 'after'].includes(counted.what)) return null;
-  const { what, f } = counted;
+  const { f } = counted;
   const model = modelOf(input, readState(home, session));
   const rung = rungFor(config.ladder, model);
   const task = taskOf(home, session, config);
   const { repeats } = f;
-  const blocks = what === 'block' && config.hook?.block !== false;
-  if (blocks) {
+  const blocking = config.hook?.block !== false;
+  let what = counted.what;
+  if (what !== 'fire' && blocking) {
     withState(home, session, null, () => {
       const caller = readState(home, session);
       if (inForce(caller.block)) return;
-      const lines = (subagent) => blockLines({ label: sig.label, task, rung, subagent }).join('\n');
-      caller.block = {
-        hash: sig.hash, kind: sig.kind, label: sig.label, at: now.toISOString(),
-        rung: { from: model ?? rung.from, to: rung.up, agents: liftersOf(rung) },
-        agent, agentType: input.agent_type ?? null, task: task?.id ?? null, step: task?.step ?? null, count: repeats,
-        reason: lines(false), subagentReason: lines(true), lifted: null,
-      };
+      if (what === 'after') what = 'block';
+      caller.block = blockFor({ sig, f, input, config, caller, model, rung, task, agent, now });
       writeState(home, caller);
     });
   }
+  const blocks = what === 'block' && blocking;
   const triggers = { fire: 'hook fired', block: blocks ? 'hook blocked' : 'repeat after fire', after: 'repeat after fire' };
   logLine(home, {
     time: now.toISOString(),
@@ -97,7 +97,29 @@ function countFailure({ input, home, config, command, error, now }) {
     liftedBy: null,
   });
   if (what !== 'fire') return null;
-  return message({ label: sig.label, repeats, task, rung, subagent: Boolean(agent), block: config.hook?.block !== false });
+  return message({ label: sig.label, repeats, task, rung, subagent: Boolean(agent), block: blocking });
+}
+
+// The block a failure after the fire sets (S-2 design §5, S-10 S-1). An agent of the rung above that the session
+// launched on the fire's word counts here: one that finished as that rung means the step failed there too, so the
+// block names the rung above that (none at the top: stop and say what is missing, E-9); one still running is let lift
+// by its end, the block's threshold being the fire (`firedAt`) instead of the block.
+function blockFor({ sig, f, input, config, caller, model, rung, task, agent, now }) {
+  const since = Date.parse(f.firedAt ?? '');
+  const after = Object.entries(caller.agents ?? {}).filter(([, a]) =>
+    a && a.by == null && Date.parse(a.at) > since && liftersOf(rung).includes(String(a.type ?? '').split(':').pop()) &&
+    !unfitFor(config.ladder, rung.up, a));
+  const failedAbove = after.some(([, a]) => a.ended && a.finished);
+  const at = failedAbove ? rungFor(config.ladder, rung.up) : rung;
+  const running = !failedAbove && after.some(([, a]) => !a.ended);
+  const lines = (subagent) => blockLines({ label: sig.label, task, rung: at, subagent }).join('\n');
+  return {
+    hash: sig.hash, kind: sig.kind, label: sig.label, at: now.toISOString(),
+    ...(running ? { firedAt: f.firedAt } : {}),
+    rung: { from: model ?? rung.from, to: at.up, agents: liftersOf(at), ...(failedAbove ? { failedOn: rung.up } : {}) },
+    agent, agentType: input.agent_type ?? null, task: task?.id ?? null, step: task?.step ?? null, count: f.repeats,
+    reason: lines(false), subagentReason: lines(true), lifted: null,
+  };
 }
 
 // An edit that failed to apply takes back the flag it set (O-2), in the file of the session or subagent that made it.
@@ -175,8 +197,8 @@ function ended(input, home, config, now) {
 
 // The lift by an agent one rung up (R5.3, E-8): the agent that stopped is of the rung above the block's (the generated
 // <model>-step or one of that rung's `agents`, the part after a plugin's `:`), the session itself launched it after
-// the block was set, it ran as that rung, its model of the rung's family and its effort not below the rung's (S-10
-// B-1), and it finished
+// the fire that led to the block (`firedAt`, when that agent was already running then, S-10 S-1) or after the block,
+// it ran as that rung, its model of the rung's family and its effort not below the rung's (S-10 B-1), and it finished
 // its run (S-10 S-2). The end counts, not the launch; a launch before the block, a launch by a subagent and an agent
 // of the block's own rung lift nothing; a Fable session's block lists no agent (E-9). → { lifted: true, block },
 // { lifted: false, block, refused } for an agent of that rung that may not lift, which is logged, or null.
@@ -186,7 +208,7 @@ function liftByAgent(state, home, config, input, launch, finished, now) {
   const type = String(input.agent_type).split(':').pop();
   const agents = Array.isArray(block.rung?.agents) ? block.rung.agents : [];
   if (!agents.includes(type)) return null;
-  if (!(Date.parse(launch.at) > Date.parse(block.at))) return null;
+  if (!(Date.parse(launch.at) > Date.parse(block.firedAt ?? block.at))) return null;
   const why = unfitFor(config.ladder, block.rung.to, launch) ?? (finished ? null : 'not finished');
   if (why) return { lifted: false, block, refused: { model: launch.model ?? null, asked: launch.asked ?? null, effort: launch.effort ?? null, why } };
   block.lifted = { by: 'agent', agent: type, agentId: input.agent_id, at: now.toISOString() };
