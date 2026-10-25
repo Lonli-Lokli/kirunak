@@ -57,6 +57,10 @@ test('a stop names the step\'s folder and its reports, the folder alone when tha
   assert.equal(stopNotice(r, { ...stop, dir }).lines[2], `read ${dir}`);
   const asked = stopNotice(r, { step: 'S-3', kind: 'owner', what: 'waits for your answer', why: 'Which cache size?', dir: 'x', reports: [] });
   assert.deepEqual(asked.lines, ['Wind alerts (weather/wind): S-3 waits for your answer', 'why: Which cache size?', 'answer in a session or in notes.md, then start k run again']);
+  // One started by hand: k run does not resume it, so the answer goes to the session that started it.
+  const byHand = stopNotice(r, { step: 'S-3', kind: 'owner', what: 'waits for your answer', why: 'Which cache size?', dir: 'x', reports: [], byHand: true });
+  assert.deepEqual(byHand.lines, ['Wind alerts (weather/wind): S-3 waits for your answer', 'why: Which cache size?', 'answer in the session that started it, or in notes.md']);
+  assert.equal(byHand.one, 'Wind alerts (weather/wind): S-3 waits for your answer. why: Which cache size? answer in the session that started it, or in notes.md');
 });
 
 // The push (R7.2, E-16): one line of at most 200 characters, the task's title and id, the step, what happened and the
@@ -83,7 +87,7 @@ test('the push of a stop on the longest real title: one line of at most 200, the
   const dir = `kirunak/tasks/${slug}/steps/S-14/`;
   const stop = { step: 'S-14', kind: 'escalated', what: 'stopped, failed on every rung', why: 'missing outputs: steps/S-14/report.md', dir, reports: [1, 2, 3, 4].map((k) => `steps/S-14/failure-${k}.md`) };
   const asked = { ...stop, kind: 'owner', what: 'waits for your answer', why: 'Which voice for the video?', reports: [] };
-  for (const n of [stopNotice(r, stop), stopNotice(r, asked), notice({ title, id: r.id, what: 'parked, not in the queue', next: `k queue add ${r.id} puts it back, then start k run again` })]) {
+  for (const n of [stopNotice(r, stop), stopNotice(r, asked), stopNotice(r, { ...asked, byHand: true }), notice({ title, id: r.id, what: 'parked, not in the queue', next: `k queue add ${r.id} puts it back, then start k run again` })]) {
     fits(n);
     assert.ok(n.one.startsWith(title.slice(0, 40)) && n.one.includes(` (${r.id}): `), n.one);
     assert.ok(n.one.endsWith(`. ${n.lines.at(-1)}`), n.one);

@@ -207,3 +207,15 @@ test('k waiting\'s group Stopped for you: per stopped step of a task not done, i
   assert.ok(text.every((l) => l.length <= 80));
   assert.ok(stopped[0].one.length <= 200);
 });
+
+test("k waiting's line for a question of a step started by hand sends the owner to the session that started it, not to k run (gulnya/enforced-escalation AC-23)", () => {
+  const stop = { step: 'S-2', kind: 'owner', what: 'waits for your answer', why: 'Three days or a week?', dir: 'kirunak/tasks/offline-forecast/steps/S-2/', reports: [], byHand: true };
+  const text = stoppedText(stoppedFor([{ id: 'weather/offline-forecast', title: 'The last forecast stays readable offline', state: 'in progress', stops: [stop] }])).split('\n');
+  assert.deepEqual(text, [
+    'stopped for you:',
+    '  The last forecast stays readable offline (weather/offline-forecast)',
+    '  S-2 waits for your answer: Three days or a week?',
+    '  answer in the session that started it, or in notes.md',
+  ]);
+  assert.ok(text.every((l) => l.length <= 80));
+});

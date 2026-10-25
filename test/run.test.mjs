@@ -481,7 +481,15 @@ test('a step started by hand that asks for a job: k run runs it and starts no cl
   lines.length = 0;
   const again = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
   assert.equal(again.stopped, 'S-1 was started by hand: its session resumes itself; its question is steps/S-1/needs.json');
-  assert.equal(lines.at(-1), QUESTION);
+  // k run never resumes it, so every notice sends the owner to the session that started it, not to k run (AC-23).
+  const byHand = 'answer in the session that started it, or in notes.md';
+  assert.equal(lines.at(-1), PUSHED(`S-1 waits for your answer. why: Three days or a week? ${byHand}`));
+  const list = await rows(w.ws, { all: true });
+  const notices = [stoppedFor(list)[0].lines, renderBrief(list, snapshot(w.ws)).groups[0].lines];
+  for (const ls of notices) {
+    assert.ok(ls.length <= 3 && ls.every((l) => l.length <= 80), ls.join('\n'));
+    assert.deepEqual([ls[0], ls.at(-1)], ['The last forecast stays readable offline (weather/offline-forecast)', byHand]);
+  }
   assert.equal(calls.length, 0);
   assert.ok(existsSync(stepFile(w, 'needs.json')), 'the question stays for the session that asked it');
 });
