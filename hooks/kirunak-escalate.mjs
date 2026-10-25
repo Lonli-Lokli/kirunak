@@ -10,7 +10,7 @@ import {
   writeState,
 } from './escalate-state.mjs';
 
-// The escalation hook (gulnya/enforced-escalation S-2 design §4). In an interactive session it counts a build or test
+// The escalation hook (approval.md §7). In an interactive session it counts a build or test
 // failing again on the same test or error after an edit, and once, on the configured repeat, tells the session to
 // hand the step one rung up the ladder (AC-8..AC-11). It prints nothing unless it fires or hands the session the push
 // of a k run it started in the background that stopped for the owner (AC-9, E-16), stays quiet in a k run step,
@@ -23,25 +23,25 @@ import {
 // UserPromptExpansion of /k-go-on is the owner's override;
 // SessionStart and PostModelSwitch record the session's model.
 //
-// The block (S-2 design §5). The first failure after a fire sets the session's `block` (the caller's, for a
+// The block (approval.md §7). The first failure after a fire sets the session's `block` (the caller's, for a
 // subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted. It
-// names the rung above, or the one above that when that rung's agent already finished on the fire's word (S-10 S-1).
+// names the rung above, or the one above that when that rung's agent already finished on the fire's word.
 //
 // The rule a reviewer can check, held by the code's shape: the block is lifted only by liftByAgent(), which runs on a
 // SubagentStop of an agent of the rung above the block's, launched by the session itself after the fire that led to
 // the block (when that agent was already running then) or after the block, that ran as that rung (its model of the
 // rung's family, its effort not below the rung's) and finished its run (a hand-back or a last text, not interrupted)
-// (R5.3, E-8, S-10 B-1, S-1, S-2), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any
-// subagent and outside a claude run that another claude started (R5.4 branch A, D-1, E-11, S-10 S-4). Nothing else
+// (R5.3, E-8), and by override(), which runs on a UserPromptExpansion naming k-go-on outside any
+// subagent and outside a claude run that another claude started (R5.4 branch A, D-1, E-11). Nothing else
 // here writes `block.lifted`. SubagentStop and UserPromptExpansion come from Claude Code, never from a tool; a typed
-// /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone (S-1 §4), which lifts
+// /k-go-on fires UserPromptExpansion, and a scheduled prompt fires UserPromptSubmit alone, which lifts
 // nothing; a claude run from the model's shell has a second claude among this hook's ancestors, however its command
 // line is written. An event written by hand and piped into this script from the model's shell has one claude above
 // it, as the owner's has, and nothing here tells the two apart. So the freeze hook refuses, as a guard against
 // mistakes and not against a deliberate bypass, the Skill call of k-go-on, a CronCreate, ScheduleWakeup or SendMessage
 // that carries /k-go-on and an Agent prompt that starts with it, a claude run from the shell that resumes a session or
 // carries /k-go-on, any write to this hook's state files and log (R5.2), and a shell command that runs this script or
-// escalate-state.mjs, named in it by basename, with node or as itself (S-17); a shell that hides the name gets past.
+// escalate-state.mjs, named in it by basename, with node or as itself; a shell that hides the name gets past.
 
 const OUTPUT_TAIL = 64 * 1024;
 const GO_ON = 'k-go-on';
@@ -57,7 +57,7 @@ const inForce = (block) => Boolean(block && typeof block === 'object' && block.l
 // Counts one failure into the file of the session or subagent that ran it (E-14); on the first failure after a fire
 // sets the block in the session's file (the caller's, E-13) unless one is in force or `hook.block` is off; logs a
 // fire, the block and every failure after them (R3.2); and returns the message's lines when it fires. A signature
-// blocked while another block was in force blocks again once none is (S-10 N-3).
+// blocked while another block was in force blocks again once none is.
 function countFailure({ input, home, config, command, error, now }) {
   const sig = signatureOf(error, command);
   if (!sig) return null;
@@ -106,7 +106,7 @@ function countFailure({ input, home, config, command, error, now }) {
   return message({ label: sig.label, repeats, task, rung, subagent: Boolean(agent), block: blocking });
 }
 
-// The block a failure after the fire sets (S-2 design §5, S-10 S-1). An agent of the rung above that the session
+// The block a failure after the fire sets (approval.md §7). An agent of the rung above that the session
 // launched on the fire's word counts here: one that finished as that rung means the step failed there too, so the
 // block names the rung above that (none at the top: stop and say what is missing, E-9); one still running is let lift
 // by its end, the block's threshold being the fire (`firedAt`) instead of the block.
@@ -137,7 +137,7 @@ function editFailed(input, home) {
   });
 }
 
-// A background build's end (S-1 §8): counted when it failed and this session noted it at launch; its output is the
+// A background build's end: counted when it failed and this session noted it at launch; its output is the
 // tail of the file the notification names. A noted k run's end: the push its output closes with, when it stopped for
 // the owner (R7.2, E-16). → { lines } of a fire, { push }, or null
 function notified(input, home, config, now) {
@@ -163,8 +163,8 @@ function notified(input, home, config, now) {
   return lines && { lines };
 }
 
-// An agent's launch (S-1 §2: PostToolUse on Agent fires at launch, with the id and the model it resolved), in the
-// session's file, with the Agent call's own `model` and `effort`, which override the agent file's (S-10 B-1); `by`
+// An agent's launch (PostToolUse on Agent fires at launch, with the id and the model it resolved), in the
+// session's file, with the Agent call's own `model` and `effort`, which override the agent file's; `by`
 // names the subagent that launched it, if one did.
 function launched(input, home, now) {
   const r = input.tool_response ?? {};
@@ -182,7 +182,7 @@ function launched(input, home, now) {
 }
 
 // An agent of a rung above the lowest stopped (the matcher names them): its end is recorded, with whether it finished
-// its run (S-10 S-2), and it may lift the block.
+// its run, and it may lift the block.
 function ended(input, home, config, now) {
   const id = input.agent_id;
   if (typeof id !== 'string' || !id || !input.agent_type) return;
@@ -203,9 +203,9 @@ function ended(input, home, config, now) {
 
 // The lift by an agent one rung up (R5.3, E-8): the agent that stopped is of the rung above the block's (the generated
 // <model>-step or one of that rung's `agents`, the part after a plugin's `:`), the session itself launched it after
-// the fire that led to the block (`firedAt`, when that agent was already running then, S-10 S-1) or after the block,
-// it ran as that rung, its model of the rung's family and its effort not below the rung's (S-10 B-1), and it finished
-// its run (S-10 S-2). The end counts, not the launch; a launch before the block, a launch by a subagent and an agent
+// the fire that led to the block (`firedAt`, when that agent was already running then) or after the block,
+// it ran as that rung, its model of the rung's family and its effort not below the rung's, and it finished
+// its run. The end counts, not the launch; a launch before the block, a launch by a subagent and an agent
 // of the block's own rung lift nothing; a Fable session's block lists no agent (E-9). → { lifted: true, block },
 // { lifted: false, block, refused } for an agent of that rung that may not lift, which is logged, or null.
 function liftByAgent(state, home, config, input, launch, finished, now) {
@@ -224,7 +224,7 @@ function liftByAgent(state, home, config, input, launch, finished, now) {
 
 // The owner's override (R5.4 branch A, D-1, E-11): /k-go-on typed in the session, at the terminal or on the phone,
 // fires UserPromptExpansion with its command name; inside a subagent it is not the owner's, nor in a claude run that
-// another claude started (S-10 S-4: a run from the model's shell, however its command line hides it, has a second
+// another claude started (a run from the model's shell, however its command line hides it, has a second
 // claude among the hook's ancestors; the owner's session has one). It lifts the block in force and clears the
 // session's counts, and is logged even with nothing to lift.
 export function override(input, home, now, ancestors = ancestry) {
@@ -277,7 +277,7 @@ export function ancestry(pid = process.ppid) {
   return names;
 }
 
-// A nested run: a claude above the hook's own claude (S-10 S-4).
+// A nested run: a claude above the hook's own claude.
 export const nested = (names) => names.filter((n) => n === 'claude').length >= 2;
 
 // Deletes the counts the lift settles: `hashes` (all with null) in the session's file and, when a subagent's failure
@@ -324,7 +324,7 @@ function recordModel(input, home, model) {
   });
 }
 
-// The message reaches the model as additionalContext and the terminal as systemMessage (S-1 §5; hooks.md lists
+// The message reaches the model as additionalContext and the terminal as systemMessage (hooks.md lists
 // additionalContext for PostToolUseFailure and UserPromptSubmit, and systemMessage for every event that keeps it).
 function say(event, lines) {
   const text = lines.join('\n');
@@ -360,7 +360,7 @@ function main() {
   } else if (event === 'UserPromptSubmit') {
     const { lines, push } = notified(input, home, config, now) ?? {};
     if (lines) say(event, lines);
-    // The push is the model's to send (S-1 §8), so it goes to the model alone.
+    // The push is the model's to send, so it goes to the model alone.
     if (push) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: pushLines(push).join('\n') } }));
   } else if (event === 'PostToolUse') {
     launched(input, home, now);
