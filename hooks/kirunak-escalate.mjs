@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
   blockLines, commandOf, count, logLine, message, modelOf, notificationOf, prune, pushIn, pushLines, readConfig,
-  readState, repeatsOf, rungFor, signatureOf, statePath, tail, taskOf, unmarkEdited, writeState,
+  readState, repeatsOf, rungFor, signatureOf, statePath, tail, taskOf, unmarkEdited, withState, writeState,
 } from './escalate-state.mjs';
 
 // The escalation hook (gulnya/enforced-escalation S-2 design §4). In an interactive session it counts a build or test
@@ -52,30 +52,33 @@ function countFailure({ input, home, config, command, error, now }) {
   if (!sig) return null;
   const session = input.session_id;
   const agent = input.agent_id ?? null;
-  const state = readState(home, session, agent);
-  const what = count(state, sig, repeatsOf(config), now);
-  if (what === 'rerun') return null;
-  if (what !== 'fire' && what !== 'block' && what !== 'after') {
-    writeState(home, state);
-    return null;
-  }
-  const caller = agent ? readState(home, session) : state;
-  const model = modelOf(input, caller);
+  const counted = withState(home, session, agent, () => {
+    const state = readState(home, session, agent);
+    const what = count(state, sig, repeatsOf(config), now);
+    if (what !== 'rerun') writeState(home, state);
+    return { what, f: state.failures[sig.hash] };
+  });
+  if (!counted || !['fire', 'block', 'after'].includes(counted.what)) return null;
+  const { what, f } = counted;
+  const model = modelOf(input, readState(home, session));
   const rung = rungFor(config.ladder, model);
   const task = taskOf(home, session, config);
-  const { repeats } = state.failures[sig.hash];
+  const { repeats } = f;
   const blocks = what === 'block' && config.hook?.block !== false;
-  if (blocks && !inForce(caller.block)) {
-    const lines = (subagent) => blockLines({ label: sig.label, task, rung, subagent }).join('\n');
-    caller.block = {
-      hash: sig.hash, kind: sig.kind, label: sig.label, at: now.toISOString(),
-      rung: { from: model ?? rung.from, to: rung.up, agents: liftersOf(rung) },
-      agent, agentType: input.agent_type ?? null, task: task?.id ?? null, step: task?.step ?? null, count: repeats,
-      reason: lines(false), subagentReason: lines(true), lifted: null,
-    };
+  if (blocks) {
+    withState(home, session, null, () => {
+      const caller = readState(home, session);
+      if (inForce(caller.block)) return;
+      const lines = (subagent) => blockLines({ label: sig.label, task, rung, subagent }).join('\n');
+      caller.block = {
+        hash: sig.hash, kind: sig.kind, label: sig.label, at: now.toISOString(),
+        rung: { from: model ?? rung.from, to: rung.up, agents: liftersOf(rung) },
+        agent, agentType: input.agent_type ?? null, task: task?.id ?? null, step: task?.step ?? null, count: repeats,
+        reason: lines(false), subagentReason: lines(true), lifted: null,
+      };
+      writeState(home, caller);
+    });
   }
-  writeState(home, state);
-  if (agent && blocks) writeState(home, caller);
   const triggers = { fire: 'hook fired', block: blocks ? 'hook blocked' : 'repeat after fire', after: 'repeat after fire' };
   logLine(home, {
     time: now.toISOString(),
@@ -97,8 +100,11 @@ function countFailure({ input, home, config, command, error, now }) {
 
 // An edit that failed to apply takes back the flag it set (O-2), in the file of the session or subagent that made it.
 function editFailed(input, home) {
-  const state = readState(home, input.session_id, input.agent_id ?? null);
-  if (unmarkEdited(state, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
+  const agent = input.agent_id ?? null;
+  withState(home, input.session_id, agent, () => {
+    const state = readState(home, input.session_id, agent);
+    if (unmarkEdited(state, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
+  });
 }
 
 // A background build's end (S-1 §8): counted when it failed and this session noted it at launch; its output is the
@@ -107,11 +113,16 @@ function editFailed(input, home) {
 function notified(input, home, config, now) {
   const n = notificationOf(input.prompt);
   if (!n?.description) return null;
-  const state = readState(home, input.session_id, input.agent_id ?? null);
-  const note = state.background[n.description];
+  const agent = input.agent_id ?? null;
+  const note = withState(home, input.session_id, agent, () => {
+    const state = readState(home, input.session_id, agent);
+    const found = state.background[n.description];
+    if (!found) return null;
+    delete state.background[n.description];
+    writeState(home, state);
+    return found;
+  });
   if (!note) return null;
-  delete state.background[n.description];
-  writeState(home, state);
   if (note.run) {
     const push = pushIn(n.outputFile);
     return push && { push };
@@ -128,22 +139,27 @@ function launched(input, home, now) {
   const r = input.tool_response ?? {};
   const id = r.agentId ?? r.agent_id;
   if (input.tool_name !== 'Agent' || typeof id !== 'string' || !id) return;
-  const state = readState(home, input.session_id);
-  state.agents[id] = {
-    type: input.tool_input?.subagent_type ?? null, model: r.resolvedModel ?? null, at: now.toISOString(), ended: null, by: input.agent_id ?? null,
-  };
-  writeState(home, state);
+  withState(home, input.session_id, null, () => {
+    const state = readState(home, input.session_id);
+    state.agents[id] = {
+      type: input.tool_input?.subagent_type ?? null, model: r.resolvedModel ?? null, at: now.toISOString(), ended: null, by: input.agent_id ?? null,
+    };
+    writeState(home, state);
+  });
 }
 
 // An agent of a rung above the lowest finished (the matcher names them): its end is recorded, and it may lift the block.
 function ended(input, home, now) {
   const id = input.agent_id;
   if (typeof id !== 'string' || !id || !input.agent_type) return;
-  const state = readState(home, input.session_id);
-  const launch = state.agents[id] ?? null;
-  state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: now.toISOString() };
-  const lifted = liftByAgent(state, home, input, launch, now);
-  writeState(home, state);
+  const lifted = withState(home, input.session_id, null, () => {
+    const state = readState(home, input.session_id);
+    const launch = state.agents[id] ?? null;
+    state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: now.toISOString() };
+    const out = liftByAgent(state, home, input, launch, now);
+    writeState(home, state);
+    return out;
+  });
   if (lifted) logLift(home, input.session_id, lifted, { agent: lifted.lifted.agent, agentId: id }, now);
 }
 
@@ -169,15 +185,17 @@ function liftByAgent(state, home, input, launch, now) {
 // and clears the session's counts, and is logged even with nothing to lift.
 function override(input, home, now) {
   if (input.command_name !== GO_ON || input.agent_id) return;
-  const state = readState(home, input.session_id);
-  const block = inForce(state.block) ? state.block : null;
-  if (block) block.lifted = { by: 'override', agent: null, agentId: null, at: now.toISOString() };
-  const counted = Object.keys(state.failures).length > 0;
-  if (block || counted) {
-    forget(state, home, block, null);
-    writeState(home, state);
-  }
-  logLift(home, input.session_id, block, 'override', now);
+  const block = withState(home, input.session_id, null, () => {
+    const state = readState(home, input.session_id);
+    const found = inForce(state.block) ? state.block : null;
+    if (found) found.lifted = { by: 'override', agent: null, agentId: null, at: now.toISOString() };
+    if (found || Object.keys(state.failures).length > 0) {
+      forget(state, home, found, null);
+      writeState(home, state);
+    }
+    return found;
+  });
+  logLift(home, input.session_id, block ?? null, 'override', now);
 }
 
 // Deletes the counts the lift settles: `hashes` (all with null) in the session's file and, when a subagent's failure
@@ -188,9 +206,11 @@ function forget(state, home, block, hashes) {
   };
   clear(state);
   if (!block?.agent) return;
-  const sub = readState(home, state.session, block.agent);
-  clear(sub);
-  writeState(home, sub);
+  withState(home, state.session, block.agent, () => {
+    const sub = readState(home, state.session, block.agent);
+    clear(sub);
+    writeState(home, sub);
+  });
 }
 
 // A lift's line in escalate.log (R3.2, AC-21): `block lifted` with the agent and its id, or `/k-go-on override`.
@@ -211,11 +231,12 @@ function logLift(home, session, block, liftedBy, now) {
 }
 
 function recordModel(input, home, model) {
-  if (typeof model !== 'string' || !model) return;
-  const state = readState(home, input.session_id);
-  if (state.model === model) return;
-  state.model = model;
-  writeState(home, state);
+  if (typeof model !== 'string' || !model || readState(home, input.session_id).model === model) return;
+  withState(home, input.session_id, null, () => {
+    const state = readState(home, input.session_id);
+    state.model = model;
+    writeState(home, state);
+  });
 }
 
 // The message reaches the model as additionalContext and the terminal as systemMessage (S-1 §5; hooks.md lists

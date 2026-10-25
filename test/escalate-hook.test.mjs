@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -622,6 +622,30 @@ test('an edit that fails to apply takes back its flag, so the next failure is no
 });
 
 // ---- S-16: the review's findings (S-10 review.md) ----
+
+// A hook run as Claude Code runs it, not waited for, so several run at once.
+const hookAsync = (script, input, home) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [script], { env: cleanEnv({ KIRUNAK_HOME: home }), stdio: ['pipe', 'ignore', 'ignore'] });
+  child.on('error', reject);
+  child.on('close', resolve);
+  child.stdin.end(JSON.stringify(input));
+});
+
+test('writers at once all land: each waits for the state file\'s lock (S-10 S-3)', async () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(failure(), h.home);
+  const lock = `${statePath(h.home, 's1')}.lock`;
+  mkdirSync(lock);
+  const ids = ['ap1', 'ap2'];
+  const runs = [...ids.map((id) => hookAsync(HOOK, launchOf('fable-step', id), h.home)), hookAsync(FREEZE, edit(), h.home)];
+  setTimeout(() => rmdirSync(lock), 25);
+  assert.deepEqual(await Promise.all(runs), [0, 0, 0]);
+  const state = h.state();
+  assert.deepEqual(ids.filter((id) => state.agents[id]), ids, 'every launch recorded');
+  assert.equal(Object.values(state.failures)[0].editedSince, true, 'and the edit\'s flag');
+  assert.ok(!existsSync(lock), 'the lock is gone');
+});
 
 test('a state file\'s lock held by another hook is skipped within about 100 ms, and one older than 2 s taken over (S-10 S-3)', () => {
   const h = makeHome();
