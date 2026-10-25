@@ -22,8 +22,6 @@ import { stopNotice } from '../lib/notice.mjs';
 
 const HOOK = fileURLToPath(new URL('../hooks/kirunak-escalate.mjs', import.meta.url));
 const FREEZE = fileURLToPath(new URL('../hooks/kirunak-freeze.mjs', import.meta.url));
-const FIX = fileURLToPath(new URL('./fixtures/escalate/', import.meta.url));
-const fixture = (name) => readFileSync(join(FIX, name), 'utf8');
 const TITLE = 'Escalation follows measured failures, not self-assessment';
 const ID = 'gulnya/enforced-escalation';
 const NODE_CMD = 'node --test test/ladder.test.mjs';
@@ -166,6 +164,46 @@ const CASES = {
   },
 };
 
+// Made-up transcripts, one JSON entry a line as Claude Code writes them, in a temp folder the hook reads.
+const TRANSCRIPTS = {
+  session: [
+    '{"type":"user","message":{"role":"user","content":"run the tests"},"sessionId":"s1"}',
+    '{"type":"assistant","message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"Running them."}]},"requestedModel":"sonnet","effort":"high","sessionId":"s1"}',
+    '{"type":"user","message":{"role":"user","content":"/model opus"},"sessionId":"s1"}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"node --test"}}]},"requestedModel":"opus","advisorModel":"claude-haiku-5-5","effort":"xhigh","sessionId":"s1"}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Exit code 1"}]},"sessionId":"s1"}',
+  ],
+  // A run that finished with a SubagentHandback.
+  handback: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Reading the failure and the ladder."}]},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/src/ladder.mjs"}}]},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function climb() {}"}]},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"SubagentHandback","input":{"message":"The design: climb reads the rung above from config.json; the test that proves it is climb.test."}}]},"isSidechain":true,"agentId":"alate"}',
+  ],
+  // A run the owner interrupted in a tool call.
+  interrupted: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Reading the failure."}]},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"node --test test/ladder.test.mjs"}}]},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Interrupted by user","is_error":true}]},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"isSidechain":true}',
+  ],
+  // The prompt alone, never answered.
+  prompt: ['{"type":"user","message":{"role":"user","content":"reply ok"},"isSidechain":true}'],
+  // A run that finished with a last text and no tool call.
+  text: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/src/ladder.mjs"}}]},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function climb() {}"}]},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Done: climb reads the rung above from config.json, and climb.test proves it."}]},"isSidechain":true}',
+  ],
+};
+const transcriptOf = (name) => `${TRANSCRIPTS[name].join('\n')}\n`;
+const TRANSCRIPT_DIR = mkdtempSync(join(tmpdir(), 'kirunak-transcripts-'));
+const transcriptPath = (name) => join(TRANSCRIPT_DIR, `transcript-${name}.jsonl`);
+for (const name of Object.keys(TRANSCRIPTS)) writeFileSync(transcriptPath(name), transcriptOf(name));
+
 // ---- The signature and the commands that count (R4.3, R4.4) ----
 
 test('each runner\'s failure text gives its signature: kind, label and items, hashed without line numbers', () => {
@@ -289,7 +327,7 @@ test('rungFor: by id, then by family; a model on no rung or none is the lowest, 
 test('modelOf: the recorded model, else the transcript\'s newest; a subagent\'s from its launch, else its own transcript', () => {
   const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
   const transcript = join(top, 's1.jsonl');
-  writeFileSync(transcript, fixture('transcript.jsonl'));
+  writeFileSync(transcript, transcriptOf('session'));
   mkdirSync(join(top, 's1', 'subagents'), { recursive: true });
   writeFileSync(join(top, 's1', 'subagents', 'agent-a2.jsonl'), '{"type":"assistant","message":{"model":"claude-sonnet-5"}}\n');
   assert.equal(modelOf({ transcript_path: transcript }, { model: 'claude-fable-5' }), 'claude-fable-5');
@@ -579,7 +617,7 @@ test('the rung comes from PostModelSwitch, else the transcript\'s tail; a model 
   assert.equal(textOf(cycle(fable, 2)[2]).split('\n')[2], 'This is the top of the ladder: stop and say plainly what is missing.');
   const tail = makeHome({}, [...DEFAULT.slice(0, 2), { ...DEFAULT[2], agents: ['music-deep'] }]);
   const transcript = join(tail.top, 's1.jsonl');
-  writeFileSync(transcript, fixture('transcript.jsonl'));
+  writeFileSync(transcript, transcriptOf('session'));
   assert.equal(textOf(cycle(tail, 2, { transcript_path: transcript })[2]).split('\n')[2], 'Hand this step to fable-step (or music-deep); its next failure blocks edits.');
   const haiku = makeHome({ block: false });
   hook(start('claude-haiku-5-5'), haiku.home);
@@ -611,7 +649,7 @@ const launchOf = (type, agentId, extra = {}, { input = {}, response = {} } = {})
   tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5', ...response }, ...extra,
 });
 // A run that finished: its transcript closes with a SubagentHandback (S-1 §2).
-const FINISHED = join(FIX, 'transcript-handback.jsonl');
+const FINISHED = transcriptPath('handback');
 const stopOf = (type, agentId, transcript = FINISHED, extra = {}) => ({
   session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: transcript, ...extra,
 });
@@ -779,7 +817,7 @@ test('unfitFor: a launch runs as a rung when its models are of the rung\'s famil
   assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', effort: 'max' }), null);
   assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', asked: 'haiku' }), 'model not fable', 'the Agent call\'s own model counts');
   assert.equal(unfitFor(ladder, 'fable', {}), 'model unknown');
-  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  const t = transcriptPath;
   assert.deepEqual(runEnd(t('handback')), { finished: true, bytes: statSync(t('handback')).size });
   assert.equal(runEnd(t('text')).finished, true, 'a last assistant text');
   assert.equal(runEnd(t('interrupted')).finished, false);
@@ -811,7 +849,7 @@ test('a rung agent launched on a cheaper model or a lower effort ends and the bl
 });
 
 test('a rung agent that was interrupted or said nothing lifts nothing; one that finished lifts, its size logged (S-10 S-2)', () => {
-  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  const t = transcriptPath;
   const h = blocked();
   for (const [id, transcript] of [['astopped', t('interrupted')], ['aempty', '/dev/null'], ['aprompt', t('prompt')]]) {
     hook(launchOf('fable-step', id), h.home);
@@ -841,7 +879,7 @@ test('a Sonnet subagent\'s block in an Opus session is lifted by opus-step\'s fi
   hook(stopOf('fable-step', 'afable'), h.home);
   assert.equal(h.state().block.lifted, null);
   hook(launchOf('opus-step', 'aopus'), h.home);
-  hook(stopOf('opus-step', 'aopus', join(FIX, 'transcript-text.jsonl')), h.home);
+  hook(stopOf('opus-step', 'aopus', transcriptPath('text')), h.home);
   assert.equal(h.state().block.lifted.agentId, 'aopus');
 });
 
@@ -866,7 +904,7 @@ test('fire, fable-step finishes, the test fails again: the block names no agent 
   hook(start('claude-sonnet-5'), sonnet.home);
   cycle(sonnet, 2);
   hook(launchOf('opus-step', 'abuild'), sonnet.home);
-  hook(stopOf('opus-step', 'abuild', join(FIX, 'transcript-text.jsonl')), sonnet.home);
+  hook(stopOf('opus-step', 'abuild', transcriptPath('text')), sonnet.home);
   freeze(edit(), sonnet.home);
   hook(failure(), sonnet.home);
   assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'music-deep'], failedOn: 'opus' });
