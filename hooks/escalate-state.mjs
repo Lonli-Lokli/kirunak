@@ -269,8 +269,9 @@ export const repeatsOf = (config) =>
 /**
  * Counts a failure with signature `sig` into `state.failures` and says what it was: `new` (first seen), `rerun`
  * (seen, with no edit since: a rerun is not a fix that failed, and nothing changes), `repeat` (seen again after an
- * edit), `fire` (that repeat reached `repeats`; once a signature, AC-11) or `after` (a failure of one that fired).
- * A test written red and then fixed is one failure and no repeat (E-5). S-6 turns the first `after` into the block.
+ * edit), `fire` (that repeat reached `repeats`; once a signature, AC-11), `block` (the first failure after the fire,
+ * edited or not, R4.4 step 4) or `after` (any later one). A test written red and then fixed is one failure and no
+ * repeat (E-5).
  */
 export function count(state, sig, repeats, now = new Date()) {
   const at = now.toISOString();
@@ -281,25 +282,45 @@ export function count(state, sig, repeats, now = new Date()) {
   }
   if (f.fired) {
     f.last = at;
-    return 'after';
+    if (f.blocked) return 'after';
+    f.blocked = true;
+    return 'block';
   }
   if (!f.editedSince) return 'rerun';
   f.repeats += 1;
   f.editedSince = false;
+  delete f.editedBy;
   f.last = at;
   if (f.repeats < repeats) return 'repeat';
   f.fired = true;
   return 'fire';
 }
 
-// An allowed edit makes the next failure of every tracked signature a fix that failed; false when nothing changed,
-// so nothing is written.
-export function markEdited(state, now = new Date()) {
+// An allowed edit makes the next failure of every tracked signature a fix that failed, and names itself (its
+// tool_use_id) on each flag it sets, so a failure to apply can take them back (O-2); false when nothing changed, so
+// nothing is written.
+export function markEdited(state, now = new Date(), id = null) {
   const open = Object.values(state.failures).filter((f) => f && !f.editedSince);
   if (!open.length) return false;
-  for (const f of open) f.editedSince = true;
+  for (const f of open) {
+    f.editedSince = true;
+    f.editedBy = id;
+  }
   state.edited = now.toISOString();
   return true;
+}
+
+// An edit that did not apply (its PostToolUseFailure) takes back the flags it set, so the next failure is a rerun,
+// not a fix that failed (O-2). A later edit that applied while every flag was already set is not seen, so that
+// failure counts as a rerun too: one repeat later, never one early.
+export function unmarkEdited(state, id) {
+  if (!id) return false;
+  const set = Object.values(state.failures).filter((f) => f && f.editedSince && f.editedBy === id);
+  for (const f of set) {
+    f.editedSince = false;
+    delete f.editedBy;
+  }
+  return set.length > 0;
 }
 
 // ---- The rung (R4.8, R1.2) ----
@@ -389,26 +410,53 @@ const cut = (s, n) => (s.length <= n ? s : `${s.slice(0, Math.max(0, n - 1))}…
 /**
  * What the hook says when it fires: three lines of at most 80 characters, what failed, the task by title and id, and
  * the one thing to do. A subagent is told to return to its caller marked NEEDS-<MODEL> (E-13); the top of the ladder
- * to stop and say what is missing (E-9). `block` adds that the next failure blocks edits (S-6's block).
+ * to stop and say what is missing (E-9). `block` adds that the next failure blocks edits (R5.1).
  */
 export function message({ label, repeats, task, rung, subagent = false, block = true }) {
   const end = ` failed again after ${repeats} fix${repeats === 1 ? '' : 'es'}.`;
   const head = `kirunak: ${cut(label, WIDTH - 'kirunak: '.length - end.length)}${end}`;
-  let named = 'No task named in this session.';
-  if (task?.id) {
-    const id = task.title ? ` (${task.id}).` : `${task.id}.`;
-    named = task.title ? `Task: ${cut(task.title, WIDTH - 'Task: '.length - id.length)}${id}` : `Task: ${id}`;
-  }
   let next;
-  if (subagent) next = `Stop and return to your caller with this failure marked NEEDS-${(rung?.up ?? 'owner').toUpperCase()}.`;
+  if (subagent) next = `Stop and return to your caller with this failure marked ${needs(rung)}.`;
   else if (!rung?.up) next = 'This is the top of the ladder: stop and say plainly what is missing.';
   else {
-    const [first, ...rest] = rung.agents.length ? rung.agents : [`${rung.up}-step`];
-    const who = rest.length ? `${first} (or ${rest.join(', ')})` : first;
+    const who = whoOf(rung);
     const blocks = `Hand this step to ${who}; its next failure blocks edits.`;
     next = block && blocks.length <= WIDTH ? blocks : `Hand this step to ${who} with what you tried.`;
   }
-  return [head, cut(named, WIDTH), cut(next, WIDTH)];
+  return [head, named(task), cut(next, WIDTH)];
+}
+
+// The task line of every notice: its title and id, or that the session names none (AC-24).
+function named(task) {
+  if (!task?.id) return 'No task named in this session.';
+  const id = task.title ? ` (${task.id}).` : `${task.id}.`;
+  return cut(task.title ? `Task: ${cut(task.title, WIDTH - 'Task: '.length - id.length)}${id}` : `Task: ${id}`, WIDTH);
+}
+
+const needs = (rung) => `NEEDS-${(rung?.up ?? 'owner').toUpperCase()}`;
+const agentsAbove = (rung) => (rung?.agents?.length ? rung.agents : [`${rung.up}-step`]);
+const whoOf = (rung) => {
+  const [first, ...rest] = agentsAbove(rung);
+  return rest.length ? `${first} (or ${rest.join(', ')})` : first;
+};
+
+/**
+ * The block's deny reason (R5.1, AC-23..AC-25): three lines of at most 80 characters, what happened, the task, and
+ * the one thing to do with the owner's /k-go-on beside it. A Fable session names no agent (E-9); a subagent, which
+ * cannot lift its caller's block by launching anything (R5.3), is told to return marked NEEDS-<MODEL> (E-13).
+ */
+export function blockLines({ label, task, rung, subagent = false }) {
+  const end = ' failed again.';
+  const head = `kirunak: edits blocked: ${cut(label, WIDTH - 'kirunak: edits blocked: '.length - end.length)}${end}`;
+  const owner = '; the owner can type /k-go-on.';
+  let next;
+  if (subagent) next = `Stop and return to your caller marked ${needs(rung)}${owner}`;
+  else if (!rung?.up) next = `Stop and say plainly what is missing${owner}`;
+  else {
+    next = `Launch ${whoOf(rung)} on this step${owner}`;
+    if (next.length > WIDTH) next = `Launch ${agentsAbove(rung)[0]} on this step${owner}`;
+  }
+  return [head, named(task), cut(next, WIDTH)];
 }
 
 // ---- A background build (R4.5; S-1 §8) and the freeze hook's notes ----
@@ -441,7 +489,7 @@ export function notificationOf(prompt) {
 // The freeze hook, after letting an Edit, Write, MultiEdit or NotebookEdit through.
 export function edited(home, input, now = new Date()) {
   const state = readState(home, input.session_id, input.agent_id ?? null);
-  if (markEdited(state, now)) writeState(home, state);
+  if (markEdited(state, now, typeof input.tool_use_id === 'string' ? input.tool_use_id : null)) writeState(home, state);
 }
 
 // The freeze hook, after letting a Bash call with `run_in_background` through: a counted build is noted.
