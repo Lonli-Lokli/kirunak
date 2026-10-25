@@ -87,7 +87,7 @@ test('the push of a stop on the longest real title: one line of at most 200, the
   const dir = `kirunak/tasks/${slug}/steps/S-14/`;
   const stop = { step: 'S-14', kind: 'escalated', what: 'stopped, failed on every rung', why: 'missing outputs: steps/S-14/report.md', dir, reports: [1, 2, 3, 4].map((k) => `steps/S-14/failure-${k}.md`) };
   const asked = { ...stop, kind: 'owner', what: 'waits for your answer', why: 'Which voice for the video?', reports: [] };
-  for (const n of [stopNotice(r, stop), stopNotice(r, asked), stopNotice(r, { ...asked, byHand: true }), notice({ title, id: r.id, what: 'parked, not in the queue', next: `k queue add ${r.id} puts it back, then start k run again` })]) {
+  for (const n of [stopNotice(r, stop), stopNotice(r, asked), stopNotice(r, { ...asked, byHand: true })]) {
     fits(n);
     assert.ok(n.one.startsWith(title.slice(0, 40)) && n.one.includes(` (${r.id}): `), n.one);
     assert.ok(n.one.endsWith(`. ${n.lines.at(-1)}`), n.one);

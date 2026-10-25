@@ -508,7 +508,7 @@ test('k run refuses a step past the machine cap and says who runs', async () => 
   }
 });
 
-test('k run starts no step of a parked task and names k queue add, which puts it back; parked during --watch, no other step starts', async () => {
+test('k run starts no step of a parked task and names k queue add, which puts it back; parked during --watch, no other step starts and no push is sent', async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);
   queue.remove(w.ws, w.id);
@@ -532,8 +532,18 @@ test('k run starts no step of a parked task and names k queue add, which puts it
   assert.equal(vCalls.length, 1);
   assert.equal(r.stopped, parked);
   assert.deepEqual([r.states['S-1'], r.states['S-2']], ['done', 'ready']);
-  assert.ok(lines.some((l) => l.endsWith(`stopped: ${r.stopped}`)), lines.join('\n'));
-  assert.equal(lines.at(-1), `kirunak-push: The last forecast stays readable offline (${v.id}): parked, not in the queue. k queue add ${v.id} puts it back, then start k run again`);
+  // The owner parked it themselves: the stop line stays on the screen, and no push tells them what they did (E-16).
+  assert.equal(lines.at(-1), `${v.id} stopped: ${parked}`);
+  assert.deepEqual([pushes(lines), r.push], [[], null]);
+  // Nor when the step it ran asked a question before the owner parked the task: k waiting shows the question.
+  const u = await approvedWorkspace(PLAN);
+  fakeRunner(u, (step, n, w2) => {
+    put(w2, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+    queue.remove(u.ws, u.id);
+    return 'nothing';
+  });
+  const asked = await run({ ws: u.ws, id: u.id, watch: true, intervalMs: 20 });
+  assert.deepEqual([asked.stopped, asked.push, asked.states['S-1']], [`${u.id} is parked, not in the queue: k queue add ${u.id} puts it back`, null, 'waiting-owner']);
 });
 
 test('one k run per task: a second refuses, naming the pid, and starts nothing; a lock whose k run is dead is taken over', async () => {
