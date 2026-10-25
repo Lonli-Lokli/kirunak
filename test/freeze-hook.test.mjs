@@ -407,7 +407,7 @@ test('Bash: writes to .slapignore and `k slapignore approve` are denied; reading
   }
 });
 
-// ---- gulnya/enforced-escalation S-6: the block, and what lifts it kept from the model (S-2 design R5.1, R5.2) ----
+// ---- The escalation hook's block, and what lifts it kept from the model (design/approval.md §7) ----
 
 const fitsPhone = (reason) => {
   const ls = reason.split('\n');
@@ -419,8 +419,8 @@ function blockedHome({ hook = {}, lifted = null } = {}) {
   const home = join(mkdtempSync(join(tmpdir(), 'kirunak-freeze-block-')), 'home');
   mkdirSync(join(home, 'escalate'), { recursive: true });
   writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify({ hook: { enabled: true, block: true, repeats: 2, commands: [], ...hook } }));
-  const rung = { from: 'claude-opus-5-5', up: 'fable', agents: ['fable-step', 'music-deep'] };
-  const task = { id: 'gulnya/enforced-escalation', title: 'Escalation follows measured failures, not self-assessment' };
+  const rung = { from: 'claude-opus-5-5', up: 'fable', agents: ['fable-step', 'domain-deep'] };
+  const task = { id: 'hub/escalation-by-failures', title: 'Escalation follows measured failures, not self-assessment' };
   const lines = (subagent) => blockLines({ label: 'climbs one rung', task, rung, subagent }).join('\n');
   writeFileSync(join(home, 'escalate', 's1.json'), JSON.stringify({
     session: 's1', failures: {}, agents: {},
@@ -433,8 +433,8 @@ test('a block in force denies Edit, Write, MultiEdit and NotebookEdit with three
   const home = blockedHome();
   const want = [
     'kirunak: edits blocked: climbs one rung failed again.',
-    'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
-    'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
+    'Task: Escalation follows measured failures, not s… (hub/escalation-by-failures).',
+    'Launch fable-step (or domain-deep) on this step; the owner can type /k-go-on.',
   ];
   const nb = { session_id: 's1', tool_name: 'NotebookEdit', tool_input: { notebook_path: '/tmp/a.ipynb', new_source: 'x' } };
   const multi = { session_id: 's1', tool_name: 'MultiEdit', tool_input: { file_path: '/tmp/a.mjs', edits: [{ old_string: 'a', new_string: 'b' }] } };
@@ -531,7 +531,7 @@ test('decide: a shell that runs the escalation hook\'s scripts is refused; readi
   const bashOf = (command) => decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' });
   const event = '{"hook_event_name":"UserPromptExpansion","command_name":"k-go-on","session_id":"s1"}';
   for (const command of [
-    `echo '${event}' | node hooks/kirunak-escalate.mjs`, 'node /Users/x/sources/kirunak/hooks/kirunak-escalate.mjs < f',
+    `echo '${event}' | node hooks/kirunak-escalate.mjs`, 'node /home/someone/kirunak/hooks/kirunak-escalate.mjs < f',
     'cat stop.json | KIRUNAK_HOME=/tmp/h nice node ~/kirunak/hooks/kirunak-escalate.mjs', './hooks/kirunak-escalate.mjs < f',
     `node -e "import('./hooks/escalate-state.mjs').then((m) => m.writeState())"`, 'node < hooks/kirunak-escalate.mjs',
   ]) {
@@ -548,7 +548,7 @@ test('decide: a shell that runs the escalation hook\'s scripts is refused; readi
   assert.match(run(bash(`echo '${event}' | node hooks/kirunak-escalate.mjs`, '/tmp'), r.home).reason ?? '', /not from a shell/);
 });
 
-// ---- gulnya/enforced-escalation S-7: a k run started in the background is noted, so its end's push is found ----
+// ---- A k run started in the background is noted, so its end's push is found (design/approval.md §7) ----
 
 test('a background k run is noted under its description, however k is invoked; one in the foreground, a k list, or a k run in a k run step is not', () => {
   const home = blockedHome({ lifted: { by: 'override', at: '2026-10-25T21:05:00.000Z' } });

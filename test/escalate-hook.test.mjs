@@ -17,13 +17,13 @@ import { familyOf } from '../lib/ladder.mjs';
 import { EFFORTS } from '../lib/plan.mjs';
 import { stopNotice } from '../lib/notice.mjs';
 
-// gulnya/enforced-escalation S-5: the escalation hook counts a build or test failing again on the same test or error
-// after an edit, and says so once (S-2 design §4).
+// The escalation hook counts a build or test failing again on the same test or error after an edit, and says so once
+// (design/approval.md §7).
 
 const HOOK = fileURLToPath(new URL('../hooks/kirunak-escalate.mjs', import.meta.url));
 const FREEZE = fileURLToPath(new URL('../hooks/kirunak-freeze.mjs', import.meta.url));
 const TITLE = 'Escalation follows measured failures, not self-assessment';
-const ID = 'gulnya/enforced-escalation';
+const ID = 'hub/escalation-by-failures';
 const NODE_CMD = 'node --test test/ladder.test.mjs';
 
 // Made-up failure texts, as a failed Bash call's `error` carries them (`Exit code N` first): per runner only the few
@@ -227,15 +227,15 @@ test('a moved line, a new test time or a longer truncation leaves the signature 
 });
 
 test('commandOf: heavy-lock\'s wrapper is the command it wraps, a cd before it is skipped, other commands never count', () => {
-  const lock = 'node ~/sources/gulnya/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
+  const lock = 'node ~/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
   assert.equal(commandOf(lock), './gradlew :engine:jvmTest');
-  assert.equal(commandOf(`cd ~/sources/slova && ${lock}`), './gradlew :engine:jvmTest');
-  assert.equal(commandOf('node ~/sources/gulnya/tools/heavy-lock.mjs status'), null);
+  assert.equal(commandOf(`cd ~/code/words && ${lock}`), './gradlew :engine:jvmTest');
+  assert.equal(commandOf('node ~/tools/heavy-lock.mjs status'), null);
   assert.equal(commandOf('cd ~/sources/kirunak && npm test'), 'npm test');
   assert.equal(commandOf('npm test 2>&1 | tail -20'), 'npm test');
   assert.equal(commandOf('FORCE_COLOR=0 env -u CI npx vitest run'), 'npx vitest run');
   assert.equal(commandOf('npm run test:unit'), 'npm run test:unit');
-  assert.equal(commandOf('xcodebuild test -scheme Hronka'), 'xcodebuild test -scheme Hronka');
+  assert.equal(commandOf('xcodebuild test -scheme App'), 'xcodebuild test -scheme App');
   for (const other of ['ls -la nope', 'git push', 'cat build.log', 'npm install', 'node scripts/x.mjs', 'echo "npm test"']) {
     assert.equal(commandOf(other), null, other);
   }
@@ -256,11 +256,11 @@ test('the freeze hook and the rules name the same state file, and read model fam
 test('a runner the hook knows with none of its lines left counts nothing; a workspace command keeps the fallback (S-10 S-5)', () => {
   const xcode = 'Exit code 65\n... [91002 characters truncated] ...\n** TEST FAILED **\n';
   const gradle = 'Exit code 1\n... [48213 characters truncated] ...\nBUILD FAILED in 12s\n';
-  assert.equal(signatureOf(xcode, 'xcodebuild test -scheme Hronka'), null);
+  assert.equal(signatureOf(xcode, 'xcodebuild test -scheme App'), null);
   assert.equal(signatureOf(gradle, './gradlew :engine:jvmTest'), null);
   assert.equal(signatureOf(xcode, './tools/check.sh').kind, 'other', 'a workspace command keeps the fallback');
   const h = makeHome();
-  for (const [command, text] of [['xcodebuild test -scheme Hronka', xcode], ['./gradlew :engine:jvmTest', gradle]]) {
+  for (const [command, text] of [['xcodebuild test -scheme App', xcode], ['./gradlew :engine:jvmTest', gradle]]) {
     for (let i = 0; i < 4; i++) {
       assert.equal(hook(failure({}, command, text), h.home).stdout, '', command);
       freeze(edit(), h.home);
@@ -296,14 +296,14 @@ const fits = (lines) => {
 
 test('the message is at most three lines of at most 80 characters, with the task\'s title and id, in every shape', () => {
   const task = { id: ID, title: TITLE };
-  const opus = { up: 'fable', agents: ['fable-step', 'music-deep'] };
+  const opus = { up: 'fable', agents: ['fable-step', 'domain-deep'] };
   const long = 'GameBoardRotationTests > keeps the score and the selected word when the board turns twice()';
   const main = message({ label: long, repeats: 2, task, rung: opus });
   fits(main);
   assert.match(main[0], /^kirunak: GameBoardRotationTests > keeps .*… failed again after 2 fixes\.$/);
-  assert.match(main[1], /^Task: Escalation follows .*… \(gulnya\/enforced-escalation\)\.$/);
-  assert.equal(main[2], 'Hand this step to fable-step (or music-deep); its next failure blocks edits.');
-  assert.equal(message({ label: 'x', repeats: 2, task, rung: opus, block: false })[2], 'Hand this step to fable-step (or music-deep) with what you tried.');
+  assert.match(main[1], /^Task: Escalation follows .*… \(hub\/escalation-by-failures\)\.$/);
+  assert.equal(main[2], 'Hand this step to fable-step (or domain-deep); its next failure blocks edits.');
+  assert.equal(message({ label: 'x', repeats: 2, task, rung: opus, block: false })[2], 'Hand this step to fable-step (or domain-deep) with what you tried.');
   const top = message({ label: 'x', repeats: 2, task, rung: { up: null, agents: [] } });
   fits(top);
   assert.equal(top[2], 'This is the top of the ladder: stop and say plainly what is missing.');
@@ -312,13 +312,13 @@ test('the message is at most three lines of at most 80 characters, with the task
   assert.equal(message({ label: 'x', repeats: 2, task: null, rung: opus })[1], 'No task named in this session.');
   assert.equal(message({ label: 'x', repeats: 2, task: { id: ID, title: null }, rung: opus })[1], `Task: ${ID}.`);
   assert.equal(message({ label: 'x', repeats: 1, task, rung: opus })[0], 'kirunak: x failed again after 1 fix.');
-  fits(message({ label: long, repeats: 3, task: { id: 'kupalinka-web/a-very-long-repository-task-slug-of-many-words', title: TITLE }, rung: { up: 'opus', agents: ['opus-step', 'builder-one', 'builder-two', 'builder-three'] } }));
+  fits(message({ label: long, repeats: 3, task: { id: 'weather-sites/a-very-long-repository-task-slug-of-many-words', title: TITLE }, rung: { up: 'opus', agents: ['opus-step', 'builder-one', 'builder-two', 'builder-three'] } }));
 });
 
 test('rungFor: by id, then by family; a model on no rung or none is the lowest, marked unknown', () => {
-  const ladder = escalateConfig({ ladder: [{ model: 'sonnet' }, { model: 'opus', id: 'claude-opus-5-5', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1, agents: ['music-deep'] }] }).ladder;
+  const ladder = escalateConfig({ ladder: [{ model: 'sonnet' }, { model: 'opus', id: 'claude-opus-5-5', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1, agents: ['domain-deep'] }] }).ladder;
   assert.deepEqual(rungFor(ladder, 'claude-sonnet-5'), { from: 'sonnet', up: 'opus', agents: ['opus-step'], unknown: false });
-  assert.deepEqual(rungFor(ladder, 'claude-opus-5-5'), { from: 'opus', up: 'fable', agents: ['fable-step', 'music-deep'], unknown: false });
+  assert.deepEqual(rungFor(ladder, 'claude-opus-5-5'), { from: 'opus', up: 'fable', agents: ['fable-step', 'domain-deep'], unknown: false });
   assert.deepEqual(rungFor(ladder, 'claude-fable-5'), { from: 'fable', up: null, agents: [], unknown: false });
   assert.deepEqual(rungFor(ladder, 'claude-haiku-5-5'), { from: 'sonnet', up: 'opus', agents: ['opus-step'], unknown: true });
   assert.equal(rungFor(ladder, null).unknown, true);
@@ -360,17 +360,17 @@ test('prune removes state files untouched for 14 days and leaves config.json and
 
 const DEFAULT = [{ model: 'sonnet' }, { model: 'opus', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1 }];
 
-// A home with config.json as k install writes it, a repo `gulnya` holding the task, and session s1 on that task.
+// A home with config.json as k install writes it, a repo `hub` holding the task, and session s1 on that task.
 function makeHome(hook = {}, ladder = DEFAULT) {
   const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
   const home = join(top, 'home');
-  const repo = join(top, 'gulnya');
-  mkdirSync(join(repo, 'kirunak', 'tasks', 'enforced-escalation'), { recursive: true });
-  writeFileSync(join(repo, 'kirunak', 'tasks', 'enforced-escalation', 'task.md'), `---\nid: ${ID}\ntitle: ${TITLE}\n---\n\n## Goal\nx\n`);
+  const repo = join(top, 'hub');
+  mkdirSync(join(repo, 'kirunak', 'tasks', 'escalation-by-failures'), { recursive: true });
+  writeFileSync(join(repo, 'kirunak', 'tasks', 'escalation-by-failures', 'task.md'), `---\nid: ${ID}\ntitle: ${TITLE}\n---\n\n## Goal\nx\n`);
   mkdirSync(join(home, 'escalate'), { recursive: true });
   mkdirSync(join(home, 'sessions'), { recursive: true });
   writeFileSync(join(home, 'sessions', 's1.json'), JSON.stringify({ task: ID, step: 'S-5', since: '2026-10-25T19:25:04.627Z' }));
-  const config = { written: new Date().toISOString(), ...escalateConfig({ ladder, hook, repos: [{ name: 'gulnya', root: repo }] }) };
+  const config = { written: new Date().toISOString(), ...escalateConfig({ ladder, hook, repos: [{ name: 'hub', root: repo }] }) };
   writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify(config, null, 2));
   const log = () => (existsSync(join(home, 'escalate.log')) ? readFileSync(join(home, 'escalate.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
   const files = () => readdirSync(join(home, 'escalate')).filter((n) => n !== 'config.json').sort();
@@ -424,7 +424,7 @@ test('fail, edit, fail, edit, fail fires exactly once: three lines of at most 80
   fits(lines);
   assert.deepEqual(lines, [
     'kirunak: climbs one rung failed again after 2 fixes.',
-    'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
+    'Task: Escalation follows measured failures, not s… (hub/escalation-by-failures).',
     'Hand this step to fable-step; its next failure blocks edits.',
   ]);
   assert.equal(freeze(edit(), h.home).stdout, '');
@@ -528,7 +528,7 @@ test('a background build is noted at launch and counted from its notification an
   hook(start('claude-opus-5-5'), h.home);
   const output = join(h.top, 'bxo7damvu.output');
   writeFileSync(output, GRADLE_FAIL.split('\n').slice(1).join('\n'));
-  const command = 'node ~/sources/gulnya/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
+  const command = 'node ~/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
   const launch = (cmd = command, description = 'Run the engine tests') => freeze({
     session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: cmd, description, run_in_background: true },
   }, h.home);
@@ -615,10 +615,10 @@ test('the rung comes from PostModelSwitch, else the transcript\'s tail; a model 
   hook({ session_id: 's1', hook_event_name: 'PostModelSwitch', from_model: 'claude-sonnet-5', to_model: 'claude-fable-5', source: 'command' }, fable.home);
   assert.equal(fable.state().model, 'claude-fable-5');
   assert.equal(textOf(cycle(fable, 2)[2]).split('\n')[2], 'This is the top of the ladder: stop and say plainly what is missing.');
-  const tail = makeHome({}, [...DEFAULT.slice(0, 2), { ...DEFAULT[2], agents: ['music-deep'] }]);
+  const tail = makeHome({}, [...DEFAULT.slice(0, 2), { ...DEFAULT[2], agents: ['domain-deep'] }]);
   const transcript = join(tail.top, 's1.jsonl');
   writeFileSync(transcript, transcriptOf('session'));
-  assert.equal(textOf(cycle(tail, 2, { transcript_path: transcript })[2]).split('\n')[2], 'Hand this step to fable-step (or music-deep); its next failure blocks edits.');
+  assert.equal(textOf(cycle(tail, 2, { transcript_path: transcript })[2]).split('\n')[2], 'Hand this step to fable-step (or domain-deep); its next failure blocks edits.');
   const haiku = makeHome({ block: false });
   hook(start('claude-haiku-5-5'), haiku.home);
   assert.equal(textOf(cycle(haiku, 2)[2]).split('\n')[2], 'Hand this step to opus-step with what you tried.');
@@ -638,11 +638,11 @@ test('SessionStart on startup prunes state files untouched for 14 days', () => {
 
 // ---- S-6: the block and what lifts it (S-2 design §5) ----
 
-const FABLE_LADDER = [DEFAULT[0], DEFAULT[1], { ...DEFAULT[2], agents: ['music-deep'] }];
+const FABLE_LADDER = [DEFAULT[0], DEFAULT[1], { ...DEFAULT[2], agents: ['domain-deep'] }];
 const OPUS_DENY = [
   'kirunak: edits blocked: climbs one rung failed again.',
-  'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
-  'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
+  'Task: Escalation follows measured failures, not s… (hub/escalation-by-failures).',
+  'Launch fable-step (or domain-deep) on this step; the owner can type /k-go-on.',
 ];
 const launchOf = (type, agentId, extra = {}, { input = {}, response = {} } = {}) => ({
   session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type, ...input },
@@ -668,7 +668,7 @@ function blocked(model = 'claude-opus-5-5', hookConfig = {}, ladder = FABLE_LADD
 test('fire, then the next failure blocks the session\'s edits with three lines; Read, Bash, Agent and other skills go on (R5.1, E-10)', () => {
   const h = blocked();
   const { block } = h.state();
-  assert.deepEqual([block.label, block.rung, block.lifted, block.agent], ['climbs one rung', { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step', 'music-deep'] }, null, null]);
+  assert.deepEqual([block.label, block.rung, block.lifted, block.agent], ['climbs one rung', { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step', 'domain-deep'] }, null, null]);
   for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
     const reason = denied(freeze(edit({ tool_name: tool, tool_input: { file_path: '/tmp/src/a.mjs', notebook_path: '/tmp/a.ipynb', content: 'x' } }), h.home));
     assert.deepEqual(reason?.split('\n'), OPUS_DENY, tool);
@@ -720,12 +720,12 @@ test('only an agent of the rung above, launched after the block, lifts it when i
   assert.deepEqual(failures, {}, 'the lifted failure is forgotten: its next failure is a new count');
   assert.equal(freeze(edit(), h.home).stdout, '');
   const lift = h.log().at(-1);
-  assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'music-deep']]);
+  assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'domain-deep']]);
   assert.equal(lift.transcriptBytes, statSync(FINISHED).size, 'the run\'s size is logged with the lift');
   const deep = blocked();
-  hook(launchOf('music-deep', 'amusic'), deep.home);
-  hook(stopOf('music-deep', 'amusic'), deep.home);
-  assert.equal(deep.state().block.lifted.agent, 'music-deep', 'an agent of the rung\'s `agents` lifts too');
+  hook(launchOf('domain-deep', 'adeep'), deep.home);
+  hook(stopOf('domain-deep', 'adeep'), deep.home);
+  assert.equal(deep.state().block.lifted.agent, 'domain-deep', 'an agent of the rung\'s `agents` lifts too');
 });
 
 // /k-go-on as the owner types it, run in this process with the owner's ancestry (one claude), so the tests hold
@@ -907,8 +907,8 @@ test('fire, fable-step finishes, the test fails again: the block names no agent 
   hook(stopOf('opus-step', 'abuild', transcriptPath('text')), sonnet.home);
   freeze(edit(), sonnet.home);
   hook(failure(), sonnet.home);
-  assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'music-deep'], failedOn: 'opus' });
-  assert.equal(denied(freeze(edit(), sonnet.home)).split('\n')[2], 'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.');
+  assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'domain-deep'], failedOn: 'opus' });
+  assert.equal(denied(freeze(edit(), sonnet.home)).split('\n')[2], 'Launch fable-step (or domain-deep) on this step; the owner can type /k-go-on.');
 });
 
 test('fire, fable-step launched, the test fails again, fable-step ends: lifted by that one run (S-10 S-1)', () => {
@@ -920,7 +920,7 @@ test('fire, fable-step launched, the test fails again, fable-step ends: lifted b
   hook(failure(), h.home);
   const { block, failures } = h.state();
   assert.equal(block.firedAt, Object.values(failures)[0].firedAt, 'the threshold is the fire');
-  assert.deepEqual(block.rung.agents, ['fable-step', 'music-deep']);
+  assert.deepEqual(block.rung.agents, ['fable-step', 'domain-deep']);
   assert.ok(denied(freeze(edit(), h.home)));
   hook(stopOf('fable-step', 'adesign'), h.home);
   assert.equal(h.state().block.lifted.agentId, 'adesign');
