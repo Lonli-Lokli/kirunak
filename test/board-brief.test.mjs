@@ -163,7 +163,7 @@ test('k board --brief --json gives the Drafts group in groups, as the mod\'s /k-
   assert.deepEqual(out.groups.map((g) => [g.name, g.count]).at(-1), ['Drafts', 2]);
 });
 
-test('a step k run stopped for the owner: the brief board opens with Stopped for you, its notice in at most 3 lines of 80 characters with the title and id (gulnya/enforced-escalation R7.3, E-15)', async () => {
+test('a step k run stopped for the owner: the brief board opens with Stopped for you, its notice in at most 3 lines of 80 characters with the title and id (design/orchestrator.md §2, E-15)', async () => {
   const w = await fixture();
   const list = await rows(w.ws, { all: true });
   const stop = { step: 'S-2', kind: 'escalated', what: 'stopped, failed on every rung', why: 'exit 1', dir: 'kirunak/tasks/hourly-chart/steps/S-2/', reports: ['steps/S-2/failure-1.md', 'steps/S-2/failure-2.md', 'steps/S-2/failure-3.md', 'steps/S-2/failure-4.md'] };

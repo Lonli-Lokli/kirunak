@@ -188,7 +188,7 @@ test("k waiting says in one line how many drafts wait for the owner's intake and
   assert.equal(draftsLine({ count: 1 }), "1 draft waits for the owner's intake: /k-drafts");
 });
 
-test('k waiting\'s group Stopped for you: per stopped step of a task not done, its notice indented two spaces, each line within 80 characters, the title and id first (gulnya/enforced-escalation R7.3, E-15)', () => {
+test('k waiting\'s group Stopped for you: per stopped step of a task not done, its notice indented two spaces, each line within 80 characters, the title and id first (design/orchestrator.md §2, E-15)', () => {
   const stop = { step: 'S-4', kind: 'escalated', what: 'stopped, failed on every rung', why: 'missing outputs: steps/S-4/report.md', dir: 'kirunak/tasks/offline-forecast/steps/S-4/', reports: ['steps/S-4/failure-1.md', 'steps/S-4/failure-2.md', 'steps/S-4/failure-3.md', 'steps/S-4/failure-4.md'] };
   const rows = [
     { id: 'weather/offline-forecast', title: 'The last forecast stays readable offline', state: 'in progress', stops: [stop] },
@@ -208,7 +208,7 @@ test('k waiting\'s group Stopped for you: per stopped step of a task not done, i
   assert.ok(stopped[0].one.length <= 200);
 });
 
-test("k waiting's line for a question of a step started by hand sends the owner to the session that started it, not to k run (gulnya/enforced-escalation AC-23)", () => {
+test("k waiting's line for a question of a step started by hand sends the owner to the session that started it, not to k run (design/orchestrator.md §2, AC-23)", () => {
   const stop = { step: 'S-2', kind: 'owner', what: 'waits for your answer', why: 'Three days or a week?', dir: 'kirunak/tasks/offline-forecast/steps/S-2/', reports: [], byHand: true };
   const text = stoppedText(stoppedFor([{ id: 'weather/offline-forecast', title: 'The last forecast stays readable offline', state: 'in progress', stops: [stop] }])).split('\n');
   assert.deepEqual(text, [

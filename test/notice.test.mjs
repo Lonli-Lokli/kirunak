@@ -1,8 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { cut, notice, PUSH, stopNotice, WIDTH } from '../lib/notice.mjs';
 
 // Every notice fits a phone screen (S-2 design R7.1; AC-23..AC-25): at most 3 lines of at most 80 characters, the
@@ -28,13 +25,13 @@ test('nothing to do says so; no why makes two lines; markdown marks and line bre
 
 test('a long title keeps the first line to itself, whole, and what happened opens the second; a longer one is cut there, never the id', () => {
   const title = 'Enforced escalation: kirunak counts failures and hands steps up';
-  const n = notice({ title, id: 'gulnya/enforced-escalation', step: 'S-14', what: 'stopped, failed on every rung', why: 'missing outputs: '.repeat(10), next: 'read it' });
-  assert.equal(n.lines[0], `${title.slice(0, 80 - ' (gulnya/enforced-escalation)'.length - 1)}… (gulnya/enforced-escalation)`);
+  const n = notice({ title, id: 'hub/escalation-by-failures', step: 'S-14', what: 'stopped, failed on every rung', why: 'missing outputs: '.repeat(10), next: 'read it' });
+  assert.equal(n.lines[0], `${title.slice(0, 80 - ' (hub/escalation-by-failures)'.length - 1)}… (hub/escalation-by-failures)`);
   assert.match(n.lines[1], /^S-14 stopped, failed on every rung: missing outputs: .*…$/);
   assert.equal(n.lines[1].length, 80);
   fits(n);
-  const short = notice({ title: 'Fifty characters of a title, give or take a word.', id: 'gulnya/enforced-escalation', step: 'S-14', what: 'stopped' });
-  assert.equal(short.lines[0], 'Fifty characters of a title, give or take a word. (gulnya/enforced-escalation)');
+  const short = notice({ title: 'Fifty characters of a title, give or take a word.', id: 'hub/escalation-by-failures', step: 'S-14', what: 'stopped' });
+  assert.equal(short.lines[0], 'Fifty characters of a title, give or take a word. (hub/escalation-by-failures)');
   assert.equal(short.lines[1], 'S-14 stopped');
 });
 
@@ -64,26 +61,13 @@ test('a stop names the step\'s folder and its reports, the folder alone when tha
 });
 
 // The push (R7.2, E-16): one line of at most 200 characters, the task's title and id, the step, what happened and the
-// one thing to do, kept whole; gulnya's tasks give the longest real titles, read only, where this machine has them.
-const LONGEST = "kirunak's docs for newcomers, a paid redaction app built through kirunak, and a promo video of it drawn in fframes";
-const realTitles = () => {
-  const dir = join(homedir(), 'sources', 'gulnya', 'kirunak', 'tasks');
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((slug) => {
-    try {
-      const title = /^title:\s*(.*)$/m.exec(readFileSync(join(dir, slug, 'task.md'), 'utf8'))?.[1].trim();
-      return title ? [{ title, slug }] : [];
-    } catch {
-      return [];
-    }
-  });
-};
+// one thing to do, kept whole; on a made-up title as long as the longest one in use (114 characters).
+const LONGEST = 'Forecasts that load offline for a week, an hourly chart drawn from them, and a widget that shows when rain is next';
 
-test('the push of a stop on the longest real title: one line of at most 200, the title and id, the step, what happened, the thing to do whole', () => {
-  const titles = [...realTitles(), { title: LONGEST, slug: 'kirunak-docs-promo' }];
-  const { title, slug } = titles.reduce((a, b) => (b.title.length > a.title.length ? b : a));
-  assert.ok(title.length >= LONGEST.length);
-  const r = { title, id: `gulnya/${slug}` };
+test('the push of a stop on the longest title: one line of at most 200, the title and id, the step, what happened, the thing to do whole', () => {
+  const [title, slug] = [LONGEST, 'offline-week-chart'];
+  assert.equal(title.length, 114);
+  const r = { title, id: `storms/${slug}` };
   const dir = `kirunak/tasks/${slug}/steps/S-14/`;
   const stop = { step: 'S-14', kind: 'escalated', what: 'stopped, failed on every rung', why: 'missing outputs: steps/S-14/report.md', dir, reports: [1, 2, 3, 4].map((k) => `steps/S-14/failure-${k}.md`) };
   const asked = { ...stop, kind: 'owner', what: 'waits for your answer', why: 'Which voice for the video?', reports: [] };
@@ -92,7 +76,7 @@ test('the push of a stop on the longest real title: one line of at most 200, the
     assert.ok(n.one.startsWith(title.slice(0, 40)) && n.one.includes(` (${r.id}): `), n.one);
     assert.ok(n.one.endsWith(`. ${n.lines.at(-1)}`), n.one);
   }
-  assert.match(stopNotice(r, stop).one, /…? \(gulnya\/[a-z-]+\): S-14 stopped, failed on every rung\. read kirunak\/tasks\/[a-z-]+\/steps\/S-14\/( \(failure-1\.md … failure-4\.md\))?$/);
+  assert.match(stopNotice(r, stop).one, /…? \(storms\/[a-z-]+\): S-14 stopped, failed on every rung\. read kirunak\/tasks\/[a-z-]+\/steps\/S-14\/( \(failure-1\.md … failure-4\.md\))?$/);
 });
 
 test('the push keeps why when it fits and leaves it out when too little room is left; no full stop after a question mark', () => {

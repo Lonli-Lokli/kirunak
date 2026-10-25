@@ -8,7 +8,7 @@ import { kirunakHome } from '../lib/home.mjs';
 // PreToolUse (approval.md §2): refuses the model's write to what only the owner's commands write, and the owner's
 // verbs run through the Bash tool. A guard against mistakes, not against a deliberate bypass; it fails open.
 // It imports nothing but node: modules and lib/home.mjs, because it runs on every Edit, Write and Bash call.
-// For the escalation hook (gulnya/enforced-escalation S-2 design §5) it refuses edits while the session's block is in
+// For the escalation hook (approval.md §7) it refuses edits while the session's block is in
 // force, and every way the model could reach what lifts the block: the Skill call of k-go-on, a scheduled prompt or a
 // message carrying /k-go-on, an agent's prompt that starts with it, a claude run from the shell that would type it into
 // a session, a shell that runs the hook's scripts with an event of its own, and the hook's own files.
@@ -25,7 +25,7 @@ const RESUMES = /^(?:--continue|--resume|--session-id)(?:=|$)|^-[A-Za-z]*[cr]/;
 const TICK = /^\s*[-*+]\s+\[[xX]\]/gm;
 const STAMP = /^(applied|declined):/gm;
 const GLOB = /[*?[]/;
-// The escalation hook's two scripts, by basename, whatever the path (S-16's open item, S-17).
+// The escalation hook's two scripts, by basename, whatever the path (approval.md §7).
 const HOOK_SCRIPT = /(?:^|[^\w.-])(?:kirunak-escalate|escalate-state)\.mjs\b/;
 const RUNTIMES = new Set(['node', 'nodejs', 'bun', 'deno']);
 
@@ -416,7 +416,7 @@ export function decide(input) {
     return name === 'k-go-on' ? GO_ON : ownerVerb(name.slice(2));
   }
   if (PROMPT_TOOLS.has(tool)) return GO_ON_TEXT.test(JSON.stringify(ti)) ? GO_ON : null;
-  // A subagent's prompt is a prompt into a session (S-10 S-4); only its start would expand, and a brief that quotes the
+  // A subagent's prompt is a prompt into a session; only its start would expand, and a brief that quotes the
   // block's reason, which names /k-go-on, must still reach the agent that lifts it.
   if (tool === 'Agent') return GO_ON_START.test(String(ti.prompt ?? '')) ? GO_ON : null;
   // Monitor runs a shell command as Bash does, under Bash's permission rules (tools reference).
@@ -425,7 +425,7 @@ export function decide(input) {
 }
 
 /**
- * The deny reason of the escalation block in force in the session (S-2 design R5.1, E-10), or null: read from the
+ * The deny reason of the escalation block in force in the session (approval.md §7, E-10), or null: read from the
  * session's state file, which a subagent's edit shares with its caller (E-13), while `block.lifted` is null,
  * config.json has the hook and `hook.block` on, and no k run step runs (E-12). One existsSync when there is no file.
  */
@@ -481,7 +481,7 @@ function log(input, reason, off) {
   }
 }
 
-// ---- What the escalation hook needs from a call let through (gulnya/enforced-escalation S-2 design R4.4, R4.5) ----
+// ---- What the escalation hook needs from a call let through (approval.md §7) ----
 
 /** The escalation hook's state file of the session or subagent making the call: hooks/escalate-state.mjs statePath. */
 export function escalationFile(input, home = kirunakHome()) {
@@ -504,7 +504,7 @@ function untracked(file) {
 
 // An edit marks the failures the escalation hook counts as edited since, so the next one is a fix that failed; a
 // counted build or a k run started in the background is noted, so its end can be counted or its push handed on
-// (gulnya/enforced-escalation S-2 design R7.2). Done in this process, so the hot path gets no second one; never in a
+// (approval.md §7). Done in this process, so the hot path gets no second one; never in a
 // k run step or without the hook's config.json, and the rules load only when there is something to write.
 async function forEscalation(input) {
   if (process.env.KIRUNAK_STEP) return;

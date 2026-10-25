@@ -17,52 +17,225 @@ import { familyOf } from '../lib/ladder.mjs';
 import { EFFORTS } from '../lib/plan.mjs';
 import { stopNotice } from '../lib/notice.mjs';
 
-// gulnya/enforced-escalation S-5: the escalation hook counts a build or test failing again on the same test or error
-// after an edit, and says so once (S-2 design §4).
+// The escalation hook counts a build or test failing again on the same test or error after an edit, and says so once
+// (design/approval.md §7).
 
 const HOOK = fileURLToPath(new URL('../hooks/kirunak-escalate.mjs', import.meta.url));
 const FREEZE = fileURLToPath(new URL('../hooks/kirunak-freeze.mjs', import.meta.url));
-const FIX = fileURLToPath(new URL('./fixtures/escalate/', import.meta.url));
-const fixture = (name) => readFileSync(join(FIX, name), 'utf8');
-const EXPECTED = JSON.parse(fixture('expected.json'));
 const TITLE = 'Escalation follows measured failures, not self-assessment';
-const ID = 'gulnya/enforced-escalation';
+const ID = 'hub/escalation-by-failures';
 const NODE_CMD = 'node --test test/ladder.test.mjs';
-const NODE_FAIL = fixture('node-test.txt');
+
+// Made-up failure texts, as a failed Bash call's `error` carries them (`Exit code N` first): per runner only the few
+// lines its signature reads, and a line or two around them.
+const text = (...lines) => `${lines.join('\n')}\n`;
+const NODE_FAIL = text(
+  'Exit code 1', '▶ ladder', '  ✖ climbs one rung (0.771667ms)', '  ✔ stays (0.063292ms)', '✖ ladder (1.22375ms)',
+  '✖ top-level fails (0.041166ms)', 'ℹ fail 2', '', '✖ failing tests:', '', 'test at test/ladder.test.mjs:4:3',
+  '✖ climbs one rung (0.771667ms)', '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+  '      at TestContext.<anonymous> (file:///home/someone/app/test/ladder.test.mjs:4:40)',
+);
+const GRADLE_FAIL = text(
+  'Exit code 1', '> Task :engine:jvmTest', '', 'com.example.words.ScoreTest > adds a word\'s letters() FAILED',
+  '    org.opentest4j.AssertionFailedError at ScoreTest.kt:41', '', 'com.example.words.ScoreTest > doubles on a bonus tile() FAILED',
+  '    org.opentest4j.AssertionFailedError at ScoreTest.kt:57', '', '> Task :engine:jvmTest FAILED', 'BUILD FAILED in 14s',
+);
+// Claude Code's middle truncation: a long head, `... [N characters truncated] ...`, then the tail.
+const truncated = (n) => text(
+  'Exit code 1', 'TAP version 13', '# Subtest: board', '    ok 1 - renders every task',
+  `      duration_ms: 1.2${'x'.repeat(4000)}... [${n} characters truncated] ...    not ok 7 - groups stopped steps first`,
+  '    1..7', 'not ok 3 - board', '# fail 1',
+);
+
+// Each case: the text, the command it came from, and the signature it gives: its kind and items, the first its label.
+const CASES = {
+  'node-test': { text: NODE_FAIL, command: NODE_CMD, kind: 'node', items: ['climbs one rung', 'ladder', 'top-level fails'] },
+  gradle: {
+    text: GRADLE_FAIL, command: './gradlew :engine:jvmTest', kind: 'gradle',
+    items: ['ScoreTest > adds a word\'s letters()', 'ScoreTest > doubles on a bonus tile()'],
+  },
+  'gradle-kotlin': {
+    text: text(
+      'Exit code 1', '> Task :engine:compileKotlinJvm FAILED',
+      'e: file:///home/someone/words/engine/src/commonMain/kotlin/Score.kt:27:16 Unresolved reference \'bonusOf\'.',
+      'e: file:///home/someone/words/engine/src/commonMain/kotlin/Score.kt:40:5 Return type mismatch: expected \'Int\', actual \'Unit\'.',
+      'BUILD FAILED in 6s',
+    ),
+    command: './gradlew :engine:jvmTest', kind: 'gradle',
+    items: ['Score.kt Return type mismatch: expected \'Int\', actual \'Unit\'.', 'Score.kt Unresolved reference \'bonusOf\'.'],
+  },
+  xcodebuild: {
+    text: text(
+      'Exit code 65', 'Test Case \'-[AppTests.BoardTests testRotateKeepsScore]\' started.',
+      '/home/someone/app/AppTests/BoardTests.swift:48: error: -[AppTests.BoardTests testRotateKeepsScore] : XCTAssertEqual failed: ("120") is not equal to ("140")',
+      'Test Case \'-[AppTests.BoardTests testRotateKeepsScore]\' failed (0.012 seconds).',
+      'Test Case \'-[AppTests.BoardTests testUndo]\' passed (0.003 seconds).', '** TEST FAILED **',
+    ),
+    command: 'xcodebuild test -scheme App -destination platform=iOS Simulator,name=iPhone 18 Pro Max', kind: 'xcode',
+    items: ['AppTests.BoardTests testRotateKeepsScore'],
+  },
+  jest: {
+    text: text(
+      'Exit code 1', 'FAIL src/daily.test.js', '  daily puzzle', '    ✓ picks the same puzzle for one date (3 ms)',
+      '    ✕ rolls over at midnight in London (5 ms)', '', '  ● daily puzzle › rolls over at midnight in London', '',
+      '    Expected: "2026-10-26"', '    Received: "2026-10-25"',
+    ),
+    command: 'npm test', kind: 'jest', items: ['daily puzzle › rolls over at midnight in London'],
+  },
+  vitest: {
+    text: text(
+      'Exit code 1', ' RUN  v3.2.4 /home/someone/web', ' ❯ src/share.test.ts (3 tests | 1 failed) 7ms', '   × share > encodes the grid 4ms',
+      ' FAIL  src/share.test.ts > share > encodes the grid', 'AssertionError: expected \'a%20b\' to be \'a+b\' // Object.is equality',
+      ' Test Files  1 failed (1)',
+    ),
+    command: 'npx vitest run', kind: 'vitest', items: ['src/share.test.ts > share > encodes the grid'],
+  },
+  pytest: {
+    text: text(
+      'Exit code 1', 'tests/test_weekly.py ......F.....                                        [100%]', 'tests/test_weekly.py:41: AssertionError',
+      'FAILED tests/test_weekly.py::test_week_starts_sunday_1500 - AssertionError: assert datetime.dat...',
+      '========================= 1 failed, 11 passed in 0.31s =========================',
+    ),
+    command: 'python3 -m pytest tests', kind: 'pytest', items: ['tests/test_weekly.py::test_week_starts_sunday_1500'],
+  },
+  go: {
+    text: text(
+      'Exit code 1', '--- FAIL: TestQueueFairTurns (0.00s)', '    queue_test.go:37: turn 3 went to session a, want b',
+      '--- FAIL: TestQueueDeadPid (0.01s)', '    --- FAIL: TestQueueDeadPid/stale_lock (0.00s)',
+      '        queue_test.go:58: lock held by dead pid 4242 was kept', 'FAIL', 'FAIL\texample.com/app/queue\t0.214s',
+    ),
+    command: 'go test ./queue', kind: 'go', items: ['TestQueueDeadPid', 'TestQueueDeadPid/stale_lock', 'TestQueueFairTurns'],
+  },
+  cargo: {
+    text: text(
+      'Exit code 101', 'running 4 tests', 'test grid::tests::fills_row ... ok', 'test grid::tests::rejects_short_word ... FAILED',
+      'thread \'grid::tests::rejects_short_word\' panicked at src/grid.rs:88:9:',
+      'test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s',
+      'error: test failed, to rerun pass `--lib`',
+    ),
+    command: 'cargo test', kind: 'cargo', items: ['grid::tests::rejects_short_word'],
+  },
+  'cargo-build': {
+    text: text(
+      'Exit code 101', '   Compiling wordgrid v0.3.1 (/home/someone/wordgrid)', 'error[E0425]: cannot find value `bonus` in this scope',
+      '  --> src/score.rs:14:17', 'error: could not compile `wordgrid` (lib) due to 1 previous error',
+    ),
+    command: 'cargo build', kind: 'cargo', items: ['E0425 cannot find value `bonus` in this scope'],
+  },
+  swift: {
+    text: text(
+      'Exit code 1', '◇ Test subtitleFitsThirtyCharacters() started.',
+      '✘ Test subtitleFitsThirtyCharacters() recorded an issue at ListingTests.swift:22:5: Expectation failed: (subtitle.count → 34) <= 30',
+      '✘ Test subtitleFitsThirtyCharacters() failed after 0.002 seconds with 1 issue.',
+      '✔ Test "Keywords stay under 100 characters" passed after 0.001 seconds.',
+      '✘ Test run with 2 tests in 1 suite failed after 0.003 seconds with 1 issue.',
+    ),
+    command: 'swift test', kind: 'xcode', items: ['subtitleFitsThirtyCharacters()'],
+  },
+  compiler: {
+    text: text(
+      'Exit code 1', 'Building for debugging...',
+      '/home/someone/app/Sources/Layout/TextGrowth.swift:31:17: error: cannot find \'scaledFont\' in scope',
+      '/home/someone/app/Sources/Layout/TextGrowth.swift:44:9: error: missing return in instance method expected to return \'CGFloat\'',
+      'error: emit-module command failed with exit code 1 (use -v to see invocation)',
+    ),
+    command: 'swift build', kind: 'compiler',
+    items: ['TextGrowth.swift cannot find \'scaledFont\' in scope', 'TextGrowth.swift missing return in instance method expected to return \'CGFloat\''],
+  },
+  tsc: {
+    text: text(
+      'Exit code 2', 'src/board.ts(41,7): error TS2322: Type \'string\' is not assignable to type \'number\'.',
+      'src/board.ts(58,12): error TS2339: Property \'rung\' does not exist on type \'Step\'.',
+    ),
+    command: 'npx tsc --noEmit', kind: 'tsc',
+    items: ['board.ts TS2322 Type \'string\' is not assignable to type \'number\'.', 'board.ts TS2339 Property \'rung\' does not exist on type \'Step\'.'],
+  },
+  truncated: { text: truncated(48213), command: 'node --test test/board.test.mjs', kind: 'node', items: ['board', 'groups stopped steps first'] },
+  timeout: {
+    text: text('Command timed out after 10m 0s', 'Exit code 143', '> Task :composeApp:linkDebugTestIosSimulatorArm64'),
+    command: './gradlew :composeApp:iosSimulatorArm64Test', kind: 'timeout', items: ['./gradlew :composeApp:iosSimulatorArm64Test timed out'],
+  },
+  other: {
+    text: text(
+      'Exit code 1', '', '> app@0.1.0 test', '> node --test \'test/*.test.mjs\'', '',
+      'Error: Cannot find module \'/home/someone/app/test/helpers-2.mjs\'', 'npm error Lifecycle script `test` failed with error:', 'npm error code 1',
+    ),
+    command: './tools/check.sh', kind: 'other', items: ['./tools/check.sh: npm error code #', 'exit 1'],
+  },
+};
+
+// Made-up transcripts, one JSON entry a line as Claude Code writes them, in a temp folder the hook reads.
+const TRANSCRIPTS = {
+  session: [
+    '{"type":"user","message":{"role":"user","content":"run the tests"},"sessionId":"s1"}',
+    '{"type":"assistant","message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"Running them."}]},"requestedModel":"sonnet","effort":"high","sessionId":"s1"}',
+    '{"type":"user","message":{"role":"user","content":"/model opus"},"sessionId":"s1"}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"node --test"}}]},"requestedModel":"opus","advisorModel":"claude-haiku-5-5","effort":"xhigh","sessionId":"s1"}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Exit code 1"}]},"sessionId":"s1"}',
+  ],
+  // A run that finished with a SubagentHandback.
+  handback: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Reading the failure and the ladder."}]},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/src/ladder.mjs"}}]},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function climb() {}"}]},"isSidechain":true,"agentId":"alate"}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"SubagentHandback","input":{"message":"The design: climb reads the rung above from config.json; the test that proves it is climb.test."}}]},"isSidechain":true,"agentId":"alate"}',
+  ],
+  // A run the owner interrupted in a tool call.
+  interrupted: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Reading the failure."}]},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"node --test test/ladder.test.mjs"}}]},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Interrupted by user","is_error":true}]},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"isSidechain":true}',
+  ],
+  // The prompt alone, never answered.
+  prompt: ['{"type":"user","message":{"role":"user","content":"reply ok"},"isSidechain":true}'],
+  // A run that finished with a last text and no tool call.
+  text: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/src/ladder.mjs"}}]},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function climb() {}"}]},"isSidechain":true}',
+    '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Done: climb reads the rung above from config.json, and climb.test proves it."}]},"isSidechain":true}',
+  ],
+};
+const transcriptOf = (name) => `${TRANSCRIPTS[name].join('\n')}\n`;
+const TRANSCRIPT_DIR = mkdtempSync(join(tmpdir(), 'kirunak-transcripts-'));
+const transcriptPath = (name) => join(TRANSCRIPT_DIR, `transcript-${name}.jsonl`);
+for (const name of Object.keys(TRANSCRIPTS)) writeFileSync(transcriptPath(name), transcriptOf(name));
 
 // ---- The signature and the commands that count (R4.3, R4.4) ----
 
 test('each runner\'s failure text gives its signature: kind, label and items, hashed without line numbers', () => {
-  assert.equal(Object.keys(EXPECTED).length, 16);
-  for (const [name, want] of Object.entries(EXPECTED)) {
-    const sig = signatureOf(fixture(name), want.command);
-    assert.deepEqual({ kind: sig.kind, label: sig.label, items: sig.items }, { kind: want.kind, label: want.label, items: want.items }, name);
+  assert.equal(Object.keys(CASES).length, 16);
+  for (const [name, want] of Object.entries(CASES)) {
+    const sig = signatureOf(want.text, want.command);
+    assert.deepEqual({ kind: sig.kind, label: sig.label, items: sig.items }, { kind: want.kind, label: want.items[0], items: want.items }, name);
     assert.equal(sig.hash, createHash('sha1').update(`${want.kind}\n${want.items.join('\n')}`).digest('hex'), name);
     assert.ok(sig.label.length <= 80, name);
   }
 });
 
 test('a moved line, a new test time or a longer truncation leaves the signature as it was', () => {
-  const moved = (text) => text.replace(/:(\d+)(?=[:\s)])/g, (_, n) => `:${Number(n) + 7}`).replace(/\((\d+\.\d+)ms\)/g, '(9.5ms)');
-  for (const name of ['node-test.txt', 'compiler.txt', 'gradle-kotlin.txt', 'tsc.txt']) {
-    const { command } = EXPECTED[name];
-    assert.equal(signatureOf(moved(fixture(name)), command).hash, signatureOf(fixture(name), command).hash, name);
+  const moved = (s) => s.replace(/:(\d+)(?=[:\s)])/g, (_, n) => `:${Number(n) + 7}`).replace(/\((\d+\.\d+)ms\)/g, '(9.5ms)');
+  for (const name of ['node-test', 'compiler', 'gradle-kotlin', 'tsc']) {
+    const { text: failed, command } = CASES[name];
+    assert.equal(signatureOf(moved(failed), command).hash, signatureOf(failed, command).hash, name);
   }
-  const longer = fixture('truncated.txt').replace('48213 characters', '91002 characters');
-  assert.equal(signatureOf(longer, 'node --test').hash, signatureOf(fixture('truncated.txt'), 'node --test').hash);
+  assert.equal(signatureOf(truncated(91002), 'node --test').hash, signatureOf(truncated(48213), 'node --test').hash);
   assert.equal(signatureOf('Error: spawn /bin/zsh ENOENT', 'npm test'), null, 'no exit code: the shell never started');
 });
 
 test('commandOf: heavy-lock\'s wrapper is the command it wraps, a cd before it is skipped, other commands never count', () => {
-  const lock = 'node ~/sources/gulnya/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
+  const lock = 'node ~/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
   assert.equal(commandOf(lock), './gradlew :engine:jvmTest');
-  assert.equal(commandOf(`cd ~/sources/slova && ${lock}`), './gradlew :engine:jvmTest');
-  assert.equal(commandOf('node ~/sources/gulnya/tools/heavy-lock.mjs status'), null);
+  assert.equal(commandOf(`cd ~/code/words && ${lock}`), './gradlew :engine:jvmTest');
+  assert.equal(commandOf('node ~/tools/heavy-lock.mjs status'), null);
   assert.equal(commandOf('cd ~/sources/kirunak && npm test'), 'npm test');
   assert.equal(commandOf('npm test 2>&1 | tail -20'), 'npm test');
   assert.equal(commandOf('FORCE_COLOR=0 env -u CI npx vitest run'), 'npx vitest run');
   assert.equal(commandOf('npm run test:unit'), 'npm run test:unit');
-  assert.equal(commandOf('xcodebuild test -scheme Hronka'), 'xcodebuild test -scheme Hronka');
+  assert.equal(commandOf('xcodebuild test -scheme App'), 'xcodebuild test -scheme App');
   for (const other of ['ls -la nope', 'git push', 'cat build.log', 'npm install', 'node scripts/x.mjs', 'echo "npm test"']) {
     assert.equal(commandOf(other), null, other);
   }
@@ -83,11 +256,11 @@ test('the freeze hook and the rules name the same state file, and read model fam
 test('a runner the hook knows with none of its lines left counts nothing; a workspace command keeps the fallback (S-10 S-5)', () => {
   const xcode = 'Exit code 65\n... [91002 characters truncated] ...\n** TEST FAILED **\n';
   const gradle = 'Exit code 1\n... [48213 characters truncated] ...\nBUILD FAILED in 12s\n';
-  assert.equal(signatureOf(xcode, 'xcodebuild test -scheme Hronka'), null);
+  assert.equal(signatureOf(xcode, 'xcodebuild test -scheme App'), null);
   assert.equal(signatureOf(gradle, './gradlew :engine:jvmTest'), null);
   assert.equal(signatureOf(xcode, './tools/check.sh').kind, 'other', 'a workspace command keeps the fallback');
   const h = makeHome();
-  for (const [command, text] of [['xcodebuild test -scheme Hronka', xcode], ['./gradlew :engine:jvmTest', gradle]]) {
+  for (const [command, text] of [['xcodebuild test -scheme App', xcode], ['./gradlew :engine:jvmTest', gradle]]) {
     for (let i = 0; i < 4; i++) {
       assert.equal(hook(failure({}, command, text), h.home).stdout, '', command);
       freeze(edit(), h.home);
@@ -123,14 +296,14 @@ const fits = (lines) => {
 
 test('the message is at most three lines of at most 80 characters, with the task\'s title and id, in every shape', () => {
   const task = { id: ID, title: TITLE };
-  const opus = { up: 'fable', agents: ['fable-step', 'music-deep'] };
+  const opus = { up: 'fable', agents: ['fable-step', 'domain-deep'] };
   const long = 'GameBoardRotationTests > keeps the score and the selected word when the board turns twice()';
   const main = message({ label: long, repeats: 2, task, rung: opus });
   fits(main);
   assert.match(main[0], /^kirunak: GameBoardRotationTests > keeps .*… failed again after 2 fixes\.$/);
-  assert.match(main[1], /^Task: Escalation follows .*… \(gulnya\/enforced-escalation\)\.$/);
-  assert.equal(main[2], 'Hand this step to fable-step (or music-deep); its next failure blocks edits.');
-  assert.equal(message({ label: 'x', repeats: 2, task, rung: opus, block: false })[2], 'Hand this step to fable-step (or music-deep) with what you tried.');
+  assert.match(main[1], /^Task: Escalation follows .*… \(hub\/escalation-by-failures\)\.$/);
+  assert.equal(main[2], 'Hand this step to fable-step (or domain-deep); its next failure blocks edits.');
+  assert.equal(message({ label: 'x', repeats: 2, task, rung: opus, block: false })[2], 'Hand this step to fable-step (or domain-deep) with what you tried.');
   const top = message({ label: 'x', repeats: 2, task, rung: { up: null, agents: [] } });
   fits(top);
   assert.equal(top[2], 'This is the top of the ladder: stop and say plainly what is missing.');
@@ -139,13 +312,13 @@ test('the message is at most three lines of at most 80 characters, with the task
   assert.equal(message({ label: 'x', repeats: 2, task: null, rung: opus })[1], 'No task named in this session.');
   assert.equal(message({ label: 'x', repeats: 2, task: { id: ID, title: null }, rung: opus })[1], `Task: ${ID}.`);
   assert.equal(message({ label: 'x', repeats: 1, task, rung: opus })[0], 'kirunak: x failed again after 1 fix.');
-  fits(message({ label: long, repeats: 3, task: { id: 'kupalinka-web/a-very-long-repository-task-slug-of-many-words', title: TITLE }, rung: { up: 'opus', agents: ['opus-step', 'builder-one', 'builder-two', 'builder-three'] } }));
+  fits(message({ label: long, repeats: 3, task: { id: 'weather-sites/a-very-long-repository-task-slug-of-many-words', title: TITLE }, rung: { up: 'opus', agents: ['opus-step', 'builder-one', 'builder-two', 'builder-three'] } }));
 });
 
 test('rungFor: by id, then by family; a model on no rung or none is the lowest, marked unknown', () => {
-  const ladder = escalateConfig({ ladder: [{ model: 'sonnet' }, { model: 'opus', id: 'claude-opus-5-5', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1, agents: ['music-deep'] }] }).ladder;
+  const ladder = escalateConfig({ ladder: [{ model: 'sonnet' }, { model: 'opus', id: 'claude-opus-5-5', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1, agents: ['domain-deep'] }] }).ladder;
   assert.deepEqual(rungFor(ladder, 'claude-sonnet-5'), { from: 'sonnet', up: 'opus', agents: ['opus-step'], unknown: false });
-  assert.deepEqual(rungFor(ladder, 'claude-opus-5-5'), { from: 'opus', up: 'fable', agents: ['fable-step', 'music-deep'], unknown: false });
+  assert.deepEqual(rungFor(ladder, 'claude-opus-5-5'), { from: 'opus', up: 'fable', agents: ['fable-step', 'domain-deep'], unknown: false });
   assert.deepEqual(rungFor(ladder, 'claude-fable-5'), { from: 'fable', up: null, agents: [], unknown: false });
   assert.deepEqual(rungFor(ladder, 'claude-haiku-5-5'), { from: 'sonnet', up: 'opus', agents: ['opus-step'], unknown: true });
   assert.equal(rungFor(ladder, null).unknown, true);
@@ -154,7 +327,7 @@ test('rungFor: by id, then by family; a model on no rung or none is the lowest, 
 test('modelOf: the recorded model, else the transcript\'s newest; a subagent\'s from its launch, else its own transcript', () => {
   const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
   const transcript = join(top, 's1.jsonl');
-  writeFileSync(transcript, fixture('transcript.jsonl'));
+  writeFileSync(transcript, transcriptOf('session'));
   mkdirSync(join(top, 's1', 'subagents'), { recursive: true });
   writeFileSync(join(top, 's1', 'subagents', 'agent-a2.jsonl'), '{"type":"assistant","message":{"model":"claude-sonnet-5"}}\n');
   assert.equal(modelOf({ transcript_path: transcript }, { model: 'claude-fable-5' }), 'claude-fable-5');
@@ -187,17 +360,17 @@ test('prune removes state files untouched for 14 days and leaves config.json and
 
 const DEFAULT = [{ model: 'sonnet' }, { model: 'opus', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1 }];
 
-// A home with config.json as k install writes it, a repo `gulnya` holding the task, and session s1 on that task.
+// A home with config.json as k install writes it, a repo `hub` holding the task, and session s1 on that task.
 function makeHome(hook = {}, ladder = DEFAULT) {
   const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
   const home = join(top, 'home');
-  const repo = join(top, 'gulnya');
-  mkdirSync(join(repo, 'kirunak', 'tasks', 'enforced-escalation'), { recursive: true });
-  writeFileSync(join(repo, 'kirunak', 'tasks', 'enforced-escalation', 'task.md'), `---\nid: ${ID}\ntitle: ${TITLE}\n---\n\n## Goal\nx\n`);
+  const repo = join(top, 'hub');
+  mkdirSync(join(repo, 'kirunak', 'tasks', 'escalation-by-failures'), { recursive: true });
+  writeFileSync(join(repo, 'kirunak', 'tasks', 'escalation-by-failures', 'task.md'), `---\nid: ${ID}\ntitle: ${TITLE}\n---\n\n## Goal\nx\n`);
   mkdirSync(join(home, 'escalate'), { recursive: true });
   mkdirSync(join(home, 'sessions'), { recursive: true });
   writeFileSync(join(home, 'sessions', 's1.json'), JSON.stringify({ task: ID, step: 'S-5', since: '2026-10-25T19:25:04.627Z' }));
-  const config = { written: new Date().toISOString(), ...escalateConfig({ ladder, hook, repos: [{ name: 'gulnya', root: repo }] }) };
+  const config = { written: new Date().toISOString(), ...escalateConfig({ ladder, hook, repos: [{ name: 'hub', root: repo }] }) };
   writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify(config, null, 2));
   const log = () => (existsSync(join(home, 'escalate.log')) ? readFileSync(join(home, 'escalate.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
   const files = () => readdirSync(join(home, 'escalate')).filter((n) => n !== 'config.json').sort();
@@ -251,7 +424,7 @@ test('fail, edit, fail, edit, fail fires exactly once: three lines of at most 80
   fits(lines);
   assert.deepEqual(lines, [
     'kirunak: climbs one rung failed again after 2 fixes.',
-    'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
+    'Task: Escalation follows measured failures, not s… (hub/escalation-by-failures).',
     'Hand this step to fable-step; its next failure blocks edits.',
   ]);
   assert.equal(freeze(edit(), h.home).stdout, '');
@@ -354,8 +527,8 @@ test('a background build is noted at launch and counted from its notification an
   const h = makeHome();
   hook(start('claude-opus-5-5'), h.home);
   const output = join(h.top, 'bxo7damvu.output');
-  writeFileSync(output, fixture('gradle.txt').split('\n').slice(1).join('\n'));
-  const command = 'node ~/sources/gulnya/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
+  writeFileSync(output, GRADLE_FAIL.split('\n').slice(1).join('\n'));
+  const command = 'node ~/tools/heavy-lock.mjs run --session s1 --max-minutes 30 --what "Gradle test" -- ./gradlew :engine:jvmTest';
   const launch = (cmd = command, description = 'Run the engine tests') => freeze({
     session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: cmd, description, run_in_background: true },
   }, h.home);
@@ -442,10 +615,10 @@ test('the rung comes from PostModelSwitch, else the transcript\'s tail; a model 
   hook({ session_id: 's1', hook_event_name: 'PostModelSwitch', from_model: 'claude-sonnet-5', to_model: 'claude-fable-5', source: 'command' }, fable.home);
   assert.equal(fable.state().model, 'claude-fable-5');
   assert.equal(textOf(cycle(fable, 2)[2]).split('\n')[2], 'This is the top of the ladder: stop and say plainly what is missing.');
-  const tail = makeHome({}, [...DEFAULT.slice(0, 2), { ...DEFAULT[2], agents: ['music-deep'] }]);
+  const tail = makeHome({}, [...DEFAULT.slice(0, 2), { ...DEFAULT[2], agents: ['domain-deep'] }]);
   const transcript = join(tail.top, 's1.jsonl');
-  writeFileSync(transcript, fixture('transcript.jsonl'));
-  assert.equal(textOf(cycle(tail, 2, { transcript_path: transcript })[2]).split('\n')[2], 'Hand this step to fable-step (or music-deep); its next failure blocks edits.');
+  writeFileSync(transcript, transcriptOf('session'));
+  assert.equal(textOf(cycle(tail, 2, { transcript_path: transcript })[2]).split('\n')[2], 'Hand this step to fable-step (or domain-deep); its next failure blocks edits.');
   const haiku = makeHome({ block: false });
   hook(start('claude-haiku-5-5'), haiku.home);
   assert.equal(textOf(cycle(haiku, 2)[2]).split('\n')[2], 'Hand this step to opus-step with what you tried.');
@@ -465,18 +638,18 @@ test('SessionStart on startup prunes state files untouched for 14 days', () => {
 
 // ---- S-6: the block and what lifts it (S-2 design §5) ----
 
-const FABLE_LADDER = [DEFAULT[0], DEFAULT[1], { ...DEFAULT[2], agents: ['music-deep'] }];
+const FABLE_LADDER = [DEFAULT[0], DEFAULT[1], { ...DEFAULT[2], agents: ['domain-deep'] }];
 const OPUS_DENY = [
   'kirunak: edits blocked: climbs one rung failed again.',
-  'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
-  'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.',
+  'Task: Escalation follows measured failures, not s… (hub/escalation-by-failures).',
+  'Launch fable-step (or domain-deep) on this step; the owner can type /k-go-on.',
 ];
 const launchOf = (type, agentId, extra = {}, { input = {}, response = {} } = {}) => ({
   session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { description: 'take the step', subagent_type: type, ...input },
   tool_response: { isAsync: true, status: 'async_launched', agentId, resolvedModel: type === 'opus-step' ? 'claude-opus-5-5' : 'claude-fable-5', ...response }, ...extra,
 });
 // A run that finished: its transcript closes with a SubagentHandback (S-1 §2).
-const FINISHED = join(FIX, 'transcript-handback.jsonl');
+const FINISHED = transcriptPath('handback');
 const stopOf = (type, agentId, transcript = FINISHED, extra = {}) => ({
   session_id: 's1', hook_event_name: 'SubagentStop', agent_id: agentId, agent_type: type, agent_transcript_path: transcript, ...extra,
 });
@@ -495,7 +668,7 @@ function blocked(model = 'claude-opus-5-5', hookConfig = {}, ladder = FABLE_LADD
 test('fire, then the next failure blocks the session\'s edits with three lines; Read, Bash, Agent and other skills go on (R5.1, E-10)', () => {
   const h = blocked();
   const { block } = h.state();
-  assert.deepEqual([block.label, block.rung, block.lifted, block.agent], ['climbs one rung', { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step', 'music-deep'] }, null, null]);
+  assert.deepEqual([block.label, block.rung, block.lifted, block.agent], ['climbs one rung', { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step', 'domain-deep'] }, null, null]);
   for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
     const reason = denied(freeze(edit({ tool_name: tool, tool_input: { file_path: '/tmp/src/a.mjs', notebook_path: '/tmp/a.ipynb', content: 'x' } }), h.home));
     assert.deepEqual(reason?.split('\n'), OPUS_DENY, tool);
@@ -547,12 +720,12 @@ test('only an agent of the rung above, launched after the block, lifts it when i
   assert.deepEqual(failures, {}, 'the lifted failure is forgotten: its next failure is a new count');
   assert.equal(freeze(edit(), h.home).stdout, '');
   const lift = h.log().at(-1);
-  assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'music-deep']]);
+  assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'domain-deep']]);
   assert.equal(lift.transcriptBytes, statSync(FINISHED).size, 'the run\'s size is logged with the lift');
   const deep = blocked();
-  hook(launchOf('music-deep', 'amusic'), deep.home);
-  hook(stopOf('music-deep', 'amusic'), deep.home);
-  assert.equal(deep.state().block.lifted.agent, 'music-deep', 'an agent of the rung\'s `agents` lifts too');
+  hook(launchOf('domain-deep', 'adeep'), deep.home);
+  hook(stopOf('domain-deep', 'adeep'), deep.home);
+  assert.equal(deep.state().block.lifted.agent, 'domain-deep', 'an agent of the rung\'s `agents` lifts too');
 });
 
 // /k-go-on as the owner types it, run in this process with the owner's ancestry (one claude), so the tests hold
@@ -644,7 +817,7 @@ test('unfitFor: a launch runs as a rung when its models are of the rung\'s famil
   assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', effort: 'max' }), null);
   assert.equal(unfitFor(ladder, 'fable', { model: 'claude-fable-5', asked: 'haiku' }), 'model not fable', 'the Agent call\'s own model counts');
   assert.equal(unfitFor(ladder, 'fable', {}), 'model unknown');
-  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  const t = transcriptPath;
   assert.deepEqual(runEnd(t('handback')), { finished: true, bytes: statSync(t('handback')).size });
   assert.equal(runEnd(t('text')).finished, true, 'a last assistant text');
   assert.equal(runEnd(t('interrupted')).finished, false);
@@ -676,7 +849,7 @@ test('a rung agent launched on a cheaper model or a lower effort ends and the bl
 });
 
 test('a rung agent that was interrupted or said nothing lifts nothing; one that finished lifts, its size logged (S-10 S-2)', () => {
-  const t = (name) => join(FIX, `transcript-${name}.jsonl`);
+  const t = transcriptPath;
   const h = blocked();
   for (const [id, transcript] of [['astopped', t('interrupted')], ['aempty', '/dev/null'], ['aprompt', t('prompt')]]) {
     hook(launchOf('fable-step', id), h.home);
@@ -706,7 +879,7 @@ test('a Sonnet subagent\'s block in an Opus session is lifted by opus-step\'s fi
   hook(stopOf('fable-step', 'afable'), h.home);
   assert.equal(h.state().block.lifted, null);
   hook(launchOf('opus-step', 'aopus'), h.home);
-  hook(stopOf('opus-step', 'aopus', join(FIX, 'transcript-text.jsonl')), h.home);
+  hook(stopOf('opus-step', 'aopus', transcriptPath('text')), h.home);
   assert.equal(h.state().block.lifted.agentId, 'aopus');
 });
 
@@ -731,11 +904,11 @@ test('fire, fable-step finishes, the test fails again: the block names no agent 
   hook(start('claude-sonnet-5'), sonnet.home);
   cycle(sonnet, 2);
   hook(launchOf('opus-step', 'abuild'), sonnet.home);
-  hook(stopOf('opus-step', 'abuild', join(FIX, 'transcript-text.jsonl')), sonnet.home);
+  hook(stopOf('opus-step', 'abuild', transcriptPath('text')), sonnet.home);
   freeze(edit(), sonnet.home);
   hook(failure(), sonnet.home);
-  assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'music-deep'], failedOn: 'opus' });
-  assert.equal(denied(freeze(edit(), sonnet.home)).split('\n')[2], 'Launch fable-step (or music-deep) on this step; the owner can type /k-go-on.');
+  assert.deepEqual(sonnet.state().block.rung, { from: 'claude-sonnet-5', to: 'fable', agents: ['fable-step', 'domain-deep'], failedOn: 'opus' });
+  assert.equal(denied(freeze(edit(), sonnet.home)).split('\n')[2], 'Launch fable-step (or domain-deep) on this step; the owner can type /k-go-on.');
 });
 
 test('fire, fable-step launched, the test fails again, fable-step ends: lifted by that one run (S-10 S-1)', () => {
@@ -747,7 +920,7 @@ test('fire, fable-step launched, the test fails again, fable-step ends: lifted b
   hook(failure(), h.home);
   const { block, failures } = h.state();
   assert.equal(block.firedAt, Object.values(failures)[0].firedAt, 'the threshold is the fire');
-  assert.deepEqual(block.rung.agents, ['fable-step', 'music-deep']);
+  assert.deepEqual(block.rung.agents, ['fable-step', 'domain-deep']);
   assert.ok(denied(freeze(edit(), h.home)));
   hook(stopOf('fable-step', 'adesign'), h.home);
   assert.equal(h.state().block.lifted.agentId, 'adesign');

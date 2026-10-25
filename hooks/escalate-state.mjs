@@ -6,7 +6,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { segments } from './kirunak-freeze.mjs';
 
-// The escalation hook's rules (gulnya/enforced-escalation S-2 design §4), shared by hooks/kirunak-escalate.mjs, the
+// The escalation hook's rules (approval.md §7), shared by hooks/kirunak-escalate.mjs, the
 // freeze hook's two notes and the tests: which commands count, the signature of a failure, the counting, the state
 // files, the rung and the message. It imports nothing but node: modules and the freeze hook's segment parser, because
 // it runs in a hook on every failed Bash call.
@@ -84,7 +84,7 @@ export function commandOf(command, extra = []) {
 
 /**
  * The `k run <id>` a Bash call starts, or null when it starts none: `k`, or `node …/k.mjs`, with the verb run and a
- * task id, past what commandOf skips. Its end's output may close with a push for the owner (S-2 design R7.2).
+ * task id, past what commandOf skips. Its end's output may close with a push for the owner (approval.md §7).
  */
 export function kRunOf(command) {
   let words = firstWords(command);
@@ -93,7 +93,7 @@ export function kRunOf(command) {
   return `k run ${words[2]}`;
 }
 
-// ---- The signature of a failure (R4.4; S-1 §1: one text, `Exit code N` first, maybe middle-truncated or timed out) ----
+// ---- The signature of a failure (R4.4: one text, `Exit code N` first, maybe middle-truncated or timed out) ----
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 const TRUNCATED = /\.\.\. \[\d+ characters truncated\] \.\.\./g;
@@ -165,7 +165,7 @@ const sign = (kind, items, label) => {
  * when the text has neither an `Exit code N` line nor a timeout (the shell never started). When no runner's lines are
  * there: a timed-out command is `<command> timed out`; a runner this file knows (BUILD) is null, since its lines were
  * cut from the text (the 64 KB tail, Claude Code's middle truncation) and `** TEST FAILED **` or `BUILD FAILED` alone
- * would make every failure one: a count lost, never a false fire (S-10 S-5); anything else, a workspace's
+ * would make every failure one: a count lost, never a false fire; anything else, a workspace's
  * `hook.commands`, is the command, the exit code and its last line without numbers.
  */
 export function signatureOf(error, command = '') {
@@ -252,8 +252,8 @@ const LOCK_STALE = 2000;
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /**
- * Runs `fn`, a read, change and write of the state file of a session or subagent, under that file's advisory lock
- * (S-10 S-3): two hooks of one session at once (parallel tool calls, a subagent and its caller) would otherwise lose one
+ * Runs `fn`, a read, change and write of the state file of a session or subagent, under that file's advisory lock:
+ * two hooks of one session at once (parallel tool calls, a subagent and its caller) would otherwise lose one
  * write. The lock is the folder `<file>.lock`; a lock older than 2 s is a crashed hook's and is taken over. → what `fn`
  * returned, or undefined without running it when the lock is not free within about 100 ms: the hook fails open, a
  * write skipped, never a session held. A path that writes nothing takes no lock.
@@ -341,8 +341,7 @@ export const repeatsOf = (config) =>
  * (seen, with no edit since: a rerun is not a fix that failed, and nothing changes), `repeat` (seen again after an
  * edit), `fire` (that repeat reached `repeats`; once a signature, AC-11), `block` (the first failure after the fire,
  * edited or not, R4.4 step 4) or `after` (any later one). A test written red and then fixed is one failure and no
- * repeat (E-5). The fire's time is kept (`firedAt`), so an agent launched on the fire's word counts at the block
- * (S-10 S-1).
+ * repeat (E-5). The fire's time is kept (`firedAt`), so an agent launched on the fire's word counts at the block.
  */
 export function count(state, sig, repeats, now = new Date()) {
   const at = now.toISOString();
@@ -422,7 +421,7 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
  * Why a launch ({ model: the model it resolved, asked: the Agent call's `model`, effort: its `effort` }) is not a run
- * of the ladder's rung `to`, or null when it is (S-10 B-1): the Agent call's `model` overrides the agent file's, so a
+ * of the ladder's rung `to`, or null when it is: the Agent call's `model` overrides the agent file's, so a
  * fable-step launched with `model: "haiku"` runs Haiku. Every model the launch names must be of the rung's family
  * (its `id` when config.json has one, else its `model`), one at least, and an effort asked must not be below the
  * rung's.
@@ -455,7 +454,7 @@ export function tail(path, size) {
   }
 }
 
-// The model of the newest assistant entry in a transcript's last 128 KB (S-1 §3: it may lag, so the newest wins).
+// The model of the newest assistant entry in a transcript's last 128 KB (it may lag, so the newest wins).
 export function modelFromTranscript(path) {
   if (typeof path !== 'string' || !path) return null;
   return [...tail(path, 128 * 1024).matchAll(/"model"\s*:\s*"(claude-[^"]+)"/g)].at(-1)?.[1] ?? null;
@@ -464,7 +463,7 @@ export function modelFromTranscript(path) {
 const INTERRUPTED = '[Request interrupted';
 
 /**
- * Whether an agent that stopped finished its run (S-10 S-2), from its transcript's last 64 KB: a SubagentHandback
+ * Whether an agent that stopped finished its run, from its transcript's last 64 KB: a SubagentHandback
  * tool_use, or a last assistant entry of text with no tool call, and no `[Request interrupted` after that entry; or
  * SubagentStop's `last_assistant_message`, which Claude Code sends when the agent did not hand back. A stopped or
  * empty run is not finished; a short one that finished is, and its size goes to the log. → { finished, bytes }
@@ -585,7 +584,7 @@ export function blockLines({ label, task, rung, subagent = false }) {
   return [head, named(task), cut(next, WIDTH)];
 }
 
-// ---- A background build (R4.5; S-1 §8) and the freeze hook's notes ----
+// ---- A background build (R4.5) and the freeze hook's notes ----
 
 const NOTES = 20;
 
@@ -598,7 +597,7 @@ export function noteBackground(state, description, command, now = new Date(), ru
   for (const k of keys.slice(0, Math.max(0, keys.length - NOTES))) delete state.background[k];
 }
 
-// ---- A k run's push (R7.2, E-16; S-1 §8: only the model sends one, with the PushNotification tool) ----
+// ---- A k run's push (R7.2, E-16: only the model sends one, with the PushNotification tool) ----
 
 const PUSH_MARK = 'kirunak-push: ';
 const PUSH_TAIL = 4096;
