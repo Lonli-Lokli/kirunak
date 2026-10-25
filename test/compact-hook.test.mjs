@@ -278,3 +278,103 @@ test('R4.2: a manual /compact is allowed while a step runs, and expect recorded 
   assert.equal(h.expected().why, 'manual');
 });
 
+test('R4.3: no config, a corrupt one, compact switched off, a bad id, an unknown repo, unreadable input: allowed (E-7)', () => {
+  const gone = makeHome();
+  rmSync(join(gone.home, 'escalate', 'config.json'));
+  allowed(run(gone), 'state unreadable');
+  const corrupt = makeHome();
+  writeFileSync(join(corrupt.home, 'escalate', 'config.json'), '{ not json');
+  allowed(run(corrupt), 'state unreadable');
+  allowed(run(makeHome({ compact: { enabled: false } })), 'state unreadable');
+  const bad = makeHome();
+  allowed(run(bad, bad.input({ session_id: '../s-main' })), 'state unreadable');
+  allowed(run(makeHome({ session: { task: 'nope/demo' } })), 'state unreadable');
+  const raw = makeHome();
+  allowed(run(raw, 'not json'), 'state unreadable');
+});
+
+test('R4.3a: outside the workspace\'s roots, with the environment variable, or no window in the repo\'s file: never blocked (E-10)', () => {
+  const h = makeHome();
+  const plain = run(h, h.input({ cwd: h.plain }));
+  allowed(plain, "user's window");
+  assert.deepEqual([plain.line.window.value, plain.line.window.from.kind, plain.line.ctx], [500000, 'user', null]);
+  const other = run(h, h.input({ cwd: h.other }));
+  allowed(other, "user's window");
+  assert.deepEqual([other.line.window.value, other.line.window.from.kind], [250000, 'local']);
+  const env = run(h, h.input(), { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '183000' });
+  allowed(env, "user's window");
+  assert.equal(env.line.window.from.kind, 'env');
+  assert.equal(run(h, h.input({ cwd: h.sub })).out.decision, 'block', 'a subdirectory reads the root\'s file');
+  assert.equal(run(h, h.input({ cwd: h.worktree })).out.decision, 'block', 'a worktree reads the main checkout\'s file');
+  rmSync(join(h.app, '.claude', 'settings.local.json'));
+  allowed(run(h), "user's window");
+  assert.equal(h.expected(), null, 'no expect outside the handover');
+});
+
+test('R4.4: no usage in the transcript: allowed, since the limit cannot be bounded (E-7, E-1)', () => {
+  allowed(run(makeHome({ ctx: null })), 'ctx unknown');
+});
+
+test('R4.5: below the threshold with the turn open, a turn closed ten minutes ago, an agent past it: allowed (E-6)', () => {
+  const at = new Date().toISOString();
+  allowed(run(makeHome({ ctx: 90000, record: { turn: { state: 'open', at } } })), 'below threshold');
+  allowed(run(makeHome({ record: { turn: { state: 'closed', at: new Date(Date.now() - 10 * 60_000).toISOString() } } })), 'turn closed');
+  const agent = (ended) => {
+    const h = makeHome({ record: { turn: { state: 'open', at }, agents: { a1: { type: 'general-purpose', at, ended } } } });
+    writeTranscript(join(h.top, 'projects', 'p', 's-main', 'subagents', 'agent-a1.jsonl'), [assistant(200000)]);
+    return run(h);
+  };
+  const past = agent(null);
+  allowed(past, 'agent past threshold');
+  assert.deepEqual(past.line.agents, [{ id: 'a1', ctx: 200000 }]);
+  assert.equal(agent(at).out.decision, 'block', 'an agent that ended is not counted');
+});
+
+test('R4.6: past the mid-step limit: the user\'s window, the workspace\'s number, none set, a per-model window (E-1, E-3, D-2)', () => {
+  const user = run(makeHome({ ctx: 500000 }));
+  allowed(user, 'limit');
+  assert.equal(user.line.limit, 500000);
+  assert.equal(run(makeHome({ ctx: 499000 })).out.decision, 'block');
+  allowed(run(makeHome({ ctx: 320000, compact: { midStepLimit: 300000 } })), 'limit');
+  const none = run(makeHome({ ctx: 600000, user: {} }));
+  assert.deepEqual([none.out.decision, none.line.limit], ['block', 1_000_000 - SLACK - LAG]);
+  const per = run(makeHome({ ctx: 420000, user: { autoCompactWindow: 500000, modelSettings: { [MODEL]: { autoCompactWindow: 400000 } } } }));
+  assert.deepEqual([per.line.decision, per.line.limit], ['allow', 400000]);
+});
+
+test('R4.6 on a 200k model: the limit below the threshold, so at most one request is held (E-8)', () => {
+  const held = run(makeHome({ ctx: 105000, model: 'claude-other-4' }));
+  assert.deepEqual([held.out.decision, held.line.T, held.line.limit], ['block', 150000, 117000]);
+  allowed(run(makeHome({ ctx: 117000, model: 'claude-other-4' })), 'limit');
+});
+
+test('R4.7: a session with no task in a workspace repo is held to the limit, as today (E-3)', () => {
+  const r = run(makeHome({ session: { step: null } }));
+  assert.deepEqual(r.out, { decision: 'block', reason: 'kirunak: this session holds no task; the compaction waits for the mid-step limit' });
+  assert.equal(run(makeHome({ session: null })).line.why, 'no task');
+});
+
+// ---- The numbers (§12): the hook's wall time ----
+
+const best = (n, fn) => Math.min(...Array.from({ length: n }, () => {
+  const t0 = performance.now();
+  fn();
+  return performance.now() - t0;
+}));
+
+test('the hook on a 1 MB transcript tail with a step running takes under 150 ms; the E-10 path under 5 ms in-process', async (t) => {
+  const h = makeHome();
+  writeTranscript(h.transcript, [assistant(160000), toolResult(300 * 1024), toolResult(300 * 1024), toolResult(300 * 1024)]);
+  const wall = best(5, () => assert.equal(run(h).out.decision, 'block'));
+  t.diagnostic(`hook wall time, 1 MB tail, best of 5: ${wall.toFixed(1)} ms`);
+  assert.ok(wall < 150, `${wall.toFixed(1)} ms`);
+  const env = { CLAUDE_CONFIG_DIR: h.configDir };
+  const e10 = Math.min(...(await Promise.all(Array.from({ length: 5 }, async () => {
+    const t0 = performance.now();
+    const d = await decide(factsOf(h.input({ cwd: h.plain }), h.home, env).facts);
+    assert.equal(d.why, "user's window");
+    return performance.now() - t0;
+  }))));
+  t.diagnostic(`E-10 path in-process, best of 5: ${e10.toFixed(2)} ms`);
+  assert.ok(e10 < 5, `${e10.toFixed(2)} ms`);
+});
