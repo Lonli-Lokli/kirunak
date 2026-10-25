@@ -159,3 +159,147 @@ test('prune removes state files untouched for 14 days and leaves config.json and
   assert.deepEqual(readdirSync(join(home, 'escalate')).sort(), ['config.json', 'fresh.json', 'notes.txt']);
   assert.deepEqual(readState(home, 'fresh').failures, {});
 });
+
+// ---- The hook, run as Claude Code runs it: the event on stdin, a temp KIRUNAK_HOME ----
+
+const DEFAULT = [{ model: 'sonnet' }, { model: 'opus', effort: 'high', mode: 'build', attempts: 1 }, { model: 'fable', effort: 'high', mode: 'design', attempts: 1 }];
+
+// A home with config.json as k install writes it, a repo `gulnya` holding the task, and session s1 on that task.
+function makeHome(hook = {}, ladder = DEFAULT) {
+  const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
+  const home = join(top, 'home');
+  const repo = join(top, 'gulnya');
+  mkdirSync(join(repo, 'kirunak', 'tasks', 'enforced-escalation'), { recursive: true });
+  writeFileSync(join(repo, 'kirunak', 'tasks', 'enforced-escalation', 'task.md'), `---\nid: ${ID}\ntitle: ${TITLE}\n---\n\n## Goal\nx\n`);
+  mkdirSync(join(home, 'escalate'), { recursive: true });
+  mkdirSync(join(home, 'sessions'), { recursive: true });
+  writeFileSync(join(home, 'sessions', 's1.json'), JSON.stringify({ task: ID, step: 'S-5', since: '2026-10-25T19:25:04.627Z' }));
+  const config = { written: new Date().toISOString(), ...escalateConfig({ ladder, hook, repos: [{ name: 'gulnya', root: repo }] }) };
+  writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify(config, null, 2));
+  const log = () => (existsSync(join(home, 'escalate.log')) ? readFileSync(join(home, 'escalate.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+  const files = () => readdirSync(join(home, 'escalate')).filter((n) => n !== 'config.json').sort();
+  return { top, home, log, files, state: (agent = null) => JSON.parse(readFileSync(statePath(home, 's1', agent), 'utf8')) };
+}
+
+function cleanEnv(extra = {}) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('KIRUNAK_')) env[k] = v;
+  return { ...env, ...extra };
+}
+
+function run(script, input, home, env = {}) {
+  const r = spawnSync(process.execPath, [script], { input: JSON.stringify(input), env: cleanEnv({ KIRUNAK_HOME: home, ...env }), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  return { stdout: r.stdout, out: r.stdout.trim() ? JSON.parse(r.stdout) : null };
+}
+const hook = (input, home, env) => run(HOOK, input, home, env);
+const freeze = (input, home, env) => run(FREEZE, input, home, env);
+
+// Events as Claude Code sends them (S-1 §1..§3).
+const failure = (extra = {}, command = NODE_CMD, error = NODE_FAIL) => ({
+  session_id: 's1', transcript_path: '/dev/null', cwd: '/tmp', hook_event_name: 'PostToolUseFailure', tool_name: 'Bash',
+  tool_input: { command, description: 'Run the tests' }, error, is_interrupt: false, duration_ms: 900, ...extra,
+});
+const edit = (extra = {}) => ({
+  session_id: 's1', cwd: '/tmp', hook_event_name: 'PreToolUse', tool_name: 'Edit',
+  tool_input: { file_path: '/tmp/src/ladder.mjs', old_string: 'a', new_string: 'b' }, ...extra,
+});
+const start = (model) => ({ session_id: 's1', transcript_path: '/dev/null', hook_event_name: 'SessionStart', source: 'startup', model });
+const textOf = (r) => r.out?.hookSpecificOutput?.additionalContext ?? null;
+
+// fail, then (edit, fail) `fixes` times; the results of the failures.
+function cycle(h, fixes, extra = {}, env = {}) {
+  const out = [hook(failure(extra), h.home, env)];
+  for (let i = 0; i < fixes; i++) {
+    assert.equal(freeze(edit(extra), h.home, env).stdout, '', 'the freeze hook lets the edit through and says nothing');
+    out.push(hook(failure(extra), h.home, env));
+  }
+  return out;
+}
+
+test('fail, edit, fail, edit, fail fires exactly once: three lines of at most 80 characters (E-6, AC-10, AC-11)', () => {
+  const h = makeHome();
+  hook(start('claude-opus-5-5'), h.home);
+  const [a, b, c] = cycle(h, 2);
+  assert.equal(a.stdout + b.stdout, '');
+  assert.equal(c.out.systemMessage, textOf(c));
+  assert.equal(c.out.hookSpecificOutput.hookEventName, 'PostToolUseFailure');
+  const lines = textOf(c).split('\n');
+  fits(lines);
+  assert.deepEqual(lines, [
+    'kirunak: climbs one rung failed again after 2 fixes.',
+    'Task: Escalation follows measured failures, not s… (gulnya/enforced-escalation).',
+    'Hand this step to fable-step; its next failure blocks edits.',
+  ]);
+  assert.equal(freeze(edit(), h.home).stdout, '');
+  assert.equal(hook(failure(), h.home).stdout, '', 'never again on the same failures');
+  assert.equal(hook(failure(), h.home).stdout, '');
+  const log = h.log();
+  assert.deepEqual(log.map((l) => l.trigger), ['hook fired', 'repeat after fire', 'repeat after fire']);
+  const { time, ...fired } = log[0];
+  assert.ok(Date.parse(time));
+  assert.deepEqual(fired, {
+    session: 's1', agent: null, agentType: null, task: ID, step: 'S-5', trigger: 'hook fired',
+    rung: { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step'] },
+    signature: { kind: 'node', label: 'climbs one rung', hash: signatureOf(NODE_FAIL, NODE_CMD).hash }, count: 2, liftedBy: null,
+  });
+});
+
+test('a test written red and then fixed never counts, nor does a rerun with no edit between (E-5)', () => {
+  const h = makeHome();
+  hook(failure(), h.home);
+  freeze(edit(), h.home);
+  // green now: a passing Bash call fires PostToolUse, which the hook is not wired on
+  const [f] = Object.values(h.state().failures);
+  assert.deepEqual([f.repeats, f.editedSince, f.fired], [0, true, false]);
+  const r = makeHome();
+  for (let i = 0; i < 4; i++) assert.equal(hook(failure(), r.home).stdout, '');
+  assert.equal(Object.values(r.state().failures)[0].repeats, 0, 'fail, fail, fail, fail with no edit is no repeat');
+  freeze(edit(), r.home);
+  hook(failure(), r.home);
+  assert.equal(Object.values(r.state().failures)[0].repeats, 1);
+  assert.deepEqual(h.log().concat(r.log()), []);
+});
+
+test('repeats: 3 in config.json moves the fire to the third fix', () => {
+  const h = makeHome({ repeats: 3 });
+  hook(start('claude-sonnet-5'), h.home);
+  const out = cycle(h, 3);
+  assert.deepEqual(out.slice(0, 3).map((r) => r.stdout), ['', '', '']);
+  assert.deepEqual(textOf(out[3]).split('\n').filter((l) => !l.startsWith('Task:')), [
+    'kirunak: climbs one rung failed again after 3 fixes.',
+    'Hand this step to opus-step; its next failure blocks edits.',
+  ]);
+});
+
+test('quiet paths print nothing, and what does not count writes nothing (AC-9, O-2)', () => {
+  const h = makeHome();
+  const quiet = [
+    failure({}, 'ls nope', 'Exit code 1\nls: nope: No such file or directory'),
+    failure({}, 'git push', 'Exit code 128\nfatal: no upstream'),
+    failure({ is_interrupt: true }),
+    { ...failure(), tool_name: 'Edit', tool_input: { file_path: '/tmp/x' }, error: 'String to replace not found' },
+    { session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'run the tests again' },
+    { session_id: 's1', hook_event_name: 'UserPromptExpansion', command_name: 'k-done', prompt: '/k-done' },
+  ];
+  for (const input of quiet) assert.equal(hook(input, h.home).stdout, '', JSON.stringify(input).slice(0, 80));
+  assert.deepEqual(h.files(), [], 'nothing written');
+  for (const input of [failure(), start('claude-opus-5-5'), { session_id: 's1', hook_event_name: 'PostModelSwitch', to_model: 'claude-fable-5' }]) {
+    assert.equal(hook(input, h.home).stdout, '');
+  }
+  assert.deepEqual(h.log(), []);
+});
+
+test('in a k run step neither hook writes anything (E-12), and hook.enabled: false makes every event exit at once', () => {
+  const step = makeHome();
+  const out = cycle(step, 3, {}, { KIRUNAK_STEP: 'S-3', KIRUNAK_TASK: ID });
+  hook(start('claude-opus-5-5'), step.home, { KIRUNAK_STEP: 'S-3' });
+  assert.deepEqual([out.map((r) => r.stdout).join(''), step.files(), step.log()], ['', [], []]);
+  hook(failure(), step.home);
+  freeze(edit(), step.home, { KIRUNAK_STEP: 'S-3' });
+  assert.equal(Object.values(step.state().failures)[0].editedSince, false, 'the freeze hook\'s edit flag is skipped too');
+  const off = makeHome({ enabled: false });
+  const offOut = cycle(off, 3);
+  hook(start('claude-opus-5-5'), off.home);
+  assert.deepEqual([offOut.map((r) => r.stdout).join(''), off.files(), off.log()], ['', [], []]);
+});
