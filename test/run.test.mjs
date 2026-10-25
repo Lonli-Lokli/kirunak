@@ -83,6 +83,10 @@ const put = (w, rel, text = 'x') => {
   writeFileSync(join(w.p.dir, rel), text);
 };
 const progress = (w) => readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
+// k run's last line on a stop for the owner, which the session's escalation hook pushes (S-2 design R7.2, E-16).
+const PUSHED = (text) => `kirunak-push: The last forecast stays readable offline (weather/offline-forecast): ${text}`;
+const pushes = (lines) => lines.filter((l) => l.startsWith('kirunak-push:'));
+const QUESTION = PUSHED('S-1 waits for your answer. why: Three days or a week? answer in a session or in notes.md, then start k run again');
 const watch = (w) => run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
 
 test('pending → ready → running → done, with the run records, the briefs and the flags', async () => {
@@ -144,7 +148,10 @@ test('a missing output fails the step; the retry is a fresh conversation that re
   // The design run's one required output is its design (R2.4): without it the attempt fails, and the top rung is spent.
   assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-4.md'), 'utf8'), /: missing outputs: steps\/S-1\/design-1\.md\n/);
   assert.equal(r.stopped, 'S-1 failed on every rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md');
-  assert.equal(lines.at(-1), `${w.id} stopped: ${r.stopped}`);
+  // The stop line, then the push, the last line; the climbs before it pushed nothing (E-17).
+  const spent = PUSHED('S-1 stopped, failed on every rung. read kirunak/tasks/offline-forecast/steps/S-1/ (failure-1.md … failure-4.md)');
+  assert.deepEqual([lines.at(-2), lines.at(-1)], [`${w.id} stopped: ${r.stopped}`, spent]);
+  assert.deepEqual([pushes(lines), `kirunak-push: ${r.push}`], [[spent], spent]);
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md, steps\/S-1\/failure-3\.md, steps\/S-1\/failure-4\.md$/m);
   assert.equal((progress(w).match(/S-1 failed: missing outputs/g) || []).length, 4);
@@ -152,6 +159,21 @@ test('a missing output fails the step; the retry is a fresh conversation that re
   assert.match(progress(w), /S-1 escalated: to fable \(high, design\) after 1 failure on opus\n.*S-1 started \(fable high, session [0-9a-f-]{36}, rung fable design\)\n.*S-1 failed: /);
   assert.ok(lines.includes(`${w.id} S-1 climbs to opus (high): attempt 1 of 1`) && lines.includes(`${w.id} S-1 climbs to fable (high): attempt 1 of 1`), lines.join('\n'));
   assert.equal(r.states['S-2'], 'pending');
+  // The next k run stops at the mark, with the same push.
+  const again = [];
+  assert.match((await run({ ws: w.ws, id: w.id, out: (l) => again.push(l) })).stopped, /^S-1 is marked \[escalate\] in plan\.md/);
+  assert.equal(again.at(-1), spent);
+});
+
+test('a k run --once that fails a step, then one that climbs it, prints no push: neither is a stop for the owner (E-17)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const lines = [];
+  fakeRunner(w, (step, n) => (n <= 2 ? 'nothing' : 'write'));
+  const results = [];
+  for (let i = 0; i < 3; i++) results.push(await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) }));
+  assert.ok(lines.includes(`${w.id} S-1 climbs to opus (high): attempt 1 of 1`), lines.join('\n'));
+  assert.deepEqual(results.map((r) => [r.states['S-1'], r.push]), [['ready', null], ['failed', null], ['done', null]]);
+  assert.deepEqual(pushes(lines), []);
 });
 
 test('a step that fails twice climbs to opus and k run goes on by itself: an event and a plain line, nothing for the owner, a line on the card (AC-1, E-17)', async () => {
@@ -163,6 +185,9 @@ test('a step that fails twice climbs to opus and k run goes on by itself: an eve
   assert.match(r.stopped, /^S-3 waits for the owner/, 'k run went on to the next step, and stops only at the owner\'s');
   assert.deepEqual(calls.map((c) => [c.env.KIRUNAK_STEP, c.model, c.effort]), [['S-1', null, null], ['S-1', null, null], ['S-1', 'opus', 'high'], ['S-2', null, null]]);
   assert.ok(lines.includes(`${w.id} S-1 climbs to opus (high): attempt 1 of 1`), lines.join('\n'));
+  // The one push is the owner step's, the last line (E-16); the climb pushed nothing (E-17).
+  const yours = PUSHED('S-3 is yours: Restart offline on a phone. once it is done: k step finish weather/offline-forecast S-3');
+  assert.deepEqual([pushes(lines), lines.at(-1)], [[yours], yours]);
   const time = (e) => ({ ...e, time: typeof e.time });
   assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map(time), [
     { time: 'string', kind: 'escalate', trigger: 'k run failure count', task: w.id, step: 'S-1', failures: 2, from: { model: 'sonnet' }, to: { model: 'opus', effort: 'high', mode: 'build', attempt: 1 } },
@@ -278,9 +303,11 @@ test('a heavy step has no rung: its second failure stops the task with every rep
   const w = await approvedWorkspace(PLAN.replace('### S-1 Keep the last forecast on disk [agent]\ncovers: AC-1, AC-2, E-1\ninputs: task, docs/offline.md\n', '### S-1 Keep the last forecast on disk [heavy]\ncovers: AC-1, AC-2, E-1\ncommand: npm test\n'));
   w.ws.seams.resourceGuard = { run: () => ({ exitCode: 1, log: 'red' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
   const calls = fakeRunner(w);
-  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
   assert.equal(calls.length, 0);
   assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
+  assert.equal(lines.at(-1), PUSHED('S-1 stopped, failed 2 times. why: exit 1. read kirunak/tasks/offline-forecast/steps/S-1/ (failure-1.md, failure-2.md)'));
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md$/m);
   assert.ok(!/escalated: to /.test(progress(w)));
   assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map((e) => [e.kind, e.to, e.stopped]), [['escalate', null, true]]);
@@ -358,16 +385,27 @@ test('needs.json owner: the task stops with the question; the next k run resumes
     put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
     return 'nothing';
   });
-  const r = await watch(w);
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
   assert.equal(r.stopped, 'S-1 waits for the owner: Three days or a week?');
+  assert.equal(lines.at(-1), QUESTION);
   assert.equal(calls.length, 1);
   assert.match(progress(w), /S-1 waiting for the owner: Three days or a week\?\n$/);
   assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"awaiting owner".*"question":"Three days or a week\?"/);
   assert.match(k(w.home, ['list']).stdout, /awaiting owner +weather\/offline-forecast/);
   const again = await watch(w);
-  assert.deepEqual(again.states, BOTH);
+  assert.deepEqual([again.states, again.push], [BOTH, PUSHED('S-3 is yours: Restart offline on a phone. once it is done: k step finish weather/offline-forecast S-3').slice('kirunak-push: '.length)]);
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; read kirunak\/tasks\/offline-forecast\/notes\.md/);
+});
+
+test('a k run --once whose step asks the owner ends with the push of the question, though no pass stopped it', async () => {
+  const w = await approvedWorkspace(PLAN);
+  fakeRunner(w, () => (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.deepEqual([r.stopped, r.states['S-1'], lines.at(-1)], [null, 'waiting-owner', QUESTION]);
+  assert.deepEqual(pushes(lines), [QUESTION]);
 });
 
 // A guard whose job only records what it was asked to run.
@@ -440,8 +478,10 @@ test('a step started by hand that asks for a job: k run runs it and starts no cl
   assert.match(progress(w), /S-1 heavy job ended: exit 0 after [\d.]+ min \(steps\/S-1\/heavy-1\.json\); started by hand, its session resumes itself\n$/);
   assert.equal(r.states['S-1'], 'running');
   put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
-  const again = await run({ ws: w.ws, id: w.id });
+  lines.length = 0;
+  const again = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
   assert.equal(again.stopped, 'S-1 was started by hand: its session resumes itself; its question is steps/S-1/needs.json');
+  assert.equal(lines.at(-1), QUESTION);
   assert.equal(calls.length, 0);
   assert.ok(existsSync(stepFile(w, 'needs.json')), 'the question stays for the session that asked it');
 });
@@ -485,6 +525,7 @@ test('k run starts no step of a parked task and names k queue add, which puts it
   assert.equal(r.stopped, parked);
   assert.deepEqual([r.states['S-1'], r.states['S-2']], ['done', 'ready']);
   assert.ok(lines.some((l) => l.endsWith(`stopped: ${r.stopped}`)), lines.join('\n'));
+  assert.equal(lines.at(-1), `kirunak-push: The last forecast stays readable offline (${v.id}): parked, not in the queue. k queue add ${v.id} puts it back, then start k run again`);
 });
 
 test('one k run per task: a second refuses, naming the pid, and starts nothing; a lock whose k run is dead is taken over', async () => {
