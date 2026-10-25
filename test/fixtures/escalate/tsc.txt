@@ -1,0 +1,3 @@
+Exit code 2
+src/board.ts(41,7): error TS2322: Type 'string' is not assignable to type 'number'.
+src/board.ts(58,12): error TS2339: Property 'rung' does not exist on type 'Step'.

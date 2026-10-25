@@ -1,0 +1,39 @@
+Exit code 1
+▶ ladder
+  ✖ climbs one rung (0.771667ms)
+  ✔ stays (0.063292ms)
+✖ ladder (1.22375ms)
+✖ top-level fails (0.041166ms)
+ℹ tests 3
+ℹ suites 1
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.068959
+
+✖ failing tests:
+
+test at test/ladder.test.mjs:4:3
+✖ climbs one rung (0.771667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///Users/volha/sources/kirunak/test/ladder.test.mjs:4:40)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1325:25) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/ladder.test.mjs:7:1
+✖ top-level fails (0.041166ms)
+  Error: boom
+      at TestContext.<anonymous> (file:///Users/volha/sources/kirunak/test/ladder.test.mjs:7:39)
+      at Test.runInAsyncScope (node:async_hooks:227:14)

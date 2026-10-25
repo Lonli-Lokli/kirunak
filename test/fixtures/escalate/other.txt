@@ -1,0 +1,12 @@
+Exit code 1
+
+> kirunak@0.1.0 test
+> node --test 'test/*.test.mjs'
+
+node:internal/modules/cjs/loader:1228
+  throw err;
+  ^
+
+Error: Cannot find module '/Users/volha/sources/kirunak/test/helpers-2.mjs'
+npm error Lifecycle script `test` failed with error:
+npm error code 1

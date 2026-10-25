@@ -41,7 +41,7 @@ test('the block is written with the absolute path, and every other hook and key 
   assert.ok(!text.includes('<kirunak>'));
   const json = JSON.parse(text);
   assert.deepEqual(json.hooks.PreToolUse[1], {
-    matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash|Skill|CronCreate|SendMessage',
+    matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor|Skill|CronCreate|ScheduleWakeup|SendMessage',
     hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`, timeout: 10 }],
   });
   assert.ok(json.hooks.PreToolUse[1].hooks[0].command.split(' ')[1].startsWith('/'), 'an absolute path');
@@ -51,12 +51,13 @@ test('the block is written with the absolute path, and every other hook and key 
   }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
-  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft']);
+  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-go-on']);
   for (const s of SKILLS) {
     const link = join(h.skillsDir, s);
     assert.ok(lstatSync(link).isSymbolicLink());
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
+  assert.ok(lstatSync(join(h.skillsDir, 'k-go-on')).isSymbolicLink(), 'the owner\'s override, /k-go-on, is linked (R5.4)');
   // The PreToolUse block, the links, the escalation hook's 7 blocks, 2 rung agents, config.json, SessionStart, the tracker.
   assert.equal(actions.length, 1 + SKILLS.length + 7 + 2 + 1 + 2);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
@@ -311,7 +312,7 @@ test('the escalation hook on its seven events, SubagentStop matching every agent
       return [event, blocks[0].matcher ?? null];
     }));
   assert.deepEqual(matchers, {
-    PostToolUseFailure: 'Bash', PostToolUse: 'Agent', SubagentStop: 'opus-step|fable-step|music-deep', UserPromptSubmit: null,
+    PostToolUseFailure: 'Bash|Edit|Write|MultiEdit|NotebookEdit', PostToolUse: 'Agent', SubagentStop: 'opus-step|fable-step|music-deep', UserPromptSubmit: null,
     UserPromptExpansion: null, SessionStart: 'startup|resume|clear', PostModelSwitch: null,
   });
   assert.ok(!('matcher' in ours('UserPromptSubmit')[0]), 'no matcher key at all');
@@ -324,7 +325,7 @@ test('an older freeze block gets the grown matcher; a changed ladder replaces th
   json.hooks.PreToolUse.push({ matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash|Skill', hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`, timeout: 10 }] });
   writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
   const { actions } = install({ ...h, ws: ws() });
-  assert.ok(actions[0].startsWith('updated the kirunak PreToolUse hook') && actions[0].endsWith('(matcher Edit|Write|MultiEdit|NotebookEdit|Bash|Skill|CronCreate|SendMessage)'));
+  assert.ok(actions[0].startsWith('updated the kirunak PreToolUse hook') && actions[0].endsWith(`(matcher ${FREEZE_MATCHER})`));
   let after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
   assert.equal(after.PreToolUse.length, 2);
   assert.equal(after.PreToolUse[1].matcher, FREEZE_MATCHER);
