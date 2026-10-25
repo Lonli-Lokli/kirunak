@@ -498,7 +498,8 @@ const VERBS = {
   // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
   // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
-  // the owner's intake: a count and their ids (kirunak-drafts AC-8).
+  // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
+  // stopped at for the owner, each as its notice of at most 3 lines (gulnya/enforced-escalation R7.3, E-15).
   async waiting({ ws }) {
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
@@ -516,15 +517,17 @@ const VERBS = {
     // k start refuses no state; it is offered what k list shows, a task neither done nor on hold.
     const start = rows.map(brief);
     const drafts = waiting.waitingDrafts(ws);
+    const stopped = waiting.stoppedFor(all);
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
+      ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
       accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
-    return { approve, accept, amendments, hold, start, drafts, text };
+    return { approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

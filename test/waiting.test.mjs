@@ -6,7 +6,7 @@ import { approve } from '../lib/approval.mjs';
 import { amendmentName, decline, newAmendment } from '../lib/amend.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { newDraft } from '../lib/drafts.mjs';
-import { draftsLine } from '../lib/waiting.mjs';
+import { draftsLine, stoppedFor, stoppedText } from '../lib/waiting.mjs';
 import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 // What k waiting gives the mod's pick lists (kirunak-phone S-4): the amendments waiting, the tasks k hold and k start
@@ -172,7 +172,7 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
 
 test("k waiting says in one line how many drafts wait for the owner's intake and names /k-drafts; --json gains drafts, every other field kept (kirunak-drafts AC-8)", async () => {
   const { ws, home } = await makeWorkspace();
-  const keys = ['approve', 'accept', 'amendments', 'hold', 'start', 'drafts'];
+  const keys = ['approve', 'accept', 'amendments', 'hold', 'start', 'drafts', 'stopped'];
   let w = waiting(home);
   assert.deepEqual(Object.keys(w), keys);
   assert.deepEqual(w.drafts, { count: 0, ids: [] });
@@ -186,4 +186,24 @@ test("k waiting says in one line how many drafts wait for the owner's intake and
   const text = run(home, ['waiting']).stdout.split('\n');
   assert.deepEqual(text.slice(-3), ['nothing to accept', "2 drafts wait for the owner's intake: /k-drafts", '']);
   assert.equal(draftsLine({ count: 1 }), "1 draft waits for the owner's intake: /k-drafts");
+});
+
+test('k waiting\'s group Stopped for you: per stopped step of a task not done, its notice indented two spaces, each line within 80 characters, the title and id first (gulnya/enforced-escalation R7.3, E-15)', () => {
+  const stop = { step: 'S-4', kind: 'escalated', what: 'stopped, failed on every rung', why: 'missing outputs: steps/S-4/report.md', dir: 'kirunak/tasks/offline-forecast/steps/S-4/', reports: ['steps/S-4/failure-1.md', 'steps/S-4/failure-2.md', 'steps/S-4/failure-3.md', 'steps/S-4/failure-4.md'] };
+  const rows = [
+    { id: 'weather/offline-forecast', title: 'The last forecast stays readable offline', state: 'in progress', stops: [stop] },
+    { id: 'weather/old', title: 'Old', state: 'done', stops: [stop] },
+    { id: 'weather/fine', title: 'Fine', state: 'queued', stops: [] },
+  ];
+  const stopped = stoppedFor(rows);
+  assert.deepEqual(stopped.map((x) => [x.id, x.step, x.kind]), [['weather/offline-forecast', 'S-4', 'escalated']]);
+  const text = stoppedText(stopped).split('\n');
+  assert.deepEqual(text, [
+    'stopped for you:',
+    '  The last forecast stays readable offline (weather/offline-forecast)',
+    '  S-4 stopped, failed on every rung: missing outputs: steps/S-4/report.md',
+    '  read kirunak/tasks/offline-forecast/steps/S-4/ (failure-1.md … failure-4.md)',
+  ]);
+  assert.ok(text.every((l) => l.length <= 80));
+  assert.ok(stopped[0].one.length <= 200);
 });

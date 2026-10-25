@@ -425,7 +425,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   const waiting = () => JSON.parse(run(['waiting', '--json']).stdout);
   const first = waiting();
   const title = first.approve[0].title;
-  const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }], drafts: { count: 0, ids: [] } };
+  const rows = { amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }], drafts: { count: 0, ids: [] }, stopped: [] };
   assert.deepEqual(first, { approve: [{ id: ID, title, state: 'proposed', why: null }], accept: [], ...rows });
   await approve({ ws, id: ID, now: NOV5 });
   // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
