@@ -1,5 +1,7 @@
 import type { PromptOrigin } from 'claude-code'
 
+import { capBlocking } from './waiting'
+
 // The owner's own gestures (approval.md §5, the owner's answer of 2026-10-19): Enter at the terminal, and Remote
 // Control from the phone. Every other origin is refused with a line and runs nothing.
 const OWNERS: ReadonlySet<string> = new Set(['composer', 'bridge'])
@@ -104,5 +106,6 @@ export function argvFor(verb: Verb, text: string): { argv: string[] } | { proble
 // a second time in an answer (AC-12).
 export const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).replace(/^[^\n]*?\$\.[\w.]+: /, '')
 
-export const refused = (name: string, r: { stdout: string; stderr: string }): string => `/${name} refused:\n${(r.stderr || r.stdout).trim()}`
+// k's refusal as it came, but for at most ten blocking lines of a task (kirunak-accept-shared-repo E-2).
+export const refused = (name: string, r: { stdout: string; stderr: string }): string => `/${name} refused:\n${capBlocking((r.stderr || r.stdout).trim().split('\n')).join('\n')}`
 export const firstLine = (r: { stdout: string; stderr: string }): string => (r.stderr || r.stdout).trim().split('\n')[0] ?? ''

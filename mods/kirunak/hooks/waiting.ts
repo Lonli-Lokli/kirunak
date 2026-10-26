@@ -18,8 +18,26 @@ export type WaitingRow = {
   onlyChecklist?: boolean
 }
 
-// A blocking file as k accept's refusal names it: `<path>  <commit>  <task>`.
-export const blockingLines = (r: WaitingRow): string[] => (r.blocking ?? []).map(b => `${b.path}  ${b.commit}  ${b.task}`)
+// A blocking file as k accept's refusal names it: `<path>  <commit>  <task>`, at most ten for a task (capBlocking).
+export const blockingLines = (r: WaitingRow): string[] => capBlocking((r.blocking ?? []).map(b => `${b.path}  ${b.commit}  ${b.task}`))
+
+// The phone shows at most ten of a task's blocking lines, in its list and in its refusal, then how many more there are,
+// in their place; `k accept` and `k waiting` in the terminal show them all (kirunak-accept-shared-repo E-2, A-1).
+export const MAX_BLOCKING = 10
+const BLOCKING = /^\s*\S.*?  [0-9a-f]{7,40}  \S/
+export function capBlocking(lines: readonly string[], max = MAX_BLOCKING): string[] {
+  const out: string[] = []
+  let seen = 0
+  let more = 0
+  let at = 0
+  let indent = ''
+  for (const l of lines) {
+    if (!BLOCKING.test(l) || ++seen <= max) out.push(l)
+    else if (!more++) [at, indent] = [out.length, /^\s*/.exec(l)?.[0] ?? '']
+  }
+  if (more) out.splice(at, 0, `${indent}and ${more} more`)
+  return out
+}
 
 // An amendment neither applied nor declined (kirunak-phone S-4): refuse is what k approve --amendment would refuse, one
 // line, null when it would not; file the amendment's absolute path; title is the task's, name the amendment's own few

@@ -1,7 +1,7 @@
 import { amendmentItem, amendmentLabel, amendmentLines, taskLabel } from './lists'
 import type { Item } from './lists'
 import type { Choice, PickScreen, Row, Screen } from './owner'
-import { blockingLines } from './waiting'
+import { blockingLines, capBlocking } from './waiting'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold, /k-resume and /k-start with no number (kirunak-phone
@@ -16,10 +16,10 @@ import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 const titleOf = (r: { title: string }): string => r.title.replace(/\s+/g, ' ').trim()
 
-// What k would refuse, line by line, less the id its first line starts with.
+// What k would refuse, line by line, less the id its first line starts with; at most ten blocking lines (capBlocking).
 function refusalLines(id: string, why: string): string[] {
   const lines = why.split('\n').map(l => l.trim()).filter(Boolean)
-  return lines.map((l, i) => (i === 0 && l.startsWith(`${id}: `) ? l.slice(id.length + 2) : l))
+  return capBlocking(lines.map((l, i) => (i === 0 && l.startsWith(`${id}: `) ? l.slice(id.length + 2) : l)))
 }
 
 // A waiting task's state as k waiting gives it; from an older k without it, what k approve and k accept take: proposed
