@@ -9,7 +9,7 @@ import {
   windowOf, windowSetting,
 } from '../hooks/compact-rules.mjs';
 import { factsOf } from '../hooks/kirunak-compact.mjs';
-import { runningBy } from '../lib/steps.mjs';
+import { boundarySince, runningBy } from '../lib/steps.mjs';
 import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
 
 // The step boundary and the PreCompact hook (design/orchestrator.md §5).
@@ -47,6 +47,36 @@ test('runningBy: the chain\'s old id holds, a by-hand or k run start does not, n
   assert.deepEqual(runningBy(`${text}2026-01-05 11:00 S-4 resumed (session k-run-2)\n`, ['s-main'], join(dir, 'none')), ['S-4', 'S-6']);
   assert.deepEqual(runningBy(text, [], dir), []);
   assert.deepEqual(runningBy('', ['s-main'], dir), []);
+});
+
+test('boundarySince: a line after the first block that leaves none of the chain running, in file order (R1.4)', () => {
+  const dir = makeRepos().top;
+  const head = '2026-01-05 10:00 S-1 started (session s-main)\n';
+  const lines = (text) => text.split('\n').length - 1;
+  const same = `${head}2026-01-05 10:40 S-1 finished\n2026-01-05 10:40 S-2 started (session s-main)\n`;
+  assert.equal(boundarySince(same, ['s-main'], dir, { line: lines(head) }), true, 'finished and started in the same minute');
+  assert.equal(boundarySince(same, ['s-main'], dir, { line: lines(same) }), false, 'the gap before the first block');
+  const overlap = `${head}2026-01-05 10:05 S-2 started (session s-main)\n`;
+  const later = `${overlap}2026-01-05 10:30 S-1 finished\n2026-01-05 10:31 S-3 started (session s-main)\n2026-01-05 10:50 S-2 failed: red\n`;
+  assert.equal(boundarySince(later, ['s-main'], dir, { line: lines(overlap) }), false, 'overlapping steps: the gap never opens');
+  const other = `${head}2026-01-05 10:10 S-9 started (session s-other)\n2026-01-05 10:20 S-1 finished\n2026-01-05 10:20 S-2 started (session s-main)\n`;
+  assert.equal(boundarySince(other, ['s-main'], dir, { line: lines(head) }), true, 'another session\'s step holds nothing');
+  writeJson(join(dir, 'steps', 'S-2', 'needs.json'), { owner: 'which one?' });
+  const paused = `${overlap}2026-01-05 10:30 S-1 finished\n2026-01-05 10:31 S-3 started (session s-main)\n`;
+  assert.equal(boundarySince(paused, ['s-main'], dir, { line: lines(overlap) }), true, 'a paused step is not running');
+  assert.equal(boundarySince(same, ['s-main'], dir, null), false);
+});
+
+test('boundarySince: progress.md shorter than at the block, or no line recorded, counts the lines stamped after its minute (R1.4)', () => {
+  const dir = makeRepos().top;
+  const pad = (x) => String(x).padStart(2, '0');
+  const at = new Date(2026, 0, 5, 10, 20, 30);
+  const stamp = (min) => `2026-01-05 ${pad(at.getHours())}:${pad(min)}`;
+  const text = (min) => `${stamp(0)} S-1 started (session s-main)\n${stamp(min)} S-1 finished\n${stamp(min)} S-2 started (session s-main)\n`;
+  assert.equal(boundarySince(text(21), ['s-main'], dir, { at: at.toISOString(), line: 40 }), true);
+  assert.equal(boundarySince(text(20), ['s-main'], dir, { at: at.toISOString(), line: 40 }), false, 'the block\'s own minute is before it');
+  assert.equal(boundarySince(text(21), ['s-main'], dir, { at: at.toISOString(), line: null }), true);
+  assert.equal(boundarySince(text(21), ['s-main'], dir, { at: 'not a time', line: null }), false);
 });
 
 test('runningBy: a 2,000-line progress.md in under 5 ms', () => {
