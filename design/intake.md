@@ -26,6 +26,16 @@ Two parts, one in Claude Code and one in `k`:
   move with itself. The task's `from:` names the moved file, and `notes.md` says it is background only: nothing in it
   is a ruling, and the interview starts from its questions and still asks every line again (R1, R4). The `k-intake`
   skill does this only when the owner asks, never on its own.
+- **A bug as `--from`** (R29): a draft with `bug-of` in its front matter (an empty one counts) starts only while its
+  task exists and is accepted; otherwise the start is refused, "the bug <id> cannot start its intake: <why>", before
+  anything moves or is written. Its `notes.md` says, before the draft's part, that it is a bug of `<task>`, a task
+  accepted already, and under `## The lines of <task>, for the intake's one proposal (background only)` names that
+  task's `task.md` and repo and gives its Edge cases, Out of scope and Aspects lines as they stand, in that order (an
+  empty one reads `Out of scope: none`). The task is only read. After the goal, the `k-intake` skill proposes
+  together those lines that still apply, in one question naming their ids: a yes keeps each under this task's next
+  number, sourced `[owner <date> Q-n] [from <repo>/<slug> <id>]`, an aspect line naming this task's ids; anything
+  else is a no, and each is asked alone, as any line of a draft. Then it asks only what is new: the bug and its
+  criteria. A plain draft's `notes.md` is unchanged.
 
 Judgement: the model runs the conversation, the tool keeps the ledger. An interview the model wrote straight into
 Markdown would drift from the grammar; an interview run by a tool with no model could not follow up a vague answer.
@@ -125,5 +135,5 @@ question, then AC-1 with the owner's answer as its source. 2.1 becomes a questio
 
 ## 6. Requirements this file satisfies
 
-R26 (§1: a draft as `--from`), R1 (§1, §2: only through the interview, with kirunak's own method), R2 (§3, §2 step 4), R3 (§2 step 4), R4 (§2
+R26 (§1: a draft as `--from`), R29 (§1: a bug as `--from`), R1 (§1, §2: only through the interview, with kirunak's own method), R2 (§3, §2 step 4), R3 (§2 step 4), R4 (§2
 steps 2 to 7), R20 and D6 (§4, §5), D8 (§5: the first repo's migration path), D12 (`k-intake`).

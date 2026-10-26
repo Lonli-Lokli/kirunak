@@ -304,6 +304,30 @@ ships on by default.
 - Not yet measured: `/k-go-on` over Remote Control from the phone (the task's S-16); whether the push arrives is
   Claude Code's (amendment A-1).
 
+## Bugs of accepted tasks. Closes R29
+
+Built 2026-10-26 (gulnya/kirunak-spikes S-1 to S-4, on the branch `bugs/drafts`), on the drafts above: a bug is a
+draft with `bug-of`, no new kind of file.
+
+- Files: `templates/bug.md` (new: the draft's skeleton with `bug-of` and Fix written) and `lib/drafts.mjs` (`newDraft`
+  with `bugOf`, `notAccepted`, a bug's shape in `checkDraft`, its task and its fix's commits in `check`, `bugOf` in
+  `list` and `format`); `bin/k.mjs` (`--bug-of` on `k draft new`, the help); `lib/intake.mjs` (a bug refused unless
+  its task is accepted, that task's lines in `notes.md`); `lib/board-model.mjs` (`draftTail`), `board-md.mjs` and
+  `board.mjs` (bug of <task> on the board, its brief, page and card); `mods/kirunak/hooks/drafts.ts` (`/k-drafts`' list,
+  whole view and Drop) and `register.tsx` (its description); `skills/k-draft/SKILL.md` (a section on bugs) and
+  `skills/k-intake/SKILL.md` (the one proposal). `REQUIREMENTS.md` R29, `design/task-files.md` §1, `intake.md` §1
+  and `boards.md` §2 and §4 say how it works.
+- Tests: `drafts.test.mjs` (the skeleton kept in step with the draft's, a bug in another repo than its task with that
+  task's folder byte for byte the same and still done, a task unknown or not accepted, the shape rules, no state
+  field, a task gone or a fix commit in neither repo, the list, the format and the CLI), `intake.test.mjs` (a bug's
+  `notes.md` from a task in another repo and in its own, a plain draft's without it, the refusals with nothing moved
+  or written), `board-model`, `board-brief`, `board-md` and `board.test.mjs` (a bug's line on each surface, a plain
+  draft's unchanged); the mod's `drafts.test.ts` (the list, the whole view, Drop by id, no command for bugs).
+- Numbers: `npm test` 664 tests, 662 pass, 2 skipped (the timing tests, run with `KIRUNAK_TIMING=1`);
+  `claude plugin test` 139 of 139.
+- Not yet measured: a bug in `/k-drafts` from the phone, and the two bugs of katyafm/music-variety written as drafts
+  (S-5), once the branch merges and the mod runs it from the main checkout.
+
 ## Slice 7, later and not detailed here: R17, R18
 
 Trackers (Linear, It's a Plan, GitHub Issues) and cloud sync as plugins on the `tracker` and `sync` seams, with

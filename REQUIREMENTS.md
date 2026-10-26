@@ -1,6 +1,6 @@
 # kirunak: a task system for Claude Code workspaces. Requirements
 
-kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R28). A change from here on is an
+kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R29). A change from here on is an
 amendment the owner approves (R7 applies to this file too). "The owner" is the person whose workspace kirunak serves:
 the one who approves tasks and says when one is done. A **workspace** is the set of repos one owner works on with
 Claude Code on one machine.
@@ -103,6 +103,18 @@ validation, archives) then go unused, and what the owner needs is not in it:
   shows whole, with Start intake (the session starts the intake from it), Drop and Back. The waiting summary
   (`k waiting`) says in one line how many drafts wait and names `/k-drafts`. The board, in brief and as its page
   (D10, D13), shows a group Drafts after the tasks, one line per draft. The task list (`k list`) lists tasks only.
+- R29 A **bug** found in a task the owner has accepted is a draft (R24) that names that task, `bug-of: <task id>` in
+  its front matter: no new kind of file, and it is called a bug wherever it shows. The command
+  `k draft new <repo>/<slug> --title "..." --bug-of <task>` writes it in the repo its fix belongs to, which may be
+  another than the task's. A task that does not exist, or is not accepted yet, is refused: a bug found while a task
+  is open goes into that task, through its review or an amendment (R7). Writing a bug leaves the task as it is: still
+  accepted, its `task.md` frozen, nothing written in its folder. A bug holds what every draft holds (R26) and one
+  section more, Fix written, used only when a fix exists already (its commits or a patch file). `k draft check` also
+  refuses a bug whose task is gone or not accepted, and a Fix written commit found in neither the bug's repo nor the
+  task's. A bug has no state field: it is parked while it waits, taken once an intake starts from it, and closed by
+  a drop (R27). Bugs show among the drafts (R28), each line saying `bug of <task>`, with no command of their own. An
+  intake started from a bug first proposes together the task's edge cases, out of scope and aspects that still
+  apply, for one yes or no (a no asks each alone), then asks one at a time only what is new (the bug, its criteria).
 
 ### The task is frozen
 - R5 On approval, the task's file is frozen: its goal, numbered acceptance criteria (AC-1, AC-2, ...), numbered edge
