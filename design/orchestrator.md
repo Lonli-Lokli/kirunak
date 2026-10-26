@@ -143,7 +143,12 @@ pending  →  ready  →  running  →  done
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
   as a background command of their session. `--watch` passes every 30 s and exits when no step is ready, nothing
   runs and no step is left undecided because `ps` could not answer (above; with `ps` broken for good it waits in
-  view, and Ctrl-C ends it). Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
+  view, and Ctrl-C ends it). A launch that ends in an error leaves its step as it was (a start the plan's gate
+  refuses, a resume that throws), so it is tried again only after a wait that doubles from the interval to at most
+  ten intervals (30 s, 1, 2, 4, then 5 minutes), and its tenth error in a row stops `k run` for the owner with the
+  error and a push; a pass that finds the step started by hand, done or no longer in the plan drops its count. Before
+  this a start the gate refused was tried again at once, about 55 times a second for 70 minutes, at a full core
+  (`gulnya/k-run-start-error-spins`, niva/themes-zoom-bests S-44, 2026-10-26). Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
   owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid and its start,
   `pidStart`; the id URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a

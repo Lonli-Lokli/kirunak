@@ -355,6 +355,44 @@ test('a runner that throws after the step started fails the step instead of leav
   assert.match(progress(w), /S-1 failed: kirunak stopped the step: no runner here\n$/);
 });
 
+// A start refused before the step runs, as in niva/themes-zoom-bests S-44 (gulnya/k-run-start-error-spins): S-2's
+// input is S-1's needs.json, which S-1's fresh attempt moves aside, so the plan's gate refuses S-1's start from then on.
+const NEEDS_INPUT = PLAN.replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task, evidence/S-1-cache-sizes.tsv, steps/S-1/needs.json');
+
+test('a start that ends in an error is tried again after a doubling wait, and the tenth stops k run for the owner, never spinning', async () => {
+  const w = await approvedWorkspace(NEEDS_INPUT);
+  put(w, 'steps/S-1/needs.json', '{}');
+  const calls = fakeRunner(w);
+  const lines = [];
+  const t0 = Date.now();
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.equal(lines.filter((l) => l.endsWith(' S-1 starts')).length, 10);
+  // 20, 40, 80, 160, then 200 ms five times: the waits between the ten starts.
+  assert.ok(Date.now() - t0 >= 1300, `ten starts in ${Date.now() - t0} ms`);
+  assert.ok(lines.some((l) => l.endsWith('S-1 is tried again in 0 s (9 of 10 starts ended in an error)')));
+  assert.match(r.stopped, /^S-1 could not start 10 times in a row: .*S-2 input steps\/S-1\/needs\.json/);
+  assert.equal(pushes(lines).length, 1);
+  assert.match(pushes(lines)[0], /S-1 could not start 10 times in a row\. why: .*once it is fixed: k run weather\/offline-forecast$/);
+  assert.equal(calls.length, 0);
+  assert.equal(existsSync(join(w.p.dir, 'progress.md')), false);
+  assert.equal(r.states['S-1'], 'ready');
+});
+
+test('a start whose fault is fixed while it waits for its next try goes on by itself', async () => {
+  const w = await approvedWorkspace(NEEDS_INPUT);
+  put(w, 'steps/S-1/needs.json', '{}');
+  fakeRunner(w);
+  const lines = [];
+  const out = (l) => {
+    lines.push(l);
+    if (l.endsWith('(2 of 10 starts ended in an error)')) writeFileSync(join(w.p.dir, 'plan.md'), PLAN);
+  };
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out });
+  assert.equal(lines.filter((l) => l.endsWith(' S-1 starts')).length, 3);
+  assert.deepEqual(r.states, BOTH);
+  assert.match(r.stopped, /^S-3 waits for the owner/);
+});
+
 test('a run past its budget minutes is killed and fails, rather than hanging', async () => {
   const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nbudget: 0.005 minutes\n'));
   fakeRunner(w, () => 'nothing');
