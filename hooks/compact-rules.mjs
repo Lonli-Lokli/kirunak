@@ -71,8 +71,9 @@ const SECOND_READ = 1024 * 1024;
 
 // The newest main-thread assistant entry with usage in `text`, read from the end: { ctx, model }. A synthetic entry
 // (an error Claude Code wrote itself, all zeros) says nothing of the context, so it is passed over. The tail's first
-// line is usually cut, and fails to parse.
-function usageIn(text) {
+// line is usually cut, and fails to parse. `sidechain`: an agent's own transcript, every entry of which is marked
+// `isSidechain` (R3.2), so none is passed over for it; the main transcript's are.
+function usageIn(text, { sidechain = false } = {}) {
   const lines = text.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
@@ -84,7 +85,7 @@ function usageIn(text) {
       continue;
     }
     const u = x?.message?.usage;
-    if (x?.type !== 'assistant' || x.isSidechain === true || !u || x.message.model === '<synthetic>') continue;
+    if (x?.type !== 'assistant' || (x.isSidechain === true && !sidechain) || !u || x.message.model === '<synthetic>') continue;
     const ctx = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
     return { ctx, model: typeof x.message.model === 'string' ? x.message.model : null };
   }
@@ -93,16 +94,17 @@ function usageIn(text) {
 
 // The context of a transcript's last request, the status line's own formula, and its model: 256 KB of its
 // tail first, then 1 MB when the first held no usage (a few large tool results); null when 1 MB holds none.
-export function lastUsage(path) {
+// `opts.sidechain` for an agent's own transcript (usageIn).
+export function lastUsage(path, opts = {}) {
   if (typeof path !== 'string' || !path) return null;
-  const first = usageIn(tail(path, FIRST_READ));
+  const first = usageIn(tail(path, FIRST_READ), opts);
   if (first) return first;
   try {
     if (statSync(path).size <= FIRST_READ) return null;
   } catch {
     return null;
   }
-  return usageIn(tail(path, SECOND_READ));
+  return usageIn(tail(path, SECOND_READ), opts);
 }
 
 // The model's own context window (R2.4): the 1M models of the ladder (each passed 200k in the week of 2026-10-19),

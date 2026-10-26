@@ -364,7 +364,9 @@ default, 150,000, was measured on a week of real sessions as the size with the l
 session's ids, at the same `T`. Each fire is attributed from what the hook can know.
 - **R3.1** The turn flag: the escalation hook writes `turn: { state, at, promptId }` into `escalate/<session>.json`,
   `open` on each main-session UserPromptSubmit, `closed` on Stop.
-- **R3.2** The running agents' contexts: for each agent record with no `ended`, the last usage of its own transcript.
+- **R3.2** The running agents' contexts: for each agent record with no `ended`, the last usage of its own transcript,
+  read with its sidechain entries (every entry of an agent's transcript is marked `isSidechain`; the main
+  transcript's reading, R2.1, passes over them).
 - **R3.3** Attribution, the first row that applies: (1) no turn record → as open; (2) a running agent at least
   `OVERSHOOT` past `T` → an agent's, starving: allow; (3) the turn open and the context more than `LAG` under `T` →
   not the main's; (4) the turn closed less than `IDLE_MIN` ago → not the main's (no request between turns); (5) else

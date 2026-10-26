@@ -46,13 +46,13 @@ const lazily = (seen) => (key, fn) => {
 };
 
 // The running agents of the session's records (R6: `agents` with no `ended`), each with its own transcript's context
-// (R3.2), for attribution row 2.
+// (R3.2), for attribution row 2. Every entry of an agent's transcript is a sidechain one, so it is read as such.
 function runningAgents(record, input) {
   const agents = record?.agents && typeof record.agents === 'object' ? record.agents : {};
   const base = join(dirname(String(input.transcript_path ?? '')), String(input.session_id), 'subagents');
   return Object.entries(agents)
     .filter(([id, a]) => isId(id) && a && a.ended == null)
-    .map(([id]) => ({ id, ctx: lastUsage(join(base, `agent-${id}.jsonl`))?.ctx ?? null }));
+    .map(([id]) => ({ id, ctx: lastUsage(join(base, `agent-${id}.jsonl`), { sidechain: true })?.ctx ?? null }));
 }
 
 // The steps of the session's chain running in its task (R1.1, R1.2); null when the task's folder cannot be found.

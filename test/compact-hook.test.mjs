@@ -20,8 +20,8 @@ const fixture = (name) => readFileSync(join(FIX, name), 'utf8');
 const MODEL = 'claude-opus-5-5';
 
 // Transcript lines with only what the hook reads.
-const assistant = (ctx, model = MODEL) =>
-  JSON.stringify({ type: 'assistant', message: { model, usage: { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: ctx - 102, output_tokens: 5 } } });
+const assistant = (ctx, model = MODEL, extra = {}) =>
+  JSON.stringify({ type: 'assistant', ...extra, message: { model, usage: { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: ctx - 102, output_tokens: 5 } } });
 const toolResult = (bytes) => JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'x'.repeat(bytes) }] } });
 const writeTranscript = (path, lines) => {
   mkdirSync(join(path, '..'), { recursive: true });
@@ -81,6 +81,18 @@ test('lastUsage: two 300 KB tool results after the last assistant entry are read
   assert.deepEqual(lastUsage(path), { ctx: 140000, model: MODEL });
   writeTranscript(path, [assistant(140000), toolResult(1100 * 1024)]);
   assert.equal(lastUsage(path), null);
+});
+
+test('lastUsage: an agent\'s own transcript, every entry a sidechain one, is read with sidechain; the main\'s reading passes over them', () => {
+  const path = join(makeRepos().top, 'agent-a1.jsonl');
+  const side = { isSidechain: true };
+  writeTranscript(path, [assistant(120000, MODEL, side), assistant(180000, MODEL, side)]);
+  assert.equal(lastUsage(path), null, 'the main\'s reading skips every sidechain entry');
+  assert.deepEqual(lastUsage(path, { sidechain: true }), { ctx: 180000, model: MODEL });
+  writeTranscript(path, [assistant(140000), assistant(9000, MODEL, side)]);
+  assert.deepEqual(lastUsage(path), { ctx: 140000, model: MODEL }, 'a trailing sidechain entry of the main transcript');
+  writeTranscript(path, [assistant(170000, MODEL, side), toolResult(300 * 1024)]);
+  assert.deepEqual(lastUsage(path, { sidechain: true }), { ctx: 170000, model: MODEL }, 'the second read keeps the option');
 });
 
 test('windowOf: the ladder\'s 1M models, [1m] ids, and 200k for any other', () => {
@@ -321,7 +333,7 @@ test('R4.5: below the threshold with the turn open, a turn closed ten minutes ag
   allowed(run(makeHome({ record: { turn: { state: 'closed', at: new Date(Date.now() - 10 * 60_000).toISOString() } } })), 'turn closed');
   const agent = (ended) => {
     const h = makeHome({ record: { turn: { state: 'open', at }, agents: { a1: { type: 'general-purpose', at, ended } } } });
-    writeTranscript(join(h.top, 'projects', 'p', 's-main', 'subagents', 'agent-a1.jsonl'), [assistant(200000)]);
+    writeTranscript(join(h.top, 'projects', 'p', 's-main', 'subagents', 'agent-a1.jsonl'), [assistant(200000, MODEL, { isSidechain: true })]);
     return run(h);
   };
   const past = agent(null);
