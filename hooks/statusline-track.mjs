@@ -5,9 +5,9 @@ import { kirunakHome } from '../lib/home.mjs';
 import { TTL, updateSession } from '../lib/keeper.mjs';
 
 // One line in the user's status line command (orchestrator.md §5), fed the same JSON on stdin (statusline.md): it
-// writes the session's file, sessions/<session_id>.json, with the last call's context, the cache's lifetime and
-// expiry and the session's cost, and keeps what `k start` wrote there. It prints nothing, since the status line shows
-// what the user's own command prints, and it never fails the status line.
+// writes the session's file, sessions/<session_id>.json, with the last call's context, the model's window, the cache's
+// lifetime and expiry and the session's cost, and keeps what `k start` wrote there. It prints nothing, since the
+// status line shows what the user's own command prints, and it never fails the status line.
 
 const n = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 
@@ -20,6 +20,8 @@ export function fromStatusline(input, now = new Date()) {
   const patch = { kind: 'interactive', seen: now.toISOString() };
   if (typeof input.transcript_path === 'string') patch.transcript = input.transcript_path;
   if (typeof input.model?.id === 'string') patch.model = input.model.id;
+  // The model's window, which the compact hook reads before its own table (orchestrator.md §5, R2.4).
+  if (Number.isFinite(input.context_window?.context_window_size)) patch.window = input.context_window.context_window_size;
   const u = input.context_window?.current_usage;
   if (u === null) patch.context = null;
   else if (u && typeof u === 'object') patch.context = n(u.input_tokens) + n(u.cache_creation_input_tokens) + n(u.cache_read_input_tokens);

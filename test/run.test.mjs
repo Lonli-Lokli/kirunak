@@ -19,6 +19,12 @@ import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
 import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK } from './helpers.mjs';
 
+// The user's settings folder of every step this file runs: empty, so a step's window is the one R7.4 gives with no
+// user window (orchestrator.md §5), whatever this machine's own settings say.
+const CONFIG_DIR = mkdtempSync(join(tmpdir(), 'kirunak-run-config-'));
+process.env.CLAUDE_CONFIG_DIR = CONFIG_DIR;
+const STEP_WINDOW = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' };
+
 const PLAN = `---
 task: weather/offline-forecast
 blocked-by: []
@@ -112,9 +118,30 @@ test('pending → ready → running → done, with the run records, the briefs a
     assert.deepEqual(c.disallowedTools, ['Agent']);
     assert.match(c.prompt, /^# weather\/offline-forecast S-\d: /);
   }
-  assert.deepEqual(calls.map((c) => c.env), [{ KIRUNAK_TASK: w.id, KIRUNAK_STEP: 'S-1' }, { KIRUNAK_TASK: w.id, KIRUNAK_STEP: 'S-2' }]);
+  assert.deepEqual(calls.map((c) => c.env), [{ KIRUNAK_TASK: w.id, KIRUNAK_STEP: 'S-1', ...STEP_WINDOW }, { KIRUNAK_TASK: w.id, KIRUNAK_STEP: 'S-2', ...STEP_WINDOW }]);
   const rec = JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'run-1.json'), 'utf8'));
   assert.deepEqual([rec.session_id, rec.num_turns, rec.kirunak.exitCode, rec.kirunak.result, typeof rec.kirunak.ended], [calls[0].sessionId, 3, 0, true, 'string']);
+});
+
+test('a step compacts where it did before the handover: the workspace\'s number, else the user\'s own window for its model, else 1000000; none with the handover off (R7.4)', async () => {
+  const once = async (compact, user) => {
+    const w = await approvedWorkspace(PLAN);
+    w.ws.compact = { ...w.ws.compact, ...compact };
+    if (user) writeFileSync(join(CONFIG_DIR, 'settings.json'), JSON.stringify(user));
+    else rmSync(join(CONFIG_DIR, 'settings.json'), { force: true });
+    const calls = fakeRunner(w);
+    await run({ ws: w.ws, id: w.id, once: true });
+    return calls[0].env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+  };
+  try {
+    assert.equal(await once({ midStepLimit: 400000 }, { autoCompactWindow: 500000 }), '400000', 'the workspace\'s number beats the user\'s window');
+    assert.equal(await once({}, { autoCompactWindow: 500000 }), '500000', 'the user\'s own window');
+    assert.equal(await once({}, { autoCompactWindow: 500000, modelSettings: { opus: { autoCompactWindow: 300000 } } }), '500000', 'a model the step does not run on');
+    assert.equal(await once({}, null), '1000000', 'none set: Claude Code\'s own point');
+    assert.equal(await once({ enabled: false }, { autoCompactWindow: 500000 }), undefined, 'the handover off: no variable');
+  } finally {
+    rmSync(join(CONFIG_DIR, 'settings.json'), { force: true });
+  }
 });
 
 test('no --model or --effort when neither the plan nor the config names one; the plan line, then models.<kind>', async () => {
