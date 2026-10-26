@@ -100,7 +100,7 @@ export default {
     { model: 'fable', effort: 'high', mode: 'design', attempts: 1 },
   ],
   hook: { enabled: true, block: true, repeats: 2, commands: [] },
-  compact: { enabled: true, handoverSize: 150000, midStepLimit: 'user', alsoIn: [] },
+  compact: { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] },
 };
 ```
 
@@ -135,17 +135,21 @@ export default {
   §5): `enabled` (default true; false makes the compact hook allow every compaction and `k install` take its window
   back out of each repo's file), `handoverSize` (default 150000, the context a session hands over at; `k install`
   writes `handoverSize + 33000` as `autoCompactWindow` into each workspace repo's own `.claude/settings.local.json`,
-  since Claude Code compacts 33,000 under the window), `midStepLimit` (default `'user'`: the user's own
-  `autoCompactWindow` from their settings file, read at each compaction, so a compaction in the middle of a step never
-  comes sooner than it would without kirunak; a number sets the limit for every model) and `alsoIn` (default empty: more
+  since Claude Code compacts 33,000 under the window), `midStepLimit` (default 167000, the context a step is compacted
+  at in its middle, a 200,000 window, measured as the least weight; a number sets it for every model, and `'user'`
+  takes the user's own `autoCompactWindow` from their settings file instead, read at each compaction, so a compaction
+  in the middle of a step never comes sooner than it would without kirunak; `k run`'s steps keep the user's own window
+  either way) and `alsoIn` (default empty: more
   folders that get the handover window and count as the workspace's, such as a checkout of a tool the workspace's tasks
   change, each expanded and made real as the repos' roots are). The workspace is refused at load when `enabled` is
   not a boolean, when the window `handoverSize + 33000` is outside autoCompactWindow's range of 100,000 to 1,000,000,
-  when `midStepLimit` is neither `'user'` nor a whole number from `handoverSize + 133000` (under it the hook could
-  never hold a call) to 967,000 (a 1M model's own point), or when `alsoIn` is not a list of folders. `k install`
+  when `midStepLimit` is neither `'user'` nor a whole number above `handoverSize` (at or under it, a compaction in the
+  middle of a step would never wait for the boundary) up to 967,000 (a 1M model's own point), or when `alsoIn` is not
+  a list of folders. `k install`
   copies them into `escalate/config.json` as `compact: { enabled, handoverSize, window, midStepLimit, roots }`, `roots`
-  the real paths whose local file the window is in, so the hook reads one file. `k doctor` names each value and the
-  user's own window, and fails a user window under the floor when `midStepLimit` is `'user'` (R7.2).
+  the real paths whose local file the window is in, so the hook reads one file. `k doctor` names each value, the limit
+  with its window (`167000 (a 200000 window)`), and the user's own window, and fails a user window not above the
+  handover size when `midStepLimit` is `'user'` (R7.2).
 - A plugin module default-exports `{ name, version, provides: { <seam>: implementation } }`. The core loads the
   workspace, then each plugin in order, validates every `provides` entry against the seam's contract (each named
   function present and a function; unknown seam names refused), applies the policy, and only then runs a verb.

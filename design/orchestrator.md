@@ -316,8 +316,8 @@ A session working a task carries every earlier step in its context, and each cal
 handover lets Claude Code's own automatic compaction do the forgetting, at a moment kirunak chooses: once the context
 passes the **handover size**, the session compacts at the next **step boundary** (no step it started is running), and
 kirunak puts the task's files and state back. The session stays interactive; nobody types anything. A compaction in
-the middle of a step waits for the **mid-step limit**, by default the user's own window, so it never comes sooner than
-it would without kirunak. The pieces are `hooks/kirunak-compact.mjs` with its rules in `hooks/compact-rules.mjs`
+the middle of a step waits for the **mid-step limit**, by default 167,000 tokens of context (a 200,000 window), the
+least weight measured: a step whose context passes it is compacted in its middle. The pieces are `hooks/kirunak-compact.mjs` with its rules in `hooks/compact-rules.mjs`
 (PreCompact), `hooks/compact-start.mjs` (SessionStart) and `hooks/compact-clear.mjs` (SessionEnd), the agent records
 and the turn flag in the escalation hook (`approval.md` §7), and `k install` and `k doctor`. Facts about Claude Code
 come from its hooks and settings pages (hooks.md, settings.md on code.claude.com) and from probes of Claude Code
@@ -341,7 +341,10 @@ after, seen live), or for the state part's decision, reading again every 250 ms 
 recent the state part's decision must be for the other three parts to take it (R5.2). `PRUNE_DAYS` = 14 days:
 `compact/*.json` untouched this long are removed (R5.5). `PROJECT_ROOT` = `main`: which folder's
 `.claude/settings.local.json` a session reads (R2.7). The handover size's default, 150,000, was measured on a week of
-real sessions as the size with the least total weight read.
+real sessions as the size with the least total weight read. The mid-step limit's default, 167,000 (a 200,000 window),
+was measured on the same week, replayed again with plain windows from 150,000 to 1,000,000 and handovers under
+mid-step limits from a 200,000 to a 400,000 window, as the least weight with the task put back: 28.4% under the
+500,000 window those sessions had, against 12.1% under with the mid-step limit at that window.
 
 **R1 The step boundary.** progress.md is the only record of a step worked by hand.
 - **R1.1** `runningBy(progressText, sessions, dir)` (lib/steps.mjs) lists the steps whose last event line is
@@ -415,12 +418,15 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 - **R4.4** The context unknown: allow (the limit cannot be bounded).
 - **R4.5** Attributed to an agent (R3.3 rows 2-4): allow.
 - **R4.6** The context at least the limit, `min(LIMIT, the model's window − SLACK − LAG)`: allow, record `expect`.
-  `LIMIT` is `compact.midStepLimit` when a number, else the user's own window for this model, read live from their
-  file (its `modelSettings.<model>.autoCompactWindow`, else its `autoCompactWindow`, else the model's window). On a
-  1M model with a user window of 500,000 the allow comes with the real context between 500k and 600k, past the 467k
-  the user's own window compacts at, so never sooner; with no window set the limit is 867,000, so the held request is
-  under 967,000; on a 200k model the limit is 67,000, under `T`, and the hook holds at most one request.
-- **R4.7** No task in `sessions/<id>.json`: block (a session with no task compacts at the limit, as without kirunak).
+  `LIMIT` is `compact.midStepLimit` when a number (by default 167,000), compared with the transcript's context
+  directly, so a limit above `T` holds the band between them: on a 1M model with the handover at 150,000, a fire at
+  160,000 in the middle of a step is held and one at 167,000 let through. For `'user'` it is the user's own window for
+  this model, read live from their file (its `modelSettings.<model>.autoCompactWindow`, else its `autoCompactWindow`,
+  else the model's window): on a 1M model with a user window of 500,000 the allow comes with the real context between
+  500k and 600k, past the 467k the user's own window compacts at; with no window set the limit is 867,000, so the held
+  request is under 967,000. On a 200k model the limit is 67,000, under `T`, and the hook holds at most one request.
+- **R4.7** No task in `sessions/<id>.json`: block (a session with no task in a workspace repo compacts at the mid-step
+  limit, never at the handover size).
 - **R4.7a** No task, and the turn closed by a Stop at least `IDLE_MIN` ago: allow (`idle, no task`), record `expect`;
   Claude Code's idle compaction goes through as without kirunak. A session holding a task keeps R4.8 and R4.9.
 - **R4.8** A step of the chain running (R1.1): block, `kirunak: S-n is running; the compaction waits for the step
@@ -486,18 +492,20 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   about 100 ms skips the write, never the decision.
 
 **R7 The workspace settings** (`plugins.md` §3, `compact`).
-- **R7.1** `compact: { enabled: true, handoverSize: 150000, midStepLimit: 'user', alsoIn: [] }`, merged as `hook` is;
-  `alsoIn` folders are expanded and made real as the repos' roots are, and count as the workspace's for R4.3a.
+- **R7.1** `compact: { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] }`, merged as `hook` is;
+  `midStepLimit` is a context (167,000 is a 200,000 window), or `'user'` for the user's own window as a workspace's
+  choice; `alsoIn` folders are expanded and made real as the repos' roots are, and count as the workspace's for R4.3a.
 - **R7.2** Checked at load: `enabled` a boolean; `handoverSize + SLACK` in [100,000, 1,000,000]; `midStepLimit`
-  `'user'` or a whole number from `handoverSize + SLACK + LAG` (under it the hook could never hold a call) to 967,000;
-  `alsoIn` a list of folders. For `'user'` the same floor is checked by `k doctor`, where the value is known.
+  `'user'` or a whole number above `handoverSize` (at or under it, a compaction in the middle of a step would never
+  wait for the boundary) up to 967,000; `alsoIn` a list of folders. For `'user'` the same check is made by `k doctor`,
+  where the value is known.
 - **R7.3** config.json carries `compact: { enabled, handoverSize, window, midStepLimit, roots }`, `roots` the real paths
   whose local file holds the window (a worktree root's main checkout), so the hook reads one file. `window` is also
   how `k install` knows its own earlier value.
 - **R7.4** `k run`'s steps keep their compaction point: a step runs in its repo's root, whose file now sets the
-  handover window, so its environment sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to `midStepLimit` when a number, else the
-  user's own window for the step's model, else 1,000,000 (Claude Code cuts it to the model's own window); none with
-  `enabled: false`.
+  handover window, so its environment sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to the user's own window for the step's
+  model, else 1,000,000 (Claude Code cuts it to the model's own window), never `midStepLimit`, which is for interactive
+  sessions; none with `enabled: false`.
 
 **R8 `k install` and `k doctor`.**
 - **R8.1** The wiring, in the user's settings file as kirunak's other hooks: PreCompact `auto|manual` (`timeout: 10`),
@@ -517,11 +525,13 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   and any other kept. Then, when git does not ignore the file (`git check-ignore`), `/.claude/settings.local.json` is
   added to the repo's own excludes file (`git rev-parse --git-path info/exclude`, shared with its worktrees); never
   the committed `.gitignore` and never the global excludes file, which is Claude Code's. The user's settings file is
-  never written for the window, and its `autoCompactWindow` is the mid-step limit: `k install` names it and each
+  never written for the window; its `autoCompactWindow` holds outside the workspace repos and in `k run`'s steps
+  (R7.4), and is the mid-step limit too when `midStepLimit` is `'user'`: `k install` names it and each
   `modelSettings.<model>.autoCompactWindow` there as the user's, kept, in the lines `k doctor` prints (R8.3). Before
   `k init`, no roots: the line says the next `k install` writes them.
-- **R8.3** `k doctor`: `compact (<module> | kirunak's defaults): handover size, window, mid-step limit` with the user's
-  own window and its per-model values, failing a user window under R7.2's floor; the compact hook's wiring; per root
+- **R8.3** `k doctor`: `compact (<module> | kirunak's defaults): handover size, window, mid-step limit`, a number named
+  with its window (`167000 (a 200000 window)`) and noting a user window under that window, `'user'` with the user's
+  own window and its per-model values, failing one not above the handover size (R7.2); the compact hook's wiring; per root
   the window, ignored by git, or the case that keeps it out (failing until the user acts); the user's own window,
   named and never failed; `here`, the window a session started in this folder gets and from where, and that outside
   the roots the hook never blocks; and the window of this session's model, failing a model not in R2.4's table.
