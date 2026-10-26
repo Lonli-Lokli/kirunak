@@ -5,7 +5,7 @@ import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  blockLines, commandOf, count, logLine, message, modelOf, notificationOf, prune, pushIn, pushLines, readConfig,
+  blockLines, commandOf, costOf, count, logLine, message, modelOf, notificationOf, prune, pushIn, pushLines, readConfig,
   readState, repeatsOf, runEnd, rungFor, signatureOf, statePath, tail, taskOf, unfitFor, unmarkEdited, withState,
   writeState,
 } from './escalate-state.mjs';
@@ -18,12 +18,21 @@ import {
 // node: modules, lib/home.mjs and its rules, because it runs on every failed Bash call (AC-12).
 //
 // Its events (R4.1): PostToolUseFailure on Bash counts, and on an edit tool takes back that edit's flag (O-2);
-// PostToolUse on Agent records a launch, with its name and output file; SubagentStop records every named agent's end
-// and may lift the block; UserPromptSubmit opens the main session's turn, counts the end of a noted background build
-// (R4.5) and hands on the push a noted k run's end carries (R7.2); Stop closes the turn and keeps the session's
-// background tasks; UserPromptExpansion of /k-go-on is the owner's override;
+// PostToolUse on Agent records a launch, with its name and output file; SubagentStop records every named agent's end,
+// may lift the block and logs what a rung agent's run cost; UserPromptSubmit opens the main session's turn, counts the
+// end of a noted background build (R4.5) and hands on the push a noted k run's end carries (R7.2); Stop closes the
+// turn and keeps the session's background tasks; UserPromptExpansion of /k-go-on is the owner's override;
 // SessionStart and PostModelSwitch record the session's model. The agent records and the turn flag are what the
 // PreCompact hook reads (design/orchestrator.md §5); they print nothing, so no agent is told anything by them.
+//
+// Its log, escalate.log (R3.2, AC-21), one line an event, each with the time, session, task, step, trigger, rung and
+// signature: `hook fired`, `hook blocked` and `repeat after fire` with the count; `block lifted`, `lift refused`,
+// `/k-go-on override` (with tokens all 0: no agent ran) and `/k-go-on refused: nested run`; and `rung agent ended` when
+// a rung agent the session launched after a fire on record stops, whether or not it lifted the block: the agent's id
+// and type, `for` (`hook fired`, or `hook blocked` while that signature's block was in force), the rung it ran as, its
+// model, `finished`, `lifted` and the tokens its run cost (`input`, `output`, `cacheRead`, `cacheWrite`; null when its
+// transcript cannot be read). Only that row carries an agent's tokens; an agent that ends twice (a hand-back) has a
+// second row with its whole run, so a reader keeps the newest row per agent and nothing is counted twice.
 //
 // The block (approval.md §7). The first failure after a fire sets the session's `block` (the caller's, for a
 // subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted. It
@@ -48,6 +57,8 @@ import {
 const OUTPUT_TAIL = 64 * 1024;
 const GO_ON = 'k-go-on';
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// An override's cost: no agent ran for it.
+const NO_TOKENS = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 // The agents whose end lifts a block at `rung` (R4.8): the rung above's, as config.json lists them (its generated
 // <model>-step first), or that <model>-step alone; none at the top of the ladder (E-9).
@@ -194,7 +205,8 @@ function launched(input, home, now) {
 // agents have an empty `agent_type`, which neither the matcher nor the check below lets in), with whether it finished
 // its run, and an agent of a rung above may lift the block. It fires twice per agent: the second changes nothing,
 // unless it is the first to see the run finished (a hand-back after a first stop that had not), and then keeps the
-// first end's time. An end the Stop snapshot inferred (`endedBy`) gives way to the agent's own.
+// first end's time. An end the Stop snapshot inferred (`endedBy`) gives way to the agent's own. When a rung agent
+// answered a fire, its cost is logged after the lift's line, at each end recorded: a hand-back's row is its whole run.
 function ended(input, home, config, now) {
   const id = input.agent_id;
   if (typeof id !== 'string' || !id || !input.agent_type) return;
@@ -207,14 +219,58 @@ function ended(input, home, config, now) {
     const record = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: again ? launch.ended : now.toISOString(), finished };
     delete record.endedBy;
     state.agents[id] = record;
+    const fire = fireAnswered(state, config, input, launch); // before a lift forgets the fire
     const out = liftByAgent(state, home, config, input, launch, finished, now);
     writeState(home, state);
-    return out;
+    return { out, fire };
   });
   if (!result) return;
+  const { out, fire } = result;
   const run = { agent: String(input.agent_type).split(':').pop(), agentId: id };
-  if (result.lifted) logLift(home, input.session_id, result.block, run, now, { transcriptBytes: bytes });
-  else logLift(home, input.session_id, result.block, null, now, { trigger: 'lift refused', refused: { ...run, ...result.refused, transcriptBytes: bytes } });
+  if (out?.lifted) logLift(home, input.session_id, out.block, run, now, { transcriptBytes: bytes });
+  else if (out) logLift(home, input.session_id, out.block, null, now, { trigger: 'lift refused', refused: { ...run, ...out.refused, transcriptBytes: bytes } });
+  if (fire) logCost(home, input, config, fire, { finished, lifted: Boolean(out?.lifted) }, now);
+}
+
+// The rung an agent runs as: the first on config.json's ladder whose lifters name it, with the rung below; null for an
+// agent no rung lists.
+function rungOfAgent(ladder, type) {
+  const list = Array.isArray(ladder) ? ladder : [];
+  for (let i = 1; i < list.length; i++) {
+    const agents = liftersOf({ up: list[i]?.model, agents: Array.isArray(list[i]?.agents) ? list[i].agents : [] });
+    if (agents.includes(type)) return { from: list[i - 1]?.model ?? null, to: list[i].model, agents };
+  }
+  return null;
+}
+
+// The fire a rung agent's end answers (AC-21): the agent is one config.json lists for some rung, the session itself
+// launched it, and it did so after a fire still on record in the session's file, a failure's `firedAt` or the block's
+// (`firedAt`, else `at`, while the block is in force or was lifted after the launch). The block's fire when the block
+// names the agent, else the newest. → { for, rung, signature, model } or null; `for` is `hook blocked` while that
+// signature's block is in force, else `hook fired`; the rung is the agent's, from the model that failed where known.
+function fireAnswered(state, config, input, launch) {
+  if (!launch || launch.by != null) return null;
+  const type = String(input.agent_type).split(':').pop();
+  const rung = rungOfAgent(config.ladder, type);
+  if (!rung) return null;
+  const since = Date.parse(launch.at);
+  const { block } = state;
+  const fires = Object.entries(state.failures).filter(([, f]) => f?.fired)
+    .map(([hash, f]) => ({ hash, kind: f.kind, label: f.label, at: Date.parse(f.firedAt) }));
+  if (block && typeof block === 'object' && (inForce(block) || Date.parse(block.lifted?.at) > since)) {
+    const names = Array.isArray(block.rung?.agents) && block.rung.agents.includes(type);
+    fires.push({ hash: block.hash, kind: block.kind, label: block.label, at: Date.parse(block.firedAt ?? block.at), names });
+  }
+  const before = fires.filter((f) => f.at < since);
+  const fire = before.find((f) => f.names) ?? before.sort((a, b) => b.at - a.at)[0];
+  if (!fire) return null;
+  const blocked = inForce(block) && block.hash === fire.hash;
+  return {
+    for: blocked ? 'hook blocked' : 'hook fired',
+    rung: { from: (blocked ? block.rung?.from : state.model) ?? rung.from, to: rung.to, agents: rung.agents },
+    signature: { kind: fire.kind ?? null, label: fire.label ?? null, hash: fire.hash ?? null },
+    model: launch.model ?? null,
+  };
 }
 
 // The lift by an agent one rung up (R5.3, E-8): the agent that stopped is of the rung above the block's (the generated
@@ -260,7 +316,7 @@ export function override(input, home, now, ancestors = ancestry) {
     }
     return found;
   });
-  logLift(home, input.session_id, block ?? null, 'override', now);
+  logLift(home, input.session_id, block ?? null, 'override', now, { tokens: NO_TOKENS });
 }
 
 // The commands of the hook's ancestors, nearest first, read with ps on a /k-go-on alone: `claude` for Claude Code (its
@@ -312,8 +368,8 @@ function forget(state, home, block, hashes) {
 }
 
 // A lift's line in escalate.log (R3.2, AC-21): `block lifted` with the agent, its id and its transcript's size (a
-// short run that finished lifts, and the usage review can see it), or `/k-go-on override`; `extra` names a refusal
-// instead (`lift refused`, `/k-go-on refused: nested run`).
+// short run that finished lifts, and the usage review can see it), or `/k-go-on override`, its tokens all 0; `extra`
+// names a refusal instead (`lift refused`, `/k-go-on refused: nested run`). The agent's tokens go on its own line.
 function logLift(home, session, block, liftedBy, now, extra = {}) {
   logLine(home, {
     time: now.toISOString(),
@@ -328,6 +384,30 @@ function logLift(home, session, block, liftedBy, now, extra = {}) {
     count: block?.count ?? null,
     liftedBy,
     ...extra,
+  });
+}
+
+// A rung agent's line in escalate.log (AC-21): `rung agent ended`, with the fire it answered, whether it finished and
+// lifted the block, and what its whole run cost, its transcript read here alone; the model is the transcript's
+// newest, else the one its launch resolved.
+function logCost(home, input, config, fire, { finished, lifted }, now) {
+  const { tokens, model } = costOf(input.agent_transcript_path);
+  const task = taskOf(home, input.session_id, config);
+  logLine(home, {
+    time: now.toISOString(),
+    session: input.session_id,
+    agent: input.agent_id,
+    agentType: input.agent_type,
+    task: task?.id ?? null,
+    step: task?.step ?? null,
+    trigger: 'rung agent ended',
+    for: fire.for,
+    rung: fire.rung,
+    signature: fire.signature,
+    model: model ?? fire.model,
+    finished,
+    lifted,
+    tokens,
   });
 }
 

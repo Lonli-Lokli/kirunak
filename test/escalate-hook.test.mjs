@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  commandOf, count, EFFORTS as HOOK_EFFORTS, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, runEnd,
+  commandOf, costOf, count, EFFORTS as HOOK_EFFORTS, familyOf as hookFamily, message, modelOf, notificationOf, prune, readState, runEnd,
   rungFor, signatureOf, statePath, unfitFor, withState,
 } from '../hooks/escalate-state.mjs';
 import { ancestry, nested, override } from '../hooks/kirunak-escalate.mjs';
@@ -197,6 +197,13 @@ const TRANSCRIPTS = {
     '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/src/ladder.mjs"}}]},"isSidechain":true}',
     '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function climb() {}"}]},"isSidechain":true}',
     '{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Done: climb reads the rung above from config.json, and climb.test proves it."}]},"isSidechain":true}',
+  ],
+  // A run that finished, with the usage of its two assistant entries.
+  costed: [
+    '{"type":"user","message":{"role":"user","content":"Design the fix for: climbs one rung failed again."},"isSidechain":true}',
+    '{"type":"assistant","message":{"id":"msg_01","model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/src/ladder.mjs"}}],"usage":{"input_tokens":12,"output_tokens":340,"cache_read_input_tokens":0,"cache_creation_input_tokens":18000}},"isSidechain":true}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"export function climb() {}"}]},"isSidechain":true}',
+    '{"type":"assistant","message":{"id":"msg_02","model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Done: climb reads the rung above from config.json, and climb.test proves it."}],"usage":{"input_tokens":3,"output_tokens":95,"cache_read_input_tokens":18000,"cache_creation_input_tokens":420}},"isSidechain":true}',
   ],
 };
 const transcriptOf = (name) => `${TRANSCRIPTS[name].join('\n')}\n`;
@@ -719,7 +726,8 @@ test('only an agent of the rung above, launched after the block, lifts it when i
   assert.deepEqual({ ...block.lifted, at: 0 }, { by: 'agent', agent: 'fable-step', agentId: 'alate', at: 0 });
   assert.deepEqual(failures, {}, 'the lifted failure is forgotten: its next failure is a new count');
   assert.equal(freeze(edit(), h.home).stdout, '');
-  const lift = h.log().at(-1);
+  const [lift, cost] = h.log().slice(-2);
+  assert.equal(cost.trigger, 'rung agent ended', 'the run\'s cost follows the lift');
   assert.deepEqual([lift.trigger, lift.liftedBy, lift.signature.label, lift.task, lift.rung.agents], ['block lifted', { agent: 'fable-step', agentId: 'alate' }, 'climbs one rung', ID, ['fable-step', 'domain-deep']]);
   assert.equal(lift.transcriptBytes, statSync(FINISHED).size, 'the run\'s size is logged with the lift');
   const deep = blocked();
@@ -808,7 +816,9 @@ test('an edit that fails to apply takes back its flag, so the next failure is no
 
 // ---- S-16: the review's findings (S-10 review.md) ----
 
-const lastRow = (h) => h.log().at(-1);
+// The log without the rung agents' cost lines, which follow each lift and refusal (AC-21).
+const rows = (h) => h.log().filter((l) => l.trigger !== 'rung agent ended');
+const lastRow = (h) => rows(h).at(-1);
 
 test('unfitFor: a launch runs as a rung when its models are of the rung\'s family and its effort not below; runEnd: a run finished with a hand-back or a last text, not interrupted (S-10 B-1, S-2)', () => {
   const ladder = [{ model: 'sonnet' }, { model: 'fable', id: 'claude-fable-5[1m]', effort: 'high' }];
@@ -842,7 +852,7 @@ test('a rung agent launched on a cheaper model or a lower effort ends and the bl
     const row = lastRow(h);
     assert.deepEqual([row.trigger, row.refused.agentId, row.refused.why], ['lift refused', id, why], id);
   }
-  assert.deepEqual([lastRow(h).refused.model, h.log().at(-2).refused.effort, h.log().at(-3).refused.asked], [null, 'low', 'haiku']);
+  assert.deepEqual([lastRow(h).refused.model, rows(h).at(-2).refused.effort, rows(h).at(-3).refused.asked], [null, 'low', 'haiku']);
   hook(launchOf('fable-step', 'afable', {}, { input: { model: 'fable', effort: 'xhigh' } }), h.home);
   hook(stopOf('fable-step', 'afable'), h.home);
   assert.equal(h.state().block.lifted.agentId, 'afable', 'Fable at an effort above the rung\'s lifts');
@@ -889,7 +899,7 @@ test('fire, fable-step finishes, the test fails again: the block names no agent 
   cycle(h, 2);
   hook(launchOf('fable-step', 'adesign'), h.home);
   hook(stopOf('fable-step', 'adesign'), h.home);
-  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired'], 'no block yet, so nothing to lift');
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'rung agent ended'], 'no block yet, so nothing to lift; the run\'s cost is logged');
   freeze(edit(), h.home);
   hook(failure(), h.home);
   const { block } = h.state();
@@ -1008,6 +1018,88 @@ test('/k-go-on in a claude run that another claude started lifts nothing and is 
   const real = blocked();
   hook(GO, real.home);
   assert.equal(real.state().block.lifted?.by ?? null, nested(names) ? null : 'override', JSON.stringify(names));
+});
+
+// ---- AC-21: what an escalation cost ----
+
+const COSTED = transcriptPath('costed');
+const COSTED_TOKENS = { input: 15, output: 435, cacheRead: 18000, cacheWrite: 18420 };
+const costRows = (h) => h.log().filter((l) => l.trigger === 'rung agent ended');
+
+test('a rung agent the session launched after a fire logs its run\'s tokens when it ends, lifting nothing (AC-21)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  cycle(h, 2);
+  hook(launchOf('fable-step', 'adesign'), h.home);
+  hook(stopOf('fable-step', 'adesign', COSTED), h.home);
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'rung agent ended']);
+  const { time, ...row } = h.log()[1];
+  assert.ok(Date.parse(time) > Date.parse(h.log()[0].time));
+  assert.deepEqual(row, {
+    session: 's1', agent: 'adesign', agentType: 'fable-step', task: ID, step: 'S-5', trigger: 'rung agent ended', for: 'hook fired',
+    rung: { from: 'claude-opus-5-5', to: 'fable', agents: ['fable-step', 'domain-deep'] },
+    signature: h.log()[0].signature, model: 'claude-fable-5', finished: true, lifted: false, tokens: COSTED_TOKENS,
+  });
+});
+
+test('fire, block, the rung agent finishes: its tokens beside the lift, for the block; the lift\'s own line has none (AC-21)', () => {
+  const h = blocked();
+  hook(launchOf('fable-step', 'alift'), h.home);
+  hook(stopOf('fable-step', 'alift', COSTED), h.home);
+  assert.deepEqual(h.log().map((l) => l.trigger), ['hook fired', 'hook blocked', 'block lifted', 'rung agent ended']);
+  const [lift, cost] = h.log().slice(-2);
+  const { block } = h.state();
+  assert.deepEqual([cost.for, cost.lifted, cost.finished, cost.agent, cost.signature.hash, cost.rung], ['hook blocked', true, true, 'alift', block.hash, block.rung]);
+  assert.deepEqual(cost.tokens, COSTED_TOKENS);
+  assert.equal(lift.tokens, undefined, 'counted once');
+});
+
+test('a rung agent that ends twice, first unfinished, then handed back: a second row with its whole run, lifted; a third stop logs nothing (AC-21, R6.2)', () => {
+  const h = blocked();
+  hook(launchOf('fable-step', 'atwice'), h.home);
+  hook(stopOf('fable-step', 'atwice', '/dev/null', { stop_hook_active: false }), h.home);
+  assert.equal(h.state().block.lifted, null, 'an unfinished run lifts nothing');
+  hook(stopOf('fable-step', 'atwice', COSTED, { stop_hook_active: true }), h.home);
+  hook(stopOf('fable-step', 'atwice', COSTED, { stop_hook_active: true }), h.home);
+  assert.deepEqual(h.log().map((l) => l.trigger).slice(2), ['lift refused', 'rung agent ended', 'block lifted', 'rung agent ended']);
+  const [first, second] = costRows(h);
+  assert.deepEqual([first.agent, first.finished, first.lifted, first.tokens], ['atwice', false, false, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }]);
+  assert.deepEqual([second.agent, second.finished, second.lifted, second.tokens], ['atwice', true, true, COSTED_TOKENS], 'the newest row is the whole run');
+});
+
+test('an agent launched before the fire, by a subagent, unknown or of no rung logs no cost; an unreadable transcript logs tokens null (AC-21)', () => {
+  const h = makeHome({}, FABLE_LADDER);
+  hook(start('claude-opus-5-5'), h.home);
+  hook(launchOf('fable-step', 'aearly'), h.home);
+  hook(launchOf('general-purpose', 'abuild', {}, { response: { resolvedModel: 'claude-opus-5-5' } }), h.home);
+  cycle(h, 2);
+  hook(launchOf('general-purpose', 'ahelper', {}, { response: { resolvedModel: 'claude-opus-5-5' } }), h.home);
+  hook(launchOf('fable-step', 'anested', { agent_id: 'abuild', agent_type: 'general-purpose' }), h.home);
+  for (const [type, id] of [['fable-step', 'aearly'], ['general-purpose', 'ahelper'], ['fable-step', 'anested'], ['fable-step', 'aunknown']]) {
+    hook(stopOf(type, id, COSTED), h.home);
+    assert.deepEqual(costRows(h), [], `${type} ${id}`);
+  }
+  hook(launchOf('fable-step', 'agone'), h.home);
+  hook(stopOf('fable-step', 'agone', join(TRANSCRIPT_DIR, 'missing.jsonl'), { last_assistant_message: 'Done: the design.' }), h.home);
+  const [row] = costRows(h);
+  assert.deepEqual([row.agent, row.tokens, row.model, row.finished], ['agone', null, 'claude-fable-5', true], 'the row lands, its model the launch\'s');
+});
+
+test('costOf counts an API message split into entries once, skips Claude Code\'s own model; /k-go-on logs tokens all 0 (AC-21)', () => {
+  const split = join(TRANSCRIPT_DIR, 'transcript-split.jsonl');
+  writeFileSync(split, `${[
+    '{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"x"}],"usage":{"input_tokens":4,"output_tokens":1,"cache_read_input_tokens":900,"cache_creation_input_tokens":60}}}',
+    '{"type":"assistant","message":{"id":"msg_01","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{}}],"usage":{"input_tokens":4,"output_tokens":210,"cache_read_input_tokens":900,"cache_creation_input_tokens":60}}}',
+    '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"assistant"}]}}',
+    'not json, "assistant"',
+    '{"type":"assistant","message":{"id":"msg_02","model":"<synthetic>","content":[{"type":"text","text":"No response requested."}],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}',
+  ].join('\n')}\n`);
+  assert.deepEqual(costOf(split), { tokens: { input: 4, output: 210, cacheRead: 900, cacheWrite: 60 }, model: 'claude-opus-5-5' });
+  assert.deepEqual(costOf('/dev/null'), { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, model: null });
+  assert.deepEqual(costOf(join(TRANSCRIPT_DIR, 'missing.jsonl')), { tokens: null, model: null });
+  const h = blocked();
+  goOn(h.home);
+  assert.deepEqual([h.log().at(-1).trigger, h.log().at(-1).tokens], ['/k-go-on override', { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }]);
 });
 
 // ---- AC-12: the time the hook adds, machine-bound, so only with KIRUNAK_TIMING=1 ----

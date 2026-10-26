@@ -338,7 +338,14 @@ repeat late, never early.
 **Switches and records.** `hook.enabled`, `hook.block`, `hook.repeats` and `hook.commands` in the workspace
 (`plugins.md` §3); `k doctor` says when the hook or the block is off. Every fire, block, lift, refusal and override is
 a line in `$KIRUNAK_HOME/escalate.log` (time, session, agent, task, step, trigger `hook fired`, `hook blocked`, `block
-lifted`, `/k-go-on override`, `lift refused` or `/k-go-on refused: nested run`, the rung from and to, the signature). A failure
+lifted`, `/k-go-on override`, `lift refused` or `/k-go-on refused: nested run`, the rung from and to, the signature).
+So is every escalation's cost (AC-21): when a rung agent (one `config.json` lists for some rung) that the session
+itself launched after a fire still on record stops, lifting or not, a `rung agent ended` line carries the agent's id
+and type, `for` (`hook blocked` while that signature's block was in force, else `hook fired`), the rung it ran as, the
+signature, its model (its transcript's newest, else the launch's), `finished`, `lifted`, and `tokens` (`input`,
+`output`, `cacheRead`, `cacheWrite`) summed over its whole transcript, each API message once; `tokens` is null when the
+transcript cannot be read. A `/k-go-on override` line carries tokens all 0, since no agent ran; `block lifted` and
+`lift refused` carry none, so nothing is counted twice. A failure
 of the log never fails the call. State files sit in `$KIRUNAK_HOME/escalate/` and are removed after 14 days. Every
 read-modify-write of one takes a `<file>.lock` folder: it waits at most 100 ms, takes over a lock older than 2 s, and
 when it cannot take it skips the write rather than fail the call, so two hooks at one instant no longer lose a block

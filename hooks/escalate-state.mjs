@@ -494,6 +494,44 @@ export function runEnd(path, lastMessage = null) {
   return { finished: !interrupted && (handback || text || said), bytes };
 }
 
+// The usage fields an assistant entry carries, by the names escalate.log gives them.
+const USAGE = { input: 'input_tokens', output: 'output_tokens', cacheRead: 'cache_read_input_tokens', cacheWrite: 'cache_creation_input_tokens' };
+
+/**
+ * What a rung agent's run cost (AC-21), from its whole transcript, read once and only on that agent's end: the usage
+ * of every assistant entry summed, and the model of the newest (`<synthetic>`, Claude Code's own, skipped). Claude Code
+ * writes one API message as an entry a content block, each with the message's `id` and usage, so a message is counted
+ * once, with its last entry's usage. A transcript that cannot be read gives tokens null. → { tokens, model }
+ */
+export function costOf(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return { tokens: null, model: null };
+  }
+  const usage = new Map();
+  let model = null;
+  for (const line of text.split('\n')) {
+    if (!line.includes('"assistant"')) continue; // a user entry, often a long tool result, is never parsed
+    let x;
+    try {
+      x = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const m = x?.type === 'assistant' ? x.message : null;
+    if (!m || typeof m !== 'object') continue;
+    if (typeof m.model === 'string' && m.model && !m.model.startsWith('<')) model = m.model;
+    if (m.usage && typeof m.usage === 'object') usage.set(typeof m.id === 'string' && m.id ? m.id : Symbol('entry'), m.usage);
+  }
+  const tokens = Object.fromEntries(Object.keys(USAGE).map((k) => [k, 0]));
+  for (const u of usage.values()) {
+    for (const [k, field] of Object.entries(USAGE)) tokens[k] += Number.isFinite(u[field]) ? u[field] : 0;
+  }
+  return { tokens, model };
+}
+
 // The model that failed (R4.8): the session's recorded one, else its transcript's; for a subagent, the model its
 // launch resolved (in the caller's file), else its own transcript's (`<session>/subagents/agent-<id>.jsonl`).
 export function modelOf(input, caller) {
