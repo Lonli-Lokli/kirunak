@@ -64,8 +64,10 @@ test('a root not written, not ignored, the owner\'s, kirunak\'s earlier window, 
 
 test('a user window under the floor FAILs naming compact.midStepLimit; a number is the limit itself; the variable and a per-model key FAIL', () => {
   const s = installed({ user: { autoCompactWindow: 100000, modelSettings: {} } });
-  const floor = 'is under 233000: the hook could never hold a call; set compact.midStepLimit to a number of at least 233000 in';
+  const floor = 'is under 283000: the hook could never hold a call; set compact.midStepLimit to a number of at least 283000 in';
   assert.deepEqual(s.fails(), [`the user's own window 100000 ${floor} ${s.ws.modulePath}, or raise the window`]);
+  const between = installed({ user: { autoCompactWindow: 250000, modelSettings: {} } });
+  assert.deepEqual(between.fails(), [`the user's own window 250000 ${floor} ${between.ws.modulePath}, or raise the window`]);
   s.ws.compact = { ...s.ws.compact, midStepLimit: 400000 };
   assert.equal(s.check()[0][1], `compact (${s.ws.modulePath}): handover size 150000, window 183000, mid-step limit 400000`);
   put(s.local(s.hub), { autoCompactWindow: 183000, modelSettings: { opus: { autoCompactWindow: 200000 } } });

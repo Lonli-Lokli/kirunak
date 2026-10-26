@@ -146,8 +146,8 @@ test('thresholdOf clamps to [100,000, the model\'s window]; limitOf takes the nu
   assert.equal(thresholdOf(null, 1_000_000), 1_000_000 - SLACK);
   assert.equal(limitOf({ midStepLimit: 'user', user: 500000, wModel: 1_000_000 }), 500000);
   assert.equal(limitOf({ midStepLimit: 300000, user: 500000, wModel: 1_000_000 }), 300000);
-  assert.equal(limitOf({ midStepLimit: 'user', user: 1_000_000, wModel: 1_000_000 }), 1_000_000 - SLACK - LAG);
-  assert.equal(limitOf({ midStepLimit: 'user', user: 500000, wModel: 200_000 }), 117000);
+  assert.equal(limitOf({ midStepLimit: 'user', user: 1_000_000, wModel: 1_000_000 }), 867000, 'a 1M model\'s point less SLACK and LAG');
+  assert.equal(limitOf({ midStepLimit: 'user', user: 500000, wModel: 200_000 }), 67000);
   const r = makeRepos({ user: { autoCompactWindow: 500000, modelSettings: { [MODEL]: { autoCompactWindow: 400000 } } } });
   assert.equal(userWindow({ configDir: r.configDir, model: MODEL, wModel: 1_000_000 }).window, 400000);
   assert.equal(userWindow({ configDir: r.configDir, model: 'claude-other-4', wModel: 200_000 }).window, 500000);
@@ -329,7 +329,7 @@ test('R4.4: no usage in the transcript: allowed, since the limit cannot be bound
 
 test('R4.5: below the threshold with the turn open, a turn closed ten minutes ago, an agent past it: allowed (E-6)', () => {
   const at = new Date().toISOString();
-  allowed(run(makeHome({ ctx: 90000, record: { turn: { state: 'open', at } } })), 'below threshold');
+  allowed(run(makeHome({ ctx: 40000, record: { turn: { state: 'open', at } } })), 'below threshold');
   allowed(run(makeHome({ record: { turn: { state: 'closed', at: new Date(Date.now() - 10 * 60_000).toISOString() } } })), 'turn closed');
   const agent = (ended) => {
     const h = makeHome({ record: { turn: { state: 'open', at }, agents: { a1: { type: 'general-purpose', at, ended } } } });
@@ -349,15 +349,15 @@ test('R4.6: past the mid-step limit: the user\'s window, the workspace\'s number
   assert.equal(run(makeHome({ ctx: 499000 })).out.decision, 'block');
   allowed(run(makeHome({ ctx: 320000, compact: { midStepLimit: 300000 } })), 'limit');
   const none = run(makeHome({ ctx: 600000, user: {} }));
-  assert.deepEqual([none.out.decision, none.line.limit], ['block', 1_000_000 - SLACK - LAG]);
+  assert.deepEqual([none.out.decision, none.line.limit], ['block', 867000]);
   const per = run(makeHome({ ctx: 420000, user: { autoCompactWindow: 500000, modelSettings: { [MODEL]: { autoCompactWindow: 400000 } } } }));
   assert.deepEqual([per.line.decision, per.line.limit], ['allow', 400000]);
 });
 
 test('R4.6 on a 200k model: the limit below the threshold, so at most one request is held (E-8)', () => {
-  const held = run(makeHome({ ctx: 105000, model: 'claude-other-4' }));
-  assert.deepEqual([held.out.decision, held.line.T, held.line.limit], ['block', 150000, 117000]);
-  allowed(run(makeHome({ ctx: 117000, model: 'claude-other-4' })), 'limit');
+  const held = run(makeHome({ ctx: 60000, model: 'claude-other-4' }));
+  assert.deepEqual([held.out.decision, held.line.T, held.line.limit], ['block', 150000, 67000]);
+  allowed(run(makeHome({ ctx: 67000, model: 'claude-other-4' })), 'limit');
 });
 
 test('R4.7: a session with no task in a workspace repo is held to the limit, as today (E-3)', () => {

@@ -139,7 +139,7 @@ export default {
   folders that get the handover window and count as the workspace's, such as a checkout of a tool the workspace's tasks
   change, each expanded and made real as the repos' roots are). The workspace is refused at load when `enabled` is
   not a boolean, when the window `handoverSize + 33000` is outside autoCompactWindow's range of 100,000 to 1,000,000,
-  when `midStepLimit` is neither `'user'` nor a whole number from `handoverSize + 83000` (under it the hook could
+  when `midStepLimit` is neither `'user'` nor a whole number from `handoverSize + 133000` (under it the hook could
   never hold a call) to 967,000 (a 1M model's own point), or when `alsoIn` is not a list of folders. `k install`
   copies them into `escalate/config.json` as `compact: { enabled, handoverSize, window, midStepLimit, roots }`, `roots`
   the real paths whose local file the window is in, so the hook reads one file. `k doctor` names each value and the

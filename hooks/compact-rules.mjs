@@ -16,7 +16,8 @@ import { dirname, join, resolve } from 'node:path';
 // output ≥ 20,000.
 export const SLACK = 33_000;
 // The most one request adds past the transcript's last usage (R2.2): the transcript lags the request being checked.
-export const LAG = 50_000;
+// Measured on two weeks of main transcripts: the largest step between two usages was 89,288, so 100,000.
+export const LAG = 100_000;
 // An agent this far past the threshold is having its compactions blocked by us: the block is lifted (R3.3 row 2).
 export const OVERSHOOT = 50_000;
 // Idle compaction fires after about 54 minutes on the 1-hour cache, so a fire within this of a Stop is not

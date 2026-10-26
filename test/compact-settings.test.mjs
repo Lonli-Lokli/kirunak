@@ -27,7 +27,7 @@ test('each value out of its range is refused at load, with its message', async (
     [{ handoverSize: 150000.5 }, 'compact.handoverSize must be a whole number'],
     [{ midStepLimit: 'mine' }, 'compact.midStepLimit must be \'user\' (the user\'s own window) or a whole number of at most 967000'],
     [{ midStepLimit: 970000 }, 'compact.midStepLimit must be \'user\''],
-    [{ midStepLimit: 232999 }, 'compact.midStepLimit 232999 is under 233000 (handoverSize + 33000 + 50000): below that the hook could never hold a call'],
+    [{ midStepLimit: 282999 }, 'compact.midStepLimit 282999 is under 283000 (handoverSize + 33000 + 100000): below that the hook could never hold a call'],
     [{ alsoIn: '~/sources/kirunak' }, 'compact.alsoIn must be a list of folders'],
     [{ alsoIn: [''] }, 'compact.alsoIn must be a list of folders'],
   ];
@@ -36,7 +36,8 @@ test('each value out of its range is refused at load, with its message', async (
     assert.ok(problem?.startsWith(message), `${JSON.stringify(compact)}: ${problem}`);
     await assert.rejects(ladderWorkspace({ compact }), (e) => e.message.includes(`: ${message}`), JSON.stringify(compact));
   }
-  assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 233000 }), [], 'the floor itself passes');
+  assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 283000 }), [], 'the floor itself passes');
+  assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 500000 }), [], 'the owner\'s 500,000 passes');
   assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 967000 }), [], 'a 1M model\'s own point passes');
   assert.match(checkCompact(5)[0], /^compact must be an object/);
   await assert.rejects(ladderWorkspace({ compact: [] }), /compact must be an object/);

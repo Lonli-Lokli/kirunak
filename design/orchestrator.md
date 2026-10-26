@@ -319,13 +319,15 @@ come from its hooks and settings pages (hooks.md, settings.md on code.claude.com
 2.1.310; the rest is judgement.
 
 **The numbers.** `SLACK` = 33,000: Claude Code compacts at the window − min(max output, 20,000) − 13,000, and every
-model kirunak runs has a max output of at least 20,000, so the threshold `T` is the window − 33,000. `LAG` = 50,000:
+model kirunak runs has a max output of at least 20,000, so the threshold `T` is the window − 33,000. `LAG` = 100,000:
 the most one request adds past the transcript's last usage (Claude Code checks the request about to go out; the
-transcript lags it by the last tool results). `OVERSHOOT` = 50,000: an agent this far past `T` is having its
-compactions held by us. `IDLE_MIN` = 50 minutes: idle compaction fires after about 54 minutes on the 1-hour cache.
-`CAP` = 9,500 characters: an additionalContext string over 10,000 is filed and the model gets a preview instead.
-`PROJECT_ROOT` = `main`: which folder's `.claude/settings.local.json` a session reads (R2.7). The handover size's
-default, 150,000, was measured on a week of real sessions as the size with the least total weight read.
+transcript lags it by the last tool results); in two weeks of real main transcripts (22,509 steps between two usages)
+the largest step was 89,288, so the usage review checks the number again against each week's largest. `OVERSHOOT` =
+50,000: an agent this far past `T` is having its compactions held by us. `IDLE_MIN` = 50 minutes: idle compaction fires
+after about 54 minutes on the 1-hour cache. `CAP` = 9,500 characters: an additionalContext string over 10,000 is filed
+and the model gets a preview instead. `PROJECT_ROOT` = `main`: which folder's `.claude/settings.local.json` a session
+reads (R2.7). The handover size's default, 150,000, was measured on a week of real sessions as the size with the least
+total weight read.
 
 **R1 The step boundary.** progress.md is the only record of a step worked by hand.
 - **R1.1** `runningBy(progressText, sessions, dir)` (lib/steps.mjs) lists the steps whose last event line is
@@ -387,9 +389,9 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 - **R4.6** The context at least the limit, `min(LIMIT, the model's window − SLACK − LAG)`: allow, record `expect`.
   `LIMIT` is `compact.midStepLimit` when a number, else the user's own window for this model, read live from their
   file (its `modelSettings.<model>.autoCompactWindow`, else its `autoCompactWindow`, else the model's window). On a
-  1M model with a user window of 500,000 the allow comes with the real context between 500k and 550k, past the 467k
-  the user's own window compacts at, so never sooner; on a 200k model the limit is 117,000, under `T`, and the hook
-  holds at most one request.
+  1M model with a user window of 500,000 the allow comes with the real context between 500k and 600k, past the 467k
+  the user's own window compacts at, so never sooner; with no window set the limit is 867,000, so the held request is
+  under 967,000; on a 200k model the limit is 67,000, under `T`, and the hook holds at most one request.
 - **R4.7** No task in `sessions/<id>.json`: block (a session with no task compacts at the limit, as without kirunak).
 - **R4.8** A step of the chain running (R1.1): block, `kirunak: S-n is running; the compaction waits for the step
   boundary`. The reason reaches nobody: a block of an automatic compaction shows nothing and costs no tokens.
