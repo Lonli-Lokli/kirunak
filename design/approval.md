@@ -147,14 +147,20 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 - its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`), by ancestry or
   with nothing left in `git cherry`;
 - it has no uncommitted or untracked change;
-- no open task but the one accepted names its path in one of its files;
-- no process works in it (`lsof`; when lsof cannot tell, none goes);
-- no checkout that stays is inside it.
+- no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS in any case):
+  a task that still needs a worktree writes its path so;
+- no process works in it or runs a program from it (`lsof`'s cwd and txt; when lsof cannot tell, none goes);
+- no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
+  inside build output is not looked for, and goes with the worktree.
 
 The main checkout never goes, nor a locked worktree or one whose folder is gone. A detached one goes only when a
-plugin offers it, and a keep from any plugin wins. Deepest first, each goes with `git worktree remove`, never
-`--force`, whole with the files git ignores in it; then its branch goes with `git branch -D`. A failure is a kept line
-with git's error. `k accept` prints a line for each worktree removed and each kept, with why.
+plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit is lost with it; a keep from any
+plugin wins. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
+branch goes with `git branch -D`. It is never `--force` but for a removal cut short (killed partway, say by the
+phone's time limit): when its only changes are tracked files deleted, nothing of its own is left in it, and it goes
+with `--force`. Every git call but the removal has a time limit (two minutes; lsof one), and what one cannot tell in
+time keeps the worktree. A failure is a kept line with git's error. `k accept` prints a line for each worktree removed
+and each kept, with why.
 
 `k worktrees [--closing <id>]` prints the same survey and removes nothing. For each worktree that would go it adds one
 line: the folders git ignores in it besides build output (the plugins' `buildOutput`), the five largest with their
