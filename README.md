@@ -69,8 +69,31 @@ You need Node 22 or later, git and Claude Code.
    status line command, so the cache keeper sees each session's context and cache; it never edits your status line
    itself.
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
-   ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on seven events, and the
-   `k-go-on` skill. `--print` shows what it would do and writes nothing. A repo that already
+   ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
+   `k-go-on` skill.
+
+   It also sets up the **handover** (`design/orchestrator.md` §5): a session working a task compacts by itself at the
+   next step boundary once its context passes the handover size, and kirunak puts the task's files and state back.
+   The compact hook goes on PreCompact (`auto|manual`: it holds an automatic compaction while a step the session
+   started is running), SessionEnd (`clear`: it hands the task to the session id `/clear` starts) and SessionStart
+   (`compact|clear`, four blocks, one per part it puts back: the state, `task.md`, the plan's open steps and the end
+   of `progress.md`). The window is set per repo, never in your own settings file: `k install` writes
+   `"autoCompactWindow": 183000` (the handover size, 150,000 by default, plus the 33,000 Claude Code compacts under
+   the window) into each workspace repo's own `.claude/settings.local.json`, keeping every other key there, and into
+   each folder the workspace's `compact.alsoIn` names. A session in a subfolder or a worktree of a repo reads the
+   file at the main checkout's root, so that is where it is written. The file is personal: when git does not ignore
+   it already, `k install` adds `/.claude/settings.local.json` to the repo's `.git/info/exclude`, and a file git
+   tracks is left alone and named. It never overwrites a window that is not its own: a value you set in that file, a
+   window in the repo's committed `.claude/settings.json`, a per-model `modelSettings` window and the
+   `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable are each named, with what to change, and `k doctor` fails them until
+   you do. A compaction in the middle of a step waits for the **mid-step limit**, by default your own
+   `autoCompactWindow` (the one in `~/.claude/settings.json`, or Claude Code's own point when you set none), so it
+   never comes sooner than it does without kirunak; `compact.midStepLimit` sets a number instead. A session outside
+   every workspace repo keeps your own window, and the hook never holds its compaction. `k run`'s steps keep their
+   own point through the variable. `compact: { enabled: false }` turns it off, and the next `k install` takes its
+   window back out (`design/plugins.md` §3).
+
+   `--print` shows what it would do and writes nothing. A repo that already
    has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
    `.slapignore`, the files left out of a commit's size (R21), when the repo has none: read it, type
    `! k slapignore approve ~/code/app`, and commit it.

@@ -34,7 +34,7 @@ test('after k install every ladder line is ok, the ladder first', async () => {
     'ladder: sonnet → opus (high, build) → fable (high, design)',
     `rung agent opus-step: ${join(w.agentsDir, 'opus-step.md')}, opus, high`,
     `rung agent fable-step: ${join(w.agentsDir, 'fable-step.md')}, fable, high`,
-    'escalation hook: wired on 7 events',
+    'escalation hook: wired on 8 events',
     'escalate/config.json matches the workspace',
     `push to the phone: on (agentPushNotifEnabled in ${w.settingsPath})`,
   ]);
@@ -105,7 +105,7 @@ test('modelSettings: an entry at the rung\'s effort is ok; one of no rung\'s fam
   assert.deepEqual(lines, [[true, 'settings.json modelSettings claude-opus-5-5: effortLevel high, as the opus rung']]);
 });
 
-test('the escalation hook not wired, or wired with the matcher of another ladder, FAILs naming the events', async () => {
+test('the escalation hook not wired, or wired as before the agent records (the rung agents\' matcher, no Stop), FAILs naming the events', async () => {
   const w = await installed();
   const was = readFileSync(w.settingsPath, 'utf8');
   w.settings((json) => {
@@ -116,9 +116,14 @@ test('the escalation hook not wired, or wired with the matcher of another ladder
   writeFileSync(w.settingsPath, was);
   const { ws } = await ladderWorkspace({ ladder: [{ model: 'sonnet' }, { model: 'opus', effort: 'high' }] });
   ws.home = w.home;
-  assert.ok(w.fails(ws).includes('escalation hook: not wired on SubagentStop (matcher opus-step|fable-step, the ladder\'s opus-step) (run k install)'));
+  assert.ok(!w.fails(ws).some((l) => l.startsWith('escalation hook')), 'the matchers are the same for every ladder');
+  w.settings((json) => {
+    json.hooks.SubagentStop.find((b) => b.matcher === '.+').matcher = 'opus-step|fable-step';
+    delete json.hooks.Stop;
+  });
+  assert.deepEqual(w.fails().filter((l) => l.startsWith('escalation hook')), ['escalation hook: not wired on SubagentStop (matcher opus-step|fable-step, kirunak\'s .+), Stop (run k install)']);
   writeFileSync(w.settingsPath, '{}');
-  assert.match(w.fails().find((l) => l.startsWith('escalation hook')), /not wired on PostToolUseFailure, PostToolUse, SubagentStop, UserPromptSubmit, UserPromptExpansion, SessionStart, PostModelSwitch/);
+  assert.match(w.fails().find((l) => l.startsWith('escalation hook')), /not wired on PostToolUseFailure, PostToolUse, SubagentStop, UserPromptSubmit, UserPromptExpansion, SessionStart, PostModelSwitch, Stop \(/);
 });
 
 test('config.json missing, disagreeing with the workspace, or older than its module FAILs', async () => {
@@ -160,7 +165,7 @@ test('k doctor --settings --agents prints the ladder lines', async () => {
   const out = r.stdout + r.stderr;
   assert.match(out, /^ok {3}ladder: sonnet → opus \(high, build\) → fable \(high, design\)$/m);
   assert.ok(out.includes(`ok   rung agent opus-step: ${join(w.agentsDir, 'opus-step.md')}, opus, high`));
-  assert.match(out, /^ok {3}escalation hook: wired on 7 events$/m);
+  assert.match(out, /^ok {3}escalation hook: wired on 8 events$/m);
   assert.match(out, /^ok {3}hook kirunak-escalate\.mjs$/m);
   assert.match(out, /^FAIL models\.escalate is no longer read/m);
   assert.match(out, /^ok {3}push to the phone: on \(agentPushNotifEnabled in .*settings\.json\)$/m);

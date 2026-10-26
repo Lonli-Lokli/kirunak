@@ -18,10 +18,12 @@ import {
 // node: modules, lib/home.mjs and its rules, because it runs on every failed Bash call (AC-12).
 //
 // Its events (R4.1): PostToolUseFailure on Bash counts, and on an edit tool takes back that edit's flag (O-2);
-// PostToolUse on Agent records a launch; SubagentStop records an agent's end and may lift the block; UserPromptSubmit
-// counts the end of a noted background build (R4.5) and hands on the push a noted k run's end carries (R7.2);
-// UserPromptExpansion of /k-go-on is the owner's override;
-// SessionStart and PostModelSwitch record the session's model.
+// PostToolUse on Agent records a launch, with its name and output file; SubagentStop records every named agent's end
+// and may lift the block; UserPromptSubmit opens the main session's turn, counts the end of a noted background build
+// (R4.5) and hands on the push a noted k run's end carries (R7.2); Stop closes the turn and keeps the session's
+// background tasks; UserPromptExpansion of /k-go-on is the owner's override;
+// SessionStart and PostModelSwitch record the session's model. The agent records and the turn flag are what the
+// PreCompact hook reads (design/orchestrator.md §5); they print nothing, so no agent is told anything by them.
 //
 // The block (approval.md §7). The first failure after a fire sets the session's `block` (the caller's, for a
 // subagent, E-13), and the freeze hook refuses Edit, Write, MultiEdit and NotebookEdit while it is not lifted. It
@@ -165,7 +167,10 @@ function notified(input, home, config, now) {
 
 // An agent's launch (PostToolUse on Agent fires at launch, with the id and the model it resolved), in the
 // session's file, with the Agent call's own `model` and `effort`, which override the agent file's; `by`
-// names the subagent that launched it, if one did.
+// names the subagent that launched it, if one did. The name the caller gave it (`description`) and its output file
+// are kept for the PreCompact hook and what a compaction puts back (AC-12: both are there at `async_launched`,
+// which every agent of an interactive session is). A foreground agent's PostToolUse comes at its end, after its
+// SubagentStop, with no output file: its record is written ended, keeping that end (R6.1).
 function launched(input, home, now) {
   const r = input.tool_response ?? {};
   const id = r.agentId ?? r.agent_id;
@@ -173,16 +178,23 @@ function launched(input, home, now) {
   const ti = input.tool_input ?? {};
   withState(home, input.session_id, null, () => {
     const state = readState(home, input.session_id);
+    const prior = state.agents[id];
+    const done = r.status === 'completed' ? (prior?.ended ?? now.toISOString()) : null;
     state.agents[id] = {
       type: ti.subagent_type ?? null, model: r.resolvedModel ?? null, asked: ti.model ?? null, effort: ti.effort ?? null,
-      at: now.toISOString(), ended: null, by: input.agent_id ?? null,
+      at: now.toISOString(), ended: done, by: input.agent_id ?? null,
+      description: ti.description ?? r.description ?? null, outputFile: r.outputFile ?? null,
+      ...(done && prior?.finished != null ? { finished: prior.finished } : {}),
     };
     writeState(home, state);
   });
 }
 
-// An agent of a rung above the lowest stopped (the matcher names them): its end is recorded, with whether it finished
-// its run, and it may lift the block.
+// An agent stopped. SubagentStop matches `.+`, so every named agent's end is recorded (R6.2; Claude Code's internal
+// agents have an empty `agent_type`, which neither the matcher nor the check below lets in), with whether it finished
+// its run, and an agent of a rung above may lift the block. It fires twice per agent: the second changes nothing,
+// unless it is the first to see the run finished (a hand-back after a first stop that had not), and then keeps the
+// first end's time. An end the Stop snapshot inferred (`endedBy`) gives way to the agent's own.
 function ended(input, home, config, now) {
   const id = input.agent_id;
   if (typeof id !== 'string' || !id || !input.agent_type) return;
@@ -190,7 +202,11 @@ function ended(input, home, config, now) {
   const result = withState(home, input.session_id, null, () => {
     const state = readState(home, input.session_id);
     const launch = state.agents[id] ?? null;
-    state.agents[id] = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: now.toISOString(), finished };
+    const again = launch?.ended != null && launch.endedBy == null;
+    if (again && (launch.finished || !finished)) return null;
+    const record = { type: input.agent_type, model: null, at: null, by: null, ...launch, ended: again ? launch.ended : now.toISOString(), finished };
+    delete record.endedBy;
+    state.agents[id] = record;
     const out = liftByAgent(state, home, config, input, launch, finished, now);
     writeState(home, state);
     return out;
@@ -324,6 +340,45 @@ function recordModel(input, home, model) {
   });
 }
 
+// The turn flag (R3.1, R6.4), from which the PreCompact hook tells the main
+// session's compaction from an agent's: open on each prompt of the main session (typed, an <agent-message>, a
+// scheduled prompt or a task notification), before its first request; closed by its Stop.
+function turnOpened(input, home, now) {
+  withState(home, input.session_id, null, () => {
+    const state = readState(home, input.session_id);
+    state.turn = { state: 'open', at: now.toISOString(), promptId: typeof input.prompt_id === 'string' ? input.prompt_id : null };
+    writeState(home, state);
+  });
+}
+
+// What a Stop keeps of the session's background tasks (R6.5): hooks.md's fields of each, strings cut, the first 50.
+const TASK_FIELDS = ['id', 'type', 'status', 'description', 'agent_type', 'command'];
+const TASKS_KEPT = 50;
+const FIELD_KEPT = 500;
+const taskEntry = (t) => Object.fromEntries(TASK_FIELDS.filter((k) => t[k] != null)
+  .map((k) => [k, typeof t[k] === 'string' ? t[k].slice(0, FIELD_KEPT) : t[k]]));
+
+// The main session's turn ended (R6.4, R6.5): the turn closed and, when Stop names the session's background tasks,
+// their snapshot as `tasks: { at, list }`. An agent launched before the snapshot, with no end recorded and no
+// `subagent` entry of its id among them, stopped without a SubagentStop (as TaskStop may): it is marked ended then,
+// `endedBy: 'snapshot'`. A Stop without the list leaves the records as they are.
+function stopped(input, home, now) {
+  withState(home, input.session_id, null, () => {
+    const state = readState(home, input.session_id);
+    const at = now.toISOString();
+    state.turn = { state: 'closed', at };
+    if (Array.isArray(input.background_tasks)) {
+      const all = input.background_tasks.filter((t) => t && typeof t === 'object');
+      const running = new Set(all.filter((t) => t.type === 'subagent').map((t) => t.id));
+      state.tasks = { at, list: all.slice(0, TASKS_KEPT).map(taskEntry) };
+      for (const [id, a] of Object.entries(state.agents)) {
+        if (a && a.ended == null && Date.parse(a.at) < now.getTime() && !running.has(id)) Object.assign(a, { ended: at, endedBy: 'snapshot' });
+      }
+    }
+    writeState(home, state);
+  });
+}
+
 // The message reaches the model as additionalContext and the terminal as systemMessage (hooks.md lists
 // additionalContext for PostToolUseFailure and UserPromptSubmit, and systemMessage for every event that keeps it).
 function say(event, lines) {
@@ -342,7 +397,9 @@ function main() {
   const event = input.hook_event_name;
   // The cheap answers first, so most calls end before reading a file.
   if (event === 'PostToolUseFailure' && !(input.tool_name === 'Bash' ? input.is_interrupt !== true : EDITS.has(input.tool_name))) return;
-  if (event === 'UserPromptSubmit' && !String(input.prompt ?? '').startsWith('<task-notification>')) return;
+  const notice = event === 'UserPromptSubmit' && String(input.prompt ?? '').startsWith('<task-notification>');
+  // A prompt or a Stop inside an agent is not the main session's turn (R6.4), and only a notification counts there.
+  if ((event === 'UserPromptSubmit' && !notice && input.agent_id) || (event === 'Stop' && input.agent_id)) return;
   if (event === 'UserPromptExpansion' && input.command_name !== GO_ON) return;
   const home = kirunakHome();
   if (!statePath(home, input.session_id)) return;
@@ -358,6 +415,8 @@ function main() {
   } else if (event === 'UserPromptExpansion') {
     override(input, home, now);
   } else if (event === 'UserPromptSubmit') {
+    if (!input.agent_id) turnOpened(input, home, now);
+    if (!notice) return;
     const { lines, push } = notified(input, home, config, now) ?? {};
     if (lines) say(event, lines);
     // The push is the model's to send, so it goes to the model alone.
@@ -366,6 +425,8 @@ function main() {
     launched(input, home, now);
   } else if (event === 'SubagentStop') {
     ended(input, home, config, now);
+  } else if (event === 'Stop') {
+    stopped(input, home, now);
   } else if (event === 'SessionStart') {
     if (input.source === 'startup') prune(home, now.getTime());
     recordModel(input, home, input.model);

@@ -58,8 +58,9 @@ test('the block is written with the absolute path, and every other hook and key 
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
   assert.ok(lstatSync(join(h.skillsDir, 'k-go-on')).isSymbolicLink(), 'the owner\'s override, /k-go-on, is linked (R5.4)');
-  // The PreToolUse block, the links, the escalation hook's 7 blocks, 2 rung agents, config.json, SessionStart, the tracker.
-  assert.equal(actions.length, 1 + SKILLS.length + 7 + 2 + 1 + 2);
+  // The PreToolUse block, the links, the escalation hook's 8 blocks, the compact hook's 6, 2 rung agents, config.json,
+  // the windows' line (no workspace yet), SessionStart, the tracker.
+  assert.equal(actions.length, 1 + SKILLS.length + 8 + 6 + 2 + 1 + 1 + 2);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
   assert.match(actions.at(-2), /added the kirunak SessionStart hook/);
   assert.ok(actions.at(-1).endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
@@ -77,7 +78,7 @@ test('a missing settings file is created; a second run changes nothing', () => {
   assert.match(actions[0], /already has the kirunak PreToolUse hook/);
   assert.match(actions[1], /already links to/);
   assert.equal(JSON.parse(first).hooks.PreToolUse.length, 1);
-  assert.equal(JSON.parse(first).hooks.SessionStart.length, 2, 'the session hook and the escalation hook');
+  assert.equal(JSON.parse(first).hooks.SessionStart.length, 6, 'the session hook, the escalation hook and the compact hook\'s 4 parts');
   assert.match(actions.at(-2), /already has the kirunak SessionStart hook/);
 });
 
@@ -89,7 +90,7 @@ test('the SessionStart block from an older checkout is updated; a status line th
   writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
   const { actions } = install(h);
   const after = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
-  assert.equal(after.hooks.SessionStart.length, 3, 'the old block pointed here, and the escalation hook\'s added');
+  assert.equal(after.hooks.SessionStart.length, 7, 'the old block pointed here, and the escalation hook\'s and the compact hook\'s added');
   assert.equal(after.hooks.SessionStart[1].hooks[0].command, `node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`);
   assert.deepEqual(after.statusLine, json.statusLine, 'k install never writes the status line');
   assert.match(actions.at(-1), /already runs kirunak's tracker/);
@@ -224,6 +225,14 @@ test('a <model>-step agent for every rung above the lowest, with the rung\'s mod
   assert.ok(actions.includes(`wrote the opus-step agent: ${join(h.agentsDir, 'opus-step.md')}`));
 });
 
+test('a rung\'s autoCompactWindow goes into its agent\'s frontmatter after the effort; none without it', () => {
+  const h = home();
+  const ladder = [LADDER[0], LADDER[1], { ...LADDER[2], autoCompactWindow: 500_000 }];
+  install({ ...h, ws: ws({ ladder }) });
+  assert.match(agent(h, 'fable-step'), /\nmodel: claude-fable-5-1\neffort: high\nautoCompactWindow: 500000\ntools: "\*"\n/);
+  assert.ok(!agent(h, 'opus-step').includes('autoCompactWindow'));
+});
+
 test('an agent path that is a link is written through, and the action names the real file', () => {
   const h = home();
   const repoAgents = join(h.dir, 'portfolio', 'claude', 'agents');
@@ -289,6 +298,7 @@ test('config.json: the ladder with each rung\'s agents, the hook switches, the r
     ],
     hook: { enabled: true, block: true, repeats: 3, commands: ['^bun test'] },
     repos: { hub: '/ws/hub' },
+    compact: { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 'user', roots: ['/ws/hub'] },
   });
   install({ ...h, ws: ws(), now: new Date('2026-10-26T08:00:00Z') });
   assert.equal(JSON.parse(readFileSync(path, 'utf8')).written, '2026-10-26T08:00:00.000Z', 'its time newer than the module\'s');
@@ -299,27 +309,30 @@ test('config.json: the ladder with each rung\'s agents, the hook switches, the r
   assert.deepEqual(none.ladder.map((r) => r.agents), [[], ['opus-step'], ['fable-step']]);
 });
 
-test('the escalation hook on its seven events, SubagentStop matching every agent above the lowest', () => {
+test('the escalation hook on its eight events, SubagentStop matching every named agent, Stop with no matcher', () => {
   const h = home();
   install({ ...h, ws: ws() });
   const hooks = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
   const command = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs')}`;
   const ours = (event) => hooks[event].filter((b) => b.hooks[0].command === command);
-  const matchers = Object.fromEntries(['PostToolUseFailure', 'PostToolUse', 'SubagentStop', 'UserPromptSubmit', 'UserPromptExpansion', 'SessionStart', 'PostModelSwitch']
+  const matchers = Object.fromEntries(['PostToolUseFailure', 'PostToolUse', 'SubagentStop', 'UserPromptSubmit', 'UserPromptExpansion', 'SessionStart', 'PostModelSwitch', 'Stop']
     .map((event) => [event, ours(event)]).map(([event, blocks]) => {
       assert.equal(blocks.length, 1, `one block on ${event}`);
       assert.deepEqual(blocks[0].hooks, [{ type: 'command', command, timeout: 10 }]);
       return [event, blocks[0].matcher ?? null];
     }));
   assert.deepEqual(matchers, {
-    PostToolUseFailure: 'Bash|Edit|Write|MultiEdit|NotebookEdit', PostToolUse: 'Agent', SubagentStop: 'opus-step|fable-step|domain-deep', UserPromptSubmit: null,
-    UserPromptExpansion: null, SessionStart: 'startup|resume|clear', PostModelSwitch: null,
+    PostToolUseFailure: 'Bash|Edit|Write|MultiEdit|NotebookEdit', PostToolUse: 'Agent', SubagentStop: '.+', UserPromptSubmit: null,
+    UserPromptExpansion: null, SessionStart: 'startup|resume|clear', PostModelSwitch: null, Stop: null,
   });
-  assert.ok(!('matcher' in ours('UserPromptSubmit')[0]), 'no matcher key at all');
+  for (const event of ['UserPromptSubmit', 'Stop']) assert.ok(!('matcher' in ours(event)[0]), `${event}: no matcher key at all`);
+  // R6.2: `.+` takes every named agent and never the empty agent_type of Claude Code's internal agents.
+  const re = new RegExp(`^(?:${matchers.SubagentStop})$`);
+  assert.deepEqual(['Explore', 'general-purpose', 'opus-step', 'kirunak:fable-step', ''].map((t) => re.test(t)), [true, true, true, true, false]);
   assert.ok(existsSync(join(KIRUNAK, 'hooks', 'kirunak-escalate.mjs')), 'the hook it wires is in this checkout');
 });
 
-test('an older freeze block gets the grown matcher; a changed ladder replaces the SubagentStop matcher, never adds a block', () => {
+test('an older freeze block gets the grown matcher; an older SubagentStop block, of the ladder\'s agents, is given .+ for any ladder, never a second block', () => {
   const h = home();
   const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
   json.hooks.PreToolUse.push({ matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash|Skill', hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`, timeout: 10 }] });
@@ -329,12 +342,15 @@ test('an older freeze block gets the grown matcher; a changed ladder replaces th
   let after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
   assert.equal(after.PreToolUse.length, 2);
   assert.equal(after.PreToolUse[1].matcher, FREEZE_MATCHER);
+  assert.equal(after.SubagentStop[0].matcher, '.+');
+  after.SubagentStop[0].matcher = 'opus-step|fable-step';
+  writeFileSync(h.settingsPath, JSON.stringify({ ...JSON.parse(readFileSync(h.settingsPath, 'utf8')), hooks: after }, null, 2) + '\n');
   const two = [{ model: 'sonnet' }, { model: 'opus', effort: 'high' }];
   const again = install({ ...h, ws: ws({ ladder: two }) }).actions;
   after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
   assert.equal(after.SubagentStop.length, 1);
-  assert.equal(after.SubagentStop[0].matcher, 'opus-step');
-  assert.ok(again.some((a) => /^updated the kirunak SubagentStop hook .*\(matcher opus-step\)$/.test(a)));
+  assert.equal(after.SubagentStop[0].matcher, '.+');
+  assert.ok(again.some((a) => /^updated the kirunak SubagentStop hook .*\(matcher \.\+\)$/.test(a)));
   assert.ok(again.some((a) => a.endsWith('already has the kirunak PostToolUseFailure hook')));
 });
 
@@ -344,7 +360,8 @@ test('--print shows the blocks, the agents and config.json, and writes none of t
   const all = install({ ...h, ws: ws(), print: true }).actions.join('\n');
   assert.ok(readFileSync(h.settingsPath).equals(before));
   assert.ok(!existsSync(h.agentsDir) && !existsSync(join(h.home, 'escalate')));
-  assert.ok(all.includes(`would set in ${h.settingsPath} hooks.SubagentStop: {"matcher":"opus-step|fable-step|domain-deep"`));
+  assert.ok(all.includes(`would set in ${h.settingsPath} hooks.SubagentStop: {"matcher":".+"`));
+  assert.ok(all.includes(`would set in ${h.settingsPath} hooks.Stop: {"hooks":`));
   assert.ok(all.includes(`would write ${join(h.agentsDir, 'fable-step.md')}:\n---\nname: fable-step\n`));
   assert.ok(all.includes(`would write ${join(h.home, 'escalate', 'config.json')}:\n{\n  "written": `));
 });

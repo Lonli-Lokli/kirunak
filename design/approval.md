@@ -272,9 +272,12 @@ A guard of another kind: not against an agent editing what is frozen, but agains
 same fix. Evidence is the task's design (S-2), its probes (S-1) and the Claude Code pages fetched on 2026-10-25; the
 rest is marked as judgement. The ladder and what `k run` does is `orchestrator.md` §2.
 
-**What the hook counts.** `hooks/kirunak-escalate.mjs` (with `hooks/escalate-state.mjs`) is wired by `k install` on seven
+**What the hook counts.** `hooks/kirunak-escalate.mjs` (with `hooks/escalate-state.mjs`) is wired by `k install` on eight
 events: PostToolUseFailure of `Bash`, `Edit`, `Write`, `MultiEdit` and `NotebookEdit`; PostToolUse of `Agent`;
-SubagentStop of the rung agents; UserPromptSubmit; UserPromptExpansion; SessionStart; PostModelSwitch. A failed build or
+SubagentStop of every named agent (matcher `.+`, which keeps out Claude Code's internal agents, whose type is empty;
+which agents lift a block is the hook's own check); UserPromptSubmit; UserPromptExpansion; SessionStart;
+PostModelSwitch; and Stop, which closes the main session's turn and keeps its background tasks for the handover's
+agent records (`orchestrator.md` §5, R6). A failed build or
 test command is given a signature (the runner, and the failing test or error with line numbers and times left out;
 `heavy-lock.mjs`'s wrapped command counts as the command, and `hook.commands` adds more). It is counted as a repeat
 when the same signature fails again after the session edited something in between. A rerun with no edit, a green run,
