@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { check } from '../hooks/git-pre-commit.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
+import { makeWorkspace } from './helpers.mjs';
 
 // D7: the git hook refuses a commit whose frozen task no longer matches its approval (approval.md §3).
 
@@ -201,4 +202,100 @@ test('check, directly: the record in HEAD when the index has none, and a slug-on
   assert.deepEqual(check({ staged, show, env: { KIRUNAK_APPROVING: 'a' } }), []);
   assert.deepEqual(check({ staged, show, env: { KIRUNAK_APPROVING: 'r/a' } }), []);
   assert.deepEqual(check({ staged: ['README.md'], show, env: {} }), []);
+});
+
+// The SLAP hook (prepare-commit-msg) as k install writes it, in both repos of the invented workspace: the step's
+// `Task:` trailer, and no new work on a task the owner accepted (accept-shared-repo AC-3, AC-4, AC-8, E-1).
+const MSG_HOOK = fileURLToPath(new URL('../hooks/git-prepare-commit-msg.mjs', import.meta.url));
+
+async function hooked() {
+  const w = await makeWorkspace();
+  for (const dir of [w.weather, w.hub]) {
+    const hook = join(dir, '.git', 'hooks', 'prepare-commit-msg');
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, `#!/bin/sh\nexec "${process.execPath}" "${MSG_HOOK}" "$@"\n`);
+    chmodSync(hook, 0o755);
+  }
+  return w;
+}
+
+function commitAs(w, dir, message, env = {}, extra = []) {
+  git(dir, ['add', '-A']);
+  const r = spawnSync('git', ['commit', '-q', ...extra, '-m', message], { cwd: dir, env: cleanEnv({ KIRUNAK_HOME: w.home, ...env }), encoding: 'utf8' });
+  return { status: r.status, stderr: r.stderr };
+}
+
+const said = (dir) => git(dir, ['log', '-1', '--format=%B']).trim();
+
+test('a commit in a step k run started carries Task: <id>, one after an amend; one with no task carries none and passes (accept-shared-repo AC-3, AC-4)', async () => {
+  const w = await hooked();
+  const step = { KIRUNAK_TASK: ID, KIRUNAK_STEP: 'S-2' };
+  put(w.weather, 'src/a.ts', 'export const a = 1;\n');
+  assert.equal(commitAs(w, w.weather, 'the cache', step).status, 0);
+  assert.match(said(w.weather), /^the cache\n\nSLAP: .*\nTask: weather\/offline-forecast$/);
+  put(w.weather, 'src/b.ts', 'export const b = 1;\n');
+  const amend = commitAs(w, w.weather, 'unused', step, ['--amend', '--no-edit']);
+  assert.equal(amend.status, 0, amend.stderr);
+  assert.equal(said(w.weather).match(/^Task: /gm).length, 1);
+  put(w.weather, 'src/c.ts', 'export const c = 1;\n');
+  const plain = commitAs(w, w.weather, 'by hand');
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.doesNotMatch(said(w.weather), /Task:/);
+});
+
+test('a commit naming a task the owner accepted is refused unless it stages only kirunak\'s records (accept-shared-repo AC-8, E-1)', async () => {
+  const w = await hooked();
+  put(w.weather, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID, accepted: '2026-11-09T10:00:00+01:00' }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0, 'the accept stages only its record');
+
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  for (const [message, env] of [[`${SLUG}: one more line`, {}], ['the cache, as weather/offline-forecast left it', {}], ['one more line', { KIRUNAK_TASK: ID }]]) {
+    const r = commitAs(w, w.weather, message, env);
+    assert.equal(r.status, 1, message);
+    assert.equal(r.stderr.trim(), `kirunak: this commit's message names ${ID}, which the owner has accepted: new work on it is a new task. Reword the message so it does not name ${ID}, or start a new task (/k-intake); only kirunak's records (task folders, drafts, approvals, the queue) may still be committed naming it.`);
+  }
+  // Records beside the code do not make it a records' commit.
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  assert.equal(commitAs(w, w.weather, `${SLUG}: the handoff and a line`).status, 1);
+  // Only the records, by a partial commit, and the records of other kinds, pass.
+  const env = cleanEnv({ KIRUNAK_HOME: w.home });
+  const partial = spawnSync('git', ['commit', '-q', '-m', `${ID}: the handoff`, '--', `kirunak/tasks/${SLUG}/handoff.md`], { cwd: w.weather, env, encoding: 'utf8' });
+  assert.equal(partial.status, 0, partial.stderr);
+  git(w.weather, ['reset', '-q']);
+  put(w.weather, 'kirunak/drafts/offline-maps.md', '# Offline maps\n');
+  put(w.weather, 'kirunak/approvals/offline-maps.json', '{}\n');
+  git(w.weather, ['add', 'kirunak']);
+  const records = spawnSync('git', ['commit', '-q', '-m', `a draft after ${SLUG}`, '--', 'kirunak'], { cwd: w.weather, env, encoding: 'utf8' });
+  assert.equal(records.status, 0, records.stderr);
+  // A longer word, or another repo's task of the same slug, names some other task; the code then passes.
+  assert.equal(commitAs(w, w.weather, `${SLUG}-again: hub/${SLUG} is the hub's`).status, 0);
+  assert.equal(git(w.weather, ['status', '--porcelain']), '');
+
+  // The queue file where the workspace keeps it is a record too.
+  put(w.hub, 'kirunak/tasks/board/done.json', JSON.stringify({ task: 'hub/board' }) + '\n');
+  assert.equal(commitAs(w, w.hub, 'hub/board: accepted').status, 0);
+  writeFileSync(join(w.hub, 'kirunak', 'queue.md'), '# Queue\n');
+  assert.equal(commitAs(w, w.hub, 'kirunak: queue remove hub/board').status, 0);
+  put(w.hub, 'README.md', 'hub, the board done\n');
+  const code = commitAs(w, w.hub, 'the board: one more line');
+  assert.equal(code.status, 1);
+  assert.match(code.stderr, /names hub\/board, which the owner has accepted/);
+});
+
+test('the hook lets a merge through, and without a workspace refuses nothing for an accepted task but still writes Task: (accept-shared-repo AC-8)', async () => {
+  const w = await hooked();
+  put(w.weather, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, 'accepted').status, 0);
+  git(w.weather, ['checkout', '-q', '-b', 'side']);
+  put(w.weather, 'src/side.ts', 'export {};\n');
+  assert.equal(commitAs(w, w.weather, 'a side line').status, 0);
+  git(w.weather, ['checkout', '-q', 'master']);
+  const merge = spawnSync('git', ['merge', '-q', '--no-ff', '-m', `${SLUG}'s side, merged`, 'side'], { cwd: w.weather, env: cleanEnv({ KIRUNAK_HOME: w.home }), encoding: 'utf8' });
+  assert.equal(merge.status, 0, merge.stderr);
+
+  const nowhere = mkdtempSync(join(tmpdir(), 'kirunak-home-'));
+  put(w.weather, 'src/again.ts', 'export {};\n');
+  const r = commitAs({ home: nowhere }, w.weather, `${SLUG}: once more`, { KIRUNAK_TASK: ID });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(said(w.weather), /\nTask: weather\/offline-forecast$/);
 });

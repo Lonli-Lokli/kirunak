@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { commitsIn } from '../lib/git.mjs';
-import { isRecord, namesTask, recordPaths, tasksNamed, trailerTask } from '../lib/records.mjs';
+import { doneTasks, isRecord, namesTask, recordPaths, said, tasksNamed, trailerTask } from '../lib/records.mjs';
 import { makeWorkspace, sh } from './helpers.mjs';
 
 const repos = ['gulnya', 'katyafm', 'kirunak'];
@@ -48,6 +48,24 @@ test('kirunak\'s records are the task folders, the drafts, the approvals and the
   for (const x of ['kirunak/tasks/a/notes.md', 'kirunak/drafts/b.md', 'kirunak/approvals/a.json', 'kirunak/queue.md']) assert.equal(isRecord(x, records), true, x);
   for (const x of ['kirunak/workspace.mjs', 'kirunak/queue.md.bak', 'src/kirunak/tasks/a.ts', 'README.md']) assert.equal(isRecord(x, records), false, x);
   assert.deepEqual(recordPaths({ ...ws, queue: join(ws.home, 'queue.md') }), ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/approvals/']);
+});
+
+test('what a message says leaves out git\'s comments and what follows the scissors (accept-shared-repo AC-8)', () => {
+  const file = 'the cache\n\n# Changes to be committed:\n#\tmodified: kirunak/tasks/kit-wanted/notes.md\n# ------------------------ >8 ------------------------\ndiff --git a/kit-wanted b/kit-wanted\n';
+  assert.equal(said(file).trim(), 'the cache');
+  assert.equal(namesTask(said(file), 'gulnya/kit-wanted', inGulnya), false);
+});
+
+test('the accepted tasks of a repo are its task folders holding a done.json that says its task (accept-shared-repo AC-8)', async () => {
+  const { weather, hub } = await makeWorkspace();
+  assert.deepEqual(doneTasks(weather), []);
+  assert.deepEqual(doneTasks(join(hub, 'nowhere')), []);
+  writeFileSync(join(weather, 'kirunak', 'tasks', 'offline-forecast', 'done.json'), JSON.stringify({ task: 'weather/offline-forecast' }));
+  for (const [slug, text] of [['broken', '{'], ['unsaid', '{}'], ['wrong', JSON.stringify({ task: 'not an id' })]]) {
+    mkdirSync(join(weather, 'kirunak', 'tasks', slug));
+    writeFileSync(join(weather, 'kirunak', 'tasks', slug, 'done.json'), text);
+  }
+  assert.deepEqual(doneTasks(weather), ['weather/offline-forecast']);
 });
 
 test('commitsIn lists a range\'s commits newest first, each with its whole message and its own paths', async () => {
