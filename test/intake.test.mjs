@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { approve } from '../lib/approval.mjs';
 import { list as listDrafts } from '../lib/drafts.mjs';
 import { answer, aspects, question, start } from '../lib/intake.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
@@ -345,4 +346,163 @@ test('start --from a draft refuses another id\'s draft naming both, and a draft 
   await start({ ws, id: ID, from: DRAFT_REL, now: NOV2 });
   await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }),
     /the draft weather\/offline-forecast is gone: .*\(its intake started already, and it is kirunak\/tasks\/offline-forecast\/draft\.md\)/);
+});
+
+// kirunak-spikes: an intake from a bug, a draft whose front matter names the accepted task it was found in.
+const BUG_REL = 'kirunak/drafts/stale-tiles.md';
+const bugDir = (repo) => join(repo, 'kirunak/tasks/stale-tiles');
+const FINISHED = readFileSync(join(FIXTURES, 'workspace/weather/kirunak/tasks/offline-forecast/task.md'), 'utf8');
+
+// DRAFT as the bug `id` of `task`, with a fix written already.
+const bugDraft = (id, task = ID) => DRAFT.replace(`id: ${ID}`, `id: ${id}`)
+  .replace(`title: ${TITLE}`, 'title: The kept forecast is stale after a restart')
+  .replace('written: 2026-10-22\n', `written: 2026-10-22\nbug-of: ${task}\n`)
+  .replace('## Questions', '## Fix written\n- the cache key [commit 1a2b3c4]\n\n## Questions');
+
+// The invented workspace with weather/offline-forecast accepted: approved, and its done.json committed as k accept does.
+async function acceptedWorkspace() {
+  const w = await makeWorkspace();
+  await approve({ ws: w.ws, id: ID });
+  writeFileSync(join(dirOf(w.weather), 'done.json'), '{"accepted":"2026-10-20"}\n');
+  gitCommitAll(w.weather, 'accept');
+  return w;
+}
+
+// The lines of a task.md that start with each prefix, as they stand there.
+const linesOf = (text, ...prefixes) => prefixes.map((s) => {
+  const line = text.split('\n').find((l) => l.startsWith(`- ${s}`));
+  assert.ok(line, `no line - ${s}`);
+  return line;
+});
+
+// notes.md of the draft `id`, a bug of weather/offline-forecast when `lines` (its lines in notes.md) are given.
+const notesOf = (id, lines = null) => [
+  `# Notes: ${id}`,
+  '',
+  'Background from the draft kirunak/drafts/stale-tiles.md, written 2026-10-22, now kirunak/tasks/stale-tiles/draft.md, ' +
+    'read 2026-11-02. Background only: nothing in a draft is a ruling, and every line is asked again in the intake, ' +
+    'starting from its questions.',
+  '',
+  ...(lines ? [
+    `The draft is a bug of ${ID}, a task accepted already.`,
+    '',
+    `## The lines of ${ID}, for the intake's one proposal (background only)`,
+    'As they stand in kirunak/tasks/offline-forecast/task.md, in weather. After the goal, the intake proposes them ' +
+      'together for one yes or no; on a no, it asks each one alone, like any line of a draft.',
+    ...lines,
+    '',
+  ] : []),
+  '## draft.md',
+  'Headings:',
+  '- Who raised it',
+  '- Why',
+  '- What was found',
+  ...(lines ? ['- Fix written'] : []),
+  '- Questions',
+  'Questions:',
+  '1. How old may the kept forecast be?',
+  '2. Should the screen say when it was fetched?',
+  '',
+].join('\n');
+
+test('start --from a bug in another repo than its task: notes.md says whose bug it is and holds that task\'s edge cases, out of scope and aspects as they stand, for one proposal; the task stays as it was (kirunak-spikes AC-1, E-3)', async () => {
+  const w = await acceptedWorkspace();
+  const BUG = 'hub/stale-tiles';
+  writeDraft(w.hub, bugDraft(BUG), BUG_REL);
+  gitCommitAll(w.hub, `kirunak: a bug, ${BUG}`);
+  const finished = snapshot(dirOf(w.weather));
+
+  const r = await start({ ws: w.ws, id: BUG, from: BUG_REL, now: NOV2 });
+  assert.deepEqual(r, { dir: bugDir(w.ws.repos[1].root), aspects: 3, draft: 'kirunak/tasks/stale-tiles/draft.md', staged: true });
+  assert.equal(readFileSync(join(bugDir(w.hub), 'notes.md'), 'utf8'), notesOf(BUG, [
+    'Edge cases:',
+    ...linesOf(FINISHED, 'E-1 '),
+    'Out of scope:',
+    ...linesOf(FINISHED, 'O-1 '),
+    'Aspects:',
+    ...linesOf(FINISHED, 'platforms:', 'large-text:', 'offline:'),
+  ]));
+  assert.equal(readFileSync(join(bugDir(w.hub), 'draft.md'), 'utf8'), bugDraft(BUG));
+  assert.deepEqual(sh(w.hub, 'git', ['status', '--porcelain']).trim().split('\n').sort(), [
+    '?? kirunak/tasks/stale-tiles/intake.md',
+    '?? kirunak/tasks/stale-tiles/notes.md',
+    '?? kirunak/tasks/stale-tiles/task.md',
+    'R  kirunak/drafts/stale-tiles.md -> kirunak/tasks/stale-tiles/draft.md',
+  ]);
+  // The finished task is only read: its folder byte for byte as it was, its repo with nothing to commit.
+  assert.deepEqual(snapshot(dirOf(w.weather)), finished);
+  assert.equal(sh(w.weather, 'git', ['status', '--porcelain']), '');
+
+  // A plain draft's notes.md has none of it.
+  const PLAIN = 'hub/plain-tiles';
+  writeDraft(w.hub, DRAFT.replace(`id: ${ID}`, `id: ${PLAIN}`), 'kirunak/drafts/plain-tiles.md');
+  await start({ ws: w.ws, id: PLAIN, from: 'kirunak/drafts/plain-tiles.md', now: NOV2 });
+  assert.equal(readFileSync(join(w.hub, 'kirunak/tasks/plain-tiles/notes.md'), 'utf8'),
+    notesOf(PLAIN).replace(/stale-tiles/g, 'plain-tiles'));
+});
+
+test('start --from a bug in its task\'s repo takes the task\'s lines as they stand now, an amendment\'s included, and says when a section has none (kirunak-spikes AC-1)', async () => {
+  const w = await acceptedWorkspace();
+  const BUG = 'weather/stale-tiles';
+  // task.md as an applied amendment leaves it: E-1 replaced, E-2 added, O-1 removed.
+  const amended = FINISHED
+    .replace(/^- E-1 .*$/m, '- E-1 A forecast older than a day shows its age in words. [owner 2026-11-04 Q-9]\n' +
+      '- E-2 A forecast older than a week is not shown. [owner 2026-11-04 Q-9]')
+    .replace(/^- O-1 .*\n/m, '');
+  writeFileSync(join(dirOf(w.weather), 'task.md'), amended);
+  writeDraft(w.weather, bugDraft(BUG), BUG_REL);
+  gitCommitAll(w.weather, 'an amendment and a bug');
+
+  await start({ ws: w.ws, id: BUG, from: BUG_REL, now: NOV2 });
+  assert.equal(readFileSync(join(bugDir(w.weather), 'notes.md'), 'utf8'), notesOf(BUG, [
+    'Edge cases:',
+    ...linesOf(amended, 'E-1 ', 'E-2 '),
+    'Out of scope: none',
+    'Aspects:',
+    ...linesOf(amended, 'platforms:', 'large-text:', 'offline:'),
+  ]));
+  assert.equal(readFileSync(join(dirOf(w.weather), 'task.md'), 'utf8'), amended);
+});
+
+test('start --from a bug whose task is gone or not accepted is refused, the draft not moved and nothing written (kirunak-spikes AC-1)', async () => {
+  const w = await makeWorkspace();
+  const BUG = 'hub/stale-tiles';
+  let text;
+  const putBug = (task) => {
+    text = bugDraft(BUG, task);
+    writeDraft(w.hub, text, BUG_REL);
+    sh(w.hub, 'git', ['add', '-A']);
+    sh(w.hub, 'git', ['commit', '-q', '--allow-empty', '-m', `kirunak: a bug of ${task}`]);
+  };
+  const untouched = () => {
+    assert.equal(readFileSync(join(w.hub, BUG_REL), 'utf8'), text);
+    assert.equal(existsSync(bugDir(w.hub)), false);
+    assert.equal(sh(w.hub, 'git', ['status', '--porcelain']), '');
+  };
+  const refused = (why) => `the bug ${BUG} cannot start its intake: ${why}`;
+
+  // Proposed, then approved and queued: not accepted.
+  putBug(ID);
+  const open = `${ID} is not accepted yet: a bug found while a task is open goes into that task, through its review or ` +
+    `an amendment (k amend new ${ID} --title "...")`;
+  await assert.rejects(start({ ws: w.ws, id: BUG, from: BUG_REL, now: NOV2 }), (e) => e.code === 1 && e.message === refused(open));
+  untouched();
+  await approve({ ws: w.ws, id: ID });
+  await assert.rejects(start({ ws: w.ws, id: BUG, from: BUG_REL, now: NOV2 }), (e) => e.code === 1 && e.message === refused(open));
+  untouched();
+  const cli = k(w.home, ['intake', 'start', BUG, '--from', BUG_REL]);
+  assert.equal(cli.status, 1);
+  assert.match(cli.stderr, /the bug hub\/stale-tiles cannot start its intake: weather\/offline-forecast is not accepted yet/);
+  untouched();
+
+  // Gone: its folder removed, a task never written, a repo the workspace does not have.
+  rmSync(dirOf(w.weather), { recursive: true });
+  const gone = (task) => `unknown task ${task}: ${join(w.ws.repos[0].root, 'kirunak/tasks', task.split('/')[1], 'task.md')} ` +
+    'does not exist; a bug names the accepted task it was found in';
+  for (const [task, why] of [[ID, gone(ID)], ['weather/never-was', gone('weather/never-was')],
+    ['radio/tiles', 'unknown repo radio: the workspace lists weather, hub']]) {
+    putBug(task);
+    await assert.rejects(start({ ws: w.ws, id: BUG, from: BUG_REL, now: NOV2 }), (e) => e.code === 1 && e.message === refused(why));
+    untouched();
+  }
 });
