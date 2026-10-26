@@ -1,6 +1,14 @@
+import { spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boundaryIn, CAP, cut, labelOf, lastOf, planFor, stateText, waitingLines } from '../hooks/compact-rules.mjs';
+import {
+  boundaryIn, CAP, CLEAR_S, cut, EXPECT_S, labelOf, lastOf, planFor, PRUNE_DAYS, stateText, waitingLines,
+} from '../hooks/compact-rules.mjs';
+import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
+import { makeWorkspace } from './helpers.mjs';
 
 // The task put back after a compaction and after /clear (design/orchestrator.md §5, R5.1-R5.5).
 
@@ -97,4 +105,137 @@ test('stateText: three sentences, the task, the running steps, k\'s text or its 
   for (const l of ['running steps of this session: none, a step boundary', '  k status failed: no workspace', '  k waiting failed: no workspace', 'running agents:\n  none', 'background shell tasks at the last Stop:\n  none']) {
     assert.ok(bare.includes(l), l);
   }
+});
+
+// ---- The hook, run as Claude Code runs it: the event on stdin, one part per entry, a scratch KIRUNAK_HOME ----
+
+const HOOK = fileURLToPath(new URL('../hooks/kirunak-compact.mjs', import.meta.url));
+const PARTS4 = ['state', 'task', 'plan', 'progress'];
+const TASK = '---\nid: app/demo\ntitle: A demo task\n---\n\n## Goal\nA made-up goal.\n';
+const PLAN = `---\ntask: app/demo\n---\n\nThe header.\n\n${[['S-1', ''], ['S-2', 'needs: S-1\n'], ['S-3', 'needs: S-2\n']]
+  .map(([id, needs]) => `### ${id} Step ${id} [agent]\n${needs}outputs: steps/${id}/report.md\nwhat: step ${id}\n\n`).join('')}`;
+const PROGRESS = '2026-01-05 09:00 S-1 started (session s-main)\n2026-01-05 09:30 S-1 finished\n2026-01-05 10:00 S-2 started (session s-main)\n';
+const SESSION = { task: 'app/demo', step: 'S-2', since: '2026-01-05T09:00:00.000Z', previous: ['s-older'] };
+const ago = (s) => new Date(Date.now() - s * 1000).toISOString();
+
+// A home as k install and k start write it: config.json naming the repo `app`, session s-main on app/demo, the task's
+// three files, `expect` written `expect` seconds ago (null: none), the escalation record, a transcript whose last
+// entry is an assistant reply ten minutes old.
+function makeHome({ session = SESSION, expect = 5, record = null } = {}) {
+  const r = makeRepos();
+  const home = join(r.top, 'home');
+  writeJson(join(home, 'escalate', 'config.json'), { repos: { app: r.app } });
+  if (session) writeJson(join(home, 'sessions', 's-main.json'), session);
+  if (record) writeJson(join(home, 'escalate', 's-main.json'), record);
+  if (expect != null) writeJson(join(home, 'compact', 's-main.json'), { expect: { at: ago(expect), why: 'boundary', ctx: 160000 } });
+  const dir = join(r.app, 'kirunak', 'tasks', 'demo');
+  mkdirSync(dir, { recursive: true });
+  for (const [name, text] of [['task.md', TASK], ['plan.md', PLAN], ['progress.md', PROGRESS]]) writeFileSync(join(dir, name), text);
+  const transcript = join(r.top, 'projects', 'p', 's-main.jsonl');
+  mkdirSync(join(transcript, '..'), { recursive: true });
+  writeFileSync(transcript, `${JSON.stringify({ type: 'assistant', timestamp: ago(600), message: { model: 'm', usage: { input_tokens: 1 } } })}\n`);
+  const input = (extra = {}) => ({ session_id: 's-main', transcript_path: transcript, cwd: r.app, hook_event_name: 'SessionStart', source: 'compact', model: 'm', ...extra });
+  const json = (rel) => (existsSync(join(home, rel)) ? JSON.parse(readFileSync(join(home, rel), 'utf8')) : null);
+  const log = () => (existsSync(join(home, 'compact.log')) ? readFileSync(join(home, 'compact.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
+  return { ...r, home, dir, transcript, input, json, log };
+}
+
+// The environment without this session's own kirunak settings, so a test never reads the real ones.
+function cleanEnv(extra = {}) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^KIRUNAK_|^CLAUDE_CONFIG_DIR$/.test(k)) env[k] = v;
+  return { ...env, ...extra };
+}
+
+// One hook entry, `--part <part>` (none for SessionEnd): the part's additionalContext, or null when it printed nothing.
+function run(h, part, input = h.input(), env = {}) {
+  const r = spawnSync(process.execPath, [HOOK, ...(part ? ['--part', part] : [])], {
+    input: typeof input === 'string' ? input : JSON.stringify(input), cwd: h.top, encoding: 'utf8',
+    env: cleanEnv({ KIRUNAK_HOME: h.home, ...env }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  if (!r.stdout) return null;
+  const out = JSON.parse(r.stdout).hookSpecificOutput;
+  assert.equal(out.hookEventName, 'SessionStart');
+  return out.additionalContext;
+}
+const all = (h, input) => PARTS4.map((p) => run(h, p, input));
+const NONE = [null, null, null, null];
+
+test('SessionStart compact after the PreCompact hook\'s allow: four labelled parts within CAP, expect consumed (R5.1, R5.2, AC-5, AC-11)', () => {
+  const h = makeHome({
+    record: {
+      agents: {
+        a1: { type: 'Explore', description: 'find the parser', outputFile: '/r/a1.output', at: ago(60), ended: null },
+        a2: { type: 'Plan', description: 'ended already', at: ago(120), ended: ago(30) },
+      },
+      tasks: { at: ago(20), list: [{ id: 'b1', type: 'shell', status: 'running', command: 'node heavy-lock.mjs run -- make test' }, { id: 'a1', type: 'subagent', status: 'running' }] },
+    },
+  });
+  const parts = all(h);
+  for (const [i, t] of parts.entries()) {
+    assert.ok(t.startsWith(`kirunak, after a compaction (part ${i + 1} of 4): ${PARTS4[i]}\n`), t.slice(0, 60));
+    assert.ok(t.length - t.indexOf('\n') - 1 <= CAP);
+  }
+  const [state, task, plan, progress] = parts;
+  assert.equal(task, `kirunak, after a compaction (part 2 of 4): task\nthe file ${join(h.dir, 'task.md')}:\n${TASK}`);
+  assert.equal(progress, `kirunak, after a compaction (part 4 of 4): progress\nthe file ${join(h.dir, 'progress.md')}:\n${PROGRESS}`);
+  assert.deepEqual(ids(plan), ['S-2', 'S-3']);
+  assert.match(plan, /\n… left out, the blocks of S-1; the whole file: .*plan\.md$/);
+  assert.ok(state.includes('\ntask: app/demo: A demo task\n'));
+  assert.ok(state.includes('\nrunning steps of this session: S-2 (started 2026-01-05 10:00)\n'));
+  assert.match(state, /\nk status --session s-main:\n {2}k status failed: .*no workspace/);
+  assert.match(state, /\nk waiting, the lines of this task:\n {2}k waiting failed: .*no workspace/);
+  assert.ok(state.includes('\nrunning agents:\n  find the parser: Explore, id a1, launched '));
+  assert.ok(!state.includes('ended already'));
+  assert.ok(state.endsWith('\n  b1 running: node heavy-lock.mjs run -- make test'));
+  const rec = h.json('compact/s-main.json');
+  assert.equal(rec.expect, undefined);
+  assert.deepEqual({ ...rec.fire, at: null }, { at: null, source: 'compact', put: true, why: 'expect boundary' });
+  const line = h.log().at(-1);
+  assert.deepEqual([line.event, line.put, line.why, line.boundary, line.chars], ['SessionStart', true, 'expect boundary', false, state.length]);
+});
+
+test('a manual /compact: the parts are put back, and a part run before the state part reads expect itself (E-4, R5.4)', () => {
+  const h = makeHome();
+  writeJson(join(h.home, 'compact', 's-main.json'), { expect: { at: ago(3), why: 'manual', ctx: 90000 } });
+  assert.match(run(h, 'progress'), /^kirunak, after a compaction \(part 4 of 4\): progress\n/);
+  assert.equal(h.json('compact/s-main.json').expect.why, 'manual');
+  assert.match(run(h, 'state'), /^kirunak, after a compaction \(part 1 of 4\): state\nThis is the same session, after a compaction, still on app\/demo\.\n/);
+  assert.equal(h.log().at(-1).why, 'expect manual');
+});
+
+test('an agent\'s compaction: no expect and no boundary, or an expect or boundary over 180 s old, gives nothing; the main\'s boundary gives the parts (R5.2, E-6)', () => {
+  const h = makeHome({ expect: null });
+  assert.deepEqual(all(h), NONE);
+  assert.deepEqual([h.log().at(-1).put, h.log().at(-1).why], [false, "not the main's"]);
+  const stale = makeHome({ expect: EXPECT_S + 1 });
+  assert.deepEqual(all(stale), NONE);
+  assert.equal(stale.json('compact/s-main.json').expect, undefined);
+  const mark = (at) => `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: at, content: 'Conversation compacted' })}\n`;
+  const old = makeHome({ expect: null });
+  appendFileSync(old.transcript, mark(ago(EXPECT_S + 5)));
+  assert.deepEqual(all(old), NONE);
+  const seen = makeHome({ expect: null });
+  appendFileSync(seen.transcript, mark(ago(10)));
+  assert.ok(all(seen).every((t) => typeof t === 'string'));
+  assert.deepEqual([seen.log().at(-1).why, seen.log().at(-1).boundary], ['boundary seen', true]);
+});
+
+test('nothing in a k run step, after startup, for an unknown part or unreadable input, a session with no task, a task folder gone (E-6, E-5)', () => {
+  const h = makeHome();
+  assert.equal(run(h, 'state', h.input(), { KIRUNAK_STEP: 'S-2' }), null);
+  assert.deepEqual([h.json('compact/s-main.json').expect.why, h.log()], ['boundary', []]);
+  assert.equal(run(h, 'state', h.input({ source: 'startup' })), null);
+  assert.equal(run(h, 'state', h.input({ agent_id: 'a1', agent_type: 'Explore' })), null);
+  assert.equal(run(h, 'nope'), null);
+  assert.equal(run(h, 'state', 'not json'), null);
+  assert.ok(h.json('compact/s-main.json').expect);
+  const none = makeHome({ session: null });
+  assert.deepEqual(all(none), NONE);
+  assert.equal(none.log().at(-1).why, 'no task');
+  const gone = makeHome({ session: { task: 'app/missing' } });
+  assert.deepEqual(all(gone), NONE);
+  assert.equal(gone.log().at(-1).why, 'task folder unknown');
 });
