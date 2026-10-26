@@ -133,7 +133,8 @@ met (<ids>)` whatever the flags, `--checklist-open` included, which waives check
 way out is an amendment (`k amend new <id>`, approved, then a new review) or a new review after a fix. It refuses a
 task with no review: a task closes only through a review step of `plan.md` that ran. It refuses code committed after
 the review: when `git diff --name-only <review head> HEAD`, leaving out the task's own folder as the reviewer's diff
-does, names a file, the review never saw it; the refusal names a few such files, no flag waives
+does and `kirunak/drafts/` (any session writes or drops a draft, and no task's code reads one), names a file, the
+review never saw it; the refusal names a few such files, no flag waives
 it, and the way out is a new review. It writes `done.json` with the review it took (file, verdict, head, hash,
 `task-files.md` §3), commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done`
 skill asks the owner to type (`review.md` §4).
