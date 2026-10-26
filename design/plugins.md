@@ -174,7 +174,7 @@ freeze.log             every refusal of the PreToolUse hook (approval.md §2)
 escalate.log           every fire, block, lift and /k-go-on override of the escalation hook, one JSON line each (approval.md §7)
 escalate/              the hook's config.json (written by k install) and its state files per session, pruned after 14 days
 compact.log            every PreCompact decision of the compact hook and what SessionStart put back, one JSON line each (orchestrator.md §5)
-compact/               the compact hook's state: <session>.json (expect, the parts' join) and cleared.json (a /clear's handover), pruned after 14 days
+compact/               the compact hook's state: <session>.json (expect, the first block, the parts' join) and cleared.json (a /clear's handover), pruned after 14 days
 slapignore.json        the repos with the git hooks and the owner's approval of each one's .slapignore (change-size.md §4)
 guard/                 the default resource guard: lock, queue, claims.json, log.jsonl (§2)
 board.html             the generated board (boards.md §2)

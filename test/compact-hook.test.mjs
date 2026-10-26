@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -206,7 +206,7 @@ test('attribute: the five rows, the edge at exactly T - LAG, and a closed turn t
 
 test('decide: the rows in the table\'s order, each fact read only when its row is reached', async () => {
   const no = (name) => () => assert.fail(`${name} was read`);
-  const base = { trigger: 'auto', config: { compact: { enabled: true } }, session: 's-main', window: { kirunak: true }, ctx: 160000, attribution: { main: true }, limit: 500000, task: 'app/demo', running: ['S-2'] };
+  const base = { trigger: 'auto', config: { compact: { enabled: true } }, session: 's-main', window: { kirunak: true }, ctx: 160000, attribution: { main: true }, limit: 500000, task: 'app/demo', running: ['S-2'], passed: false };
   const row = async (f) => {
     const d = await decide({ ...base, ...f });
     return [d.decision, d.row, d.why, d.expect];
@@ -225,7 +225,8 @@ test('decide: the rows in the table\'s order, each fact read only when its row i
   const d = await decide({ ...base, running: async () => ['S-2', 'S-3'] });
   assert.equal(d.reason, 'kirunak: S-2, S-3 are running; the compaction waits for the step boundary');
   assert.deepEqual(await row({ running: null }), ['allow', 'R4.3', 'state unreadable', false]);
-  assert.deepEqual(await row({ running: [] }), ['allow', 'R4.9', 'boundary', true]);
+  assert.deepEqual(await row({ running: [], passed: no('passed') }), ['allow', 'R4.9', 'boundary', true]);
+  assert.deepEqual(await row({ passed: async () => true }), ['allow', 'R4.8a', 'boundary passed', true]);
 });
 
 // ---- §4 The hook, run as Claude Code runs it: the event on stdin, a scratch KIRUNAK_HOME and config folder ----
@@ -253,7 +254,7 @@ function makeHome({ ctx = 160000, model = MODEL, progress = STARTED, session = {
     custom_instructions: null, ...extra,
   });
   const log = () => (existsSync(join(home, 'compact.log')) ? readFileSync(join(home, 'compact.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
-  const expected = () => (existsSync(join(home, 'compact', 's-main.json')) ? JSON.parse(readFileSync(join(home, 'compact', 's-main.json'), 'utf8')).expect : null);
+  const expected = () => (existsSync(join(home, 'compact', 's-main.json')) ? JSON.parse(readFileSync(join(home, 'compact', 's-main.json'), 'utf8')).expect ?? null : null);
   return { ...r, home, dir, transcript, input, log, expected };
 }
 
@@ -407,6 +408,64 @@ test('R4.7a: in a session with no task, an idle compaction (the turn closed IDLE
   assert.equal(run(makeHome({ session: null, record: closed(IDLE_MIN + 5) })).line.why, 'idle, no task');
   assert.equal(run(makeHome({ session: null, record: { turn: { state: 'open', at: new Date(Date.now() - 60 * 60_000).toISOString() } } })).line.why, 'no task');
   assert.equal(run(makeHome({ record: closed(IDLE_MIN + 5) })).out.decision, 'block', 'a session holding a task keeps R4.8');
+});
+
+// ---- R1.4: a boundary no fire saw, after the first block ----
+
+test('R1.4: after a block, S-2 finished and S-3 started in the same minute is a boundary passed: allowed once, the record cleared', () => {
+  const h = makeHome();
+  const rec = () => JSON.parse(readFileSync(join(h.home, 'compact', 's-main.json'), 'utf8'));
+  assert.equal(run(h).out.decision, 'block');
+  const first = rec().blocked;
+  assert.equal(first.line, 1);
+  assert.equal(first.at, h.log().at(-1).ts);
+  writeFileSync(join(h.dir, 'progress.md'), `${STARTED}2026-01-05 10:40 S-2 finished\n2026-01-05 10:40 S-3 started (session s-main)\n`);
+  const r = run(h);
+  allowed(r, 'boundary passed');
+  assert.deepEqual([r.line.row, r.line.steps, h.expected().why], ['R4.8a', ['S-3'], 'boundary passed']);
+  assert.equal(rec().blocked, undefined, 'an allow clears it');
+  assert.equal(run(h).out.decision, 'block', 'S-3 runs: a new first block');
+  assert.equal(rec().blocked.line, 3);
+});
+
+test('R1.4: overlapping steps whose gap never opens stay blocked; the first block\'s record is kept, not moved', () => {
+  const h = makeHome({ progress: `${STARTED}2026-01-05 10:05 S-3 started (session s-main)\n` });
+  const rec = () => JSON.parse(readFileSync(join(h.home, 'compact', 's-main.json'), 'utf8'));
+  assert.equal(run(h).out.decision, 'block');
+  const first = rec().blocked;
+  appendFileSync(join(h.dir, 'progress.md'), '2026-01-05 10:30 S-2 finished\n2026-01-05 10:31 S-4 started (session s-main)\n2026-01-05 10:50 S-3 finished\n');
+  const r = run(h);
+  assert.deepEqual([r.out.decision, r.line.why, r.line.steps], ['block', 'running', ['S-4']]);
+  assert.deepEqual(rec().blocked, first);
+});
+
+test('R1.4: a boundary before the first block holds nothing: S-2 finished and S-3 started before it, S-3 still running', () => {
+  const h = makeHome({ progress: `${STARTED}2026-01-05 10:30 S-2 finished\n2026-01-05 10:30 S-3 started (session s-main)\n` });
+  assert.equal(run(h).out.decision, 'block');
+  assert.equal(run(h).out.decision, 'block');
+  appendFileSync(join(h.dir, 'progress.md'), '2026-01-05 10:45 S-4 started (session s-main)\n');
+  assert.deepEqual([run(h).out.decision, h.log().at(-1).why], ['block', 'running']);
+});
+
+test('R1.4: a block with the context under T records nothing (an agent\'s fire held with the main\'s, R3.4); the first at T does', () => {
+  const h = makeHome({ ctx: 120000, record: { turn: { state: 'open', at: new Date().toISOString() } } });
+  assert.equal(run(h).out.decision, 'block');
+  assert.equal(existsSync(join(h.home, 'compact', 's-main.json')), false);
+  appendFileSync(join(h.dir, 'progress.md'), '2026-01-05 10:40 S-2 finished\n2026-01-05 10:40 S-3 started (session s-main)\n');
+  writeTranscript(h.transcript, [assistant(160000)]);
+  assert.deepEqual([run(h).out.decision, h.log().at(-1).why], ['block', 'running'], 'the gap came before the main was due');
+  assert.equal(JSON.parse(readFileSync(join(h.home, 'compact', 's-main.json'), 'utf8')).blocked.line, 3);
+});
+
+test('R1.4: a session with no task records its first block too; the limit\'s allow clears it', () => {
+  const h = makeHome({ session: { step: null } });
+  const rec = () => JSON.parse(readFileSync(join(h.home, 'compact', 's-main.json'), 'utf8'));
+  assert.equal(run(h).line.why, 'no task');
+  assert.deepEqual(Object.keys(rec().blocked), ['at', 'line']);
+  assert.equal(rec().blocked.line, null, 'progress.md not read');
+  writeTranscript(h.transcript, [assistant(500000)]);
+  allowed(run(h), 'limit');
+  assert.equal(rec().blocked, undefined);
 });
 
 // ---- compact/<session>.json: one read, change and write at a time (R6.6) ----

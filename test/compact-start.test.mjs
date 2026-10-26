@@ -339,6 +339,18 @@ test('R6.6: the state part decides under the lock: with another writer holding i
   assert.equal(h.json('compact/s-new.json'), null, 'joined is written under the lock');
 });
 
+test('R1.4: the main\'s compaction clears the first block\'s record; an agent\'s leaves it', () => {
+  const blocked = { at: ago(300), line: 3 };
+  const h = makeHome();
+  writeJson(join(h.home, 'compact', 's-main.json'), { ...h.json('compact/s-main.json'), blocked });
+  assert.ok(run(h, 'state'));
+  assert.equal(h.json('compact/s-main.json').blocked, undefined);
+  const agent = makeHome({ expect: null });
+  writeJson(join(agent.home, 'compact', 's-main.json'), { blocked });
+  assert.equal(run(agent, 'state'), null);
+  assert.deepEqual(agent.json('compact/s-main.json').blocked, blocked);
+});
+
 test('prune: the state part removes compact/*.json untouched for 14 days; newer ones and compact.log stay (R5.5)', () => {
   const h = makeHome();
   const aged = (path, days) => utimesSync(path, new Date(Date.now() - days * 86_400_000), new Date(Date.now() - days * 86_400_000));

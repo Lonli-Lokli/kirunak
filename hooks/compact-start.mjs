@@ -42,6 +42,8 @@ function compactFire(home, input, part, now) {
       d = decision(rec);
       const rest = { ...rec };
       delete rest.expect;
+      // R1.4: the main's compaction ends the hold the first block's record measures from.
+      if (d.put) delete rest.blocked;
       const boundaryAt = d.boundary ?? rec.fire?.boundaryAt ?? null;
       return { ...rest, fire: { at: now.toISOString(), source: 'compact', put: d.put, why: d.why, boundaryAt } };
     });

@@ -247,7 +247,7 @@ const block = (row, why, reason) => ({ decision: 'block', row, why, reason, expe
 // anything is read). Each fact of `f` is a value or a function (sync or async) called only when its row is reached,
 // so the cheap rows end before the transcript or progress.md is read: trigger, config, session (the id), window
 // (windowSetting), ctx, attribution, limit, task, idle (idleOf), running (runningBy, or null when progress.md cannot
-// be read).
+// be read), passed (boundarySince over the first block's record).
 // `expect` marks the allows attributed to the main session, which SessionStart puts the task back after (R5.2).
 export async function decide(f) {
   const get = async (k) => (typeof f[k] === 'function' ? f[k]() : f[k]);
@@ -275,6 +275,8 @@ export async function decide(f) {
   const running = await get('running');
   if (!Array.isArray(running)) return allow('R4.3', 'state unreadable');
   if (running.length) {
+    // R1.4: a boundary came after the first block, though no fire saw it.
+    if (await get('passed')) return allow('R4.8a', 'boundary passed', true);
     const verb = running.length > 1 ? 'are' : 'is';
     return block('R4.8', 'running', `kirunak: ${running.join(', ')} ${verb} running; the compaction waits for the step boundary`);
   }

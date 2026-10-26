@@ -56,8 +56,8 @@ function runningAgents(record, input) {
     .map(([id]) => ({ id, ctx: lastUsage(join(base, `agent-${id}.jsonl`), { sidechain: true })?.ctx ?? null }));
 }
 
-// The steps of the session's chain running in its task (R1.1, R1.2); null when the task's folder cannot be found.
-async function stepsRunning(config, session, id) {
+// The task's progress.md, its folder and the session's chain (R1.1, R1.2); null when the folder cannot be found.
+function progressOf(config, session, id) {
   const dir = taskDir(config, session?.task);
   if (!dir) return null;
   let text = '';
@@ -66,9 +66,11 @@ async function stepsRunning(config, session, id) {
   } catch {
     // no progress.md yet: no step started
   }
-  const { runningBy } = await import('../lib/steps.mjs');
-  return runningBy(text, [id, ...(Array.isArray(session.previous) ? session.previous : [])], dir);
+  return { dir, text, chain: [id, ...(Array.isArray(session.previous) ? session.previous : [])] };
 }
+
+// lib/steps.mjs, loaded only when the table reaches R4.8.
+const steps = () => import('../lib/steps.mjs');
 
 // The facts of R4's table, each read when its row is reached, in the order the design names: config, the settings
 // files, the transcript tail, the sessions file and the escalation record, progress.md, the agents' transcripts.
@@ -93,10 +95,19 @@ export function factsOf(input, home, env = process.env, now = new Date()) {
   const agents = once('agents', () => runningAgents(record(), input));
   const turn = () => record()?.turn ?? null;
   const attribution = once('attribution', () => attribute({ turn: turn(), ctx: usage().ctx, T: T(), agents: agents(), now: now.getTime() }));
-  const running = async () => (seen.running = await stepsRunning(config(), session(), id));
+  const progress = once('progress', () => progressOf(config(), session(), id));
+  const running = async () => {
+    const p = progress();
+    return (seen.running = p ? (await steps()).runningBy(p.text, p.chain, p.dir) : null);
+  };
+  const blocked = () => read(expectPath(home, id))?.blocked ?? null;
+  const passed = async () => {
+    const [p, since] = [progress(), blocked()];
+    return !!(p && since) && (await steps()).boundarySince(p.text, p.chain, p.dir, since);
+  };
   const facts = {
     trigger: input.trigger, config, session: id, window, ctx: () => usage()?.ctx ?? null, attribution, limit,
-    task: () => session()?.task ?? null, idle: () => idleOf(turn(), now.getTime()), running,
+    task: () => session()?.task ?? null, idle: () => idleOf(turn(), now.getTime()), running, passed,
   };
   return { facts, seen };
 }
@@ -110,10 +121,23 @@ const lineOf = (input, seen, out, now) => ({
   steps: seen.running ?? null, decision: out.decision, row: out.row, why: out.why,
 });
 
-// `expect` (R5.2) in compact/<session>.json, merged under its lock (R6.6); a record, never a reason to fail.
+// `expect` (R5.2) in compact/<session>.json, merged under its lock (R6.6), and the first block's record (R1.4) gone;
+// a record, never a reason to fail.
 function recordExpect(home, session, expect) {
-  updateRecord(expectPath(home, session), (rec) => ({ ...rec, expect }));
+  updateRecord(expectPath(home, session), (rec) => {
+    const rest = { ...rec };
+    delete rest.blocked;
+    return { ...rest, expect };
+  });
 }
+
+// R1.4: the first block since the last allow with the context at least T (the main's compaction due, whoever
+// fired), its time and the lines progress.md had then (null when it was not read); a later block leaves it.
+function recordBlocked(home, session, blocked) {
+  updateRecord(expectPath(home, session), (rec) => (rec.blocked ? null : { ...rec, blocked }));
+}
+
+const linesOf = (text) => (typeof text === 'string' ? text.split('\n').length - 1 : null);
 
 // `--part <name>` or `--part=<name>`: the SessionStart entry's part (R5.1).
 function partArg(argv) {
@@ -158,6 +182,9 @@ async function main() {
   }
   if (out.expect && expectPath(home, input.session_id)) {
     recordExpect(home, input.session_id, { at: now.toISOString(), why: out.why, ctx: seen.usage?.ctx ?? null });
+  }
+  if (out.decision === 'block' && seen.usage?.ctx >= seen.T && expectPath(home, input.session_id)) {
+    recordBlocked(home, input.session_id, { at: now.toISOString(), line: linesOf(seen.progress?.text) });
   }
   logLine(home, lineOf(input, seen, out, now));
   if (out.decision === 'block') process.stdout.write(JSON.stringify({ decision: 'block', reason: out.reason }));
