@@ -33,6 +33,7 @@ own implementations live in the workspace's repo, beside its config (D2).
 | `tracker` | many | `push(task, state)`, `pull() → [{ id, state }]` | none | later: Linear, It's a Plan, GitHub Issues (R18) |
 | `sync` | one | `pushTask(id)`, `pullTask(id)`, `watch(cb)` | none | later: the cloud (R17) |
 | `prices` | one | `weights(model) → { input, cacheRead, write5m, write1h, output }` | `prices-default.mjs`: per base input token, cache read 0.1, 5-minute write 1.25, 1-hour write 2, output 5; per model against Opus: Sonnet 0.6, Haiku 0.2, Fable 2.5 | its own, when the price list changes or its account pays differently |
+| `worktrees` | many, merged in load order | `repos({ ws }) → [path]`, `candidates({ ws, repos }) → [{ path, remove, why }]`, `buildOutput({ ws }) → [name]` | none: the core removes only the merged branch worktrees of the workspace's repos | more repos to look in, detached worktrees it offers or keeps (a keep from any plugin wins), and the folder names that are build output (`approval.md` §4) |
 
 - Evidence for the cache ratios of the `prices` default: Anthropic's prompt-caching documentation (a cache read at
   0.1 times the base input price, a 5-minute write at 1.25 times, a 1-hour write at 2 times; `prompt-caching.md`).
