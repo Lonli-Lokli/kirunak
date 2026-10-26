@@ -46,12 +46,17 @@ test('a: the window written into each root\'s local file, its keys and indent ke
   assert.ok(again.includes(`${s.local(s.hub)}: autoCompactWindow is already 183000; ignored by git`));
   assert.equal(read(join(s.hub, '.git', 'info', 'exclude')), exclude, 'appended once');
   const yours = [
-    `${s.paths.settingsPath}: autoCompactWindow 500000, yours (the mid-step limit); kirunak never writes it`,
-    `${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (the mid-step limit for opus); kirunak never writes it`,
+    `${s.paths.settingsPath}: autoCompactWindow 500000, yours (outside the workspace repos and in k run steps); kirunak never writes it`,
+    `${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (for opus outside the workspace repos and in k run steps); kirunak never writes it`,
   ];
-  const aboutUser = (list) => list.filter((a) => a.includes(s.paths.settingsPath) && a.includes('autoCompactWindow'));
+  const aboutUser = (list, file = s.paths.settingsPath) => list.filter((a) => a.includes(file) && a.includes('autoCompactWindow'));
   assert.deepEqual(aboutUser(actions), yours, 'the user\'s own window and its per-model value named, and nothing else of the window in their file');
   assert.deepEqual(aboutUser(again), yours, 'named on every run');
+  const own = setup({ compact: { midStepLimit: 'user' } });
+  assert.deepEqual(aboutUser(own.go(), own.paths.settingsPath), [
+    `${own.paths.settingsPath}: autoCompactWindow 500000, yours (the mid-step limit); kirunak never writes it`,
+    `${own.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (the mid-step limit for opus); kirunak never writes it`,
+  ], 'with midStepLimit \'user\' the user\'s window is the mid-step limit');
 });
 
 test('c: kirunak\'s earlier window replaced once config.json carried it; d: the owner\'s own kept and named; f: a per-model window named', () => {
@@ -125,8 +130,8 @@ test('a root that is a worktree is written at its main checkout\'s file; --print
   assert.ok(printed.includes(`${wt} is a worktree: sessions there read ${s.local(s.hub)}`));
   assert.ok(printed.includes(`would set autoCompactWindow 183000 in ${s.local(s.hub)} (handover size 150000 + 33000)`));
   assert.ok(printed.some((a) => a.startsWith('would add /.claude/settings.local.json to ')));
-  assert.ok(printed.includes(`${s.paths.settingsPath}: autoCompactWindow 500000, yours (the mid-step limit); kirunak never writes it`));
-  assert.ok(printed.includes(`${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (the mid-step limit for opus); kirunak never writes it`), '--print names the user\'s window as a run does');
+  assert.ok(printed.includes(`${s.paths.settingsPath}: autoCompactWindow 500000, yours (outside the workspace repos and in k run steps); kirunak never writes it`));
+  assert.ok(printed.includes(`${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (for opus outside the workspace repos and in k run steps); kirunak never writes it`), '--print names the user\'s window as a run does');
   assert.ok(!existsSync(s.local(s.hub)) && !existsSync(join(wt, ...LOCAL)), 'nothing written');
   assert.equal(read(join(s.hub, '.git', 'info', 'exclude')), exclude);
   s.go();
