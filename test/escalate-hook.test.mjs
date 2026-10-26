@@ -1063,7 +1063,7 @@ test('a launch keeps the name the caller gave and the output file; a foreground 
   assert.ok(Date.parse(a.at) > 0);
   hook(launchOf('Explore', 'aresp', {}, { input: { description: undefined }, response: { description: 'named in the response' } }), h.home);
   assert.deepEqual([h.state().agents.aresp.description, h.state().agents.aresp.outputFile], ['named in the response', null]);
-  // Foreground (S-1 §7, a -p run): its SubagentStop comes first, then PostToolUse with `completed` and no output file.
+  // Foreground (a -p run, as probed): its SubagentStop comes first, then PostToolUse with `completed` and no output file.
   hook(stopOf('filler', 'afg', '/dev/null', { last_assistant_message: 'filled' }), h.home);
   const stop = h.state().agents.afg;
   hook(launchOf('filler', 'afg', {}, { input: { description: 'fill the gap' }, response: { isAsync: undefined, status: 'completed', agentType: 'filler' } }), h.home);
@@ -1089,7 +1089,7 @@ test('every named agent\'s end is recorded and an internal agent\'s never; the s
   assert.equal(unfinished.finished, false);
   hook(stopOf('Explore', 'alate', handedBack(h), { stop_hook_active: true }), h.home);
   assert.deepEqual([h.state().agents.alate.finished, h.state().agents.alate.ended], [true, unfinished.ended]);
-  // Claude Code's internal agents have an empty agent_type (S-1 §7): nothing, even past the matcher.
+  // Claude Code's internal agents have an empty agent_type: nothing, even past the matcher.
   const was = stateText(h);
   hook(stopOf('', 'ainternal', '/dev/null', { last_assistant_message: 'a summary' }), h.home);
   assert.equal(stateText(h), was);
