@@ -176,6 +176,8 @@ test('thresholdOf clamps to [100,000, the model\'s window]; limitOf takes the nu
   assert.equal(thresholdOf(null, 1_000_000), 1_000_000 - SLACK);
   assert.equal(limitOf({ midStepLimit: 'user', user: 500000, wModel: 1_000_000 }), 500000);
   assert.equal(limitOf({ midStepLimit: 300000, user: 500000, wModel: 1_000_000 }), 300000);
+  assert.equal(limitOf({ midStepLimit: 167000, user: 500000, wModel: 1_000_000 }), 167000, 'the default, under the user\'s window');
+  assert.equal(limitOf({ midStepLimit: 167000, user: 500000, wModel: 200_000 }), 67000);
   assert.equal(limitOf({ midStepLimit: 'user', user: 1_000_000, wModel: 1_000_000 }), 867000, 'a 1M model\'s point less SLACK and LAG');
   assert.equal(limitOf({ midStepLimit: 'user', user: 500000, wModel: 200_000 }), 67000);
   const r = makeRepos({ user: { autoCompactWindow: 500000, modelSettings: { [MODEL]: { autoCompactWindow: 400000 } } } });
@@ -427,6 +429,20 @@ test('R4.6 on a 200k model: the limit below the threshold, so at most one reques
   const held = run(makeHome({ ctx: 60000, model: 'claude-other-4' }));
   assert.deepEqual([held.out.decision, held.line.T, held.line.limit], ['block', 150000, 67000]);
   allowed(run(makeHome({ ctx: 67000, model: 'claude-other-4' })), 'limit');
+});
+
+test('R4.6, R4.8, R4.7: the default limit of 167,000 holds a step and a session with no task at 160k, both let through at 167k (E-1, E-3, D-2)', () => {
+  const at = (ctx, extra = {}) => run(makeHome({ ctx, compact: { midStepLimit: 167000 }, user: { autoCompactWindow: 500000 }, ...extra }));
+  const mid = at(160000);
+  assert.deepEqual([mid.out.decision, mid.line.row, mid.line.T, mid.line.limit], ['block', 'R4.8', 150000, 167000], 'the band between the threshold and the limit holds');
+  const past = at(167000);
+  allowed(past, 'limit');
+  assert.deepEqual([past.line.row, past.line.limit], ['R4.6', 167000], 'the user\'s 500,000 is not the limit');
+  const free = at(160000, { session: null });
+  assert.deepEqual([free.out.decision, free.line.row], ['block', 'R4.7']);
+  allowed(at(167000, { session: null }), 'limit');
+  const small = at(167000, { model: 'claude-other-4' });
+  assert.deepEqual([small.line.decision, small.line.limit], ['allow', 67000], 'on a 200k model the model\'s point still bounds it (E-8)');
 });
 
 test('R4.7: a session with no task in a workspace repo is held to the limit, as today (E-3)', () => {
