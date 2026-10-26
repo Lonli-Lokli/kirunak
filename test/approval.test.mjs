@@ -473,7 +473,7 @@ test('accept refuses a not met verdict, --checklist-open or not: the way out is 
   assert.equal(existsSync(join(taskDir(weather), 'done.json')), false);
 });
 
-test('accept refuses code committed after the review head, naming it; commits in the task folder alone are not code', async () => {
+test('accept refuses code committed after the review head, naming it; commits in the task folder or the drafts alone are not code', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
   const dir = taskDir(weather);
@@ -496,6 +496,15 @@ test('accept refuses code committed after the review head, naming it; commits in
   reviewsRan(dir);
   sh(weather, 'git', ['rm', '-q', ...code]);
   sh(weather, 'git', ['commit', '-q', '-m', 'the fix taken back']);
+  // A draft written or dropped after the review is no task's code: any session does either, the review's finding too.
+  const drafts = join(weather, 'kirunak', 'drafts');
+  sh(weather, 'mkdir', ['-p', drafts]);
+  writeFileSync(join(drafts, 'later.md'), '# a draft for later\n');
+  gitCommitAll(weather, 'a draft from the review');
+  writeFileSync(join(drafts, 'other.md'), '# another draft\n');
+  gitCommitAll(weather, 'another session\'s draft');
+  sh(weather, 'git', ['rm', '-q', join('kirunak', 'drafts', 'later.md')]);
+  sh(weather, 'git', ['commit', '-q', '-m', 'the draft dropped']);
   assert.equal(accept({ ws, id: ID, now: NOV7 }).state, 'done');
   assert.equal(JSON.parse(readFileSync(join(dir, 'done.json'), 'utf8')).head, reviewed);
 });
