@@ -298,7 +298,7 @@ test('config.json: the ladder with each rung\'s agents, the hook switches, the r
     ],
     hook: { enabled: true, block: true, repeats: 3, commands: ['^bun test'] },
     repos: { hub: '/ws/hub' },
-    compact: { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 'user', roots: ['/ws/hub'] },
+    compact: { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 167000, roots: ['/ws/hub'] },
   });
   install({ ...h, ws: ws(), now: new Date('2026-10-26T08:00:00Z') });
   assert.equal(JSON.parse(readFileSync(path, 'utf8')).written, '2026-10-26T08:00:00.000Z', 'its time newer than the module\'s');

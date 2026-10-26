@@ -10,13 +10,15 @@ import { gitCommitAll, gitInit, ladderWorkspace, sh } from './helpers.mjs';
 // The handover's workspace settings (orchestrator.md §5, R7.1-R7.3): the defaults, the checks at load, the folders
 // and config.json's `compact` block.
 
-test('the defaults: the handover on, the measured size, the user\'s own window as the mid-step limit, no other folder', async () => {
-  assert.deepEqual({ ...DEFAULT_COMPACT }, { enabled: true, handoverSize: 150000, midStepLimit: 'user', alsoIn: [] });
-  assert.deepEqual(checkCompact(DEFAULT_COMPACT), [], '150000 + 33000 = 183000 is in the range');
+test('the defaults: the handover on, the measured size, the measured mid-step limit (a 200,000 window), no other folder', async () => {
+  assert.deepEqual({ ...DEFAULT_COMPACT }, { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] });
+  assert.deepEqual(checkCompact(DEFAULT_COMPACT), [], '150000 + 33000 = 183000 is in the range, and 167000 is above 150000');
   const { ws } = await ladderWorkspace();
-  assert.deepEqual(ws.compact, { enabled: true, handoverSize: 150000, midStepLimit: 'user', alsoIn: [] });
+  assert.deepEqual(ws.compact, { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] });
   const { ws: own } = await ladderWorkspace({ compact: { handoverSize: 120000 } });
-  assert.deepEqual(own.compact, { enabled: true, handoverSize: 120000, midStepLimit: 'user', alsoIn: [] }, 'merged with the defaults');
+  assert.deepEqual(own.compact, { enabled: true, handoverSize: 120000, midStepLimit: 167000, alsoIn: [] }, 'merged with the defaults');
+  const { ws: user } = await ladderWorkspace({ compact: { midStepLimit: 'user' } });
+  assert.equal(user.compact.midStepLimit, 'user', 'the user\'s own window stays a workspace\'s choice');
 });
 
 test('each value out of its range is refused at load, with its message', async () => {
@@ -27,7 +29,10 @@ test('each value out of its range is refused at load, with its message', async (
     [{ handoverSize: 150000.5 }, 'compact.handoverSize must be a whole number'],
     [{ midStepLimit: 'mine' }, 'compact.midStepLimit must be \'user\' (the user\'s own window) or a whole number of at most 967000'],
     [{ midStepLimit: 970000 }, 'compact.midStepLimit must be \'user\''],
-    [{ midStepLimit: 282999 }, 'compact.midStepLimit 282999 is under 283000 (handoverSize + 33000 + 100000): below that the hook could never hold a call'],
+    [{ midStepLimit: 150000 }, 'compact.midStepLimit 150000 must be above compact.handoverSize 150000: at or under it, a compaction in the middle of a step would never wait for the step boundary'],
+    [{ midStepLimit: 120000 }, 'compact.midStepLimit 120000 must be above compact.handoverSize 150000'],
+    [{ handoverSize: 200000 }, 'compact.midStepLimit 167000 must be above compact.handoverSize 200000'], // the default limit under a larger size
+    [{ midStepLimit: 167000.5 }, 'compact.midStepLimit must be \'user\''],
     [{ alsoIn: '~/sources/kirunak' }, 'compact.alsoIn must be a list of folders'],
     [{ alsoIn: [''] }, 'compact.alsoIn must be a list of folders'],
   ];
@@ -36,7 +41,8 @@ test('each value out of its range is refused at load, with its message', async (
     assert.ok(problem?.startsWith(message), `${JSON.stringify(compact)}: ${problem}`);
     await assert.rejects(ladderWorkspace({ compact }), (e) => e.message.includes(`: ${message}`), JSON.stringify(compact));
   }
-  assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 283000 }), [], 'the floor itself passes');
+  assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 150001 }), [], 'just above the handover size passes: the hook holds the band between');
+  assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 'user' }), [], 'the user\'s own window passes, checked by k doctor');
   assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 500000 }), [], 'the owner\'s 500,000 passes');
   assert.deepEqual(checkCompact({ ...DEFAULT_COMPACT, midStepLimit: 967000 }), [], 'a 1M model\'s own point passes');
   assert.match(checkCompact(5)[0], /^compact must be an object/);
@@ -69,11 +75,11 @@ test('alsoIn is expanded and made real at load; a worktree root is its main chec
 test('config.json carries the compact block: the switch, the size, the window, the limit and the roots, with and without alsoIn', async () => {
   const s = scratch();
   const ws = { repos: [{ name: 'repo', root: s.repo }], compact: { ...DEFAULT_COMPACT } };
-  assert.deepEqual(compactConfig(ws), { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 'user', roots: [s.repo] });
+  assert.deepEqual(compactConfig(ws), { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 167000, roots: [s.repo] });
   const other = join(s.dir, 'other');
   mkdirSync(other);
   ws.compact = { enabled: false, handoverSize: 100000, midStepLimit: 400000, alsoIn: [other] };
   assert.deepEqual(escalateConfig(ws).compact, { enabled: false, handoverSize: 100000, window: 133000, midStepLimit: 400000, roots: [s.repo, other] });
-  assert.deepEqual(escalateConfig(null).compact, { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 'user', roots: [] },
+  assert.deepEqual(escalateConfig(null).compact, { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 167000, roots: [] },
     'before k init: the defaults, no roots');
 });

@@ -8,6 +8,7 @@ import {
   AGENT_FRESH_S, BOUNDARY_WAIT_S, boundaryIn, CAP, CLEAR_S, cut, EXPECT_S, IDLE_MIN, LAG, labelOf, lastOf, OVERSHOOT, PARTS_S, planFor,
   PRUNE_DAYS, SLACK, stateText, waitingLines,
 } from '../hooks/compact-rules.mjs';
+import { DEFAULT_COMPACT } from '../lib/compact.mjs';
 import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
 import { makeWorkspace } from './helpers.mjs';
 
@@ -20,6 +21,9 @@ test('orchestrator.md §5\'s numbers name every constant of the handover with it
   const numbers = /\*\*The numbers\.\*\*[\s\S]*?\n\n/.exec(doc)?.[0].replace(/\s+/g, ' ') ?? '';
   const all = { SLACK, LAG, OVERSHOOT, AGENT_FRESH_S, IDLE_MIN, CAP, EXPECT_S, BOUNDARY_WAIT_S, CLEAR_S, PARTS_S, PRUNE_DAYS };
   for (const [name, v] of Object.entries(all)) assert.ok(numbers.includes(`\`${name}\` = ${v.toLocaleString('en-US')}`), name);
+  const { handoverSize, midStepLimit } = DEFAULT_COMPACT;
+  assert.ok(numbers.includes(`The handover size's default, ${handoverSize.toLocaleString('en-US')},`), 'the handover size');
+  assert.ok(numbers.includes(`The mid-step limit's default, ${midStepLimit.toLocaleString('en-US')} (a ${(midStepLimit + SLACK).toLocaleString('en-US')} window)`), 'the mid-step limit');
 });
 
 // ---- The parts' text (R5.1) ----

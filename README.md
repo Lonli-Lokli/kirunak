@@ -86,12 +86,13 @@ You need Node 22 or later, git and Claude Code.
    tracks is left alone and named. It never overwrites a window that is not its own: a value you set in that file, a
    window in the repo's committed `.claude/settings.json`, a per-model `modelSettings` window and the
    `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable are each named, with what to change, and `k doctor` fails them until
-   you do. A compaction in the middle of a step waits for the **mid-step limit**, by default your own
-   `autoCompactWindow` (the one in `~/.claude/settings.json`, or Claude Code's own point when you set none), so it
-   never comes sooner than it does without kirunak; `compact.midStepLimit` sets a number instead. `k install` and
-   `k doctor` name that window, and each `modelSettings.<model>.autoCompactWindow` beside it, as yours; neither
-   writes it. A session outside every workspace repo keeps your own window, and the hook never holds its compaction.
-   `k run`'s steps keep their own point through the variable. `compact: { enabled: false }` turns it off, and the
+   you do. A compaction in the middle of a step waits for the **mid-step limit**, by default 167,000 tokens of
+   context (a 200,000 window, measured as the least weight); `compact.midStepLimit` sets another number, or `'user'`
+   for your own `autoCompactWindow` (the one in `~/.claude/settings.json`, or Claude Code's own point when you set
+   none), so it never comes sooner than it does without kirunak. `k install` and `k doctor` name your window, and
+   each `modelSettings.<model>.autoCompactWindow` beside it, as yours; neither writes it. A session outside every
+   workspace repo keeps your own window, and the hook never holds its compaction. `k run`'s steps keep your own
+   window too, through the variable. `compact: { enabled: false }` turns it off, and the
    next `k install` takes its window back out (`design/plugins.md` §3).
 
    `--print` shows what it would do and writes nothing. A repo that already

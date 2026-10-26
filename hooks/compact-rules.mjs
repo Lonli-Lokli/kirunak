@@ -217,8 +217,9 @@ export function userWindow({ configDir, model, wModel, read = readJson }) {
 // The threshold (R2.6): the window clamped to [100,000, the model's window], less SLACK; none set, the model's own.
 export const thresholdOf = (window, wModel) => Math.min(Math.max(window ?? wModel, MIN_WINDOW), wModel) - SLACK;
 
-// The mid-step limit (R4.6, E-1, E-8): the workspace's number, else the user's own window, and never past the point
-// where one request more could pass Claude Code's own compaction.
+// The mid-step limit (R4.6, E-1, E-8), a context compared with the transcript's: the workspace's number (by default
+// 167,000), else for 'user' the user's own window, and never past the point where one request more could pass Claude
+// Code's own compaction.
 export const limitOf = ({ midStepLimit, user, wModel }) =>
   Math.min(num(midStepLimit) ?? user ?? wModel, wModel - SLACK - LAG);
 

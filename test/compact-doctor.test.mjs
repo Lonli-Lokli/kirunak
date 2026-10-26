@@ -22,12 +22,12 @@ test('after k install every compact line is ok: the settings, the wiring, each r
   const s = installed();
   const user = s.paths.settingsPath;
   assert.deepEqual(s.check(), [
-    [true, `compact (kirunak's defaults): handover size 150000, window 183000, mid-step limit the user's own window: 500000 (autoCompactWindow in ${user}), 400000 for opus (modelSettings)`],
+    [true, 'compact (kirunak\'s defaults): handover size 150000, window 183000, mid-step limit 167000 (a 200000 window)'],
     [true, 'compact hook: wired on PreCompact auto|manual, SessionEnd clear, SessionStart compact|clear (4 parts)'],
     [true, `weather: autoCompactWindow 183000 in ${s.local(s.weather)}, ignored by git`],
     [true, `hub: autoCompactWindow 183000 in ${s.local(s.hub)}, ignored by git`],
-    [true, `${user}: autoCompactWindow 500000, yours (the mid-step limit); kirunak never writes it`],
-    [true, `${user}: modelSettings.opus.autoCompactWindow 400000, yours (the mid-step limit for opus); kirunak never writes it`],
+    [true, `${user}: autoCompactWindow 500000, yours (outside the workspace repos and in k run steps); kirunak never writes it`],
+    [true, `${user}: modelSettings.opus.autoCompactWindow 400000, yours (for opus outside the workspace repos and in k run steps); kirunak never writes it`],
     [true, `here (${s.hub}): the handover window 183000 from ${s.local(s.hub)}`],
   ]);
 });
@@ -62,20 +62,25 @@ test('a root not written, not ignored, the owner\'s, kirunak\'s earlier window, 
   ]);
 });
 
-test('a user window under the floor FAILs naming compact.midStepLimit; a number is the limit itself; the variable and a per-model key FAIL', () => {
+test('the default limit: a small user window passes, one under the limit\'s window noted; with \'user\' one not above the handover size FAILs; the variable and a per-model key FAIL', () => {
   const s = installed({ user: { autoCompactWindow: 100000, modelSettings: {} } });
-  const floor = 'is under 283000: the hook could never hold a call; set compact.midStepLimit to a number of at least 283000 in';
-  assert.deepEqual(s.fails(), [`the user's own window 100000 ${floor} ${s.ws.modulePath}, or raise the window`]);
+  assert.deepEqual(s.fails(), [], 'a number is the limit: the user\'s window is not in force in a workspace repo');
+  const noted = (x) => x.check().filter(([, l]) => l.startsWith('the user\'s own window'));
+  assert.deepEqual(noted(s), [[true, 'the user\'s own window 100000 is under the mid-step limit\'s window 200000: in a workspace repo a step is compacted in its middle later than the window would elsewhere']]);
   const between = installed({ user: { autoCompactWindow: 250000, modelSettings: {} } });
-  assert.deepEqual(between.fails(), [`the user's own window 250000 ${floor} ${between.ws.modulePath}, or raise the window`]);
+  assert.deepEqual([between.fails(), noted(between)], [[], []], 'under 283000 and above the limit\'s window: nothing');
+  const own = installed({ compact: { midStepLimit: 'user' }, user: { autoCompactWindow: 150000, modelSettings: {} } });
+  assert.deepEqual(own.fails(), [`the user's own window 150000 is not above the handover size 150000: as the mid-step limit, a compaction in the middle of a step would never wait for the step boundary; set compact.midStepLimit to a number above 150000 in ${own.ws.modulePath}, or raise the window`]);
+  assert.equal(own.check()[0][1], `compact (${own.ws.modulePath}): handover size 150000, window 183000, mid-step limit the user's own window: 150000 (autoCompactWindow in ${own.paths.settingsPath})`);
+  assert.deepEqual(installed({ compact: { midStepLimit: 'user' }, user: { autoCompactWindow: 250000, modelSettings: {} } }).fails(), [], 'above the handover size passes');
   s.ws.compact = { ...s.ws.compact, midStepLimit: 400000 };
-  assert.equal(s.check()[0][1], `compact (${s.ws.modulePath}): handover size 150000, window 183000, mid-step limit 400000`);
+  assert.equal(s.check()[0][1], `compact (${s.ws.modulePath}): handover size 150000, window 183000, mid-step limit 400000 (a 433000 window)`);
   put(s.local(s.hub), { autoCompactWindow: 183000, modelSettings: { opus: { autoCompactWindow: 200000 } } });
   assert.deepEqual(s.fails({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '800000' } }), [
     'CLAUDE_CODE_AUTO_COMPACT_WINDOW=800000 in the shell beats every setting: the handover window is not in force while it is set',
     `hub: ${s.local(s.hub)}: modelSettings.opus.autoCompactWindow 200000 beats the handover window for opus; remove it, or set it to 183000`,
   ]);
-  const none = installed({ user: { autoCompactWindow: undefined, modelSettings: undefined } });
+  const none = installed({ compact: { midStepLimit: 'user' }, user: { autoCompactWindow: undefined, modelSettings: undefined } });
   assert.match(none.check()[0][1], /mid-step limit the user's own window: none set, the model's own window$/);
 });
 
