@@ -73,8 +73,10 @@ Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
+          k draft new <repo>/<slug> --title "..." --bug-of <task>: a bug of that accepted task, in any repo, with its
+            section Fix written for a fix that exists already (deleted when none does)
           k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
-          k drafts: every draft in every repo, one line each (id, title, date written)
+          k drafts: every draft in every repo, one line each (id, title, date written, bug of <task> on a bug's)
           k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
 Every verb takes --json and --dry-run.`;
 
@@ -483,15 +485,21 @@ const VERBS = {
   },
 
   // A prepared intake for a future task (kirunak-drafts): not the owner's, so any session runs these. Neither `new`
-  // nor `check` commits; the session that writes the draft commits it.
+  // nor `check` commits; the session that writes the draft commits it. `--bug-of <task>` writes a bug of that accepted
+  // task (kirunak-spikes AC-2).
   async draft({ ws, pos, flags }) {
     const sub = need(pos[0], 'draft verb: new|check|drop');
     const id = need(pos[1], 'draft id <repo>/<slug>');
     const dryRun = !!flags['dry-run'];
     if (sub === 'new') {
-      const r = drafts.newDraft({ ws, id, title: typeof flags.title === 'string' ? flags.title : '', session: session(flags), dryRun });
-      if (dryRun) return { ...r, text: `would write ${r.path}` };
-      return { ...r, text: `${r.path}: fill in every section, then \`k draft check ${id}\`, and commit it` };
+      const bugOf = flags['bug-of'] ?? null;
+      if (bugOf !== null && typeof bugOf !== 'string') throw usage('--bug-of names one accepted task: --bug-of <repo>/<slug>');
+      const title = typeof flags.title === 'string' ? flags.title : '';
+      const r = drafts.newDraft({ ws, id, title, bugOf, session: session(flags), dryRun });
+      const bug = r.bugOf ? `, a bug of ${r.bugOf}` : '';
+      if (dryRun) return { ...r, text: `would write ${r.path}${bug}` };
+      const fix = r.bugOf ? ` (name the fix under ${drafts.FIX}, or delete that section when no fix exists)` : '';
+      return { ...r, text: `${r.path}${bug}: fill in every section${fix}, then \`k draft check ${id}\`, and commit it` };
     }
     if (sub === 'check') return report(id, drafts.check(ws, id), '');
     if (sub === 'drop') {
