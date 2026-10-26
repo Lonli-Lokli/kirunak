@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE_FILE, doneNamed, doneRefusal, kept } from '../lib/records.mjs';
+import { BASE_FILE, doneNamed, doneRefusal } from '../lib/records.mjs';
 import { EMPTY_TREE, gate, line, parentOf, repoInfo } from '../lib/slap.mjs';
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -51,7 +51,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const task = (env.KIRUNAK_TASK || '').trim();
   const trailers = [line(m), ...(task ? [`Task: ${task}`] : [])];
   const own = !amending && amendsHead(env, head) ? parentOf(process.cwd(), 'HEAD') : base;
-  const done = await doneNamed(process.cwd(), kept(readFileSync(msgFile, 'utf8'), env) + (task ? `\nTask: ${task}\n` : ''), own);
+  const done = await doneNamed(info, readFileSync(msgFile, 'utf8'), own, env, task ? `\nTask: ${task}\n` : '');
   if (done) {
     console.error(doneRefusal(done));
     return 1;

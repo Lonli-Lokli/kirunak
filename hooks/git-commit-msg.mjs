@@ -7,12 +7,13 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE_FILE, doneNamed, doneRefusal, kept } from '../lib/records.mjs';
+import { BASE_FILE, doneNamed, doneRefusal } from '../lib/records.mjs';
 import { repoInfo } from '../lib/slap.mjs';
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const [msgFile] = argv;
-  const baseFile = join(repoInfo(process.cwd()).gitDir, BASE_FILE);
+  const info = repoInfo(process.cwd());
+  const baseFile = join(info.gitDir, BASE_FILE);
   let base;
   try {
     base = readFileSync(baseFile, 'utf8').trim();
@@ -20,7 +21,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     return 0;
   }
   rmSync(baseFile, { force: true });
-  const done = await doneNamed(process.cwd(), kept(readFileSync(msgFile, 'utf8'), env), base);
+  const done = await doneNamed(info, readFileSync(msgFile, 'utf8'), base, env);
   if (!done) return 0;
   console.error(doneRefusal(done));
   return 1;
