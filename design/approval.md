@@ -128,29 +128,50 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   `kirunak/plan.md` and `kirunak/amendments.md`, D-3), each at its path inside the repo that holds it
   (`kirunak/queue.md` in gulnya), the same path in a worktree of that repo.
 - **No new work on an accepted task** (AC-8, E-1): a commit whose message names a task of this repo the owner has
-  accepted (its folder holds `done.json`, whose `task` is its id), the trailer the hook is about to write included, is
+  accepted (its folder in the main checkout holds `done.json`, whose `task` is its id, or the default branch has that
+  file committed: the accepted set below), the trailer the hook is about to write included, is
   refused when it stages anything besides records. A message that only mentions the task names it too. The refusal:
   "kirunak: this commit's message names <id>, which the owner has accepted: new work on it is a new task. Reword the
   message so it does not name <id>, or start a new task (/k-intake); only kirunak's records (task folders, drafts,
   approvals, the queue, and what the workspace names as records) may still be committed naming it." So the accept's
   own commit and the handoff written after it pass.
 - **The message the commit keeps** (review.md of the task found a message typed in the editor let through):
-  prepare-commit-msg runs before the editor and checks a message given with `-m` or `-F`; commit-msg runs after it
-  and checks the final message, whether typed, given, edited with `-e` or kept by an amend. Both read the text as git
-  will keep it: with no editor, which git tells a hook by `GIT_EDITOR=:`, every line, a `#` line included; after an
-  editor, git's comment lines (the file list it writes names a task's records) and everything after the scissors
-  line are left out. The staged paths are taken against the commit's parent: prepare-commit-msg works it out (an
-  amend's is HEAD's parent) and leaves it in the worktree's git folder as `KIRUNAK_COMMIT_BASE`, which commit-msg
-  reads and removes. An amend given `-m` or `-F` reaches the hook as any commit does; git keeps HEAD's author date
-  for it and gives it to the hook as `GIT_AUTHOR_DATE`, so a date equal to HEAD's and two seconds old or more counts
-  as an amend here (the SLAP gate measures as before).
+  prepare-commit-msg runs before the editor and checks a message given with `-m` or `-F`; commit-msg runs after it and
+  checks the final message, whether typed, given, edited with `-e` or kept by an amend. Both read the text as git will
+  keep it (git-commit(1) `--cleanup`, measured in the task's steps/S-11/design.md §2). The comment string is
+  `core.commentChar` (or `core.commentString`), else `#`. The mode is `commit.cleanup`; unset or `default`, it is
+  `strip` when an editor runs and `whitespace` when none does, which git tells a hook by `GIT_EDITOR=:`. `verbatim`
+  keeps every line. Every other mode cuts the text at the scissors line (the comment string, then `>8` between dashes)
+  and keeps what is above it. `strip` also leaves out every line starting with the comment string, git's status block
+  among them (its file list names a task's records); `whitespace` and `scissors` keep them. So under `whitespace` or
+  `scissors` with an editor, git keeps its own status block, and a commit that stages code beside an accepted task's
+  records names that task in the message it keeps and is refused; under `strip` set in config, a `#` line given with
+  `-m` is dropped by git and names nothing. The staged paths are taken against the commit's parent: prepare-commit-msg
+  works it out (an amend's is HEAD's parent) and leaves it in the worktree's git folder as `KIRUNAK_COMMIT_BASE`,
+  which commit-msg reads and removes. An amend given `-m` or `-F` reaches the hook as any commit does; git keeps
+  HEAD's author date for it and gives it to the hook as `GIT_AUTHOR_DATE`, so a date equal to HEAD's and two seconds
+  old or more counts as an amend here (the SLAP gate measures as before).
+- **The accepted set** (review-2.md of the task found a worktree, or a branch made before the accept, let through):
+  whichever working tree commits, the hooks read the main checkout's `kirunak/tasks/*/done.json`, found from any
+  worktree as the folder above `git rev-parse --git-common-dir`, and, when the main checkout is not on the default
+  branch, the `done.json` files committed on that branch. The default branch is `origin/HEAD`'s target, else `main`,
+  else `master`. Both it and the main checkout's branch are read from their files in the common git folder, so the
+  main checkout on the default branch costs no git call; without those files, one `for-each-ref` or `symbolic-ref`
+  says. Off the default branch, one `ls-tree` and one `cat-file --batch` read the committed files. The staged paths
+  are still those of the committing worktree.
 - **What it does not check**: under `--no-verify` git skips commit-msg, so only a message given with `-m` or `-F` is
   checked: a mistake guard, as the pre-commit checks are. An amend with `--reset-author`, or one within two seconds
   of the commit it amends, given `-m`, is taken as a new commit. A merge and a replayed commit (rebase, cherry-pick,
   revert) pass, as the SLAP gate lets them: prepare-commit-msg leaves no base for them, and commit-msg checks nothing
   without one. A workspace that cannot be loaded refuses nothing here, since its queue file cannot be told from
-  code; the trailer is still written. The hooks load the workspace only when a done task's slug or id is in the
-  message.
+  code; the trailer is still written. The hooks load the workspace, and read git's `commit.cleanup` and
+  `core.commentChar`, only when the message's raw text names a done task's slug or id. An accept committed while the
+  main checkout was on a side branch is known on that branch and from the main checkout's tree, and lost once the
+  main checkout moves to another branch without merging it, until the merge. A `done.json` left uncommitted in the
+  main checkout counts as an accept until it goes. A sparse checkout of the main checkout that leaves out
+  `kirunak/tasks` hides its accepts from the first read. `--cleanup=<mode>` and `--verbose` on the command line are
+  not seen (config is), nor a scissors line typed by hand where git keeps what follows it; `core.commentChar=auto`
+  (deprecated, gone in Git 3.0) is read as `#`.
 - Only the task's own repo is guarded: its commits in another repo are out of scope (O-2).
 
 ## 4. The owner's command: `k approve`, `k accept`, through `!`

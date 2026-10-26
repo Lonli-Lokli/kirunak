@@ -378,6 +378,14 @@ forces a new review.
   else refused), `approval.test.mjs` (the task's own commits and later ones, one naming it, to a named file and folder
   taken; the same history blocked when nothing names them), the mod's `dialog.test.ts` (thirteen lines: ten and `and
   3 more` in the list, the view and the refusal).
+- Fourth pass (S-13, from S-11's design after review-2.md found AC-8 not met a second time): the hooks read the
+  accepted set from the main checkout's tree and, when it is off the default branch, from that branch's commits
+  (`acceptedTasks`, `defaultBranch`, `mainOnDefault`, `doneOnBranch` in `lib/records.mjs`; `repoInfo` gives `common`
+  and `main`), and `kept` follows `core.commentChar` and `commit.cleanup` (`commitConfig`, read only when the raw
+  message names a done task). Tests: `git-hook.test.mjs` (a worktree on a branch made before the accept, the main
+  checkout on one with and without `origin/HEAD`, an accept on a side branch then left unmerged, an accept not yet
+  committed, `commentChar=;`, `cleanup=whitespace`, `cleanup=strip` with `-m`, `commit.verbose`; the hooks set by an
+  absolute `core.hooksPath`, which a worktree runs), `records.test.mjs` (`kept` against the measured cases).
 
 ## Slice 7, later and not detailed here: R17, R18
 
