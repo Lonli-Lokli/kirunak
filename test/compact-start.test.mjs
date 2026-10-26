@@ -239,3 +239,90 @@ test('nothing in a k run step, after startup, for an unknown part or unreadable 
   assert.deepEqual(all(gone), NONE);
   assert.equal(gone.log().at(-1).why, 'task folder unknown');
 });
+
+const endOf = (h, extra = {}) => ({ session_id: 's-main', transcript_path: h.transcript, cwd: h.app, hook_event_name: 'SessionEnd', reason: 'clear', ...extra });
+const startAs = (h, extra = {}) => h.input({ session_id: 's-new', transcript_path: join(h.top, 'projects', 'p', 's-new.jsonl'), source: 'clear', model: undefined, ...extra });
+
+test('SessionEnd on /clear: a session holding a task writes cleared.json; another reason writes nothing; after k-done it is removed (R5.3, E-5)', () => {
+  const h = makeHome({ expect: null });
+  assert.equal(run(h, null, endOf(h, { reason: 'logout' })), null);
+  assert.equal(h.json('compact/cleared.json'), null);
+  assert.equal(run(h, null, endOf(h)), null);
+  const c = h.json('compact/cleared.json');
+  assert.deepEqual({ ...c, at: null }, { from: 's-main', task: 'app/demo', step: 'S-2', since: SESSION.since, previous: ['s-older'], at: null, cwd: h.app, ppid: process.pid });
+  assert.deepEqual([h.log().at(-1).event, h.log().at(-1).task], ['SessionEnd', 'app/demo']);
+  rmSync(join(h.home, 'sessions', 's-main.json'));
+  run(h, null, endOf(h));
+  assert.equal(h.json('compact/cleared.json'), null);
+  assert.deepEqual(all(h, startAs(h)), NONE);
+  assert.equal(h.log().at(-1).why, 'nothing cleared');
+});
+
+test('SessionStart clear within 120 s joins the old id: the chain, clearedTo, cleared.json gone, the parts after /clear (R5.3, E-5)', () => {
+  const h = makeHome({ expect: null });
+  run(h, null, endOf(h));
+  const start = startAs(h);
+  assert.match(run(h, 'task', start), /^kirunak, after \/clear \(part 2 of 4\): task\nthe file /);
+  const state = run(h, 'state', start);
+  assert.match(state, /^kirunak, after \/clear \(part 1 of 4\): state\nThis is the same session, after \/clear \(it was session s-main\), still on app\/demo\.\n/);
+  assert.ok(state.includes('\nsession: s-new, earlier ids s-older, s-main\n'));
+  assert.ok(state.includes('\nrunning steps of this session: S-2 (started 2026-01-05 10:00)\n'));
+  assert.deepEqual(h.json('sessions/s-new.json'), { task: 'app/demo', step: 'S-2', since: SESSION.since, previous: ['s-older', 's-main'] });
+  assert.equal(h.json('sessions/s-main.json').clearedTo, 's-new');
+  assert.equal(h.json('compact/cleared.json'), null);
+  assert.deepEqual({ ...h.json('compact/s-new.json').joined, at: null }, { at: null, from: 's-main', task: 'app/demo', previous: ['s-older', 's-main'] });
+  assert.match(run(h, 'plan', start), /^kirunak, after \/clear \(part 3 of 4\): plan\n/);
+  assert.match(run(h, 'progress', start), /^kirunak, after \/clear \(part 4 of 4\): progress\n/);
+  assert.deepEqual([h.log().at(-1).why, h.log().at(-1).from], ['joined', 's-main']);
+});
+
+test('SessionStart clear refuses cleared.json 121 s old or from another folder; another parent process joins and is logged (R5.3)', () => {
+  const h = makeHome({ expect: null });
+  const cleared = (extra) => writeJson(join(h.home, 'compact', 'cleared.json'), {
+    from: 's-main', task: 'app/demo', step: 'S-2', since: null, previous: [], at: ago(CLEAR_S + 1), cwd: h.app, ppid: process.pid, ...extra,
+  });
+  cleared();
+  assert.deepEqual(all(h, startAs(h)), NONE);
+  assert.equal(h.log().at(-1).why, 'cleared too long ago');
+  assert.equal(h.json('compact/cleared.json'), null);
+  cleared({ at: ago(5), cwd: h.plain });
+  assert.deepEqual(all(h, startAs(h)), NONE);
+  assert.equal(h.log().at(-1).why, 'another folder');
+  assert.equal(h.json('sessions/s-new.json'), null);
+  cleared({ at: ago(5), ppid: 1 });
+  assert.ok(run(h, 'state', startAs(h)));
+  assert.equal(h.log().at(-1).why, 'joined, another parent process');
+});
+
+test('prune: the state part removes compact/*.json untouched for 14 days; newer ones and compact.log stay (R5.5)', () => {
+  const h = makeHome();
+  const aged = (path, days) => utimesSync(path, new Date(Date.now() - days * 86_400_000), new Date(Date.now() - days * 86_400_000));
+  const [old, recent, log] = [join(h.home, 'compact', 's-old.json'), join(h.home, 'compact', 's-recent.json'), join(h.home, 'compact.log')];
+  writeJson(old, { fire: {} });
+  writeJson(recent, { fire: {} });
+  writeFileSync(log, '{}\n');
+  aged(old, PRUNE_DAYS + 1);
+  aged(recent, PRUNE_DAYS - 1);
+  aged(log, 60);
+  run(h, 'task');
+  assert.ok(existsSync(old));
+  run(h, 'state');
+  assert.deepEqual([existsSync(old), existsSync(recent), existsSync(log)], [false, true, true]);
+});
+
+test('the state part carries k status --session and the task\'s lines of k waiting from a workspace (AC-11)', async () => {
+  const before = process.env.KIRUNAK_HOME;
+  try {
+    const w = await makeWorkspace();
+    writeJson(join(w.home, 'escalate', 'config.json'), { repos: { weather: w.weather } });
+    writeJson(join(w.home, 'sessions', 's-main.json'), { task: 'weather/offline-forecast' });
+    writeJson(join(w.home, 'compact', 's-main.json'), { expect: { at: ago(2), why: 'boundary', ctx: 1 } });
+    const input = { session_id: 's-main', transcript_path: join(w.root, 'none.jsonl'), cwd: w.weather, hook_event_name: 'SessionStart', source: 'compact' };
+    const state = run({ home: w.home, top: w.root }, 'state', input);
+    assert.match(state, /\nk status --session s-main:\n {2}no lock\n {2}running steps: 0 of \d+\n {2}session s-main: weather\/offline-forecast\n/);
+    assert.match(state, /\nk waiting, the lines of this task:\n {2}to approve: (can approve|not yet: .+)\n/);
+  } finally {
+    if (before === undefined) delete process.env.KIRUNAK_HOME;
+    else process.env.KIRUNAK_HOME = before;
+  }
+});
