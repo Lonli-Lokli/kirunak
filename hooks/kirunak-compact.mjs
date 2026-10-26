@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  attribute, decide, expectPath, isId, lastUsage, limitOf, logLine, readJson, thresholdOf, userWindow, windowOf,
-  windowSetting,
+  attribute, decide, expectPath, isId, lastUsage, limitOf, logLine, readJson, saveJson, taskDir, thresholdOf, userWindow,
+  windowOf, windowSetting,
 } from './compact-rules.mjs';
 
 // The PreCompact hook (design/orchestrator.md §5). In a session started in a workspace repo whose
@@ -18,7 +18,9 @@ import {
 // compact.log, and each allow it gives the main session records `expect` for SessionStart (R5.2).
 //
 // It imports nothing but node: modules, lib/home.mjs and its rules; lib/steps.mjs, for the running steps, is loaded
-// only when the table reaches R4.8, so no other fire pays for it. Not wired by k install until S-6.
+// only when the table reaches R4.8, so no other fire pays for it. SessionStart (`--part <name>`) loads
+// hooks/compact-start.mjs, which puts the task back after a compaction or /clear (R5.1-R5.5), and SessionEnd
+// hooks/compact-clear.mjs, which hands a cleared session's task to the next id (R5.3). Not wired by k install yet.
 
 // A file read once per run: the user's settings file is read for the window (R2.5) and again for the limit (R4.6).
 function cachedReader() {
@@ -55,11 +57,8 @@ function runningAgents(record, input) {
 
 // The steps of the session's chain running in its task (R1.1, R1.2); null when the task's folder cannot be found.
 async function stepsRunning(config, session, id) {
-  const [repo, slug] = typeof session?.task === 'string' ? session.task.split('/') : [];
-  const root = config?.repos?.[repo];
-  if (typeof root !== 'string' || !slug || !/^[A-Za-z0-9._-]+$/.test(slug)) return null;
-  const dir = join(root, 'kirunak', 'tasks', slug);
-  if (!existsSync(dir)) return null;
+  const dir = taskDir(config, session?.task);
+  if (!dir) return null;
   let text = '';
   try {
     text = readFileSync(join(dir, 'progress.md'), 'utf8');
@@ -112,16 +111,24 @@ const lineOf = (input, seen, out, now) => ({
 
 // `expect` (R5.2) in compact/<session>.json, merged, written whole and renamed; a record, never a reason to fail.
 function recordExpect(home, session, expect) {
-  try {
-    const path = expectPath(home, session);
-    const next = { ...readJson(path), expect };
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(next) + '\n');
-    renameSync(tmp, path);
-  } catch {
-    // the same
-  }
+  const path = expectPath(home, session);
+  saveJson(path, { ...readJson(path), expect });
+}
+
+// `--part <name>` or `--part=<name>`: the SessionStart entry's part (R5.1).
+function partArg(argv) {
+  const i = argv.indexOf('--part');
+  return i >= 0 ? argv[i + 1] ?? null : argv.find((a) => a.startsWith('--part='))?.slice('--part='.length) ?? null;
+}
+
+// SessionStart and SessionEnd (R5.1-R5.5): nothing on unreadable input; a part's text as SessionStart's
+// additionalContext, which Claude Code adds to the compacted context.
+async function startOrEnd(input, home, now) {
+  if (!input || typeof input !== 'object') return;
+  if (input.hook_event_name === 'SessionEnd') return (await import('./compact-clear.mjs')).onEnd(input, home, now);
+  const start = await import('./compact-start.mjs');
+  const text = await start.onStart(input, home, partArg(process.argv.slice(2)), now);
+  if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }));
 }
 
 async function main() {
@@ -135,6 +142,8 @@ async function main() {
   } catch {
     // unreadable input: allowed below
   }
+  const event = input?.hook_event_name;
+  if (event === 'SessionStart' || event === 'SessionEnd' || partArg(process.argv.slice(2))) return startOrEnd(input, home, now);
   if (!input || typeof input !== 'object') {
     logLine(home, { ts: now.toISOString(), decision: 'allow', row: 'R4.3', why: 'state unreadable' });
     return;
