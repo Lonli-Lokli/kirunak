@@ -8,6 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { check } from '../hooks/git-pre-commit.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
+import { defaultBranch, mainOnDefault } from '../lib/records.mjs';
+import { repoInfo } from '../lib/slap.mjs';
 import { makeWorkspace } from './helpers.mjs';
 
 // D7: the git hook refuses a commit whose frozen task no longer matches its approval (approval.md §3).
@@ -218,6 +220,8 @@ async function hooked() {
       writeFileSync(hook, `#!/bin/sh\nexec "${process.execPath}" "${fileURLToPath(new URL(`../hooks/${module}`, import.meta.url))}" "$@"\n`);
       chmodSync(hook, 0o755);
     }
+    // Absolute, so a linked worktree runs them: it reads a relative one against its own root, where .git is a file.
+    git(dir, ['config', 'core.hooksPath', join(dir, '.git', 'hooks')]);
   }
   return w;
 }
@@ -381,4 +385,133 @@ test('a merge after a commit under --no-verify, which leaves commit-msg\'s base 
   const merge = spawnSync('git', ['merge', '-q', '--no-ff', '-m', `${SLUG}'s side, merged`, 'side'], { cwd: w.weather, env: cleanEnv({ KIRUNAK_HOME: w.home }), encoding: 'utf8' });
   assert.equal(merge.status, 0, merge.stderr);
   assert.ok(!existsSync(join(w.weather, '.git', 'KIRUNAK_COMMIT_BASE')));
+});
+
+// A worktree of `dir` on a new branch made at `at`, and `dir` as its own origin with origin/HEAD at master: the
+// shapes the accepted set is read through (accept-shared-repo AC-8; steps/S-11/design.md §1, §5).
+function worktreeOf(dir, branch, at) {
+  const wt = `${dir}-${branch}`;
+  git(dir, ['branch', branch, at]);
+  git(dir, ['worktree', 'add', '-q', wt, branch]);
+  return wt;
+}
+
+function remoteOf(dir) {
+  git(dir, ['remote', 'add', 'origin', dir]);
+  git(dir, ['fetch', '-q', 'origin']);
+  git(dir, ['remote', 'set-head', 'origin', 'master']);
+}
+
+const DONE = `kirunak/tasks/${SLUG}/done.json`;
+
+test('a worktree on a branch made before the accept refuses a commit naming it, with -m and in the editor, and lets its records through (accept-shared-repo AC-8, E-1)', async () => {
+  const w = await accepted();
+  const wt = worktreeOf(w.weather, 'old', git(w.weather, ['rev-parse', 'HEAD~']).trim());
+  assert.ok(!existsSync(join(wt, DONE)));
+  const head = git(wt, ['rev-parse', 'HEAD']);
+  put(wt, 'src/more.ts', 'export const more = 1;\n');
+  for (const r of [commitAs(w, wt, `${SLUG}: one more line`), editAs(w, wt, `${SLUG}:`)]) {
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.trim(), REFUSAL);
+  }
+  assert.equal(git(wt, ['rev-parse', 'HEAD']), head);
+  git(wt, ['reset', '-q', '--hard']);
+  put(wt, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  const records = commitAs(w, wt, `${ID}: the handoff`);
+  assert.equal(records.status, 0, records.stderr);
+  assert.match(said(wt), /\nSLAP: /, 'the hooks ran in the worktree');
+  // The main checkout still refuses it.
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  assert.equal(commitAs(w, w.weather, `${SLUG}: one more line`).status, 1);
+});
+
+test('the main checkout on a branch made before the accept refuses a commit naming it, by the default branch, with origin/HEAD or without (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  git(w.weather, ['checkout', '-q', '-b', 'old', 'HEAD~']);
+  assert.ok(!existsSync(join(w.weather, DONE)));
+  // Without a git call: a top where none can run still finds the branch, once origin/HEAD's file is there.
+  const away = { ...repoInfo(w.weather), top: join(w.weather, 'nowhere'), main: join(w.weather, 'nowhere') };
+  assert.equal(defaultBranch(away), null);
+  assert.equal(mainOnDefault(away, 'old'), true);
+  for (const origin of [false, true]) {
+    if (origin) remoteOf(w.weather);
+    put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+    const r = commitAs(w, w.weather, `${SLUG}: one more line`);
+    assert.equal(r.status, 1, `origin/HEAD: ${origin}`);
+    assert.equal(r.stderr.trim(), REFUSAL);
+    git(w.weather, ['reset', '-q', '--hard']);
+    put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, `# Handoff, origin/HEAD: ${origin}\n`);
+    const records = commitAs(w, w.weather, `${ID}: the handoff`);
+    assert.equal(records.status, 0, records.stderr);
+  }
+  assert.equal(defaultBranch(away), 'master');
+});
+
+test('an accept committed on a side branch of the main checkout is known from a worktree, and let through once the main checkout leaves it unmerged (accept-shared-repo AC-8; approval.md §3)', async () => {
+  const w = await hooked();
+  const pre = git(w.weather, ['rev-parse', 'HEAD']).trim();
+  git(w.weather, ['checkout', '-q', '-b', 'settings']);
+  put(w.weather, DONE, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0);
+  const wt = worktreeOf(w.weather, 'wip', pre);
+  put(wt, 'src/more.ts', 'export const more = 1;\n');
+  const r = commitAs(w, wt, `${SLUG}: one more line`);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr.trim(), REFUSAL);
+  git(w.weather, ['checkout', '-q', 'master']);
+  const lost = commitAs(w, wt, `${SLUG}: one more line`);
+  assert.equal(lost.status, 0, lost.stderr);
+});
+
+test('an accept written and not yet committed counts from a worktree (accept-shared-repo AC-8)', async () => {
+  const w = await hooked();
+  const wt = worktreeOf(w.weather, 'wip', git(w.weather, ['rev-parse', 'HEAD']).trim());
+  put(w.weather, DONE, JSON.stringify({ task: ID }) + '\n');
+  put(wt, 'src/more.ts', 'export const more = 1;\n');
+  const r = commitAs(w, wt, `${SLUG}: one more line`);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr.trim(), REFUSAL);
+});
+
+test('under core.commentChar=; a # line typed in the editor is read, and git\'s ; status lines are not (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  git(w.weather, ['config', 'core.commentChar', ';']);
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  const tag = editAs(w, w.weather, `# tag ${SLUG}`);
+  assert.equal(tag.status, 1);
+  assert.equal(tag.stderr.trim(), REFUSAL);
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  const line = editAs(w, w.weather, 'a line');
+  assert.equal(line.status, 0, line.stderr);
+});
+
+test('under commit.cleanup=whitespace a # line typed in the editor is read, and git\'s own status block too (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  git(w.weather, ['config', 'commit.cleanup', 'whitespace']);
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  assert.equal(editAs(w, w.weather, `# tag ${SLUG}`).stderr.trim(), REFUSAL);
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  assert.equal(editAs(w, w.weather, 'a line').stderr.trim(), REFUSAL, 'the status block kept names the handoff');
+  git(w.weather, ['reset', '-q', '--hard']);
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  const records = editAs(w, w.weather, 'a line');
+  assert.equal(records.status, 0, records.stderr);
+});
+
+test('under commit.cleanup=strip a # line given with -m is dropped by git and names nothing (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  git(w.weather, ['config', 'commit.cleanup', 'strip']);
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  const r = commitAs(w, w.weather, `#${SLUG} tag`, {}, ['-m', 'one more line']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(said(w.weather), /^#/m);
+});
+
+test('under commit.verbose=true the diff below the scissors names nothing (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  git(w.weather, ['config', 'commit.verbose', 'true']);
+  put(w.weather, 'src/more.ts', `// ${SLUG}\n`);
+  const r = editAs(w, w.weather, 'a line');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(said(w.weather).split('\n')[0], 'a line');
 });

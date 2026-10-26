@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { commitsIn } from '../lib/git.mjs';
-import { doneTasks, isRecord, namesTask, recordPaths, said, tasksNamed, trailerTask } from '../lib/records.mjs';
+import { doneTasks, isRecord, kept, namesTask, recordPaths, tasksNamed, trailerTask } from '../lib/records.mjs';
 import { loadWorkspaceModule } from '../lib/workspace.mjs';
 import { makeWorkspace, sh } from './helpers.mjs';
 
@@ -67,10 +67,28 @@ test('the workspace may name more records, a file or a folder in any of its repo
   }
 });
 
-test('what a message says leaves out git\'s comments and what follows the scissors (accept-shared-repo AC-8)', () => {
-  const file = 'the cache\n\n# Changes to be committed:\n#\tmodified: kirunak/tasks/kit-wanted/notes.md\n# ------------------------ >8 ------------------------\ndiff --git a/kit-wanted b/kit-wanted\n';
-  assert.equal(said(file).trim(), 'the cache');
-  assert.equal(namesTask(said(file), 'gulnya/kit-wanted', inGulnya), false);
+test('the text git keeps of a message follows its comment string and cleanup mode, as measured (accept-shared-repo AC-8; steps/S-11/design.md §2)', () => {
+  const status = '# Please enter the commit message.\n#\tmodified: kirunak/tasks/kit-wanted/notes.md\n';
+  const scissors = (c = '#') => `${c} ------------------------ >8 ------------------------\n`;
+  const editor = { GIT_EDITOR: 'vi' };
+  const none = { GIT_EDITOR: ':' };
+  for (const [name, message, env, cfg, want] of [
+    ['A: default, an editor', `msg\n# tag kit-wanted\n${status}`, editor, {}, 'msg'],
+    ['B: whitespace, an editor', `msg\n# tag kit-wanted\n${status}`, editor, { cleanup: 'whitespace' }, `msg\n# tag kit-wanted\n${status}`],
+    ['C: strip, -m', '#kit-wanted tag\n', none, { cleanup: 'strip' }, ''],
+    ['C: default, -m', '#kit-wanted tag\n', none, {}, '#kit-wanted tag'],
+    ['D: commentChar ;', 'msg\n# tag kit-wanted\n; note\n; modified: kirunak/tasks/kit-wanted/notes.md\n', editor, { comment: ';' }, 'msg\n# tag kit-wanted'],
+    ['E: commentChar auto, read as #', 'typed\n#start\n; modified: kirunak/tasks/kit-wanted/notes.md\n', editor, { comment: 'auto' }, 'typed\n; modified: kirunak/tasks/kit-wanted/notes.md'],
+    ['F: commentString //', 'msg\n# tag kit-wanted\n// note kit-wanted\n', editor, { comment: '//' }, 'msg\n# tag kit-wanted'],
+    ['G: verbose, default', `msg\n${status}${scissors()}diff --git a/kit-wanted b/kit-wanted\n`, editor, {}, 'msg'],
+    ['H: verbose, whitespace', `msg\n${status}${scissors()}diff --git a/kit-wanted b/kit-wanted\n`, editor, { cleanup: 'whitespace' }, `msg\n${status}`.trimEnd()],
+    ['I: verbatim', `msg\n${status}`, editor, { cleanup: 'verbatim' }, `msg\n${status}`],
+    ['J: scissors', `msg\n# kept kit-wanted\n${scissors()}${status}`, editor, { cleanup: 'scissors' }, 'msg\n# kept kit-wanted'],
+    ['a comment string a pattern would read', `msg\n* note\n${scissors('*')}kit-wanted\n`, editor, { comment: '*' }, 'msg'],
+  ]) {
+    assert.equal(kept(message, env, cfg).trimEnd(), want.trimEnd(), name);
+  }
+  assert.equal(namesTask(kept(`the cache\n\n${status}${scissors()}diff --git a/kit-wanted b/kit-wanted\n`, editor), 'gulnya/kit-wanted', inGulnya), false);
 });
 
 test('the accepted tasks of a repo are its task folders holding a done.json that says its task (accept-shared-repo AC-8)', async () => {
