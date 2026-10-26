@@ -20,6 +20,9 @@ export const SLACK = 33_000;
 export const LAG = 100_000;
 // An agent this far past the threshold is having its compactions blocked by us: the block is lifted (R3.3 row 2).
 export const OVERSHOOT = 50_000;
+// An agent record with no end counts as running for attribution only when its own transcript was written this
+// recently before the fire (R3.2): a record whose end was never written is stale, its old context no sign of this fire.
+export const AGENT_FRESH_S = 300;
 // Idle compaction fires after about 54 minutes on the 1-hour cache, so a fire within this of a Stop is not
 // the main session's (R3.3 row 4).
 export const IDLE_MIN = 50;
@@ -221,13 +224,36 @@ export const limitOf = ({ midStepLimit, user, wModel }) =>
 
 // ---- Whose compaction it is (R3.3, E-6) ----
 
+// The running agents of the session's escalation record (R3.2, R6.3: `agents` with no `ended`), each with its own
+// transcript's context, for attribution row 2. Every entry of an agent's transcript is a sidechain one, so it is read
+// as such. A record whose transcript, `<session>/subagents/agent-<id>.jsonl` beside the main one, is missing or was
+// last written more than AGENT_FRESH_S before `now` is stale: { id, ctx: null, stale: true }, its transcript not read.
+export function runningAgents(record, { transcript, session, now = Date.now() } = {}) {
+  const agents = record?.agents && typeof record.agents === 'object' ? record.agents : {};
+  const base = join(dirname(String(transcript ?? '')), String(session), 'subagents');
+  return Object.entries(agents)
+    .filter(([id, a]) => isId(id) && a && a.ended == null)
+    .map(([id]) => {
+      const path = join(base, `agent-${id}.jsonl`);
+      let written = null;
+      try {
+        written = statSync(path).mtimeMs;
+      } catch {
+        // no transcript: stale
+      }
+      if (written == null || now - written > AGENT_FRESH_S * 1000) return { id, ctx: null, stale: true };
+      return { id, ctx: lastUsage(path, { sidechain: true })?.ctx ?? null };
+    });
+}
+
 // PreCompact names no agent, so a fire is attributed from the turn flag and the contexts, the first row that
 // applies deciding: an unknown turn is open (1); a running agent at least OVERSHOOT past the threshold is starving
 // under our blocks (2); an open turn whose context is more than LAG under the threshold cannot have crossed it (3);
-// a turn closed less than IDLE_MIN ago makes no request (4); else the main session's (5). `agents`: [{ id, ctx }].
+// a turn closed less than IDLE_MIN ago makes no request (4); else the main session's (5). `agents`: [{ id, ctx,
+// stale }], runningAgents'; a stale one never counts (R3.2).
 export function attribute({ turn, ctx, T, agents = [], now = Date.now() }) {
   const closed = turn?.state === 'closed';
-  const past = agents.find((a) => num(a?.ctx) != null && a.ctx >= T + OVERSHOOT);
+  const past = agents.find((a) => a?.stale !== true && num(a?.ctx) != null && a.ctx >= T + OVERSHOOT);
   if (past) return { main: false, row: 2, why: 'agent past threshold', agent: past.id ?? null };
   if (!closed && ctx < T - LAG) return { main: false, row: 3, why: 'below threshold' };
   if (closed && now - Date.parse(turn.at) < IDLE_MIN * 60_000) return { main: false, row: 4, why: 'turn closed' };

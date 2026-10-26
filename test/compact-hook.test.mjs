@@ -1,12 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attribute, decide, IDLE_MIN, LAG, lastUsage, limitOf, OVERSHOOT, projectRoot, SLACK, thresholdOf, updateRecord, userWindow,
-  windowOf, windowSetting,
+  AGENT_FRESH_S, attribute, decide, IDLE_MIN, LAG, lastUsage, limitOf, OVERSHOOT, projectRoot, runningAgents, SLACK, thresholdOf,
+  updateRecord, userWindow, windowOf, windowSetting,
 } from '../hooks/compact-rules.mjs';
 import { factsOf } from '../hooks/kirunak-compact.mjs';
 import { boundarySince, runningBy } from '../lib/steps.mjs';
@@ -200,6 +200,20 @@ test('attribute: the five rows, the edge at exactly T - LAG, and a closed turn t
   assert.equal(attribute({ turn: ago(10), ctx: T, T, now }).why, 'turn closed');
   assert.equal(attribute({ turn: ago(IDLE_MIN), ctx: T, T, now }).main, true, 'closed long enough for idle compaction');
   assert.equal(attribute({ turn: ago(10), ctx: 0, T, agents: [], now }).row, 4);
+  assert.equal(attribute({ turn: open, ctx: T, T, agents: [{ id: 'a1', ctx: T + OVERSHOOT, stale: true }], now }).main, true, 'a stale record never counts');
+});
+
+test('runningAgents (R3.2): the records with no end, a transcript written within AGENT_FRESH_S read for its context, an older or missing one stale', () => {
+  const top = makeRepos().top;
+  const transcript = join(top, 'projects', 'p', 's-main.jsonl');
+  const sub = (id) => join(top, 'projects', 'p', 's-main', 'subagents', `agent-${id}.jsonl`);
+  writeTranscript(sub('a1'), [assistant(210000, MODEL, { isSidechain: true })]);
+  const written = statSync(sub('a1')).mtimeMs;
+  const record = { agents: { a1: { ended: null }, a2: { ended: null }, a3: { ended: '2026-01-05T10:00:00.000Z' }, '../x': { ended: null } } };
+  const at = (now) => runningAgents(record, { transcript, session: 's-main', now });
+  assert.deepEqual(at(written + AGENT_FRESH_S * 1000), [{ id: 'a1', ctx: 210000 }, { id: 'a2', ctx: null, stale: true }]);
+  assert.deepEqual(at(written + AGENT_FRESH_S * 1000 + 1), [{ id: 'a1', ctx: null, stale: true }, { id: 'a2', ctx: null, stale: true }]);
+  assert.deepEqual(runningAgents(null, { transcript, session: 's-main' }), []);
 });
 
 // ---- §4 The rule table, pure: each row reads only what it needs ----
@@ -373,6 +387,28 @@ test('R4.5: below the threshold with the turn open, a turn closed ten minutes ag
   allowed(past, 'agent past threshold');
   assert.deepEqual(past.line.agents, [{ id: 'a1', ctx: 200000 }]);
   assert.equal(agent(at).out.decision, 'block', 'an agent that ended is not counted');
+});
+
+test('R3.2: agent records whose ends were never written, their transcripts long untouched, do not take the main\'s fire past T', () => {
+  const at = new Date().toISOString();
+  const agents = Object.fromEntries(['a1', 'a2', 'a3'].map((id) => [id, { type: 'general-purpose', at: '2026-01-04T23:00:00.000Z', ended: null }]));
+  const h = makeHome({ ctx: 464000, progress: `${STARTED}2026-01-05 10:30 S-2 finished\n`, record: { turn: { state: 'open', at }, agents } });
+  const sub = (id) => join(h.top, 'projects', 'p', 's-main', 'subagents', `agent-${id}.jsonl`);
+  const old = new Date(Date.now() - (AGENT_FRESH_S + 60) * 1000);
+  for (const [id, ctx] of [['a1', 190000], ['a2', 206000]]) {
+    writeTranscript(sub(id), [assistant(ctx, MODEL, { isSidechain: true })]);
+    utimesSync(sub(id), old, old);
+  }
+  const stale = run(h);
+  allowed(stale, 'boundary');
+  assert.equal(stale.line.row, 'R4.9');
+  assert.deepEqual(stale.line.agents, ['a1', 'a2', 'a3'].map((id) => ({ id, ctx: null, stale: true })), 'two past T + OVERSHOOT, one with no transcript');
+  assert.equal(h.expected().why, 'boundary', 'the main\'s compaction, so SessionStart puts the task back');
+  const now = new Date();
+  utimesSync(sub('a2'), now, now);
+  const fresh = run(h);
+  allowed(fresh, 'agent past threshold');
+  assert.deepEqual(fresh.line.agents[1], { id: 'a2', ctx: 206000 }, 'written within AGENT_FRESH_S, an agent past T + OVERSHOOT still is');
 });
 
 test('R4.6: past the mid-step limit: the user\'s window, the workspace\'s number, none set, a per-model window (E-1, E-3, D-2)', () => {
