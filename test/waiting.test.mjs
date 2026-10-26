@@ -156,17 +156,21 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
   };
   assert.deepEqual(row(), [`${ID}: checklist.md has 2 unticked item(s):`, 2, true]);
 
-  // Code after the review is a second block: the items are still counted, but they are not all that stops it.
+  // The task's own work after the review is a second block: the items are still counted, but they are not all that
+  // stops it.
   writeFileSync(join(weather, 'fix.ts'), 'export {};\n');
-  gitCommitAll(weather, 'a fix after the review');
+  gitCommitAll(weather, `a fix after the review (${ID})`);
   const [why, open, only] = row();
-  assert.match(why, /the code changed after review\.md's head/);
+  assert.match(why, /its work changed after review\.md's head .*, in 1 file\(s\) the review never saw/);
   assert.deepEqual([open, only], [2, false]);
 
-  sh(weather, 'git', ['rm', '-q', 'fix.ts']);
+  // A new review over the fix, its checklist ticked.
+  writeFileSync(join(dirOf(weather), 'review-2.md'), REVIEW(headOf(weather)));
+  reviewsRan(dirOf(weather), ['review.md', 'review-2.md']);
+  generate(ws, ID);
   const file = join(dirOf(weather), 'checklist.md');
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
-  gitCommitAll(weather, 'the fix taken back, the checklist ticked');
+  gitCommitAll(weather, 'the second review, the checklist ticked');
   assert.deepEqual(row(), [null, 0, false]);
 });
 

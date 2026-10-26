@@ -473,40 +473,70 @@ test('accept refuses a not met verdict, --checklist-open or not: the way out is 
   assert.equal(existsSync(join(taskDir(weather), 'done.json')), false);
 });
 
-test('accept refuses code committed after the review head, naming it; commits in the task folder or the drafts alone are not code', async () => {
+// A commit made with a message, adding or changing each of `files` (relative to the repo) first.
+const commitFiles = (repo, message, files) => {
+  for (const f of files) {
+    mkdirSync(join(repo, f, '..'), { recursive: true });
+    writeFileSync(join(repo, f), `${message}\n`, { flag: 'a' });
+  }
+  sh(repo, 'git', ['add', '-A']);
+  sh(repo, 'git', ['commit', '-q', '-m', message]);
+  return headOf(repo);
+};
+
+test('accept refuses a later commit to a file of the task\'s own change, naming file, commit and task; other work and records never block (accept-shared-repo AC-1, AC-2, AC-5, AC-6)', async () => {
   const { ws, weather } = await makeWorkspace();
-  await approve({ ws, id: ID, now: NOV5 });
   const dir = taskDir(weather);
+  // Before the first approval, a commit naming the task is not its own change (D-1).
+  commitFiles(weather, 'offline-forecast: a sketch before the approval', ['src/early.ts']);
+  await approve({ ws, id: ID, now: NOV5 });
+  commitFiles(weather, `${ID} S-1: the cache`, ['src/cache.ts']);
+  commitFiles(weather, 'the age line, for offline-forecast', ['docs/offline.md']);
+  commitFiles(weather, 'a chart for weather/hourly', ['src/chart.ts']);
   const reviewed = headOf(weather);
   writeFileSync(join(dir, 'review.md'), REVIEW(reviewed, 'verdict: met', false));
   reviewsRan(dir);
-  writeFileSync(join(dir, 'notes.md'), 'the review is in\n');
-  gitCommitAll(weather, 'review and notes');
-  const code = ['a', 'b', 'c', 'd', 'e', 'f'].map((x) => `src/${x}.ts`);
-  sh(weather, 'mkdir', ['-p', 'src']);
-  for (const f of code) writeFileSync(join(weather, f), 'export {};\n');
-  gitCommitAll(weather, 'a fix after the review');
-  const later = new RegExp(`the code changed after review\\.md's head ${reviewed}, so the review never saw src/a\\.ts, src/b\\.ts, src/c\\.ts, src/d\\.ts, src/e\\.ts and 1 more: run a new review \\(a review step whose output is review-2\\.md\\)$`);
-  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'nothing open' }), later);
+  gitCommitAll(weather, `kirunak/tasks/offline-forecast: the review (${ID})`);
+  // Other work after the review: files the task's own change never touched, another task's folder, the drafts and the
+  // approvals, even when its message names the task (AC-2, AC-5).
+  commitFiles(weather, 'the chart again (weather/hourly)', ['src/chart.ts']);
+  commitFiles(weather, 'no task: the early sketch again', ['src/early.ts']);
+  commitFiles(weather, `notes on ${ID}`, ['kirunak/tasks/hourly/notes.md', 'kirunak/drafts/later.md', 'kirunak/approvals/hourly.json']);
+  assert.equal(accept({ ws, id: ID, dryRun: true }).state, 'would accept');
+  // A file of its own change, changed by a commit of no task, then by one whose trailer names another task (AC-1, AC-6).
+  const a = commitFiles(weather, 'a typo', ['src/cache.ts']);
+  const b = commitFiles(weather, 'the age line reworded\n\nTask: weather/hourly', ['docs/offline.md', 'src/chart.ts']);
+  const refusal = `${ID}: its work changed after review.md's head ${reviewed}, in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):\n  src/cache.ts  ${a}  no task\n  docs/offline.md  ${b}  weather/hourly`;
+  assert.throws(() => accept({ ws, id: ID, checklistOpen: 'nothing open' }), (e) => e.message === refusal);
   // A head named HEAD would be the code as it is at accept, so the check would pass for nothing: not a review.
   writeFileSync(join(dir, 'review.md'), REVIEW('HEAD', 'verdict: met', false));
   reviewsRan(dir);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'nothing open' }), /not a review k accept takes:\n {2}line 1: head HEAD is not a commit id/);
+  // Changed and changed back still blocks: the commits are judged, not the net diff.
+  writeFileSync(join(dir, 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(dir);
+  gitCommitAll(weather, 'the review again');
+  const added = commitFiles(weather, 'a line', ['src/cache.ts']);
+  sh(weather, 'git', ['revert', '--no-edit', 'HEAD']);
+  const back = headOf(weather);
+  assert.throws(() => accept({ ws, id: ID }), (e) => e.message.endsWith(`:\n  src/cache.ts  ${added}  no task\n  src/cache.ts  ${back}  no task`));
+});
+
+test('a later commit naming the task blocks accept whatever files it touches, unless they are all records (accept-shared-repo AC-7)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  const dir = taskDir(weather);
+  await approve({ ws, id: ID, now: NOV5 });
+  commitFiles(weather, `${ID} S-1: the cache`, ['src/cache.ts']);
+  const reviewed = headOf(weather);
   writeFileSync(join(dir, 'review.md'), REVIEW(reviewed, 'verdict: met', false));
   reviewsRan(dir);
-  sh(weather, 'git', ['rm', '-q', ...code]);
-  sh(weather, 'git', ['commit', '-q', '-m', 'the fix taken back']);
-  // A draft written or dropped after the review is no task's code: any session does either, the review's finding too.
-  const drafts = join(weather, 'kirunak', 'drafts');
-  sh(weather, 'mkdir', ['-p', drafts]);
-  writeFileSync(join(drafts, 'later.md'), '# a draft for later\n');
-  gitCommitAll(weather, 'a draft from the review');
-  writeFileSync(join(drafts, 'other.md'), '# another draft\n');
-  gitCommitAll(weather, 'another session\'s draft');
-  sh(weather, 'git', ['rm', '-q', join('kirunak', 'drafts', 'later.md')]);
-  sh(weather, 'git', ['commit', '-q', '-m', 'the draft dropped']);
-  assert.equal(accept({ ws, id: ID, now: NOV7 }).state, 'done');
-  assert.equal(JSON.parse(readFileSync(join(dir, 'done.json'), 'utf8')).head, reviewed);
+  gitCommitAll(weather, 'the review');
+  commitFiles(weather, `kirunak/tasks/offline-forecast: notes (${ID})`, ['kirunak/tasks/offline-forecast/notes.md']);
+  assert.equal(accept({ ws, id: ID, dryRun: true }).state, 'would accept');
+  // A new file, by slug, by id and by trailer.
+  const slug = commitFiles(weather, 'offline-forecast: the hourly cut', ['src/hourly.ts']);
+  const trailer = commitFiles(weather, `the README\n\nTask: ${ID}`, ['README.md', 'kirunak/drafts/x.md']);
+  assert.throws(() => accept({ ws, id: ID }), (e) => e.message.endsWith(`in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):\n  src/hourly.ts  ${slug}  ${ID}\n  README.md  ${trailer}  ${ID}`));
 });
 
 // Rows the owner should check, spelled as no verdict, a cited line past its file, and the last line met anyway.
