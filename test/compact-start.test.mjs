@@ -1,12 +1,12 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AGENT_FRESH_S, boundaryIn, CAP, CLEAR_S, cut, EXPECT_S, IDLE_MIN, LAG, labelOf, lastOf, OVERSHOOT, PARTS_S, planFor, PRUNE_DAYS,
-  SLACK, stateText, waitingLines,
+  AGENT_FRESH_S, BOUNDARY_WAIT_S, boundaryIn, CAP, CLEAR_S, cut, EXPECT_S, IDLE_MIN, LAG, labelOf, lastOf, OVERSHOOT, PARTS_S, planFor,
+  PRUNE_DAYS, SLACK, stateText, waitingLines,
 } from '../hooks/compact-rules.mjs';
 import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
 import { makeWorkspace } from './helpers.mjs';
@@ -18,7 +18,7 @@ import { makeWorkspace } from './helpers.mjs';
 test('orchestrator.md §5\'s numbers name every constant of the handover with its value', () => {
   const doc = readFileSync(fileURLToPath(new URL('../design/orchestrator.md', import.meta.url)), 'utf8');
   const numbers = /\*\*The numbers\.\*\*[\s\S]*?\n\n/.exec(doc)?.[0].replace(/\s+/g, ' ') ?? '';
-  const all = { SLACK, LAG, OVERSHOOT, AGENT_FRESH_S, IDLE_MIN, CAP, EXPECT_S, CLEAR_S, PARTS_S, PRUNE_DAYS };
+  const all = { SLACK, LAG, OVERSHOOT, AGENT_FRESH_S, IDLE_MIN, CAP, EXPECT_S, BOUNDARY_WAIT_S, CLEAR_S, PARTS_S, PRUNE_DAYS };
   for (const [name, v] of Object.entries(all)) assert.ok(numbers.includes(`\`${name}\` = ${v.toLocaleString('en-US')}`), name);
 });
 
@@ -173,6 +173,37 @@ function run(h, part, input = h.input(), env = {}) {
 const all = (h, input) => PARTS4.map((p) => run(h, p, input));
 const NONE = [null, null, null, null];
 
+// One hook entry started now and left to run, as Claude Code starts the four at once: its text (null for none) and
+// how long it took from the start, in ms.
+function start(h, part, input = h.input()) {
+  const begun = Date.now();
+  return new Promise((done, fail) => {
+    const p = spawn(process.execPath, [HOOK, '--part', part], { cwd: h.top, env: cleanEnv({ KIRUNAK_HOME: h.home }) });
+    let out = '';
+    let err = '';
+    p.stdout.on('data', (b) => {
+      out += b;
+    });
+    p.stderr.on('data', (b) => {
+      err += b;
+    });
+    p.on('error', fail);
+    p.on('close', (code) => {
+      try {
+        assert.equal(code, 0, err);
+        assert.equal(err, '');
+        done({ text: out ? JSON.parse(out).hookSpecificOutput.additionalContext : null, ms: Date.now() - begun });
+      } catch (e) {
+        fail(e);
+      }
+    });
+    p.stdin.end(JSON.stringify(input));
+  });
+}
+const together = (h, input) => Promise.all(PARTS4.map((p) => start(h, p, input)));
+const after = (ms, fn) => new Promise((done) => setTimeout(() => done(fn()), ms));
+const boundaryAt = (at) => `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: at, content: 'Conversation compacted' })}\n`;
+
 test('SessionStart compact after the PreCompact hook\'s allow: four labelled parts within CAP, expect consumed (R5.1, R5.2, AC-5, AC-11)', () => {
   const h = makeHome({
     record: {
@@ -216,22 +247,56 @@ test('a manual /compact: the parts are put back, and a part run before the state
   assert.equal(h.log().at(-1).why, 'expect manual');
 });
 
-test('an agent\'s compaction: no expect and no boundary, or an expect or boundary over 180 s old, gives nothing; the main\'s boundary gives the parts (R5.2, E-6)', () => {
-  const h = makeHome({ expect: null });
-  assert.deepEqual(all(h), NONE);
-  assert.deepEqual([h.log().at(-1).put, h.log().at(-1).why], [false, "not the main's"]);
+test('an agent\'s compaction: an expect or boundary over 180 s old gives nothing; the main\'s boundary gives the parts (R5.2, E-6)', async () => {
   const stale = makeHome({ expect: EXPECT_S + 1 });
-  assert.deepEqual(all(stale), NONE);
-  assert.equal(stale.json('compact/s-main.json').expect, undefined);
-  const mark = (at) => `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: at, content: 'Conversation compacted' })}\n`;
   const old = makeHome({ expect: null });
-  appendFileSync(old.transcript, mark(ago(EXPECT_S + 5)));
-  assert.deepEqual(all(old), NONE);
+  appendFileSync(old.transcript, boundaryAt(ago(EXPECT_S + 5)));
+  for (const parts of await Promise.all([together(stale), together(old)])) assert.deepEqual(parts.map((p) => p.text), NONE);
+  assert.equal(stale.json('compact/s-main.json').expect, undefined);
+  assert.deepEqual([old.log().at(-1).put, old.log().at(-1).why], [false, "not the main's"]);
   const seen = makeHome({ expect: null });
   const at = ago(10);
-  appendFileSync(seen.transcript, mark(at));
+  appendFileSync(seen.transcript, boundaryAt(at));
   assert.ok(all(seen).every((t) => typeof t === 'string'));
   assert.deepEqual([seen.log().at(-1).why, seen.log().at(-1).boundary], ['boundary seen', at]);
+});
+
+test('R5.2a: the main transcript\'s boundary written about 1 s after the four parts start: all four put back', async () => {
+  const h = makeHome({ expect: null });
+  let at = null;
+  const [parts] = await Promise.all([together(h), after(1000, () => {
+    at = new Date().toISOString();
+    appendFileSync(h.transcript, boundaryAt(at));
+  })]);
+  for (const [i, p] of parts.entries()) {
+    assert.ok(p.text?.startsWith(`kirunak, after a compaction (part ${i + 1} of 4): ${PARTS4[i]}\n`), `${PARTS4[i]}: ${p.text}`);
+    assert.ok(p.ms >= 900, `${PARTS4[i]} decided after ${p.ms} ms, before the boundary was written`);
+    if (PARTS4[i] !== 'state') assert.ok(p.ms < BOUNDARY_WAIT_S * 1000, `${PARTS4[i]} waited ${p.ms} ms`);
+  }
+  const line = h.log().at(-1);
+  assert.deepEqual([line.put, line.why, line.boundary], [true, 'boundary seen', at]);
+  assert.equal(h.json('compact/s-main.json').fire.boundaryAt, at);
+});
+
+test('R5.2a: no expect and no boundary ever written: nothing put back, the four parts done in about BOUNDARY_WAIT_S', async () => {
+  const h = makeHome({ expect: null });
+  const parts = await together(h);
+  assert.deepEqual(parts.map((p) => p.text), NONE);
+  for (const p of parts) assert.ok(p.ms >= BOUNDARY_WAIT_S * 1000 - 250 && p.ms < BOUNDARY_WAIT_S * 1000 + 3000, `${p.ms} ms`);
+  assert.deepEqual([h.log().at(-1).put, h.log().at(-1).why, h.log().at(-1).boundary], [false, "not the main's", null]);
+});
+
+test('R5.2a: a waiting part takes the state part\'s fire once it is written; a session with no task waits for nothing', async () => {
+  const h = makeHome({ expect: null });
+  const fire = { source: 'compact', put: true, why: 'boundary seen', boundaryAt: ago(1) };
+  const [task] = await Promise.all([start(h, 'task'), after(1000, () => writeJson(join(h.home, 'compact', 's-main.json'), { fire: { ...fire, at: new Date().toISOString() } }))]);
+  assert.match(task.text, /^kirunak, after a compaction \(part 2 of 4\): task\nthe file /);
+  assert.ok(task.ms >= 900 && task.ms < BOUNDARY_WAIT_S * 1000, `${task.ms} ms`);
+  const none = makeHome({ session: null, expect: null });
+  const state = await start(none, 'state');
+  assert.equal(state.text, null);
+  assert.ok(state.ms < BOUNDARY_WAIT_S * 1000 - 1000, `${state.ms} ms`);
+  assert.equal(none.log().at(-1).why, 'no task');
 });
 
 test('one boundary is the main\'s once: a second state part on the same transcript tail, after expect or not, gives nothing (R5.2, E-6)', () => {

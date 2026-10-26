@@ -328,7 +328,10 @@ no end counts as running for attribution only when its own transcript was writte
 (R3.2). `IDLE_MIN` = 50 minutes: idle compaction fires
 after about 54 minutes on the 1-hour cache. `CAP` = 9,500 characters: an additionalContext string over 10,000 is filed
 and the model gets a preview instead. `EXPECT_S` = 180 s: how recent PreCompact's `expect`, or the main transcript's
-compaction boundary, must be for SessionStart to put the task back (R5.2). `CLEAR_S` = 120 s: how recent SessionEnd's
+compaction boundary, must be for SessionStart to put the task back (R5.2). `BOUNDARY_WAIT_S` = 5 s: how long a
+SessionStart part with no `expect` waits for that boundary, which Claude Code writes after SessionStart starts (70 ms
+after, seen live), or for the state part's decision, reading again every 250 ms (R5.2a); with the 8 s `k status` and
+`k waiting` are given, the state part ends within 13 s, inside the parts' 20 s timeout. `CLEAR_S` = 120 s: how recent SessionEnd's
 `cleared.json` must be for SessionStart `clear` to join the old id (R5.3). `PARTS_S` = 20 s: the parts' timeout, and how
 recent the state part's decision must be for the other three parts to take it (R5.2). `PRUNE_DAYS` = 14 days:
 `compact/*.json` untouched this long are removed (R5.5). `PROJECT_ROOT` = `main`: which folder's
@@ -443,6 +446,15 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   decision as `fire` (`joined`); a task, plan or progress part takes a decision under `PARTS_S` (20 s) old as its own,
   and decides as above when there is none. The risk: an agent whose SessionStart comes within 20 s of the main's, its
   own parts running before its state part, gets the three files (the state part, never).
+- **R5.2a** SessionStart `compact` runs before Claude Code writes the main transcript's compact_boundary entry (seen
+  live: SessionStart at 07:48:58.297, the boundary stamped 07:48:58.367), so a boundary looked for once is never
+  found. A part with no `expect`, no `fire` it takes (the state part takes none) and no boundary yet, in a session
+  holding a task, reads `compact/<session>.json` and the transcript's tail again every 250 ms for up to
+  `BOUNDARY_WAIT_S`; the first to show decides as R5.2 says: a boundary newer than the fire's `EXPECT_S` window is
+  the main's compaction (`boundary seen`), and the state part's `fire` is taken by the other three, so no part
+  decides before the boundary is written and all four agree. Nothing in that time: `not the main's`, about 5 s
+  late. A session with no task waits for nothing, since nothing is put back, and its log says `no task`. A part with
+  `expect` waits for nothing either, so the state part records `boundaryAt` only when the boundary is already written.
 - **R5.3** After `/clear`: SessionEnd (`clear`, `timeout: 5`) under the old id writes `compact/cleared.json` when its
   sessions file holds a task, and removes it otherwise (after a task is done nothing is put back); SessionStart
   `clear` under the new id, within 120 s and from the same folder, writes `sessions/<new>.json` with the task and the

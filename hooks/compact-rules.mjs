@@ -413,6 +413,9 @@ export function taskDir(config, task) {
 // SessionStart `compact` puts the task back when the PreCompact hook's `expect` is this recent, or the main
 // transcript's compact_boundary entry is (R5.2).
 export const EXPECT_S = 180;
+// SessionStart `compact` starts before Claude Code writes the main transcript's compact_boundary entry (about 70 ms
+// later), so a part with no `expect` and no state part's `fire` to take waits this long for either (R5.2a).
+export const BOUNDARY_WAIT_S = 5;
 // SessionStart `clear` joins the old id when SessionEnd wrote cleared.json this recently (R5.3).
 export const CLEAR_S = 120;
 // The four entries of one SessionStart run in parallel: the `state` part decides, records it and consumes `expect`

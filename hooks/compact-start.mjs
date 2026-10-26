@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clearFire, sessionFile, taskOf, within } from './compact-clear.mjs';
 import {
-  boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, PARTS, PARTS_S, planFor, PRUNE_DAYS,
-  readJson, stateText, taskDir, updateRecord, waitingLines,
+  BOUNDARY_WAIT_S, boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, PARTS, PARTS_S, planFor,
+  PRUNE_DAYS, readJson, stateText, taskDir, updateRecord, waitingLines,
 } from './compact-rules.mjs';
 
 // The task put back (design/orchestrator.md §5, R5.1-R5.5): SessionStart after `compact` and after `clear`, one entry
@@ -15,41 +15,61 @@ import {
 //
 // The four entries of one SessionStart run in parallel, so one of them, `state`, decides and writes: it consumes
 // `expect` or cleared.json and records what it decided in compact/<session>.json (`fire`, `joined`); the other three
-// read the same records and take that decision when they come after it.
+// read the same records and take that decision when they come after it. After `compact` with no `expect`, each part
+// waits for the main transcript's boundary, and the other three for the state part's `fire` as well (R5.2a).
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const K_MS = 8_000;
-
+// R5.2a: how often a waiting part reads the record and the transcript's tail again.
+const BOUNDARY_STEP_MS = 250;
+const sleep = (ms) => new Promise((done) => setTimeout(done, Math.max(0, ms)));
 
 // R5.2, R5.4: the main session's compaction (an automatic or manual one the PreCompact hook let through, `expect`
 // recent; else the main transcript's own boundary, once: the state part records its time as `fire.boundaryAt`, and
 // the same boundary seen again is an agent's compaction within EXPECT_S of the main's) or an agent's, which gets
 // nothing. The state part decides and writes under the record's lock (R6.6).
-function compactFire(home, input, part, now) {
+//
+// R5.2a: SessionStart starts before Claude Code writes the boundary, so with no `expect`, no `fire` a part other than
+// the state part takes, and no boundary yet, a part of a session holding a task reads the record and the tail again
+// every BOUNDARY_STEP_MS for up to BOUNDARY_WAIT_S; the first of them to show decides. A session with no task waits for
+// nothing: nothing would be put back.
+async function compactFire(home, input, part, now) {
   const path = expectPath(home, input.session_id);
-  const decision = (rec) => {
-    const expect = within(rec.expect?.at, EXPECT_S, now) ? rec.expect : null;
-    const fire = part !== 'state' && rec.fire?.source === 'compact' && within(rec.fire.at, PARTS_S, now) ? rec.fire : null;
-    const boundary = part === 'state' || (!expect && !fire) ? boundarySeen(input.transcript_path, now.getTime()) : null;
-    const again = boundary != null && boundary === rec.fire?.boundaryAt;
+  const s = readJson(sessionFile(home, input.session_id));
+  const expectOf = (rec) => (within(rec.expect?.at, EXPECT_S, now) ? rec.expect : null);
+  const fireOf = (rec) => (part !== 'state' && rec.fire?.source === 'compact' && within(rec.fire.at, PARTS_S, now) ? rec.fire : null);
+  const seen = (rec) => (part === 'state' || (!expectOf(rec) && !fireOf(rec)) ? boundarySeen(input.transcript_path, now.getTime()) : null);
+  let rec = readJson(path) ?? {};
+  let boundary = seen(rec);
+  const settled = () => expectOf(rec) || fireOf(rec) || boundary != null;
+  if (taskOf(s)) {
+    for (const until = Date.now() + BOUNDARY_WAIT_S * 1000; !settled() && Date.now() < until;) {
+      await sleep(Math.min(BOUNDARY_STEP_MS, until - Date.now()));
+      rec = readJson(path) ?? {};
+      boundary = seen(rec);
+    }
+  }
+  const decision = (r) => {
+    const expect = expectOf(r);
+    const fire = fireOf(r);
+    const again = boundary != null && boundary === r.fire?.boundaryAt;
     const put = expect ? true : fire ? fire.put === true : boundary != null && !again;
     const why = expect ? `expect ${expect.why}` : fire ? fire.why : again ? 'boundary already put back' : boundary ? 'boundary seen' : "not the main's";
     return { put, why, boundary };
   };
   let d;
   if (part === 'state') {
-    updateRecord(path, (rec) => {
-      d = decision(rec);
-      const rest = { ...rec };
+    updateRecord(path, (r) => {
+      d = decision(r);
+      const rest = { ...r };
       delete rest.expect;
       // R1.4: the main's compaction ends the hold the first block's record measures from.
       if (d.put) delete rest.blocked;
-      const boundaryAt = d.boundary ?? rec.fire?.boundaryAt ?? null;
+      const boundaryAt = d.boundary ?? r.fire?.boundaryAt ?? null;
       return { ...rest, fire: { at: now.toISOString(), source: 'compact', put: d.put, why: d.why, boundaryAt } };
     });
-  } else d = decision(readJson(path) ?? {});
-  const { put, why, boundary } = d;
-  const s = readJson(sessionFile(home, input.session_id));
+  } else d = decision(rec);
+  const { put, why } = d;
   return { put, why, boundary, task: taskOf(s), previous: Array.isArray(s?.previous) ? s.previous : [] };
 }
 
@@ -153,7 +173,7 @@ export async function onStart(input, home, part, now = new Date()) {
   // An agent's own event names it (hooks.md): never an agent's context (E-6).
   if (input.agent_id) return null;
   if (part === 'state') prune(home, now);
-  const fire = source === 'compact' ? compactFire(home, input, part, now) : await clearFire(home, input, part, now);
+  const fire = source === 'compact' ? await compactFire(home, input, part, now) : await clearFire(home, input, part, now);
   const config = fire.put && fire.task ? readJson(join(home, 'escalate', 'config.json')) : null;
   const dir = config ? taskDir(config, fire.task) : null;
   let text = null;
@@ -170,7 +190,8 @@ export async function onStart(input, home, part, now = new Date()) {
     text = `${labelOf(part, source)}\n${text}`;
   }
   if (part === 'state') {
-    const why = !fire.put ? fire.why : !fire.task ? 'no task' : !dir ? 'task folder unknown' : fire.why;
+    // A compaction in a session with no task waited for no boundary (R5.2a), so what it found says nothing.
+    const why = !fire.task && (fire.put || source === 'compact') ? 'no task' : !fire.put ? fire.why : !dir ? 'task folder unknown' : fire.why;
     logLine(home, {
       ts: now.toISOString(), event: 'SessionStart', session: input.session_id, source, put: !!text, why,
       boundary: fire.boundary ?? null, task: fire.task ?? null, from: fire.from ?? null, chars: text?.length ?? null,
