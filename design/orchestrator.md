@@ -305,6 +305,172 @@ gets.
 context, ttl, expectedWaitMin, reason, costWeight }`. `k keeper report` sums keep-alives and misses per task and per
 week: the numbers R11 asks for, and the ones to compare with the workspace's baseline (§6).
 
+### The handover: a compaction at the step boundary
+
+A session working a task carries every earlier step in its context, and each call reads all of it again. The
+handover lets Claude Code's own automatic compaction do the forgetting, at a moment kirunak chooses: once the context
+passes the **handover size**, the session compacts at the next **step boundary** (no step it started is running), and
+kirunak puts the task's files and state back. The session stays interactive; nobody types anything. A compaction in
+the middle of a step waits for the **mid-step limit**, by default the user's own window, so it never comes sooner than
+it would without kirunak. The pieces are `hooks/kirunak-compact.mjs` with its rules in `hooks/compact-rules.mjs`
+(PreCompact), `hooks/compact-start.mjs` (SessionStart) and `hooks/compact-clear.mjs` (SessionEnd), the agent records
+and the turn flag in the escalation hook (`approval.md` §7), and `k install` and `k doctor`. Facts about Claude Code
+come from its hooks and settings pages (hooks.md, settings.md on code.claude.com) and from probes of Claude Code
+2.1.310; the rest is judgement.
+
+**The numbers.** `SLACK` = 33,000: Claude Code compacts at the window − min(max output, 20,000) − 13,000, and every
+model kirunak runs has a max output of at least 20,000, so the threshold `T` is the window − 33,000. `LAG` = 50,000:
+the most one request adds past the transcript's last usage (Claude Code checks the request about to go out; the
+transcript lags it by the last tool results). `OVERSHOOT` = 50,000: an agent this far past `T` is having its
+compactions held by us. `IDLE_MIN` = 50 minutes: idle compaction fires after about 54 minutes on the 1-hour cache.
+`CAP` = 9,500 characters: an additionalContext string over 10,000 is filed and the model gets a preview instead.
+`PROJECT_ROOT` = `main`: which folder's `.claude/settings.local.json` a session reads (R2.7). The handover size's
+default, 150,000, was measured on a week of real sessions as the size with the least total weight read.
+
+**R1 The step boundary.** progress.md is the only record of a step worked by hand.
+- **R1.1** `runningBy(progressText, sessions, dir)` (lib/steps.mjs) lists the steps whose last event line is
+  `started` or `resumed`, whose `started` line names `session <id>` with an id in `sessions`, and with no
+  `steps/<step>/needs.json` (a step waiting for the owner or a heavy job is paused, not running). A boundary is an
+  empty list.
+- **R1.2** `sessions` is the session's chain: its own id and every `previous` id in `sessions/<id>.json`, so a step
+  started before `/clear` is still this session's.
+- **R1.3** A `started` line with no session (by hand) or k run's label never holds this session's compaction.
+
+**R2 What the hook reads.**
+- **R2.1** The context: the main transcript's last assistant entry, `input_tokens + cache_creation_input_tokens +
+  cache_read_input_tokens` (the status line's formula), read from the file's tail, 256 KB then 1 MB; none → unknown.
+- **R2.2** The lag: the context read is a lower bound on the real one, late by at most `LAG`.
+- **R2.3** The model: the last assistant entry's, else the escalation record's.
+- **R2.4** The model's window: `sessions/<id>.json` `window` when the status line's tracker wrote it, else a table
+  (ids with `[1m]`, and the Haiku, Opus and Sonnet 5.5 and Fable 5.1 ids → 1,000,000; any other → 200,000, the
+  documented default, on which the hook holds at most one request).
+- **R2.5** The window in force, as Claude Code resolves it: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` beats everything; else
+  the first file that sets `modelSettings.<model>.autoCompactWindow` or `autoCompactWindow` (the per-model key wins
+  inside a file, the higher file across files): `<root>/.claude/settings.local.json`, a local file an older Claude
+  Code left in the starting folder, the starting folder's `.claude/settings.json`, the user's
+  `settings.json` (`CLAUDE_CONFIG_DIR`, else `~/.claude`). `windowSetting` returns `{ window, from: { kind, file, key },
+  kirunak }`; `kirunak` is true only when a project file set it and the root is one of config.json's `compact.roots`.
+  `--settings` and managed settings cannot be seen.
+- **R2.6** The threshold `T` = the window, clamped to [100,000, the model's window], − `SLACK`: 150,000 with the
+  default handover window of 183,000.
+- **R2.7** The project root: Claude Code reads the local file at the repository root for a session started in a
+  subfolder, and the main checkout's for a worktree (settings.md), except outside git, at the home folder or when
+  the root is not the user's. `projectRoot(cwd)` mirrors it with node:fs alone (a walk up to `.git`; a `.git` file
+  naming `<main>/.git/worktrees/<name>`), returning a real path. A probe found the same window from a repo's root, a
+  subfolder and a worktree, so `PROJECT_ROOT` is `main`; `k install` writes where the same function says Claude Code
+  reads, so the two agree either way.
+
+**R3 Whose compaction it is.** PreCompact names no agent: a subagent's own compaction reaches the hook with the main
+session's ids, at the same `T`. Each fire is attributed from what the hook can know.
+- **R3.1** The turn flag: the escalation hook writes `turn: { state, at, promptId }` into `escalate/<session>.json`,
+  `open` on each main-session UserPromptSubmit, `closed` on Stop.
+- **R3.2** The running agents' contexts: for each agent record with no `ended`, the last usage of its own transcript.
+- **R3.3** Attribution, the first row that applies: (1) no turn record → as open; (2) a running agent at least
+  `OVERSHOOT` past `T` → an agent's, starving: allow; (3) the turn open and the context more than `LAG` under `T` →
+  not the main's; (4) the turn closed less than `IDLE_MIN` ago → not the main's (no request between turns); (5) else
+  the main's, and R4 decides.
+- **R3.4** What remains: an agent's fire while the main is within `LAG` of `T` mid-step is held with the main's, at
+  most `OVERSHOOT` tokens longer; a stale closed turn lets one mid-step compaction through. Both are logged. Never
+  holding while any agent runs would break the boundary for every step worked through an agent.
+
+**R4 PreCompact, the rule table** (matcher `auto|manual`), cheapest reads first:
+- **R4.1** `KIRUNAK_STEP` set (a `k run` step): exit at once, nothing read or written.
+- **R4.2** A manual `/compact`: allow, and record `expect`.
+- **R4.3** config.json missing, `compact.enabled: false`, no session id, or anything unreadable: allow (`state
+  unreadable`).
+- **R4.3a** The window in force is not a workspace root's (the user's own, the variable's or none): allow (`user's
+  window`). A session outside every workspace repo (an ordinary chat, a project without kirunak) is never held.
+- **R4.4** The context unknown: allow (the limit cannot be bounded).
+- **R4.5** Attributed to an agent (R3.3 rows 2-4): allow.
+- **R4.6** The context at least the limit, `min(LIMIT, the model's window − SLACK − LAG)`: allow, record `expect`.
+  `LIMIT` is `compact.midStepLimit` when a number, else the user's own window for this model, read live from their
+  file (its `modelSettings.<model>.autoCompactWindow`, else its `autoCompactWindow`, else the model's window). On a
+  1M model with a user window of 500,000 the allow comes with the real context between 500k and 550k, past the 467k
+  the user's own window compacts at, so never sooner; on a 200k model the limit is 117,000, under `T`, and the hook
+  holds at most one request.
+- **R4.7** No task in `sessions/<id>.json`: block (a session with no task compacts at the limit, as without kirunak).
+- **R4.8** A step of the chain running (R1.1): block, `kirunak: S-n is running; the compaction waits for the step
+  boundary`. The reason reaches nobody: a block of an automatic compaction shows nothing and costs no tokens.
+- **R4.9** Otherwise, a boundary: allow, record `expect`.
+- **The log.** Every decision is one JSON line of `compact.log`: `{ ts, session, cwd, trigger, ctx, model, window: {
+  value, from }, T, limit, turn, agents, steps, decision, row, why }`; the usage review counts its `why`.
+
+**R5 SessionStart after a compaction or `/clear`** (matcher `compact|clear`).
+- **R5.1** Four parts, four hook entries (`--part state|task|plan|progress`, `timeout: 20`), since each
+  additionalContext string is capped alone; each at most `CAP` characters with a label `kirunak, after a compaction
+  (part k of 4): <name>`, cut at a line end with the whole file's path. `task`: task.md whole. `plan`: plan.md's
+  header and the blocks of the steps not finished (still too long: the running and ready ones). `progress`: the end of
+  progress.md. `state`: the task and its title, the running steps with their start, `k status --session <id>`,
+  `k waiting`'s rows for the task, the running agents (description, type, id, output file, launched, by), the shell
+  tasks of the last Stop, and three sentences telling the model it is the same session and to go on from progress.md's
+  last line without starting a step or asking the owner again. The entries run in parallel in any order, so no part
+  refers to another's place.
+- **R5.2** Only the main session's compaction gets the parts: PreCompact records `expect: { at, why, ctx }` in
+  `compact/<session>.json` on every allow it attributes to the main (R4.2, R4.6, R4.9); SessionStart adds the parts
+  when `expect` is under 180 s old, else when the main transcript's tail holds a compaction boundary newer than its
+  last assistant entry and under 180 s old, else nothing. `expect` is consumed.
+- **R5.3** After `/clear`: SessionEnd (`clear`, `timeout: 5`) under the old id writes `compact/cleared.json` when its
+  sessions file holds a task, and removes it otherwise (after a task is done nothing is put back); SessionStart
+  `clear` under the new id, within 120 s and from the same folder, writes `sessions/<new>.json` with the task and the
+  chain, marks the old file `clearedTo`, and adds the four parts labelled after `/clear`.
+- **R5.4** A manual `/compact` gets the parts as an automatic one (R4.2 records `expect`).
+- **R5.5** `compact/*.json` untouched for 14 days are pruned; `compact.log` never.
+
+**R6 The agent records**, kept by the escalation hook in `escalate/<session>.json` `agents`.
+- **R6.1** A launch records `description` and `outputFile`; a foreground agent's launch, which fires at its end, is
+  recorded ended.
+- **R6.2** Every named agent's end is recorded: SubagentStop's matcher is `.+`, which keeps out Claude Code's internal
+  agents (their type is empty); which agents lift an escalation block is still the hook's own check.
+- **R6.3** The running agents are the records with no `ended`.
+- **R6.4** The turn flag (R3.1): UserPromptSubmit without `agent_id` opens it, Stop closes it.
+- **R6.5** Stop's `background_tasks` is kept as `tasks: { at, list }`; an agent record older than the snapshot with
+  no entry in it is marked ended by the snapshot. Its `shell` entries are the background shell tasks R5.1 lists.
+- **R6.6** One writer per file: the escalation hook writes `escalate/<session>.json`, the compact hook writes
+  `compact/` and `compact.log`, and `sessions/<id>.json` is written through `updateSession` only.
+
+**R7 The workspace settings** (`plugins.md` §3, `compact`).
+- **R7.1** `compact: { enabled: true, handoverSize: 150000, midStepLimit: 'user', alsoIn: [] }`, merged as `hook` is;
+  `alsoIn` folders are expanded and made real as the repos' roots are, and count as the workspace's for R4.3a.
+- **R7.2** Checked at load: `enabled` a boolean; `handoverSize + SLACK` in [100,000, 1,000,000]; `midStepLimit`
+  `'user'` or a whole number from `handoverSize + SLACK + LAG` (under it the hook could never hold a call) to 967,000;
+  `alsoIn` a list of folders. For `'user'` the same floor is checked by `k doctor`, where the value is known.
+- **R7.3** config.json carries `compact: { enabled, handoverSize, window, midStepLimit, roots }`, `roots` the real paths
+  whose local file holds the window (a worktree root's main checkout), so the hook reads one file. `window` is also
+  how `k install` knows its own earlier value.
+- **R7.4** `k run`'s steps keep their compaction point: a step runs in its repo's root, whose file now sets the
+  handover window, so its environment sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to `midStepLimit` when a number, else the
+  user's own window for the step's model, else 1,000,000 (Claude Code cuts it to the model's own window); none with
+  `enabled: false`.
+
+**R8 `k install` and `k doctor`.**
+- **R8.1** The wiring, in the user's settings file as kirunak's other hooks: PreCompact `auto|manual` (`timeout: 10`),
+  SessionEnd `clear` (`timeout: 5`), SessionStart `compact|clear` as four blocks, one per part (`timeout: 20`), each
+  recognised by its own command pattern, so one part's block is never taken for another's. They run in every session;
+  R4.3a keeps them quiet outside the workspace.
+- **R8.2** The window per root: `handoverSize + SLACK` into `<projectRoot(root)>/.claude/settings.local.json` for each
+  repo and `alsoIn` folder, after checking everything. A file git tracks is named and not written (a window there would
+  be committed). A file that is not a JSON object is named and skipped; the others still get theirs. Then the first
+  case that matches: (a) no window in the local file and none in the shared `.claude/settings.json` → written, every
+  other key and the file's indent kept, `.claude` made when missing; (b) already the handover window → nothing;
+  (c) kirunak's earlier window (config.json's `compact.window`) → replaced; (d) any other value, the user's own → kept
+  and named; (e) a window in the committed shared file and none in the local one → nothing written, named (a local
+  key would silently beat the repo's). Beside them, (f) a `modelSettings.<model>.autoCompactWindow` in the local file
+  is named (it beats the handover window for that model), and (g) `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the shell or in
+  a settings file's `env` is named (it beats every setting). With `enabled: false`, kirunak's own window is removed
+  and any other kept. Then, when git does not ignore the file (`git check-ignore`), `/.claude/settings.local.json` is
+  added to the repo's own excludes file (`git rev-parse --git-path info/exclude`, shared with its worktrees); never
+  the committed `.gitignore` and never the global excludes file, which is Claude Code's. The user's settings file is
+  never written for the window, and its `autoCompactWindow` is the mid-step limit. Before `k init`, no roots: the line
+  says the next `k install` writes them.
+- **R8.3** `k doctor`: `compact (<module> | kirunak's defaults): handover size, window, mid-step limit` with the user's
+  own window and its per-model values, failing a user window under R7.2's floor; the compact hook's wiring; per root
+  the window, ignored by git, or the case that keeps it out (failing until the user acts); the user's own window,
+  named and never failed; `here`, the window a session started in this folder gets and from where, and that outside
+  the roots the hook never blocks; and the window of this session's model, failing a model not in R2.4's table.
+- **R8.4** These docs: the install section of README.md, `plugins.md` §3 and this section.
+- **R8.5** Undoing it: nothing of the user's changes, so nothing needs restoring; `compact.enabled: false` and
+  `k install` take kirunak's window back out of every root.
+
 ## 6. Token records (R12)
 
 - Every run record (`run-<k>.json`, `keep-<k>.json`) carries the result's `model_usage`; `k cost <id>` folds them
@@ -349,4 +515,5 @@ week: the numbers R11 asks for, and the ones to compare with the workspace's bas
 
 ## 7. Requirements this file satisfies
 
-R8 (§1), R9 (§1 inputs, §2 including the ladder, §3 `--disallowedTools Agent`), R10 (§4), R11 and D9 (§5), R12 (§6).
+R8 (§1), R9 (§1 inputs, §2 including the ladder, §3 `--disallowedTools Agent`), R10 (§4), R11 and D9 (§5, with the
+handover, its rules R1.1 to R8.5), R12 (§6).
