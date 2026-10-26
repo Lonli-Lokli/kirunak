@@ -370,6 +370,14 @@ forces a new review.
   commit under `--no-verify` let through; `install.test.mjs` writes and finds the hook. Rolling out: `k install
   --git` on each repo; a repo's own `commit-msg` (gulnya's music research hook) takes the printed line before its
   first `exit`.
+- Third pass, A-1 (S-12, after review-2.md's findings): a workspace's `records` names more files and folders as
+  records (`lib/workspace.mjs` loads and checks them, `recordPaths` in `lib/records.mjs` takes them as it takes the
+  queue; a path not written yet is made real through its nearest folder), and the mod's `capBlocking`
+  (`waiting.ts`) shows at most ten blocking lines for a task in `/k-accept`'s list, its view and its refusal, then
+  `and <n> more`. Tests: `records.test.mjs` (a file and a folder named, one outside every repo, a list of anything
+  else refused), `approval.test.mjs` (the task's own commits and later ones, one naming it, to a named file and folder
+  taken; the same history blocked when nothing names them), the mod's `dialog.test.ts` (thirteen lines: ten and `and
+  3 more` in the list, the view and the refusal).
 
 ## Slice 7, later and not detailed here: R17, R18
 

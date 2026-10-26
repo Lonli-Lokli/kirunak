@@ -88,6 +88,7 @@ own implementations live in the workspace's repo, beside its config (D2).
 export default {
   repos: [{ name: 'weather', root: '~/code/weather' }, { name: 'hub', root: '~/code/hub' }],
   queue: '~/code/hub/kirunak/queue.md',
+  records: [],                        // more of kirunak's records (approval.md §3); a folder ends with a slash
   plugins: ['./plugins/checklist.mjs'],
   machine: { maxAgents: 2, maxHeavy: 1 },
   models: {},                         // per step kind: { model, effort }; empty means Claude Code's own defaults
@@ -125,6 +126,11 @@ export default {
   and its two attempts are `k run`'s), or a design rung with a design rung directly below it (its build run is on the
   rung below, which must build). A design rung's attempt is a design run on its model and a fresh build run on the rung
   below.
+- **`records`** names more files and folders as kirunak's records (`approval.md` §3, gulnya/kirunak-accept-shared-repo
+  AC-5): never part of a task's own change, never blocking `k accept`, and committable naming an accepted task. Each
+  is a path like the queue's, made real as the repos' roots are, a folder ending with a slash; one inside a repo counts
+  at its path there, in every worktree of that repo, and one outside every repo counts nowhere. The workspace is
+  refused at load when `records` is not a list of paths.
 - **`hook`** switches the escalation hook (`approval.md` §7): `enabled` (default true; false makes the hook do
   nothing at all), `block` (default true; false keeps the message and sets no block), `repeats` (default 2, the repeat
   after a fix that fires), `commands` (a list of regular-expression strings for more commands to count beyond the

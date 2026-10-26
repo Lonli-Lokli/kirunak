@@ -247,7 +247,9 @@ taken from the dry run's own error, and empty unless that is what stops the task
 AC-6). `why` keeps the whole refusal. The text prints each as `<path>  <sha>  <task>` under the accept row, indented;
 other refusals still print one line. `/k-accept` with no id shows the same lines under the task's row in its dialog's
 list and in the numbered list it prints again when nothing ran, and the task's own view and a refusal of
-`/k-accept <id>` show every line of the refusal (E-2); an older `k` that sends no `blocking` shows none. `k approve`
+`/k-accept <id>` show every line of the refusal (E-2), but for at most ten blocking lines for a task, then `and <n>
+more` in place of the rest (A-1; `k accept` and `k waiting` in the terminal show them all); an older `k` that sends no
+`blocking` shows none. `k approve`
 and `k hold` take `--dry-run`, which makes every check and writes nothing. A row says "can approve" or "can accept"
 where it said "ready". Evidence: `test/waiting.test.mjs`. Known gap:
 `k start` refuses no state, so the start list is narrower than the verb, and `k approve` does not refuse an amendment

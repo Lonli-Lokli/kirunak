@@ -123,16 +123,17 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   letter, digit, `-` or `_` on either side ends it, so `kit-wanted` does not name `kit`). A slug right after another
   repo's name and a slash names that repo's task (`katyafm/settings` never names gulnya's `settings`). The `Task:`
   trailer is part of the message, so it names its task the same way.
-- **kirunak's records** (AC-5): in every repo, `kirunak/tasks/`, `kirunak/drafts/`, `kirunak/approvals/`, and the
-  workspace's queue file at its path inside the repo that holds it (`kirunak/queue.md` in gulnya), the same path in
-  a worktree of that repo.
+- **kirunak's records** (AC-5): in every repo, `kirunak/tasks/`, `kirunak/drafts/`, `kirunak/approvals/`, the
+  workspace's queue file, and each file or folder the workspace's `records` names (`plugins.md` §3; gulnya's names
+  `kirunak/plan.md` and `kirunak/amendments.md`, D-3), each at its path inside the repo that holds it
+  (`kirunak/queue.md` in gulnya), the same path in a worktree of that repo.
 - **No new work on an accepted task** (AC-8, E-1): a commit whose message names a task of this repo the owner has
-  accepted (its folder holds `done.json`, whose `task` is its id), the trailer the hook is about to write included,
-  is refused when it stages anything besides records. A message that only mentions the task names it too. The
-  refusal: "kirunak: this commit's message names <id>, which the owner has accepted: new work on it is a new task.
-  Reword the message so it does not name <id>, or start a new task (/k-intake); only kirunak's records (task
-  folders, drafts, approvals, the queue) may still be committed naming it." So the accept's own commit and the
-  handoff written after it pass.
+  accepted (its folder holds `done.json`, whose `task` is its id), the trailer the hook is about to write included, is
+  refused when it stages anything besides records. A message that only mentions the task names it too. The refusal:
+  "kirunak: this commit's message names <id>, which the owner has accepted: new work on it is a new task. Reword the
+  message so it does not name <id>, or start a new task (/k-intake); only kirunak's records (task folders, drafts,
+  approvals, the queue, and what the workspace names as records) may still be committed naming it." So the accept's
+  own commit and the handoff written after it pass.
 - **The message the commit keeps** (review.md of the task found a message typed in the editor let through):
   prepare-commit-msg runs before the editor and checks a message given with `-m` or `-F`; commit-msg runs after it
   and checks the final message, whether typed, given, edited with `-e` or kept by an amend. Both read the text as git
@@ -188,20 +189,20 @@ out. Then each commit in `<review head>..HEAD` is judged by its own paths, recor
 - every path of a commit that names the task, in its message or its `Task:` trailer, blocks, whatever files it
   touches (AC-7);
 - a path the task's own change never touched, in a commit that does not name the task, blocks nothing (AC-2);
-- kirunak's own records (every task folder, the drafts folder, the queue file and the approvals folder, wherever the
-  workspace keeps them) are never part of a task's own change, and a change to them after the review never blocks
-  `k accept` (AC-5), so a commit whose paths are all records blocks nothing, even one naming the task.
+- kirunak's own records (every task folder, the drafts folder, the queue file, the approvals folder, and any other
+  file or folder the workspace names as a record, wherever the workspace keeps them) are never part of a task's own
+  change, and a change to them after the review never blocks `k accept` (AC-5), so a commit whose paths are all
+  records blocks nothing, even one naming the task.
 
 A file changed and changed back still blocks: the commits are judged, not the net diff. A merge adds no paths of its
-own; the commits it brings in count one by one. No flag waives a block, and the way out is a new review. The
-refusal's first line says how many files and names the next review's file ("<id>: its work changed after review.md's
-head <sha>, in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):"); a
-line follows for each blocking file and commit, `<path>  <sha>  <task>`, where the task is the commit's `Task:`
-trailer when it has one, else every workspace task its message names, else `no task` (AC-6). `k waiting` and
-`/k-accept` show the same lines (`boards.md` §4). Only the task's own repo is judged (O-2). It writes `done.json` with
-the review it took (file, verdict, head, hash,
-`task-files.md` §3), commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done`
-skill asks the owner to type (`review.md` §4).
+own; the commits it brings in count one by one. No flag waives a block, and the way out is a new review. The refusal's
+first line says how many files and names the next review's file ("<id>: its work changed after review.md's head <sha>,
+in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):"); a line follows for
+each blocking file and commit, `<path>  <sha>  <task>`, where the task is the commit's `Task:` trailer when it has
+one, else every workspace task its message names, else `no task` (AC-6). `k waiting` and `/k-accept` show the same
+lines, the phone at most ten for a task (`boards.md` §4). Only the task's own repo is judged (O-2). It writes
+`done.json` with the review it took (file, verdict, head, hash, `task-files.md` §3), commits with `KIRUNAK_ACCEPTING`,
+removes the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
 
 Once the acceptance is committed, `k accept` removes the worktrees the closed work left (`lib/worktrees.mjs`,
 gulnya/worktrees-on-close). A refusal or `--dry-run` removes nothing, and nothing in the removal undoes or fails the

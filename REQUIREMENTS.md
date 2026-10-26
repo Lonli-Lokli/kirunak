@@ -153,10 +153,11 @@ validation, archives) then go unused, and what the owner needs is not in it:
   message names the task, by its id or its slug, from its first approval to its latest review's head. The accept is
   refused when a path its own change touched changed after that head, and when a commit after it names the task, in
   its message or its `Task:` trailer, whatever files it touches. kirunak's own records (every task folder, the drafts
-  folder, the queue file and the approvals folder, wherever the workspace keeps them) are never part of a task's own
-  change, and a change to them after the review never blocks the accept. The refusal, the waiting summary
-  (`k waiting`) and `/k-accept`, at the terminal or on the phone, name each blocking file with the commit that changed
-  it and the task that commit names, or "no task". After a new review, the checklist keeps the owner's tick on an
+  folder, the queue file, the approvals folder, and any other file or folder the workspace names as a record, wherever
+  the workspace keeps them) are never part of a task's own change, and a change to them after the review never blocks
+  the accept. The refusal, the waiting summary (`k waiting`) and `/k-accept`, at the terminal or on the phone, name
+  each blocking file with the commit that changed it and the task that commit names, or "no task"; on the phone at
+  most ten for a task, then how many more there are. After a new review, the checklist keeps the owner's tick on an
   item whose row has the same id and the same words as in the review before; a row with other words comes unticked.
 - R31 A commit made in a step `k run` started gets a `Task: <id>` trailer naming the step's task, and counts as that
   task's own change (R30); a commit with no task in its environment gets no trailer and is never refused for it. Once
