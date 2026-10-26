@@ -22,7 +22,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { ladderChecks } from '../lib/doctor.mjs';
+import { compactChecks, ladderChecks } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -42,7 +42,8 @@ const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
 Setup     k init --workspace <module> | k plugins | k doctor [--settings <file>] [--agents <dir>]
           k install [--settings <file>] [--skills <dir>] [--agents <dir>] [--replace-agents] [--git <repo>]... [--print]:
-            the hooks, the skills, and a <model>-step agent for every rung of the workspace's ladder above the lowest
+            the hooks, the skills, and a <model>-step agent for every rung of the workspace's ladder above the lowest;
+            the handover window in each workspace repo's own .claude/settings.local.json (never in --settings' file)
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
           k check <id> | k check --file <task.md>
@@ -189,6 +190,7 @@ const VERBS = {
     }
     const agentsDir = flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents');
     for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
+    for (const [ok, line] of compactChecks({ ws, settingsPath: settings })) say(ok, line);
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);
