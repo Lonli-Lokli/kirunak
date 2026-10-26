@@ -123,7 +123,7 @@ test('pending → ready → running → done, with the run records, the briefs a
   assert.deepEqual([rec.session_id, rec.num_turns, rec.kirunak.exitCode, rec.kirunak.result, typeof rec.kirunak.ended], [calls[0].sessionId, 3, 0, true, 'string']);
 });
 
-test('a step compacts where it did before the handover: the workspace\'s number, else the user\'s own window for its model, else 1000000; none with the handover off (R7.4)', async () => {
+test('a step compacts where it did before the handover: the user\'s own window for its model, else 1000000, never the mid-step limit; none with the handover off (R7.4)', async () => {
   const once = async (compact, user) => {
     const w = await approvedWorkspace(PLAN);
     w.ws.compact = { ...w.ws.compact, ...compact };
@@ -134,8 +134,9 @@ test('a step compacts where it did before the handover: the workspace\'s number,
     return calls[0].env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
   };
   try {
-    assert.equal(await once({ midStepLimit: 400000 }, { autoCompactWindow: 500000 }), '400000', 'the workspace\'s number beats the user\'s window');
-    assert.equal(await once({}, { autoCompactWindow: 500000 }), '500000', 'the user\'s own window');
+    assert.equal(await once({ midStepLimit: 400000 }, { autoCompactWindow: 500000 }), '500000', 'a workspace\'s number is the interactive sessions\' limit, not the step\'s');
+    assert.equal(await once({}, { autoCompactWindow: 500000 }), '500000', 'the default limit, 167000, is not passed: the user\'s own window');
+    assert.equal(await once({ midStepLimit: 'user' }, { autoCompactWindow: 500000 }), '500000', 'with \'user\' the same');
     assert.equal(await once({}, { autoCompactWindow: 500000, modelSettings: { opus: { autoCompactWindow: 300000 } } }), '500000', 'a model the step does not run on');
     assert.equal(await once({}, null), '1000000', 'none set: Claude Code\'s own point');
     assert.equal(await once({ enabled: false }, { autoCompactWindow: 500000 }), undefined, 'the handover off: no variable');
