@@ -329,6 +329,37 @@ draft with `bug-of`, no new kind of file.
   drafts` and `k board --brief` naming each a bug of katyafm/music-variety (gulnya/kirunak-spikes S-5). Not yet
   measured: a bug in `/k-drafts` from the phone.
 
+## What blocks an accept: the task's own work. Closes R30, R31
+
+Built 2026-10-26 (gulnya/kirunak-accept-shared-repo S-1 to S-4, on the branch `accept/shared-repo`), on slice 4's
+`k accept` and slice 1b's prepare-commit-msg hook: other work committed in a task's repo after its review no longer
+forces a new review.
+
+- Files: `lib/records.mjs` (new: kirunak's records and `isRecord`, `namesTask`, `trailerTask`, `tasksNamed`, `said`,
+  `doneTasks`, `blocking`); `lib/git.mjs` (`commitsIn`; `changedSince` stays for the storage seam);
+  `lib/approval.mjs` (`k accept` judged by `blocking` in place of `changedSince`, `blockingLine`, the rows on the
+  refusal's error); `hooks/git-prepare-commit-msg.mjs` (the `Task:` trailer, the refusal of new work on an accepted
+  task); `lib/checklist.mjs` (`ownerLine` matching an item by its id and words, whichever review closes it);
+  `lib/waiting.mjs` and `bin/k.mjs` (the accept row's `blocking`, its lines in `k waiting`);
+  `mods/kirunak/hooks/waiting.ts`, `lists.ts` and `picks.ts` (the lines under a task in `/k-accept`'s dialog and
+  list). `REQUIREMENTS.md` R30 and R31, `design/approval.md` §3 and §4, `review.md` §3, `orchestrator.md` §3 and
+  `boards.md` §4 say how it works.
+- Tests: `records.test.mjs` (naming by id and by slug as a whole word, inside a longer word, `katyafm/settings`
+  against gulnya's `settings`, the trailer, the records, `said`, `doneTasks`, `commitsIn` with a rename, a body and an
+  empty commit), `approval.test.mjs` (a commit before the first approval not counted, another task's commit to other
+  files taken and to the task's file refused with its lines, commits to another task's folder, the drafts, the queue
+  and the approvals taken, a file changed and changed back still refused; a commit naming the task by slug or by
+  trailer refused, a records-only one naming it taken), `git-hook.test.mjs` (the trailer under a step's variables,
+  one after an amend, none by hand; a code commit naming an accepted task refused, its records, the queue, a merge
+  and no workspace let through), `checklist.test.mjs` (a tick and the owner's words carried from review.md to
+  review-2.md, a reworded row unticked, `k accept` taking the carried tick), `waiting.test.mjs` (the accept row's
+  `blocking` and its line, a second review clearing it); the mod's `dialog.test.ts` (the lines under the row in the
+  dialog's list and after Skip, every line in the task's view and a refusal by id).
+- Numbers: `npm test` 675 tests, 673 pass, 2 skipped (the timing tests, run with `KIRUNAK_TIMING=1`);
+  `claude plugin test` 140 of 140.
+- Not yet measured: the hook and `k accept` from the main checkout once the branch merges (S-6), and `/k-accept` on
+  the phone with a blocking file.
+
 ## Slice 7, later and not detailed here: R17, R18
 
 Trackers (Linear, It's a Plan, GitHub Issues) and cloud sync as plugins on the `tracker` and `sync` seams, with

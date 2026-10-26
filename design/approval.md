@@ -76,7 +76,7 @@ allowed.
 - Under a subagent the input carries `agent_id` and `agent_type` (hooks.md, fetched 2026-10-18); the hook treats
   agents and the main session alike (both are the model).
 
-## 3. The git hook: `hooks/git-pre-commit.mjs`
+## 3. The git hooks: `hooks/git-pre-commit.mjs`, and a task's part of `prepare-commit-msg`
 
 Installed per repo that holds tasks. `k install --git <repo>` writes `.git/hooks/pre-commit` calling it when the repo
 has no pre-commit hook; a repo that already has one (often a committed `githooks/pre-commit` copied into
@@ -107,6 +107,39 @@ It also runs `k verify --staged` logic for every task whose record is in HEAD an
 nothing to do, so the hook costs one `git diff --cached` on a commit that touches no kirunak file (number to check:
 under 100 ms).
 
+### A step's `Task:` trailer, and no new work on an accepted task (gulnya/kirunak-accept-shared-repo)
+
+The prepare-commit-msg hook (`hooks/git-prepare-commit-msg.mjs`, the SLAP gate of `change-size.md` §3, which git runs
+even under `--no-verify`) does two things for tasks once the SLAP gate passes. What names a task and what kirunak's
+records are is `lib/records.mjs`, the same for the hook and for `k accept` (§4).
+
+- **The trailer** (AC-3, AC-4): with `KIRUNAK_TASK` in the commit's environment, which `k run` sets on every step
+  (`orchestrator.md` §3), the hook writes `Task: <id>` after the `SLAP:` line, through `git interpret-trailers
+  --if-exists replace`, so an amend keeps one. A commit with no task in its environment gets no trailer and is never
+  refused for it. A task's commit made outside a step `k run` started, such as one from an interactive session, is
+  not stamped (O-1); it is the task's own change only if its message names the task.
+- **Naming a task**: a message names a task by its id, or, in the task's own repo, by its slug as a whole word (a
+  letter, digit, `-` or `_` on either side ends it, so `kit-wanted` does not name `kit`). A slug right after another
+  repo's name and a slash names that repo's task (`katyafm/settings` never names gulnya's `settings`). The `Task:`
+  trailer is part of the message, so it names its task the same way.
+- **kirunak's records** (AC-5): in every repo, `kirunak/tasks/`, `kirunak/drafts/`, `kirunak/approvals/`, and the
+  workspace's queue file at its path inside the repo that holds it (`kirunak/queue.md` in gulnya), the same path in
+  a worktree of that repo.
+- **No new work on an accepted task** (AC-8, E-1): a commit whose message names a task of this repo the owner has
+  accepted (its folder holds `done.json`, whose `task` is its id), the trailer the hook is about to write included,
+  is refused when it stages anything besides records. A message that only mentions the task names it too. The
+  refusal: "kirunak: this commit's message names <id>, which the owner has accepted: new work on it is a new task.
+  Reword the message so it does not name <id>, or start a new task (/k-intake); only kirunak's records (task
+  folders, drafts, approvals, the queue) may still be committed naming it." So the accept's own commit and the
+  handoff written after it pass.
+- **What it does not check**: git's comment lines and everything after the scissors line are left out, so the file
+  list git writes for an editor names nothing (a `#` line given with `-m` is left out too). A message typed in the
+  editor comes after the hook, so only one given with `-m` or `-F`, or kept by an amend, is checked: a mistake guard,
+  as the pre-commit checks are. A merge and a replayed commit (rebase, cherry-pick, revert) pass, as the SLAP gate
+  lets them. A workspace that cannot be loaded refuses nothing here, since its queue file cannot be told from code;
+  the trailer is still written. The hook loads the workspace only when a done task's slug or id is in the message.
+- Only the task's own repo is guarded: its commits in another repo are out of scope (O-2).
+
 ## 4. The owner's command: `k approve`, `k accept`, through `!`
 
 `k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>]`:
@@ -131,11 +164,30 @@ it leaves open; `cost.md`, the task's cost, is committed with it, `orchestrator.
 problem. The verdict it takes is `met`, or `needs owner (<ids>)` once the checklist is done. It refuses `verdict: not
 met (<ids>)` whatever the flags, `--checklist-open` included, which waives checklist items and never a criterion: the
 way out is an amendment (`k amend new <id>`, approved, then a new review) or a new review after a fix. It refuses a
-task with no review: a task closes only through a review step of `plan.md` that ran. It refuses code committed after
-the review: when `git diff --name-only <review head> HEAD`, leaving out the task's own folder as the reviewer's diff
-does and `kirunak/drafts/` (any session writes or drops a draft, and no task's code reads one), names a file, the
-review never saw it; the refusal names a few such files, no flag waives
-it, and the way out is a new review. It writes `done.json` with the review it took (file, verdict, head, hash,
+task with no review: a task closes only through a review step of `plan.md` that ran. It refuses a task whose own work
+changed after the review, and only that: other work committed in the same repo after the review never forces a new
+review (gulnya/kirunak-accept-shared-repo). A task's own change is the paths of the commits whose message names the
+task, by its id or its slug, from its first approval to its latest review's head (D-1): the commits `git log <first
+approval>..<review head>` lists, the first approval being the oldest commit that added `kirunak/approvals/<slug>.json`
+(a task whose record was never committed is refused: its own change has no start), with kirunak's records (§3) left
+out. Then each commit in `<review head>..HEAD` is judged by its own paths, records left out:
+
+- a path in the task's own change blocks (AC-1);
+- every path of a commit that names the task, in its message or its `Task:` trailer, blocks, whatever files it
+  touches (AC-7);
+- a path the task's own change never touched, in a commit that does not name the task, blocks nothing (AC-2);
+- kirunak's own records (every task folder, the drafts folder, the queue file and the approvals folder, wherever the
+  workspace keeps them) are never part of a task's own change, and a change to them after the review never blocks
+  `k accept` (AC-5), so a commit whose paths are all records blocks nothing, even one naming the task.
+
+A file changed and changed back still blocks: the commits are judged, not the net diff. A merge adds no paths of its
+own; the commits it brings in count one by one. No flag waives a block, and the way out is a new review. The
+refusal's first line says how many files and names the next review's file ("<id>: its work changed after review.md's
+head <sha>, in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):"); a
+line follows for each blocking file and commit, `<path>  <sha>  <task>`, where the task is the commit's `Task:`
+trailer when it has one, else every workspace task its message names, else `no task` (AC-6). `k waiting` and
+`/k-accept` show the same lines (`boards.md` §4). Only the task's own repo is judged (O-2). It writes `done.json` with
+the review it took (file, verdict, head, hash,
 `task-files.md` §3), commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done`
 skill asks the owner to type (`review.md` §4).
 
@@ -391,5 +443,6 @@ that tell the session to send it with PushNotification. Best effort (amendment A
 ## 8. Requirements this file satisfies
 
 D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
-R15 (`k accept`, with `review.md`).
+R15 (`k accept`, with `review.md`), R30 (§4, what blocks `k accept`), R31 (§3, the `Task:` trailer and an accepted
+task).
 The escalation hook, its block and the owner's `/k-go-on` (§7): gulnya/enforced-escalation AC-8 to AC-14, AC-27, AC-29.

@@ -92,17 +92,22 @@ verdict is misspelt never leaves an empty checklist:
 ```
 
 The owner ticks items; the freeze hook refuses an agent's tick (`approval.md` §2). Run again, `k checklist` keeps
-what the owner wrote: a line that begins with an item's text is that item's, its tick and the owner's words after
-the text kept (`- [x] E-2 ... (review-2.md), done on the old phone`), and every line that is not an item stays, after
-the items, in its order; an item line from an older review goes. `k accept` refuses while an item
-is unticked unless the owner passes `--checklist-open "<why>"`, which `done.json` records with the text of each item
-left open (unticked, or a row with no item yet), beside the review it took. It takes only a latest
-review that counts (§2) and ends `verdict: met` or `verdict: needs owner (<ids>)`. A `not met` verdict is refused
-whatever the flags (`--checklist-open` waives checklist items, never a criterion); the way out is an amendment and a
-new review, or a new review after a fix. Code committed after the review's `head` is refused the same way (the
-task's own folder aside, as the reviewer's diff leaves it out, and `kirunak/drafts/`, which is no task's code): the
-review never saw it, and the way out is a new review. A task with no review cannot be accepted: its plan needs a review step, run, and `k plan check` refuses a
-plan with none, so the gap shows when the plan is written (`orchestrator.md` §1).
+what the owner wrote: a line with an item's id and words, closed by the name of the review it came from (`review.md`,
+`review-2.md`, ...), is that item's, its tick and the owner's words after it kept (`- [x] E-2 ... (review-2.md), done
+on the old phone`), and every line that is not an item stays, after the items, in its order; an item line from an
+older review goes. So after a new review, an item whose row has the same id and the same words as in the review
+before keeps the owner's tick and words and names the new review; a row with other words comes unticked
+(gulnya/kirunak-accept-shared-repo AC-9). `k accept` matches the same way, so it takes a carried tick before
+`k checklist` is run again. `k accept` refuses while an item is unticked unless the owner passes
+`--checklist-open "<why>"`, which `done.json` records with the text of each item left open (unticked, or a row with no
+item yet), beside the review it took. It takes only a latest review that counts (§2) and ends `verdict: met` or
+`verdict: needs owner (<ids>)`. A `not met` verdict is refused whatever the flags (`--checklist-open` waives
+checklist items, never a criterion); the way out is an amendment and a new review, or a new review after a fix. A
+commit after the review's `head` that changed the task's own work, or that names the task, is refused the same way,
+kirunak's own records aside, while other work in the repo is not (`approval.md` §4,
+gulnya/kirunak-accept-shared-repo): the review never saw it, and the way out is a new review. A task with no review
+cannot be accepted: its plan needs a review step, run, and `k plan check` refuses a plan with none, so the gap shows
+when the plan is written (`orchestrator.md` §1).
 
 ## 4. Done only through `k-done` (R15, D12)
 
@@ -137,4 +142,5 @@ handoff) and the record must not (D7). The owner may prefer one name for both; t
 
 ## 5. Requirements this file satisfies
 
-R13 (§1), R14 (§2), R15 (§3, §4), D12 (§4).
+R13 (§1), R14 (§2), R15 (§3, §4), D12 (§4), R30 (§3, the tick a new review keeps; what blocks `k accept` is
+`approval.md` §4).

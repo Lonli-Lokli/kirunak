@@ -82,6 +82,9 @@ committed by `k install`: the owner approves it first (§4), then it is committe
      and how to split: `git restore --staged <file>`, `git add -p`, `k slap --staged`.
 - **Otherwise** it writes `SLAP: <score> (<tier>)` through `git interpret-trailers --in-place --if-exists replace`,
   so it joins the message's trailer block and an amend replaces the line instead of adding a second.
+- **Then a task's part** (`approval.md` §3, gulnya/kirunak-accept-shared-repo): a `Task: <id>` line after it when
+  the commit's environment has `KIRUNAK_TASK`, and a refusal of a commit whose message names a task the owner has
+  accepted, unless it stages only kirunak's records.
 - **What it skips**: a merge (the hook's `merge` argument), and a commit made while a rebase, cherry-pick or revert
   replays others (`rebase-merge`, `rebase-apply`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `sequencer` or `MERGE_MSG` in
   the git folder; a revert leaves only `MERGE_MSG`, measured on git 2.54). Judgement: a replayed commit was measured

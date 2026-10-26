@@ -240,9 +240,16 @@ why, lines, refuse }`, where `title` is the task's, `name` the amendment's own t
 changes ("replaces AC-2, AC-3; adds AC-17", kirunak-phone A-8), which the text shows as `<id> A-n: <name>`, and
 `refuse` is one line of what `k approve --amendment` would refuse, or null; the hold and start
 rows `{ id, title, state }` (hold what `k hold --dry-run` takes, start the tasks `k list` shows that are neither done
-nor on hold); each accept row adds `checklistOpen` and `onlyChecklist` (true when `k accept` refuses only for open
-items and passes with a reason). `k approve` and `k hold` take `--dry-run`, which makes every check and writes
-nothing. A row says "can approve" or "can accept" where it said "ready". Evidence: `test/waiting.test.mjs`. Known gap:
+nor on hold); each accept row adds `checklistOpen`, `onlyChecklist` (true when `k accept` refuses only for open
+items and passes with a reason) and `blocking`, `[{ path, commit, task }]`: each file a commit after the review
+changed, with that commit and the task it names or `no task`, as `k accept`'s refusal lists them (`approval.md` §4),
+taken from the dry run's own error, and empty unless that is what stops the task (gulnya/kirunak-accept-shared-repo
+AC-6). `why` keeps the whole refusal. The text prints each as `<path>  <sha>  <task>` under the accept row, indented;
+other refusals still print one line. `/k-accept` with no id shows the same lines under the task's row in its dialog's
+list and in the numbered list it prints again when nothing ran, and the task's own view and a refusal of
+`/k-accept <id>` show every line of the refusal (E-2); an older `k` that sends no `blocking` shows none. `k approve`
+and `k hold` take `--dry-run`, which makes every check and writes nothing. A row says "can approve" or "can accept"
+where it said "ready". Evidence: `test/waiting.test.mjs`. Known gap:
 `k start` refuses no state, so the start list is narrower than the verb, and `k approve` does not refuse an amendment
 to a done task.
 
@@ -295,4 +302,4 @@ As built, where the build chose (each judgement unless marked):
 
 ## 5. Requirements this file satisfies
 
-D5 and R16 (§1, §2), R28 (§2 the Drafts group, §4 `/k-drafts`), R29 (§2 a bug among the drafts, §4 `/k-drafts`), R27 (§4 Drop), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5).
+D5 and R16 (§1, §2), R28 (§2 the Drafts group, §4 `/k-drafts`), R29 (§2 a bug among the drafts, §4 `/k-drafts`), R27 (§4 Drop), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5), R30's names in `k waiting` and `/k-accept` (§4).

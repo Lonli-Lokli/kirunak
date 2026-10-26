@@ -205,7 +205,9 @@ claude -p
   `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` ("Set 1 to turn nesting off", sub-agents.md), and the machine guard
   counts the step as 1 + that number.
 - The environment also carries `KIRUNAK_TASK=<id>` and `KIRUNAK_STEP=S-n`, so the hooks and `k` verbs inside the
-  run know the step (used by `k step note`, by the freeze hook's log, and by the token records).
+  run know the step (used by `k step note`, by the freeze hook's log, and by the token records). Every commit the
+  step makes carries a `Task: <id>` trailer from `KIRUNAK_TASK`, written by the prepare-commit-msg hook, so `k accept`
+  counts it as the task's own change (`approval.md` §3 and §4, gulnya/kirunak-accept-shared-repo AC-3).
 - The result: the JSON result's documented fields `session_id`, `result`, `total_cost_usd` (with a per-model
   breakdown), `usage` ("covers the main agent loop only") with `cache_creation.ephemeral_5m_input_tokens` and
   `ephemeral_1h_input_tokens`, `model_usage` (totals including subagents), `num_turns`, `duration_ms`, `is_error`,
@@ -594,4 +596,4 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 ## 7. Requirements this file satisfies
 
 R8 (§1), R9 (§1 inputs, §2 including the ladder, §3 `--disallowedTools Agent`), R10 (§4), R11 and D9 (§5, with the
-handover, its rules R1.1 to R8.6), R12 (§6).
+handover, its rules R1.1 to R8.6), R12 (§6), R31 (§3, `KIRUNAK_TASK` for a step's `Task:` trailer).

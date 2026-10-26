@@ -1,6 +1,6 @@
 # kirunak: a task system for Claude Code workspaces. Requirements
 
-kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R29). A change from here on is an
+kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R31). A change from here on is an
 amendment the owner approves (R7 applies to this file too). "The owner" is the person whose workspace kirunak serves:
 the one who approves tasks and says when one is done. A **workspace** is the set of repos one owner works on with
 Claude Code on one machine.
@@ -148,6 +148,22 @@ validation, archives) then go unused, and what the owner needs is not in it:
   test name, a file and line, a measurement or a screenshot.
 - R15 What needs a device or the owner becomes the owner's checklist. A task is done only when the owner says so
   (kirunak's `k-done` skill).
+- R30 Other work committed in the same repo after a task's review never forces a new review; a later change to the
+  task's own work does (gulnya/kirunak-accept-shared-repo). A task's own change is the paths of the commits whose
+  message names the task, by its id or its slug, from its first approval to its latest review's head. The accept is
+  refused when a path its own change touched changed after that head, and when a commit after it names the task, in
+  its message or its `Task:` trailer, whatever files it touches. kirunak's own records (every task folder, the drafts
+  folder, the queue file and the approvals folder, wherever the workspace keeps them) are never part of a task's own
+  change, and a change to them after the review never blocks the accept. The refusal, the waiting summary
+  (`k waiting`) and `/k-accept`, at the terminal or on the phone, name each blocking file with the commit that changed
+  it and the task that commit names, or "no task". After a new review, the checklist keeps the owner's tick on an
+  item whose row has the same id and the same words as in the review before; a row with other words comes unticked.
+- R31 A commit made in a step `k run` started gets a `Task: <id>` trailer naming the step's task, and counts as that
+  task's own change (R30); a commit with no task in its environment gets no trailer and is never refused for it. Once
+  a task is accepted, the git hook refuses a commit that names it, in its message or its `Task:` trailer, unless the
+  commit touches only kirunak's records; the refusal names the task and says new work on it is a new task, to reword
+  the message or start a new task. A task's commits outside a step that do not name it, and its commits in a repo
+  other than its own, are not guarded.
 
 ### Change size
 - R21 Every commit in a repo where kirunak's git hooks are installed is measured by SLAP:
