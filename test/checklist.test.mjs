@@ -79,6 +79,28 @@ test('k checklist run again keeps the owner\'s tick and words on an item line, a
   assert.throws(() => accept({ ws: w.ws, id: ID }), /checklist\.md has 1 unticked item\(s\):\n {2}- \[ \] E-1 Read: /, 'the annotated line counts as AC-3\'s, ticked');
 });
 
+test('a new review keeps the owner\'s tick and words on a row with the same id and words, under the new review\'s name; other words come unticked (accept-shared-repo AC-9)', async () => {
+  const w = await approvedWorkspace('');
+  const file = join(w.p.dir, 'checklist.md');
+  const rows = [ROWS[0], '| AC-2 | met | file docs/offline.md:1 |', ROWS[2], ROWS[3]];
+  writeFileSync(join(w.p.dir, 'review.md'), reviewText(w, rows, 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(w.p.dir);
+  assert.equal(k(w.home, ['checklist', ID]).status, 0);
+  writeFileSync(file, readFileSync(file, 'utf8').replace(/- \[ \] (AC-3 .*\(review\.md\))\n/, '- [x] $1, done on the Pixel 7\n').replace('- [ ] E-1', '- [x] E-1'));
+
+  // The second review keeps AC-3's words and rewords E-1.
+  const reworded = '| E-1 | needs owner | Read: the age line reads naturally in both themes (evidence/S-4-wording.md) |';
+  writeFileSync(join(w.p.dir, 'review-2.md'), reviewText(w, [rows[0], rows[1], rows[2], reworded], 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(w.p.dir, ['review.md', 'review-2.md']);
+  // Before k checklist runs again, k accept already takes AC-3's tick and wants only the reworded E-1.
+  assert.throws(() => accept({ ws: w.ws, id: ID }), (e) => e.message.endsWith('1 unticked item(s), 1 not in checklist.md yet (k checklist weather/offline-forecast writes them from review-2.md):\n  - [ ] E-1 Read: the age line reads naturally in both themes (evidence/S-4-wording.md) (review-2.md)'));
+  assert.equal(k(w.home, ['checklist', ID]).status, 0);
+  assert.equal(readFileSync(file, 'utf8'), [
+    '- [x] AC-3 On a phone: restart the app offline; the forecast is still there (review-2.md), done on the Pixel 7',
+    '- [ ] E-1 Read: the age line reads naturally in both themes (evidence/S-4-wording.md) (review-2.md)',
+  ].join('\n') + '\n');
+});
+
 test('k checklist on a review with every row met writes an empty checklist', async () => {
   const w = await makeWorkspace();
   const p = taskPaths(w.ws, ID);
