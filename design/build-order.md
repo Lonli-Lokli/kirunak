@@ -359,6 +359,17 @@ forces a new review.
   `claude plugin test` 140 of 140.
 - Not yet measured: the hook and `k accept` from the main checkout once the branch merges (S-6), and `/k-accept` on
   the phone with a blocking file.
+- Second pass (S-8, after the task's review.md found AC-8 not met: a message typed in the editor was let through):
+  `hooks/git-commit-msg.mjs` (new) checks the message the commit keeps, after the editor; `lib/records.mjs` holds
+  the check both hooks run (`doneNamed`, `doneRefusal`), the text git keeps (`kept`, by `GIT_EDITOR=:`) and
+  `BASE_FILE`, where prepare-commit-msg leaves the commit's parent for commit-msg; an amend given `-m` is known by
+  its author date (`approval.md` §3); `lib/install.mjs` plans `commit-msg` as it plans `prepare-commit-msg`. Tests in
+  `git-hook.test.mjs`: a message typed in the editor and one given with `-m` and edited with `-e` refused, git's file
+  list naming the task's records beside code and records alone through the editor let through, a `#` line given with
+  `-m` read, an amend rewording a commit to name the task refused with `-m` and through the editor, a merge after a
+  commit under `--no-verify` let through; `install.test.mjs` writes and finds the hook. Rolling out: `k install
+  --git` on each repo; a repo's own `commit-msg` (gulnya's music research hook) takes the printed line before its
+  first `exit`.
 
 ## Slice 7, later and not detailed here: R17, R18
 

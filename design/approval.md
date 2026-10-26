@@ -76,7 +76,7 @@ allowed.
 - Under a subagent the input carries `agent_id` and `agent_type` (hooks.md, fetched 2026-10-18); the hook treats
   agents and the main session alike (both are the model).
 
-## 3. The git hooks: `hooks/git-pre-commit.mjs`, and a task's part of `prepare-commit-msg`
+## 3. The git hooks: `hooks/git-pre-commit.mjs`, and a task's part of `prepare-commit-msg` and `commit-msg`
 
 Installed per repo that holds tasks. `k install --git <repo>` writes `.git/hooks/pre-commit` calling it when the repo
 has no pre-commit hook; a repo that already has one (often a committed `githooks/pre-commit` copied into
@@ -110,8 +110,9 @@ under 100 ms).
 ### A step's `Task:` trailer, and no new work on an accepted task (gulnya/kirunak-accept-shared-repo)
 
 The prepare-commit-msg hook (`hooks/git-prepare-commit-msg.mjs`, the SLAP gate of `change-size.md` §3, which git runs
-even under `--no-verify`) does two things for tasks once the SLAP gate passes. What names a task and what kirunak's
-records are is `lib/records.mjs`, the same for the hook and for `k accept` (§4).
+even under `--no-verify`) does two things for tasks once the SLAP gate passes; the commit-msg hook
+(`hooks/git-commit-msg.mjs`) checks the second again on the message the commit keeps, after the editor. What names a
+task and what kirunak's records are is `lib/records.mjs`, the same for the hooks and for `k accept` (§4).
 
 - **The trailer** (AC-3, AC-4): with `KIRUNAK_TASK` in the commit's environment, which `k run` sets on every step
   (`orchestrator.md` §3), the hook writes `Task: <id>` after the `SLAP:` line, through `git interpret-trailers
@@ -132,12 +133,23 @@ records are is `lib/records.mjs`, the same for the hook and for `k accept` (§4)
   Reword the message so it does not name <id>, or start a new task (/k-intake); only kirunak's records (task
   folders, drafts, approvals, the queue) may still be committed naming it." So the accept's own commit and the
   handoff written after it pass.
-- **What it does not check**: git's comment lines and everything after the scissors line are left out, so the file
-  list git writes for an editor names nothing (a `#` line given with `-m` is left out too). A message typed in the
-  editor comes after the hook, so only one given with `-m` or `-F`, or kept by an amend, is checked: a mistake guard,
-  as the pre-commit checks are. A merge and a replayed commit (rebase, cherry-pick, revert) pass, as the SLAP gate
-  lets them. A workspace that cannot be loaded refuses nothing here, since its queue file cannot be told from code;
-  the trailer is still written. The hook loads the workspace only when a done task's slug or id is in the message.
+- **The message the commit keeps** (review.md of the task found a message typed in the editor let through):
+  prepare-commit-msg runs before the editor and checks a message given with `-m` or `-F`; commit-msg runs after it
+  and checks the final message, whether typed, given, edited with `-e` or kept by an amend. Both read the text as git
+  will keep it: with no editor, which git tells a hook by `GIT_EDITOR=:`, every line, a `#` line included; after an
+  editor, git's comment lines (the file list it writes names a task's records) and everything after the scissors
+  line are left out. The staged paths are taken against the commit's parent: prepare-commit-msg works it out (an
+  amend's is HEAD's parent) and leaves it in the worktree's git folder as `KIRUNAK_COMMIT_BASE`, which commit-msg
+  reads and removes. An amend given `-m` or `-F` reaches the hook as any commit does; git keeps HEAD's author date
+  for it and gives it to the hook as `GIT_AUTHOR_DATE`, so a date equal to HEAD's and two seconds old or more counts
+  as an amend here (the SLAP gate measures as before).
+- **What it does not check**: under `--no-verify` git skips commit-msg, so only a message given with `-m` or `-F` is
+  checked: a mistake guard, as the pre-commit checks are. An amend with `--reset-author`, or one within two seconds
+  of the commit it amends, given `-m`, is taken as a new commit. A merge and a replayed commit (rebase, cherry-pick,
+  revert) pass, as the SLAP gate lets them: prepare-commit-msg leaves no base for them, and commit-msg checks nothing
+  without one. A workspace that cannot be loaded refuses nothing here, since its queue file cannot be told from
+  code; the trailer is still written. The hooks load the workspace only when a done task's slug or id is in the
+  message.
 - Only the task's own repo is guarded: its commits in another repo are out of scope (O-2).
 
 ## 4. The owner's command: `k approve`, `k accept`, through `!`

@@ -118,8 +118,11 @@ committed by `k install`: the owner approves it first (§4), then it is committe
 - `k install --git <repo>` writes `prepare-commit-msg` beside `pre-commit` in the repo's hooks folder as git resolves
   it (`git rev-parse --git-path hooks`, so `core.hooksPath` and worktrees are followed): `exec node
   <kirunak>/hooks/git-prepare-commit-msg.mjs "$@"`. A repo with a `prepare-commit-msg` of its own gets the line to
-  add printed, as for pre-commit (`approval.md` §3). It writes the starter `.slapignore` (§2) when the repo has none,
-  keeps one that is there, and registers the repo in the record, so `--all` finds it. `--print` shows the starter.
+  add printed, as for pre-commit (`approval.md` §3). It writes `commit-msg` the same way (`exec node
+  <kirunak>/hooks/git-commit-msg.mjs "$@"`), the check of an accepted task on the message the commit keeps; a repo's
+  own `commit-msg` gets the line printed, to add before its first `exit`. It writes the starter `.slapignore` (§2)
+  when the repo has none, keeps one that is there, and registers the repo in the record, so `--all` finds it.
+  `--print` shows the starter.
 - **Rolling out to repos that already have the hooks**: run `k install --git` on each (the hooks are already there;
   the starter and the registry are new), then the owner reads the starters and runs `k slapignore approve --all`,
   then each starter is committed (it passes, being the approved one). Until a repo's starter is committed, its prose
