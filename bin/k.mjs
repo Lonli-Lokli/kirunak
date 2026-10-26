@@ -416,7 +416,7 @@ const VERBS = {
   // `k worktrees [--closing <id>]`: what an acceptance would remove now and keep, with what each worktree that would
   // go holds besides build output (k-done shows it before asking for the acceptance); it removes nothing.
   async worktrees({ ws, flags }) {
-    const closing = flags.closing ?? null;
+    const closing = 'closing' in flags ? need(typeof flags.closing === 'string' && flags.closing, '--closing <task id>') : null;
     if (closing && !existsSync(taskPaths(ws, closing).task)) throw refuse(`unknown task ${closing}`);
     const w = await worktrees.worktrees({ ws, closing, sizes: true });
     const out = worktrees.lines(w, { dry: true });

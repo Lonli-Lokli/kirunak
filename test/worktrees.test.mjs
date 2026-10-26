@@ -1,4 +1,4 @@
-// The worktrees an acceptance removes (approval.md §5), on fixture repos: lib/worktrees.mjs, `k worktrees`, `k accept`.
+// The worktrees an acceptance removes (approval.md §4), on fixture repos: lib/worktrees.mjs, `k worktrees`, `k accept`.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -50,7 +50,7 @@ test('AC-1, AC-3, E-2, E-5: a merged, clean worktree goes whole with its branch,
   mkdirSync(join(hub, 'tmp'));
   const nested = add(weather, join(hub, 'tmp', 'weather-n'), 'nested');
 
-  const look = await worktrees({ ws, cwds: none });
+  const look = await worktrees({ ws, processes: none });
   assert.deepEqual(paths(look.removed), [nested, done], 'the one inside another checkout first');
   assert.deepEqual(whys(look.kept), {
     [dirty]: '1 uncommitted change',
@@ -60,7 +60,7 @@ test('AC-1, AC-3, E-2, E-5: a merged, clean worktree goes whole with its branch,
   assert.deepEqual(look.problems, []);
   assert.ok(existsSync(done) && existsSync(nested), 'a look removes nothing');
 
-  const r = await worktrees({ ws, remove: true, cwds: none });
+  const r = await worktrees({ ws, remove: true, processes: none });
   assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [
     [nested, 'nested merged into master', true],
     [done, 'done merged into master', true],
@@ -80,9 +80,9 @@ test('E-1: a branch whose every change is in the main line counts as merged; one
   const sha = commitIn(picked, 'c.txt');
   commitIn(weather, 'other.txt');
   sh(weather, 'git', ['cherry-pick', sha]);
-  assert.deepEqual(whys((await worktrees({ ws, cwds: none })).removed), { [picked]: 'picked merged into master' });
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).removed), { [picked]: 'picked merged into master' });
   commitIn(picked, 'd.txt');
-  assert.deepEqual(whys((await worktrees({ ws, cwds: none })).kept), { [picked]: 'picked has 1 commit not in master' });
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [picked]: 'picked has 1 commit not in master' });
 });
 
 test("the main line is origin's HEAD branch when there is one; a worktree on the main line itself stays", async () => {
@@ -96,7 +96,7 @@ test("the main line is origin's HEAD branch when there is one; a worktree on the
   const feature = add(weather, join(root, 'feature'), 'feature');
   commitIn(feature, 'f.txt');
   sh(weather, 'git', ['branch', '-f', 'master', 'feature']);
-  const look = await worktrees({ ws, cwds: none });
+  const look = await worktrees({ ws, processes: none });
   assert.deepEqual(whys(look.kept), { [feature]: 'feature has 1 commit not in trunk', [trunk]: 'it is trunk, the main line' });
 });
 
@@ -105,20 +105,20 @@ test('AC-1: a worktree an open task names stays, unless that task is the one clo
   const named = add(weather, join(root, 'named'), 'named');
   const plan = join(taskDir(weather), 'plan.md');
   writeFileSync(plan, `work in ${named}-2 first\n`);
-  assert.deepEqual(paths((await worktrees({ ws, cwds: none })).removed), [named], 'a longer name is another folder');
+  assert.deepEqual(paths((await worktrees({ ws, processes: none })).removed), [named], 'a longer name is another folder');
   writeFileSync(plan, `work in ${named}/src, then merge\n`);
-  assert.deepEqual(whys((await worktrees({ ws, cwds: none })).kept), { [named]: `the open task ${ID} names it (plan.md)` });
-  assert.deepEqual(paths((await worktrees({ ws, closing: ID, cwds: none })).removed), [named]);
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [named]: `the open task ${ID} names it (plan.md)` });
+  assert.deepEqual(paths((await worktrees({ ws, closing: ID, processes: none })).removed), [named]);
   const home = process.env.HOME;
   try {
     process.env.HOME = realpathSync(root);
     writeFileSync(plan, 'work in ~/named.\n');
-    assert.deepEqual(paths((await worktrees({ ws, cwds: none })).kept), [named], 'from ~');
+    assert.deepEqual(paths((await worktrees({ ws, processes: none })).kept), [named], 'from ~');
   } finally {
     process.env.HOME = home;
   }
   writeFileSync(join(taskDir(weather), 'done.json'), '{}\n');
-  assert.deepEqual(paths((await worktrees({ ws, cwds: none })).removed), [named], 'an accepted task is not open');
+  assert.deepEqual(paths((await worktrees({ ws, processes: none })).removed), [named], 'an accepted task is not open');
 });
 
 test('AC-1: a worktree a process works in stays (lsof), and so does every one when lsof cannot tell', async () => {
@@ -132,14 +132,14 @@ test('AC-1: a worktree a process works in stays (lsof), and so does every one wh
   } finally {
     child.kill();
   }
-  assert.deepEqual(whys((await worktrees({ ws, cwds: () => null })).kept), { [busy]: 'lsof cannot tell whether a process works in it' });
+  assert.deepEqual(whys((await worktrees({ ws, processes: () => null })).kept), { [busy]: 'lsof cannot tell whether a process works in it or runs from it' });
 });
 
 test('E-6: a detached worktree goes only when a plugin offers it; a keep from any plugin wins; a plugin adds repos; a failing plugin removes nothing', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const cache = add(weather, join(root, 'cache'), null);
   const merged = add(weather, join(root, 'merged'), 'merged');
-  assert.deepEqual(whys((await worktrees({ ws, cwds: none })).kept), { [cache]: 'detached (no branch), and no plugin offers it' });
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [cache]: 'detached (no branch), and no plugin offers it' });
 
   const extra = join(root, 'extra');
   mkdirSync(extra);
@@ -149,16 +149,16 @@ test('E-6: a detached worktree goes only when a plugin offers it; a keep from an
   const outside = add(extra, join(root, 'outside'), 'outside');
   const offer = { repos: () => [extra], candidates: () => [{ path: cache, remove: true, why: 'a cache nothing pins' }], buildOutput: () => [] };
   ws.seams.worktrees = [offer];
-  let look = await worktrees({ ws, cwds: none });
+  let look = await worktrees({ ws, processes: none });
   assert.deepEqual(whys(look.removed), { [cache]: 'a cache nothing pins', [merged]: 'merged merged into master', [outside]: 'outside merged into master' });
 
   const keeper = { repos: () => [], candidates: () => [{ path: cache, remove: false, why: 'pinned by a lock' }, { path: merged, remove: false, why: 'kept by the plugin' }], buildOutput: () => [] };
   ws.seams.worktrees = [offer, keeper];
-  look = await worktrees({ ws, cwds: none });
+  look = await worktrees({ ws, processes: none });
   assert.deepEqual(whys(look.kept), { [cache]: 'pinned by a lock', [merged]: 'kept by the plugin' });
 
   ws.seams.worktrees = [{ repos: () => [], candidates: () => { throw new Error('no cache folder'); }, buildOutput: () => [] }];
-  look = await worktrees({ ws, cwds: none });
+  look = await worktrees({ ws, processes: none });
   assert.deepEqual(paths(look.removed), [merged]);
   assert.deepEqual(look.problems, ['a worktrees plugin failed: no cache folder']);
 });
@@ -170,12 +170,12 @@ test('a worktree holding another checkout stays while that one stays, and goes a
   mkdirSync(join(outer, 'tmp'));
   const inner = add(hub, join(outer, 'tmp', 'inner'), 'inner');
   commitIn(inner, 'i.txt');
-  assert.deepEqual(whys((await worktrees({ ws, cwds: none })).kept), {
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), {
     [outer]: `it holds the checkout ${inner}`,
     [inner]: 'inner has 1 commit not in master',
   });
   sh(hub, 'git', ['merge', '-q', 'inner']);
-  const r = await worktrees({ ws, remove: true, cwds: none });
+  const r = await worktrees({ ws, remove: true, processes: none });
   assert.deepEqual(paths(r.removed), [inner, outer]);
   assert.equal(existsSync(outer), false);
 });
@@ -192,7 +192,7 @@ test('AC-4: what a worktree that would go holds besides build output, one short 
   writeFileSync(join(shots, 'store', 'g.bin'), 'x'.repeat(10000));
   writeFileSync(join(shots, 'top.log'), 'log');
   ws.seams.worktrees = [{ repos: () => [], candidates: () => [], buildOutput: () => ['build'] }];
-  const [w] = (await worktrees({ ws, sizes: true, cwds: none })).removed;
+  const [w] = (await worktrees({ ws, sizes: true, processes: none })).removed;
   assert.match(w.holds, /^store\/ 30\dK, renders\/ 2\dK, \.\/ 4K$/);
   assert.doesNotMatch(w.holds, /build/);
 
@@ -200,7 +200,7 @@ test('AC-4: what a worktree that would go holds besides build output, one short 
     mkdirSync(join(shots, d));
     writeFileSync(join(shots, d, 'f'), 'x');
   }
-  const [many] = (await worktrees({ ws, sizes: true, cwds: none })).removed;
+  const [many] = (await worktrees({ ws, sizes: true, processes: none })).removed;
   assert.match(many.holds, /^store\/ 30\dK, renders\/ 2\dK, (\S+ 4K, ){3}and 3 more, 12K$/);
 
   assert.equal(holdsLine([]), 'nothing besides build output');
