@@ -30,9 +30,21 @@ reads it as background and still asks every line.
      each ending with its source: `[file <path>]`, `[command <command>]`, `[commit <sha>]` or
      `[research <path or URL>]`. Nothing guessed.
    - **Questions**: numbered `1.`, `2.`, one point each, each one the intake can ask as it stands. A plain yes or no,
-     or A or B, where it can be. Name what you would propose, and leave the choice open.
+     or A or B, where it can be. Under each, an indented `Proposed:` line with your answer and why it is the one.
 
-   Nothing in a draft is a ruling: write what you saw and what to ask, never what was decided.
+   **Groom it** (owner, 2026-10-26): wherever you know enough, the draft is ready for the owner to read, change what
+   they disagree with, and start. Leave nothing for them to work out. Concretely:
+   - A proposed answer under every question, never a bare question.
+   - The task as you would write it, each part a question with its `Proposed:` answer: the goal, the acceptance
+     criteria, the edge cases and out of scope, the aspects (all n/a in one question when nothing has an app), and the
+     plan's steps.
+   - When the fix is small and safe to try (no heavy job, nothing outside the machine), try it on a side branch in
+     its own worktree (`draft/<slug>`), with a test that fails without it and the docs, committed there and never
+     merged. Then cite those commits and the test runs under What was found.
+   Only where you cannot know (the owner's taste, a fact you cannot measure) does a question stay open, and its
+   `Proposed:` line then says what is missing. A bug's Fix written names fixes on such a branch the same way.
+
+   Nothing in a draft is a ruling: the owner's answers at the intake decide, and the draft only proposes.
 4. **Check**: `k draft check <id>` until it passes. It names each problem with its line.
 5. **Commit the draft alone**, in its repo:
 

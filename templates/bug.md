@@ -18,4 +18,4 @@ bug-of: {{bugOf}}
 <!-- fill in: the fix that exists already, one "- " line each, ending with [commit <sha>] or [file <patch path>]; or delete this section, heading and all, when no fix exists -->
 
 ## Questions
-<!-- fill in: the questions ready for the owner's turn at the intake, numbered "1. ", "2. ", one a line -->
+<!-- fill in: the questions ready for the owner's turn at the intake, numbered "1. ", "2. ", one a line, each with an indented "Proposed:" line under it, your answer and why; groom it (the k-draft skill): the goal, criteria, edge cases, aspects and plan proposed too, wherever you know enough -->

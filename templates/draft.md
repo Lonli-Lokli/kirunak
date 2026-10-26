@@ -14,4 +14,4 @@ written: {{written}}
 <!-- fill in: one "- " line for each thing already found (files, commands, research), each ending with its source: [file <path>], [command <command>], [commit <sha>] or [research <path or URL>] -->
 
 ## Questions
-<!-- fill in: the questions ready for the owner's turn at the intake, numbered "1. ", "2. ", one a line -->
+<!-- fill in: the questions ready for the owner's turn at the intake, numbered "1. ", "2. ", one a line, each with an indented "Proposed:" line under it, your answer and why; groom it (the k-draft skill): the goal, criteria, edge cases, aspects and plan proposed too, wherever you know enough -->
