@@ -512,8 +512,9 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   and any other kept. Then, when git does not ignore the file (`git check-ignore`), `/.claude/settings.local.json` is
   added to the repo's own excludes file (`git rev-parse --git-path info/exclude`, shared with its worktrees); never
   the committed `.gitignore` and never the global excludes file, which is Claude Code's. The user's settings file is
-  never written for the window, and its `autoCompactWindow` is the mid-step limit. Before `k init`, no roots: the line
-  says the next `k install` writes them.
+  never written for the window, and its `autoCompactWindow` is the mid-step limit: `k install` names it and each
+  `modelSettings.<model>.autoCompactWindow` there as the user's, kept, in the lines `k doctor` prints (R8.3). Before
+  `k init`, no roots: the line says the next `k install` writes them.
 - **R8.3** `k doctor`: `compact (<module> | kirunak's defaults): handover size, window, mid-step limit` with the user's
   own window and its per-model values, failing a user window under R7.2's floor; the compact hook's wiring; per root
   the window, ignored by git, or the case that keeps it out (failing until the user acts); the user's own window,

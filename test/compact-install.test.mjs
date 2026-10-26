@@ -7,7 +7,8 @@ import { KIRUNAK, sh } from './helpers.mjs';
 import { json, LOCAL, put, read, setup } from './fixtures/compact/install.mjs';
 
 // k install's compact part (orchestrator.md §5, R8.1, R8.2): the compact hook's blocks in the user's file, and the
-// handover window in each root's own .claude/settings.local.json, in every case; the user's file never changes for it.
+// handover window in each root's own .claude/settings.local.json, in every case; the user's file never changes for it,
+// and its own window is named on every run.
 
 test('R8.1: the compact hook on PreCompact, SessionEnd and four SessionStart parts, each its own block; a second run adds none', () => {
   const s = setup();
@@ -29,7 +30,7 @@ test('R8.1: the compact hook on PreCompact, SessionEnd and four SessionStart par
   assert.equal(json(s.paths.settingsPath).hooks.SessionStart.length, 6, 'pointed here, never added twice');
 });
 
-test('a: the window written into each root\'s local file, its keys and indent kept, the not-ignored root given the exclude line once; b: already', () => {
+test('a: the window written into each root\'s local file, its keys and indent kept, the not-ignored root given the exclude line once; b: already; the user\'s own window named, kept', () => {
   const s = setup();
   put(s.local(s.hub), '{\n    "permissions": {\n        "allow": ["Bash(ls:*)"]\n    }\n}\n');
   writeFileSync(join(s.weather, '.gitignore'), '.claude/settings.local.json\n');
@@ -44,7 +45,13 @@ test('a: the window written into each root\'s local file, its keys and indent ke
   const again = s.go();
   assert.ok(again.includes(`${s.local(s.hub)}: autoCompactWindow is already 183000; ignored by git`));
   assert.equal(read(join(s.hub, '.git', 'info', 'exclude')), exclude, 'appended once');
-  assert.ok(!again.some((a) => a.includes(s.paths.settingsPath) && a.includes('autoCompactWindow')), 'no line about the user\'s window');
+  const yours = [
+    `${s.paths.settingsPath}: autoCompactWindow 500000, yours (the mid-step limit); kirunak never writes it`,
+    `${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (the mid-step limit for opus); kirunak never writes it`,
+  ];
+  const aboutUser = (list) => list.filter((a) => a.includes(s.paths.settingsPath) && a.includes('autoCompactWindow'));
+  assert.deepEqual(aboutUser(actions), yours, 'the user\'s own window and its per-model value named, and nothing else of the window in their file');
+  assert.deepEqual(aboutUser(again), yours, 'named on every run');
 });
 
 test('c: kirunak\'s earlier window replaced once config.json carried it; d: the owner\'s own kept and named; f: a per-model window named', () => {
@@ -118,6 +125,8 @@ test('a root that is a worktree is written at its main checkout\'s file; --print
   assert.ok(printed.includes(`${wt} is a worktree: sessions there read ${s.local(s.hub)}`));
   assert.ok(printed.includes(`would set autoCompactWindow 183000 in ${s.local(s.hub)} (handover size 150000 + 33000)`));
   assert.ok(printed.some((a) => a.startsWith('would add /.claude/settings.local.json to ')));
+  assert.ok(printed.includes(`${s.paths.settingsPath}: autoCompactWindow 500000, yours (the mid-step limit); kirunak never writes it`));
+  assert.ok(printed.includes(`${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (the mid-step limit for opus); kirunak never writes it`), '--print names the user\'s window as a run does');
   assert.ok(!existsSync(s.local(s.hub)) && !existsSync(join(wt, ...LOCAL)), 'nothing written');
   assert.equal(read(join(s.hub, '.git', 'info', 'exclude')), exclude);
   s.go();

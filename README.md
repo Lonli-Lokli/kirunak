@@ -88,10 +88,11 @@ You need Node 22 or later, git and Claude Code.
    `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable are each named, with what to change, and `k doctor` fails them until
    you do. A compaction in the middle of a step waits for the **mid-step limit**, by default your own
    `autoCompactWindow` (the one in `~/.claude/settings.json`, or Claude Code's own point when you set none), so it
-   never comes sooner than it does without kirunak; `compact.midStepLimit` sets a number instead. A session outside
-   every workspace repo keeps your own window, and the hook never holds its compaction. `k run`'s steps keep their
-   own point through the variable. `compact: { enabled: false }` turns it off, and the next `k install` takes its
-   window back out (`design/plugins.md` §3).
+   never comes sooner than it does without kirunak; `compact.midStepLimit` sets a number instead. `k install` and
+   `k doctor` name that window, and each `modelSettings.<model>.autoCompactWindow` beside it, as yours; neither
+   writes it. A session outside every workspace repo keeps your own window, and the hook never holds its compaction.
+   `k run`'s steps keep their own point through the variable. `compact: { enabled: false }` turns it off, and the
+   next `k install` takes its window back out (`design/plugins.md` §3).
 
    `--print` shows what it would do and writes nothing. A repo that already
    has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
