@@ -115,6 +115,9 @@ test('stateText: three sentences, the task, the running steps, k\'s text or its 
   for (const l of ['running steps of this session: none, a step boundary', '  k status failed: no workspace', '  k waiting failed: no workspace', 'running agents:\n  none', 'background shell tasks at the last Stop:\n  none']) {
     assert.ok(bare.includes(l), l);
   }
+  assert.ok(!bare.includes('quiet agents'), 'no quiet agents, no line for them');
+  const quiet = stateText({ ...f, quiet: [{ id: 'a2', type: 'Plan', description: 'review the diff', written: new Date(2026, 0, 5, 7, 12, 40).getTime() }] });
+  assert.ok(quiet.includes('; output /r/tasks/a1.output\nquiet agents (finished, or waiting on a long tool):\n  review the diff: Plan, id a2, no end recorded, quiet since 07:12\nbackground'), quiet);
 });
 
 // ---- The hook, run as Claude Code runs it: the event on stdin, one part per entry, a scratch KIRUNAK_HOME ----
@@ -210,10 +213,19 @@ test('SessionStart compact after the PreCompact hook\'s allow: four labelled par
       agents: {
         a1: { type: 'Explore', description: 'find the parser', outputFile: '/r/a1.output', at: ago(60), ended: null },
         a2: { type: 'Plan', description: 'ended already', at: ago(120), ended: ago(30) },
+        a3: { type: 'general-purpose', description: 'review the diff', outputFile: '/r/a3.output', at: ago(9000), ended: null },
+        a4: { type: 'general-purpose', description: 'no transcript', at: ago(9000), ended: null },
       },
       tasks: { at: ago(20), list: [{ id: 'b1', type: 'shell', status: 'running', command: 'node heavy-lock.mjs run -- make test' }, { id: 'a1', type: 'subagent', status: 'running' }] },
     },
   });
+  // R3.2: a1's transcript written just now runs; a3's, untouched past AGENT_FRESH_S, is quiet; a4 has none.
+  const sub = (id) => join(h.top, 'projects', 'p', 's-main', 'subagents', `agent-${id}.jsonl`);
+  mkdirSync(join(sub('a1'), '..'), { recursive: true });
+  for (const id of ['a1', 'a3']) writeFileSync(sub(id), '{}\n');
+  const quietSince = new Date(Date.now() - (AGENT_FRESH_S + 3600) * 1000);
+  utimesSync(sub('a3'), quietSince, quietSince);
+  const hhmm = `${String(quietSince.getHours()).padStart(2, '0')}:${String(quietSince.getMinutes()).padStart(2, '0')}`;
   const parts = all(h);
   for (const [i, t] of parts.entries()) {
     assert.ok(t.startsWith(`kirunak, after a compaction (part ${i + 1} of 4): ${PARTS4[i]}\n`), t.slice(0, 60));
@@ -229,7 +241,9 @@ test('SessionStart compact after the PreCompact hook\'s allow: four labelled par
   assert.match(state, /\nk status --session s-main:\n {2}k status failed: .*no workspace/);
   assert.match(state, /\nk waiting, the lines of this task:\n {2}k waiting failed: .*no workspace/);
   assert.ok(state.includes('\nrunning agents:\n  find the parser: Explore, id a1, launched '));
+  assert.ok(state.includes(`; output /r/a1.output\nquiet agents (finished, or waiting on a long tool):\n  review the diff: general-purpose, id a3, no end recorded, quiet since ${hhmm}\nbackground shell tasks`), state);
   assert.ok(!state.includes('ended already'));
+  assert.ok(!state.includes('id a4'), 'a record with no transcript is left out');
   assert.ok(state.endsWith('\n  b1 running: node heavy-lock.mjs run -- make test'));
   const rec = h.json('compact/s-main.json');
   assert.equal(rec.expect, undefined);

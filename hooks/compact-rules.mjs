@@ -224,26 +224,31 @@ export const limitOf = ({ midStepLimit, user, wModel }) =>
 
 // ---- Whose compaction it is (R3.3, E-6) ----
 
-// The running agents of the session's escalation record (R3.2, R6.3: `agents` with no `ended`), each with its own
-// transcript's context, for attribution row 2. Every entry of an agent's transcript is a sidechain one, so it is read
-// as such. A record whose transcript, `<session>/subagents/agent-<id>.jsonl` beside the main one, is missing or was
-// last written more than AGENT_FRESH_S before `now` is stale: { id, ctx: null, stale: true }, its transcript not read.
+// The records of an escalation record's agents with no `ended` (R6.3), as [id, record].
+export const openAgents = (record) =>
+  Object.entries(record?.agents && typeof record.agents === 'object' ? record.agents : {}).filter(([id, a]) => isId(id) && a && a.ended == null);
+
+// An agent's own transcript, `<session>/subagents/agent-<id>.jsonl` beside the main transcript `transcript`, and when
+// it was last written (R3.2): { path, written (ms, null when it is missing), fresh (within AGENT_FRESH_S of `now`) }.
+export function agentTranscript(transcript, session, id, now = Date.now()) {
+  const path = join(dirname(String(transcript ?? '')), String(session), 'subagents', `agent-${id}.jsonl`);
+  let written = null;
+  try {
+    written = statSync(path).mtimeMs;
+  } catch {
+    // no transcript
+  }
+  return { path, written, fresh: written != null && now - written <= AGENT_FRESH_S * 1000 };
+}
+
+// The running agents of the session's escalation record (R3.2, R6.3), each with its own transcript's context, for
+// attribution row 2. Every entry of an agent's transcript is a sidechain one, so it is read as such. A record whose
+// transcript is missing or not fresh is stale: { id, ctx: null, stale: true }, its transcript not read.
 export function runningAgents(record, { transcript, session, now = Date.now() } = {}) {
-  const agents = record?.agents && typeof record.agents === 'object' ? record.agents : {};
-  const base = join(dirname(String(transcript ?? '')), String(session), 'subagents');
-  return Object.entries(agents)
-    .filter(([id, a]) => isId(id) && a && a.ended == null)
-    .map(([id]) => {
-      const path = join(base, `agent-${id}.jsonl`);
-      let written = null;
-      try {
-        written = statSync(path).mtimeMs;
-      } catch {
-        // no transcript: stale
-      }
-      if (written == null || now - written > AGENT_FRESH_S * 1000) return { id, ctx: null, stale: true };
-      return { id, ctx: lastUsage(path, { sidechain: true })?.ctx ?? null };
-    });
+  return openAgents(record).map(([id]) => {
+    const t = agentTranscript(transcript, session, id, now);
+    return t.fresh ? { id, ctx: lastUsage(t.path, { sidechain: true })?.ctx ?? null } : { id, ctx: null, stale: true };
+  });
 }
 
 // PreCompact names no agent, so a fire is attributed from the turn flag and the contexts, the first row that
@@ -527,13 +532,22 @@ export function waitingLines(w, task) {
 
 const indented = (lines, none) => (lines.length ? lines.map((l) => `  ${l}`) : [`  ${none}`]);
 
+const pad2 = (x) => String(x).padStart(2, '0');
+
 // R5.1's state part, from what the hook gathered: three sentences, the task, the running steps of the session's chain
-// with their starts, `k status --session` as it printed, the task's lines of k waiting, the running agents and the
-// background shell tasks of the last Stop. `status` and `waiting` are a text and lines, or an Error-like { failed }.
+// with their starts, `k status --session` as it printed, the task's lines of k waiting, the running agents, apart from
+// them the quiet ones (no end recorded, the transcript not written for AGENT_FRESH_S: finished, or on a long tool;
+// `written` in ms, shown as the local HH:MM) and the background shell tasks of the last Stop. `status` and `waiting`
+// are a text and lines, or an Error-like { failed }.
 export function stateText(f) {
   const after = f.source === 'clear' ? `after /clear (it was session ${f.from})` : 'after a compaction';
+  const name = (a) => `${a.description ?? 'no name'}: ${a.type ?? 'agent'}, id ${a.id}`;
   const agents = (f.agents ?? []).map((a) =>
-    `${a.description ?? 'no name'}: ${a.type ?? 'agent'}, id ${a.id}, launched ${a.at ?? 'at an unknown time'}${a.by ? `, by ${a.by}` : ''}; output ${a.outputFile ?? 'none'}`);
+    `${name(a)}, launched ${a.at ?? 'at an unknown time'}${a.by ? `, by ${a.by}` : ''}; output ${a.outputFile ?? 'none'}`);
+  const quiet = (f.quiet ?? []).map((a) => {
+    const d = new Date(a.written);
+    return `${name(a)}, no end recorded, quiet since ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  });
   const shells = (f.shells?.list ?? []).map((x) => `${x.id ?? 'no id'} ${x.status ?? 'unknown'}: ${x.command ?? x.description ?? ''}`);
   const lines = [
     `This is the same session, ${after}, still on ${f.task}.`,
@@ -550,6 +564,7 @@ export function stateText(f) {
     ...indented(f.waiting?.failed ? [`k waiting failed: ${f.waiting.failed}`] : f.waiting ?? [], 'none'),
     'running agents:',
     ...indented(agents, 'none'),
+    ...(quiet.length ? ['quiet agents (finished, or waiting on a long tool):', ...indented(quiet)] : []),
     `background shell tasks at the last Stop${f.shells?.at ? ` (${f.shells.at})` : ''}:`,
     ...indented(shells, 'none'),
   ];

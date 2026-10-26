@@ -433,7 +433,10 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   and the blocks of the steps not finished (still too long: the running, paused and ready ones, a paused step being one
   waiting for a heavy job or the owner's answer). `progress`: the end of progress.md. `state`: the task and its title,
   the running steps with their start, `k status --session <id>`, `k waiting`'s rows for the task, the running agents
-  (description, type, id, output file, launched, by), the shell tasks of the last Stop, and three sentences telling the
+  (description, type, id, output file, launched, by: the records with no end whose transcript is fresh, R3.2), apart
+  from them the quiet ones, one short line each (`no end recorded, quiet since HH:MM`, the transcript's last write in
+  local time: finished with no end written, or waiting on a long tool, so kept), a record with no transcript left
+  out, the shell tasks of the last Stop, and three sentences telling the
   model it is the same session and to go on from progress.md's last line without starting a step or asking the owner
   again. The entries run in parallel in any order, so no part refers to another's place.
 - **R5.2** Only the main session's compaction gets the parts: PreCompact records `expect: { at, why, ctx }` in

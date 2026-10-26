@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clearFire, sessionFile, taskOf, within } from './compact-clear.mjs';
 import {
-  BOUNDARY_WAIT_S, boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, PARTS, PARTS_S, planFor,
-  PRUNE_DAYS, readJson, stateText, taskDir, updateRecord, waitingLines,
+  agentTranscript, BOUNDARY_WAIT_S, boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, openAgents,
+  PARTS, PARTS_S, planFor, PRUNE_DAYS, readJson, stateText, taskDir, updateRecord, waitingLines,
 } from './compact-rules.mjs';
 
 // The task put back (design/orchestrator.md §5, R5.1-R5.5): SessionStart after `compact` and after `clear`, one entry
@@ -132,9 +132,9 @@ async function statesOf(dir, root, planText, progress) {
 }
 
 // The state part's facts (R5.1): the task's title, the chain's running steps with their starts, k status and k
-// waiting run in parallel, the agents still running and the shell tasks of the last Stop, from the escalation
-// records of this id (and the old one after /clear).
-async function stateBody(home, input, fire, dir, source) {
+// waiting run in parallel, the agents still running and the quiet ones and the shell tasks of the last Stop, from the
+// escalation records of this id (and the old one after /clear).
+async function stateBody(home, input, fire, dir, source, now) {
   const id = input.session_id;
   const progress = readText(join(dir, 'progress.md')) ?? '';
   const [{ events, runningBy }, status, waiting] = await Promise.all([
@@ -151,16 +151,22 @@ async function stateBody(home, input, fire, dir, source) {
   } catch {
     lines = null;
   }
-  const records = [id, ...(source === 'clear' && isId(fire.from) ? [fire.from] : [])].map((x) => readJson(join(home, 'escalate', `${x}.json`)));
-  const agents = records.flatMap((r) => Object.entries(r?.agents && typeof r.agents === 'object' ? r.agents : {}))
-    .filter(([aid, a]) => isId(aid) && a && a.ended == null)
-    .map(([aid, a]) => ({ id: aid, type: a.type, description: a.description, outputFile: a.outputFile, at: a.at, by: a.by }));
+  const sessions = [id, ...(source === 'clear' && isId(fire.from) ? [fire.from] : [])];
+  const records = sessions.map((x) => readJson(join(home, 'escalate', `${x}.json`)));
+  // R3.2: an agent with no end whose transcript was written within AGENT_FRESH_S runs; an older one is quiet, listed
+  // apart (it may be on a long tool); one with no transcript is left out.
+  const open = records.flatMap((r, i) => openAgents(r).map(([aid, a]) => ({
+    id: aid, type: a.type, description: a.description, outputFile: a.outputFile, at: a.at, by: a.by,
+    t: agentTranscript(input.transcript_path, sessions[i], aid, now.getTime()),
+  })));
+  const agents = open.filter((a) => a.t.fresh);
+  const quiet = open.filter((a) => a.t.written != null && !a.t.fresh).map((a) => ({ ...a, written: a.t.written }));
   const snap = records.find((r) => Array.isArray(r?.tasks?.list))?.tasks;
   return stateText({
     source, from: fire.from, task: fire.task, title, dir, session: id, chain, running, home,
     status: status.failed ? { failed: status.failed } : status.out,
     waiting: waiting.failed ? { failed: waiting.failed } : lines ?? { failed: 'its answer was not JSON' },
-    agents, shells: snap ? { at: snap.at, list: snap.list.filter((x) => x?.type === 'shell') } : null,
+    agents, quiet, shells: snap ? { at: snap.at, list: snap.list.filter((x) => x?.type === 'shell') } : null,
   });
 }
 
@@ -186,7 +192,7 @@ export async function onStart(input, home, part, now = new Date()) {
       const states = await statesOf(dir, config.repos[fire.task.split('/')[0]], planText, readText(file('progress.md')) ?? '');
       text = fileBody(file('plan.md'), (t, cap) => planFor(t, states, file('plan.md'), cap));
     }
-    if (part === 'state') text = await stateBody(home, input, fire, dir, source);
+    if (part === 'state') text = await stateBody(home, input, fire, dir, source, now);
     text = `${labelOf(part, source)}\n${text}`;
   }
   if (part === 'state') {
