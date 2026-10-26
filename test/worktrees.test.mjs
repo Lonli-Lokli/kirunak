@@ -163,3 +163,104 @@ test('E-6: a detached worktree goes only when a plugin offers it; a keep from an
   assert.deepEqual(look.problems, ['a worktrees plugin failed: no cache folder']);
 });
 
+test('a worktree holding another checkout stays while that one stays, and goes after it', async () => {
+  const { ws, root, weather, hub } = await makeWorkspace();
+  ignore(weather, 'tmp');
+  const outer = add(weather, join(root, 'outer'), 'outer');
+  mkdirSync(join(outer, 'tmp'));
+  const inner = add(hub, join(outer, 'tmp', 'inner'), 'inner');
+  commitIn(inner, 'i.txt');
+  assert.deepEqual(whys((await worktrees({ ws, cwds: none })).kept), {
+    [outer]: `it holds the checkout ${inner}`,
+    [inner]: 'inner has 1 commit not in master',
+  });
+  sh(hub, 'git', ['merge', '-q', 'inner']);
+  const r = await worktrees({ ws, remove: true, cwds: none });
+  assert.deepEqual(paths(r.removed), [inner, outer]);
+  assert.equal(existsSync(outer), false);
+});
+
+test('AC-4: what a worktree that would go holds besides build output, one short line of folders and sizes', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  ignore(weather, 'build', 'store', 'renders', 'a', 'b', 'c', 'd', 'e');
+  writeFileSync(join(weather, '.git', 'info', 'exclude'), '*.log\n', { flag: 'a' });
+  const shots = add(weather, join(root, 'shots'), 'shots');
+  for (const [dir, size] of [['build/x', 900000], ['store', 300000], ['renders', 20000], ['sub/build', 50000]]) {
+    mkdirSync(join(shots, dir), { recursive: true });
+    writeFileSync(join(shots, dir, 'f.bin'), 'x'.repeat(size));
+  }
+  writeFileSync(join(shots, 'store', 'g.bin'), 'x'.repeat(10000));
+  writeFileSync(join(shots, 'top.log'), 'log');
+  ws.seams.worktrees = [{ repos: () => [], candidates: () => [], buildOutput: () => ['build'] }];
+  const [w] = (await worktrees({ ws, sizes: true, cwds: none })).removed;
+  assert.match(w.holds, /^store\/ 30\dK, renders\/ 2\dK, \.\/ 4K$/);
+  assert.doesNotMatch(w.holds, /build/);
+
+  for (const d of ['a', 'b', 'c', 'd', 'e']) {
+    mkdirSync(join(shots, d));
+    writeFileSync(join(shots, d, 'f'), 'x');
+  }
+  const [many] = (await worktrees({ ws, sizes: true, cwds: none })).removed;
+  assert.match(many.holds, /^store\/ 30\dK, renders\/ 2\dK, (\S+ 4K, ){3}and 3 more, 12K$/);
+
+  assert.equal(holdsLine([]), 'nothing besides build output');
+});
+
+const REVIEW = (head) => `---
+task: ${ID}
+head: ${head}
+---
+
+| id | verdict | evidence |
+| --- | --- | --- |
+| AC-1 | met | file docs/offline.md:1 |
+| AC-2 | met | file docs/offline.md:1 |
+| AC-3 | met | file docs/offline.md:1 |
+| E-1 | met | file docs/offline.md:1 |
+
+verdict: met
+`;
+
+test('AC-2, E-4, E-7: k accept removes after its commit and prints each removed and kept; a refusal or --dry-run removes nothing; a failed removal never undoes it', async () => {
+  const { ws, root, weather, home } = await makeWorkspace();
+  ignore(weather, 'locked');
+  const gone = add(weather, join(root, 'gone'), 'gone');
+  const stays = add(weather, join(root, 'stays'), 'stays');
+  commitIn(stays, 's.txt');
+  const stuck = add(weather, join(root, 'stuck'), 'stuck');
+  mkdirSync(join(stuck, 'locked'));
+  writeFileSync(join(stuck, 'locked', 'f'), 'f');
+  chmodSync(join(stuck, 'locked'), 0o555);
+  try {
+    await approve({ ws, id: ID, now: NOV5 });
+    const refused = k(home, ['accept', ID]);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /has no review/);
+    assert.ok(existsSync(gone) && branchExists(weather, 'gone'), 'E-7: a refused acceptance removes nothing');
+
+    writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim()));
+    reviewsRan(taskDir(weather));
+    gitCommitAll(weather, 'review');
+    assert.equal(k(home, ['accept', ID, '--dry-run']).status, 0);
+    assert.ok(existsSync(gone), 'nor does --dry-run');
+
+    const preview = k(home, ['worktrees', '--closing', ID]);
+    assert.equal(preview.status, 0);
+    assert.match(preview.stdout, new RegExp(`^would remove ${gone} \\(gone merged into master\\): nothing besides build output$`, 'm'));
+    assert.match(preview.stdout, new RegExp(`^would keep ${stays}: stays has 1 commit not in master$`, 'm'));
+    assert.ok(existsSync(gone), 'k worktrees removes nothing');
+
+    const r = k(home, ['accept', ID]);
+    assert.equal(r.status, 0, r.stderr);
+    const out = r.stdout.trim().split('\n');
+    assert.equal(out[0], `${ID}: done`);
+    assert.ok(out.includes(`removed ${gone} (gone merged into master, branch deleted)`), r.stdout);
+    assert.ok(out.some((l) => l.startsWith(`kept ${stuck}: git worktree remove failed: `)), r.stdout);
+    assert.ok(out.includes(`kept ${stays}: stays has 1 commit not in master`), r.stdout);
+    assert.ok(existsSync(join(taskDir(weather), 'done.json')), 'E-4: the acceptance stands');
+    assert.equal(existsSync(gone), false);
+    assert.ok(existsSync(stays));
+  } finally {
+    chmodSync(join(stuck, 'locked'), 0o755);
+  }
+});
