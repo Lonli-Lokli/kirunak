@@ -323,10 +323,15 @@ model kirunak runs has a max output of at least 20,000, so the threshold `T` is 
 the most one request adds past the transcript's last usage (Claude Code checks the request about to go out; the
 transcript lags it by the last tool results); in two weeks of real main transcripts (22,509 steps between two usages)
 the largest step was 89,288, so the usage review checks the number again against each week's largest. `OVERSHOOT` =
-50,000: an agent this far past `T` is having its compactions held by us. `IDLE_MIN` = 50 minutes: idle compaction fires
+50,000: an agent this far past `T` is having its compactions held by us. `AGENT_FRESH_S` = 300 s: an agent record with
+no end counts as running for attribution only when its own transcript was written this recently before the fire
+(R3.2). `IDLE_MIN` = 50 minutes: idle compaction fires
 after about 54 minutes on the 1-hour cache. `CAP` = 9,500 characters: an additionalContext string over 10,000 is filed
 and the model gets a preview instead. `EXPECT_S` = 180 s: how recent PreCompact's `expect`, or the main transcript's
-compaction boundary, must be for SessionStart to put the task back (R5.2). `CLEAR_S` = 120 s: how recent SessionEnd's
+compaction boundary, must be for SessionStart to put the task back (R5.2). `BOUNDARY_WAIT_S` = 5 s: how long a
+SessionStart part with no `expect` waits for that boundary, which Claude Code writes after SessionStart starts (70 ms
+after, seen live), or for the state part's decision, reading again every 250 ms (R5.2a); with the 8 s `k status` and
+`k waiting` are given, the state part ends within 13 s, inside the parts' 20 s timeout. `CLEAR_S` = 120 s: how recent SessionEnd's
 `cleared.json` must be for SessionStart `clear` to join the old id (R5.3). `PARTS_S` = 20 s: the parts' timeout, and how
 recent the state part's decision must be for the other three parts to take it (R5.2). `PRUNE_DAYS` = 14 days:
 `compact/*.json` untouched this long are removed (R5.5). `PROJECT_ROOT` = `main`: which folder's
@@ -381,7 +386,12 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   `open` on each main-session UserPromptSubmit, `closed` on Stop.
 - **R3.2** The running agents' contexts: for each agent record with no `ended`, the last usage of its own transcript,
   read with its sidechain entries (every entry of an agent's transcript is marked `isSidechain`; the main
-  transcript's reading, R2.1, passes over them).
+  transcript's reading, R2.1, passes over them). A record whose transcript (`<session>/subagents/agent-<id>.jsonl`
+  beside the main one) is missing or was last written more than `AGENT_FRESH_S` before the fire is stale, logged as
+  `{ id, ctx: null, stale: true }` and never counted: an end that was never written (a record made before
+  SubagentStop matched every agent, with no Stop since to mark it ended, R6.5) leaves an old context past `T` that
+  would take the main's fire for an agent's. An agent compacts just before a request, which follows a write to its
+  transcript, so a running agent's own fire always finds it fresh.
 - **R3.3** Attribution, the first row that applies: (1) no turn record → as open; (2) a running agent at least
   `OVERSHOOT` past `T` → an agent's, starving: allow; (3) the turn open and the context more than `LAG` under `T` →
   not the main's; (4) the turn closed less than `IDLE_MIN` ago → not the main's (no request between turns); (5) else
@@ -423,7 +433,10 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   and the blocks of the steps not finished (still too long: the running, paused and ready ones, a paused step being one
   waiting for a heavy job or the owner's answer). `progress`: the end of progress.md. `state`: the task and its title,
   the running steps with their start, `k status --session <id>`, `k waiting`'s rows for the task, the running agents
-  (description, type, id, output file, launched, by), the shell tasks of the last Stop, and three sentences telling the
+  (description, type, id, output file, launched, by: the records with no end whose transcript is fresh, R3.2), apart
+  from them the quiet ones, one short line each (`no end recorded, quiet since HH:MM`, the transcript's last write in
+  local time: finished with no end written, or waiting on a long tool, so kept), a record with no transcript left
+  out, the shell tasks of the last Stop, and three sentences telling the
   model it is the same session and to go on from progress.md's last line without starting a step or asking the owner
   again. The entries run in parallel in any order, so no part refers to another's place.
 - **R5.2** Only the main session's compaction gets the parts: PreCompact records `expect: { at, why, ctx }` in
@@ -436,6 +449,15 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   decision as `fire` (`joined`); a task, plan or progress part takes a decision under `PARTS_S` (20 s) old as its own,
   and decides as above when there is none. The risk: an agent whose SessionStart comes within 20 s of the main's, its
   own parts running before its state part, gets the three files (the state part, never).
+- **R5.2a** SessionStart `compact` runs before Claude Code writes the main transcript's compact_boundary entry (seen
+  live: SessionStart at 07:48:58.297, the boundary stamped 07:48:58.367), so a boundary looked for once is never
+  found. A part with no `expect`, no `fire` it takes (the state part takes none) and no boundary yet, in a session
+  holding a task, reads `compact/<session>.json` and the transcript's tail again every 250 ms for up to
+  `BOUNDARY_WAIT_S`; the first to show decides as R5.2 says: a boundary newer than the fire's `EXPECT_S` window is
+  the main's compaction (`boundary seen`), and the state part's `fire` is taken by the other three, so no part
+  decides before the boundary is written and all four agree. Nothing in that time: `not the main's`, about 5 s
+  late. A session with no task waits for nothing, since nothing is put back, and its log says `no task`. A part with
+  `expect` waits for nothing either, so the state part records `boundaryAt` only when the boundary is already written.
 - **R5.3** After `/clear`: SessionEnd (`clear`, `timeout: 5`) under the old id writes `compact/cleared.json` when its
   sessions file holds a task, and removes it otherwise (after a task is done nothing is put back); SessionStart
   `clear` under the new id, within 120 s and from the same folder, writes `sessions/<new>.json` with the task and the
@@ -448,7 +470,7 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   recorded ended.
 - **R6.2** Every named agent's end is recorded: SubagentStop's matcher is `.+`, which keeps out Claude Code's internal
   agents (their type is empty); which agents lift an escalation block is still the hook's own check.
-- **R6.3** The running agents are the records with no `ended`.
+- **R6.3** The running agents are the records with no `ended`; attribution counts only the fresh ones (R3.2).
 - **R6.4** The turn flag (R3.1): UserPromptSubmit without `agent_id` opens it, Stop closes it.
 - **R6.5** Stop's `background_tasks` is kept as `tasks: { at, list }`; an agent record older than the snapshot with
   no entry in it is marked ended by the snapshot. Its `shell` entries are the background shell tasks R5.1 lists.

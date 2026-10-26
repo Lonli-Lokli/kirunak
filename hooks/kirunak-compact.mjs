@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  attribute, decide, expectPath, idleOf, isId, lastUsage, limitOf, logLine, readJson, taskDir, thresholdOf, updateRecord,
-  userWindow, windowOf, windowSetting,
+  attribute, decide, expectPath, idleOf, lastUsage, limitOf, logLine, readJson, runningAgents, taskDir, thresholdOf,
+  updateRecord, userWindow, windowOf, windowSetting,
 } from './compact-rules.mjs';
 
 // The PreCompact hook (design/orchestrator.md §5). In a session started in a workspace repo whose own
@@ -46,16 +46,6 @@ const lazily = (seen) => (key, fn) => {
   };
 };
 
-// The running agents of the session's records (R6: `agents` with no `ended`), each with its own transcript's context
-// (R3.2), for attribution row 2. Every entry of an agent's transcript is a sidechain one, so it is read as such.
-function runningAgents(record, input) {
-  const agents = record?.agents && typeof record.agents === 'object' ? record.agents : {};
-  const base = join(dirname(String(input.transcript_path ?? '')), String(input.session_id), 'subagents');
-  return Object.entries(agents)
-    .filter(([id, a]) => isId(id) && a && a.ended == null)
-    .map(([id]) => ({ id, ctx: lastUsage(join(base, `agent-${id}.jsonl`), { sidechain: true })?.ctx ?? null }));
-}
-
 // The task's progress.md, its folder and the session's chain (R1.1, R1.2); null when the folder cannot be found.
 function progressOf(config, session, id) {
   const dir = taskDir(config, session?.task);
@@ -92,7 +82,7 @@ export function factsOf(input, home, env = process.env, now = new Date()) {
   const T = once('T', () => thresholdOf(window().window, wModel()));
   const user = () => userWindow({ configDir, model: model(), wModel: wModel(), read }).window;
   const limit = once('limit', () => limitOf({ midStepLimit: compact().midStepLimit, user: user(), wModel: wModel() }));
-  const agents = once('agents', () => runningAgents(record(), input));
+  const agents = once('agents', () => runningAgents(record(), { transcript: input.transcript_path, session: id, now: now.getTime() }));
   const turn = () => record()?.turn ?? null;
   const attribution = once('attribution', () => attribute({ turn: turn(), ctx: usage().ctx, T: T(), agents: agents(), now: now.getTime() }));
   const progress = once('progress', () => progressOf(config(), session(), id));
