@@ -25,6 +25,7 @@ test('the session file is written from the status line JSON, and the hook prints
     kind: 'interactive',
     transcript: `/home/someone/.claude/projects/weather/${SID}.jsonl`,
     model: 'claude-opus-5-5',
+    window: 1000000,
     context: 182340,
     ttl: '1h',
     warm: true,

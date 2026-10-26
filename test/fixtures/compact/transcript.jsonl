@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"hello"}}
+{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":151000,"output_tokens":40}}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"assistant","isSidechain":true,"message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":9000,"output_tokens":1}}}
+{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}

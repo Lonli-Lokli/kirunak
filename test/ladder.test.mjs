@@ -100,6 +100,12 @@ test('refused: agents that are not names, a cacheTtl other than 5m or 1h', () =>
   assert.match(top({ cacheTtl: '30m' })[0], /^rung 2: cacheTtl must be 5m or 1h, not "30m"/);
 });
 
+test('a rung\'s autoCompactWindow is a whole number from 100000 to 1000000', () => {
+  const top = (r) => checkLadder([{ model: 'sonnet' }, { model: 'opus', ...r }]);
+  for (const w of [100_000, 500_000, 1_000_000]) assert.deepEqual(top({ autoCompactWindow: w }), []);
+  for (const w of [99_999, 1_000_001, 500_000.5, '500000']) assert.match(top({ autoCompactWindow: w })[0], /^rung 2: autoCompactWindow must be a whole number from 100000 to 1000000/);
+});
+
 test('familyOf: the word after claude-, the alias itself, a context suffix left off', () => {
   assert.equal(familyOf('claude-opus-5-5'), 'opus');
   assert.equal(familyOf('claude-fable-5-1[1m]'), 'fable');

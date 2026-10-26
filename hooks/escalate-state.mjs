@@ -220,8 +220,9 @@ export const readConfig = (home) => readJson(configPath(home));
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 
-// The state of a session or a subagent. The launches (`agents`) and the block live in the session's file only, the
-// caller's (E-13).
+// The state of a session or a subagent. The launches (`agents`), the block, the turn flag (`turn`) and the last Stop's
+// background tasks (`tasks`) live in the session's file only, the caller's (E-13; design/orchestrator.md §5), so every
+// writer keeps them.
 export function readState(home, session, agent = null) {
   const path = statePath(home, session, agent);
   const known = (path && readJson(path)) ?? {};
@@ -232,7 +233,7 @@ export function readState(home, session, agent = null) {
     edited: known.edited ?? null,
     failures: obj(known.failures),
     background: obj(known.background),
-    ...(agent ? {} : { agents: obj(known.agents), block: known.block ?? null }),
+    ...(agent ? {} : { agents: obj(known.agents), block: known.block ?? null, turn: known.turn ?? null, tasks: known.tasks ?? null }),
   };
 }
 

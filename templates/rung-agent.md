@@ -3,6 +3,7 @@ name: {{name}}
 description: {{description}}
 model: {{model}}
 {{effort}}
+{{window}}
 tools: "*"
 {{experimental}}
 ---
