@@ -1,6 +1,6 @@
 ---
 name: k-draft
-description: Write a kirunak draft, an intake prepared ahead for a task that does not exist yet, or drop one. Use when the owner names a future task ("its own task", "later", "another session"), when you find something worth its own task yourself (a bug in a shared library, a missing tool), and when a draft should go (it landed already, the owner said no, another draft says the same).
+description: Write a kirunak draft, an intake prepared ahead for a task that does not exist yet, or drop one. Use when the owner names a future task ("its own task", "later", "another session"), when you find something worth its own task yourself (a bug in a shared library, a missing tool), when a bug turns up in a task the owner has accepted already (a bug of that task, `--bug-of`), and when a draft should go (it landed already, the owner said no, another draft says the same).
 ---
 
 # k-draft: an intake prepared ahead
@@ -47,6 +47,21 @@ reads it as background and still asks every line.
 Never start an intake from a draft on your own: the owner starts it, with Start intake in `/k-drafts` or by naming
 the draft (the k-intake skill says how).
 
+## A bug of an accepted task
+
+A bug found in a task the owner has accepted (done in `k list`) is a draft that names that task, which stays as it
+is: still accepted, frozen, nothing written in its folder. A bug found while its task is open is not a draft: it goes
+into that task, through its review or an amendment, and `--bug-of` refuses an open task or one that does not exist.
+Write it as above, except:
+
+- **The skeleton**, in the repo the fix belongs to, which may be another than the task's:
+  `k draft new <repo>/<slug> --title "<a few words>" --bug-of <task> --session <session id>`.
+- **Fix written**, before Questions: a `- ` line a fix that exists already, ending with `[commit <sha>]` or
+  `[file <patch path>]`; delete the section, heading and all, when no fix exists. No `state` field: a bug is parked
+  while it waits here, taken once an intake starts from it, and closed by a drop.
+- **`k draft check`** also checks that the task is accepted, and that every commit under Fix written is in the
+  bug's repo or the task's.
+
 ## Dropping one
 
 ```sh
@@ -59,4 +74,5 @@ come back. With no reason nothing runs. Say in your reply which draft you droppe
 ## Where the owner sees drafts
 
 `/k-drafts` lists every draft in every repo; one picked shows whole, with Start intake, Drop and Back. `k waiting`
-says how many drafts wait, and the board (`/k-board`, `k board`) shows a group Drafts after the tasks.
+says how many drafts wait, and the board (`/k-board`, `k board`) shows a group Drafts after the tasks. A bug shows
+among them, and in `k drafts`, as `bug of <task>`; it has no command of its own.

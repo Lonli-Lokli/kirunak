@@ -242,7 +242,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-amendments', description: 'The amendments waiting for your approval, to approve or decline by touch; with a number, that one in full', argumentHint: '[<n>]' })
     await $.command.register({ name: 'k-approve-amendment', description: 'Approve an amendment /k-amendments listed: k approve --amendment, as your own command', argumentHint: '<n>' })
     await $.command.register({ name: 'k-queue', description: 'Show the kirunak queue and move, park or put back a task by touch' })
-    await $.command.register({ name: 'k-drafts', description: 'The kirunak drafts, intakes prepared ahead: one shown whole, to start its intake or drop it by touch' })
+    await $.command.register({ name: 'k-drafts', description: 'The kirunak drafts, intakes prepared ahead, bugs among them: one shown whole, to start its intake or drop it by touch' })
     await $.command.register({ name: 'kirunak', description: 'Show or hide kirunak\'s pane: this session\'s task, the queue and the lock' })
     // A `claude -p` run draws nothing: it gets the commands, which refuse its origin, and no reads.
     if (e.isInteractive) {
