@@ -1,6 +1,7 @@
 import { amendmentItem, amendmentLabel, amendmentLines, taskLabel } from './lists'
 import type { Item } from './lists'
 import type { Choice, PickScreen, Row, Screen } from './owner'
+import { blockingLines } from './waiting'
 import type { AmendmentRow, TaskRow, WaitingRow } from './waiting'
 
 // The dialogs of /k-approve, /k-accept, /k-amendments, /k-hold, /k-resume and /k-start with no number (kirunak-phone
@@ -26,7 +27,8 @@ function refusalLines(id: string, why: string): string[] {
 const waitingState = (verb: 'approve' | 'accept', r: WaitingRow): string => r.state ?? (verb === 'approve' ? 'proposed' : r.checklistOpen ? 'awaiting owner' : 'reviewed')
 
 // A task k waiting offers a verb on, as a list row: its id and state; whether k would take the verb shows once picked.
-export const waitingItem = (verb: 'approve' | 'accept', r: WaitingRow): Item => ({ lead: '', name: r.id, text: `: ${waitingState(verb, r)}` })
+// Under a task its blocking files refuse, each file, its commit and its task (kirunak-accept-shared-repo E-2).
+export const waitingItem = (verb: 'approve' | 'accept', r: WaitingRow): Item => ({ lead: '', name: r.id, text: `: ${waitingState(verb, r)}`, under: blockingLines(r) })
 
 // The task picked, in full: id and title, its state, its review, and what k would refuse, every line of it.
 function taskText(verb: 'approve' | 'accept', r: WaitingRow): string[] {

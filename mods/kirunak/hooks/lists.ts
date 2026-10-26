@@ -9,8 +9,9 @@ import type { AmendmentRow } from './waiting'
 // an answer; `plainLines` and the labels for a choice dialog, whose question shows plain lines and whose choices are
 // short names, kirunak-phone S-6).
 
-// A row as plain words: `lead`, then `name` (the row's id, bold in an answer), then `text`.
-export type Item = { lead: string; name: string; text: string }
+// A row as plain words: `lead`, then `name` (the row's id, bold in an answer), then `text`; `under`, lines a dialog's
+// list shows below it (/k-accept's blocking files, kirunak-accept-shared-repo E-2).
+export type Item = { lead: string; name: string; text: string; under?: readonly string[] }
 
 // lib/board-md.mjs's escape and line starts, so an answer reads as the board does.
 const md = (s: string): string => s.replace(/[\\`*_<>[\]]/g, '\\$&')
@@ -31,8 +32,10 @@ export function numbered(items: readonly Item[], from = 1): string[] {
   return items.map((x, i) => entry(`${md(x.lead)}**${md(x.name)}**${md(x.text)}`, `${from + i}. `))
 }
 
-// The rows as numbered plain lines, one each, for a dialog's question, which draws no markdown.
-export const plainLines = (items: readonly Item[], from = 1): string[] => items.map((x, i) => `${from + i}. ${x.lead}${x.name}${x.text}`)
+// The rows as numbered plain lines, one each and its `under` lines indented below it, for a dialog's question, which
+// draws no markdown.
+export const plainLines = (items: readonly Item[], from = 1): string[] =>
+  items.flatMap((x, i) => [`${from + i}. ${x.lead}${x.name}${x.text}`, ...(x.under ?? []).map(l => `   ${l}`)])
 
 // The rows as plain lines, each numbered by its own number, a row without one unnumbered (/k-queue's places,
 // kirunak-phone A-11).

@@ -551,7 +551,8 @@ const VERBS = {
       ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
-      accept.length ? ['to accept:', ...accept.map(line('accept'))].join('\n') : 'nothing to accept',
+      // Under an accept row its later commits block, each file with its commit and task, as k accept names them (AC-6).
+      accept.length ? ['to accept:', ...accept.flatMap((x) => [line('accept')(x), ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
     return { approve, accept, amendments, hold, start, drafts, stopped, text };

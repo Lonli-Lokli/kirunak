@@ -3,8 +3,24 @@ import type { PromptAutocompleteSuggestion } from 'claude-code'
 import type { KirunakRow } from '../types'
 
 // What waits for the owner, as `k waiting --json` gives it: why is what the verb would refuse, null when it would not;
-// an accept row's onlyChecklist says open checklist items are all that stops it (`--checklist-open` would run).
-export type WaitingRow = { id: string; title: string; state?: string; why: string | null; review?: { file: string; verdict: string | null } | null; checklistOpen?: number; onlyChecklist?: boolean }
+// an accept row's onlyChecklist says open checklist items are all that stops it (`--checklist-open` would run), and its
+// blocking names each file a commit after the review changed, with that commit and the task it names, or "no task"
+// (kirunak-accept-shared-repo AC-6); none from an older k.
+export type Blocking = { path: string; commit: string; task: string }
+export type WaitingRow = {
+  id: string
+  title: string
+  state?: string
+  why: string | null
+  review?: { file: string; verdict: string | null } | null
+  blocking?: readonly Blocking[]
+  checklistOpen?: number
+  onlyChecklist?: boolean
+}
+
+// A blocking file as k accept's refusal names it: `<path>  <commit>  <task>`.
+export const blockingLines = (r: WaitingRow): string[] => (r.blocking ?? []).map(b => `${b.path}  ${b.commit}  ${b.task}`)
+
 // An amendment neither applied nor declined (kirunak-phone S-4): refuse is what k approve --amendment would refuse, one
 // line, null when it would not; file the amendment's absolute path; title is the task's, name the amendment's own few
 // words, or the criteria it changes when it has none ("replaces AC-5", kirunak-phone A-8).
@@ -24,7 +40,8 @@ export type AmendmentRow = {
 export type TaskRow = { id: string; title: string; state: string }
 export type Waiting = { approve: WaitingRow[]; accept: WaitingRow[]; amendments: AmendmentRow[]; hold: TaskRow[]; start: TaskRow[] }
 
-// `/k-approve` or `/k-accept` with no id: the tasks waiting for that verb, numbered as `/k-accept <n>` takes them.
+// `/k-approve` or `/k-accept` with no id: the tasks waiting for that verb, numbered as `/k-accept <n>` takes them;
+// under a task its blocking files refuse, each file, its commit and its task, as `k waiting` shows them (E-2).
 export function offerText(verb: 'approve' | 'accept', rows: readonly WaitingRow[]): string {
   if (!rows.length) return `Nothing waits for you to ${verb}.`
   // k waiting's own words: the verb's, never a task's state (kirunak-phone AC-15).
@@ -32,7 +49,8 @@ export function offerText(verb: 'approve' | 'accept', rows: readonly WaitingRow[
   const how = verb === 'accept'
     ? '/k-accept 1 accepts the first. Add --checklist-open "<why>" to accept one with checklist items open.'
     : '/k-approve 1 approves the first.'
-  return [`Waiting for you to ${verb}:`, ...rows.map((r, i) => `${String(i + 1).padStart(3)}  ${r.id}  ${state(r)}`), how].join('\n')
+  const row = (r: WaitingRow, i: number) => [`${String(i + 1).padStart(3)}  ${r.id}  ${state(r)}`, ...blockingLines(r).map(l => `       ${l}`)]
+  return [`Waiting for you to ${verb}:`, ...rows.flatMap(row), how].join('\n')
 }
 
 // The row a line's leading number names in the list the owner was last shown in this session (`shownBy` shows it),
