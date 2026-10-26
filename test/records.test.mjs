@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { commitsIn } from '../lib/git.mjs';
 import { doneTasks, isRecord, namesTask, recordPaths, said, tasksNamed, trailerTask } from '../lib/records.mjs';
+import { loadWorkspaceModule } from '../lib/workspace.mjs';
 import { makeWorkspace, sh } from './helpers.mjs';
 
 const repos = ['gulnya', 'katyafm', 'kirunak'];
@@ -48,6 +49,22 @@ test('kirunak\'s records are the task folders, the drafts, the approvals and the
   for (const x of ['kirunak/tasks/a/notes.md', 'kirunak/drafts/b.md', 'kirunak/approvals/a.json', 'kirunak/queue.md']) assert.equal(isRecord(x, records), true, x);
   for (const x of ['kirunak/workspace.mjs', 'kirunak/queue.md.bak', 'src/kirunak/tasks/a.ts', 'README.md']) assert.equal(isRecord(x, records), false, x);
   assert.deepEqual(recordPaths({ ...ws, queue: join(ws.home, 'queue.md') }), ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/approvals/']);
+});
+
+test('the workspace may name more records, a file or a folder in any of its repos, written yet or not; anything but a list of paths is refused (accept-shared-repo AC-5, D-3)', async () => {
+  const { ws } = await makeWorkspace();
+  const dir = dirname(ws.modulePath);
+  const named = (file, records) => {
+    writeFileSync(join(dir, file), readFileSync(ws.modulePath, 'utf8').replace("queue: './queue.md',", `queue: './queue.md',\n  records: ${JSON.stringify(records)},`));
+    return loadWorkspaceModule(join(dir, file));
+  };
+  const records = recordPaths(await named('records.mjs', ['./plan.md', '../../weather/notes/', '~/elsewhere.md']));
+  assert.deepEqual(records, ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/approvals/', 'kirunak/queue.md', 'kirunak/plan.md', 'notes/']);
+  for (const x of ['kirunak/plan.md', 'notes/a.md', 'notes/deep/b.md']) assert.equal(isRecord(x, records), true, x);
+  for (const x of ['kirunak/plan.md.bak', 'notes', 'docs/notes/a.md', 'kirunak/workspace.mjs']) assert.equal(isRecord(x, records), false, x);
+  for (const [file, bad] of [['one.mjs', './plan.md'], ['empty.mjs', ['']], ['number.mjs', [3]]]) {
+    await assert.rejects(named(file, bad), /records must be a list of paths, a folder ending with a slash/);
+  }
 });
 
 test('what a message says leaves out git\'s comments and what follows the scissors (accept-shared-repo AC-8)', () => {

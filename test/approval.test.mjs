@@ -522,6 +522,24 @@ test('accept refuses a later commit to a file of the task\'s own change, naming 
   assert.throws(() => accept({ ws, id: ID }), (e) => e.message.endsWith(`:\n  src/cache.ts  ${added}  no task\n  src/cache.ts  ${back}  no task`));
 });
 
+test('a file or folder the workspace names as a record is never the task\'s own change and never blocks accept (accept-shared-repo AC-5, D-3)', async () => {
+  const { ws: plain, weather } = await makeWorkspace();
+  const root = plain.repos.find((r) => r.name === 'weather').root;
+  const ws = { ...plain, records: [join(root, 'kirunak/plan.md'), `${join(root, 'notes')}/`] };
+  const dir = taskDir(weather);
+  await approve({ ws, id: ID, now: NOV5 });
+  commitFiles(weather, `${ID} S-1: the cache, the plan and a note`, ['src/cache.ts', 'kirunak/plan.md', 'notes/a.md']);
+  writeFileSync(join(dir, 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(dir);
+  gitCommitAll(weather, `kirunak/tasks/offline-forecast: the review (${ID})`);
+  // Its own commit touched the plan and the notes; later commits to them, one naming the task, block nothing.
+  commitFiles(weather, 'the plan of weather/hourly', ['kirunak/plan.md', 'notes/a.md']);
+  const ticked = commitFiles(weather, `${ID}: the plan ticked`, ['kirunak/plan.md']);
+  assert.equal(accept({ ws, id: ID, dryRun: true }).state, 'would accept');
+  // Named by no workspace, the same files block (AC-1, AC-7).
+  assert.throws(() => accept({ ws: plain, id: ID, dryRun: true }), (e) => e.message.includes(`\n  kirunak/plan.md  ${ticked}  ${ID}`) && e.message.includes('  notes/a.md  '));
+});
+
 test('a later commit naming the task blocks accept whatever files it touches, unless they are all records (accept-shared-repo AC-7)', async () => {
   const { ws, weather } = await makeWorkspace();
   const dir = taskDir(weather);

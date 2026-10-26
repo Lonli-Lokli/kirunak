@@ -183,6 +183,20 @@ describe('picking by touch', () => {
     expect(verbs(w.runs)).toEqual([['accept', ID, '--via', 'mod']])
   })
 
+  test('/k-accept on the phone: at most ten blocking lines for a task, in the dialog\'s list, its view and the refusal, then how many more there are (kirunak-accept-shared-repo E-2, A-1)', async ($, on) => {
+    const many = Array.from({ length: 13 }, (_, i) => ({ path: `kirunak/plan.md`, commit: `${i}`.padStart(7, 'a'), task: 'no task' }))
+    const lines = many.map(b => `${b.path}  ${b.commit}  ${b.task}`)
+    const why = [`${ID}: ${CHANGED.replace('2 file(s)', '1 file(s)')}`, ...lines.map(l => `  ${l}`)].join('\n')
+    const accept = [{ ...BLOCKED, why, blocking: many }] as Waiting['accept']
+    const w = world(on, { waiting: [{ ...WAITING, accept }], taps: [ID, 'Back', SKIP], verb: { exitCode: 1, stdout: '', stderr: `k: ${why}\nrun k accept in the terminal for the rest\n` } })
+    const skipped = await run($, 'k-accept', '', { kind: 'bridge' })
+    const ten = lines.slice(0, 10)
+    expect(w.asked[0]?.question).toBe(['Waiting for you to accept:', `1. ${ID}: reviewed`, ...ten.map(l => `   ${l}`), '   and 3 more', 'Which task?'].join('\n'))
+    expect(w.asked[1]?.question).toBe([`${ID}: The last forecast stays readable offline.`, 'State: reviewed.', 'Review: review.md, met.', 'Not yet:', CHANGED.replace('2 file(s)', '1 file(s)'), ...ten, 'and 3 more', 'k would refuse it now. Back to the list?'].join('\n'))
+    expect(skipped).toContain([...ten.map(l => `       ${l}`), '       and 3 more', '/k-accept 1 accepts'].join('\n'))
+    expect(await run($, 'k-accept', ID, { kind: 'bridge' })).toBe([`/k-accept refused:`, `k: ${ID}: ${CHANGED.replace('2 file(s)', '1 file(s)')}`, ...ten.map(l => `  ${l}`), '  and 3 more', 'run k accept in the terminal for the rest', '(typed in Remote Control)'].join('\n'))
+  })
+
   test('/k-amendments: one k would approve offers "Approve <id> A-n" and Decline; one it would refuse, Decline alone, which takes a reason and runs k amend decline (AC-8)', async ($, on) => {
     const w = world(on, { taps: [`${ID} A-3`, `Approve ${ID} A-3`, `${ID} A-4`, 'Decline', 'covered by AC-1 already', `Decline ${ID} A-4`] })
     await run($, 'k-amendments')
