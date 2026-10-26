@@ -407,7 +407,7 @@ const VERBS = {
       taskCost = { error: e.message };
     }
     const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: taskCost });
-    // Once the acceptance is committed, the merged worktrees go (approval.md §5); nothing there undoes or fails it.
+    // Once the acceptance is committed, the merged worktrees go (approval.md §4); nothing there undoes or fails it.
     const w = await worktrees.worktrees({ ws, closing: id, remove: true });
     const text = `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}`;
     return { ...r, worktrees: w, text: [text, ...worktrees.lines(w)].join('\n') };

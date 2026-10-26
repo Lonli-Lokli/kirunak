@@ -139,6 +139,28 @@ it, and the way out is a new review. It writes `done.json` with the review it to
 `task-files.md` §3), commits with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done`
 skill asks the owner to type (`review.md` §4).
 
+Once the acceptance is committed, `k accept` removes the worktrees the closed work left (`lib/worktrees.mjs`,
+gulnya/worktrees-on-close). A refusal or `--dry-run` removes nothing, and nothing in the removal undoes or fails the
+acceptance. It looks, from no record, at every worktree of the workspace's repos and of the repos a `worktrees`
+plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones too. A worktree goes when:
+
+- its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`), by ancestry or
+  with nothing left in `git cherry`;
+- it has no uncommitted or untracked change;
+- no open task but the one accepted names its path in one of its files;
+- no process works in it (`lsof`; when lsof cannot tell, none goes);
+- no checkout that stays is inside it.
+
+The main checkout never goes, nor a locked worktree or one whose folder is gone. A detached one goes only when a
+plugin offers it, and a keep from any plugin wins. Deepest first, each goes with `git worktree remove`, never
+`--force`, whole with the files git ignores in it; then its branch goes with `git branch -D`. A failure is a kept line
+with git's error. `k accept` prints a line for each worktree removed and each kept, with why.
+
+`k worktrees [--closing <id>]` prints the same survey and removes nothing. For each worktree that would go it adds one
+line: the folders git ignores in it besides build output (the plugins' `buildOutput`), the five largest with their
+sizes and the rest summed. The `k-done` skill shows it before asking for the acceptance, so the owner saves what they
+still need first.
+
 Why `!`: the shortcuts documentation says a `!` line is "Run a command directly, add its output to the session, and
 have Claude respond to it", shell mode "Doesn't require Claude to interpret or approve the command", and the
 model's own route to a shell is the `Bash` tool (`code.claude.com/docs/en/interactive-mode.md`, fetched
