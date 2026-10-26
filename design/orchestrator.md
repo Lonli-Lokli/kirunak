@@ -325,9 +325,13 @@ transcript lags it by the last tool results); in two weeks of real main transcri
 the largest step was 89,288, so the usage review checks the number again against each week's largest. `OVERSHOOT` =
 50,000: an agent this far past `T` is having its compactions held by us. `IDLE_MIN` = 50 minutes: idle compaction fires
 after about 54 minutes on the 1-hour cache. `CAP` = 9,500 characters: an additionalContext string over 10,000 is filed
-and the model gets a preview instead. `PROJECT_ROOT` = `main`: which folder's `.claude/settings.local.json` a session
-reads (R2.7). The handover size's default, 150,000, was measured on a week of real sessions as the size with the least
-total weight read.
+and the model gets a preview instead. `EXPECT_S` = 180 s: how recent PreCompact's `expect`, or the main transcript's
+compaction boundary, must be for SessionStart to put the task back (R5.2). `CLEAR_S` = 120 s: how recent SessionEnd's
+`cleared.json` must be for SessionStart `clear` to join the old id (R5.3). `PARTS_S` = 20 s: the parts' timeout, and how
+recent the state part's decision must be for the other three parts to take it (R5.2). `PRUNE_DAYS` = 14 days:
+`compact/*.json` untouched this long are removed (R5.5). `PROJECT_ROOT` = `main`: which folder's
+`.claude/settings.local.json` a session reads (R2.7). The handover size's default, 150,000, was measured on a week of
+real sessions as the size with the least total weight read.
 
 **R1 The step boundary.** progress.md is the only record of a step worked by hand.
 - **R1.1** `runningBy(progressText, sessions, dir)` (lib/steps.mjs) lists the steps whose last event line is
@@ -402,19 +406,23 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 **R5 SessionStart after a compaction or `/clear`** (matcher `compact|clear`).
 - **R5.1** Four parts, four hook entries (`--part state|task|plan|progress`, `timeout: 20`), since each
   additionalContext string is capped alone; each at most `CAP` characters with a label `kirunak, after a compaction
-  (part k of 4): <name>`, cut at a line end with the whole file's path. `task`: task.md whole. `plan`: plan.md's
-  header and the blocks of the steps not finished (still too long: the running and ready ones). `progress`: the end of
-  progress.md. `state`: the task and its title, the running steps with their start, `k status --session <id>`,
-  `k waiting`'s rows for the task, the running agents (description, type, id, output file, launched, by), the shell
-  tasks of the last Stop, and three sentences telling the model it is the same session and to go on from progress.md's
-  last line without starting a step or asking the owner again. The entries run in parallel in any order, so no part
-  refers to another's place.
+  (part k of 4): <name>`, cut at a line end with the whole file's path. `task`: task.md whole. `plan`: plan.md's header
+  and the blocks of the steps not finished (still too long: the running, paused and ready ones, a paused step being one
+  waiting for a heavy job or the owner's answer). `progress`: the end of progress.md. `state`: the task and its title,
+  the running steps with their start, `k status --session <id>`, `k waiting`'s rows for the task, the running agents
+  (description, type, id, output file, launched, by), the shell tasks of the last Stop, and three sentences telling the
+  model it is the same session and to go on from progress.md's last line without starting a step or asking the owner
+  again. The entries run in parallel in any order, so no part refers to another's place.
 - **R5.2** Only the main session's compaction gets the parts: PreCompact records `expect: { at, why, ctx }` in
   `compact/<session>.json` on every allow it attributes to the main (R4.2, R4.6, R4.9); SessionStart adds the parts
   when `expect` is under 180 s old, else when the main transcript's tail holds a compaction boundary newer than its
   last assistant entry and under 180 s old, else nothing. `expect` is consumed. The state part records the boundary's
   time as `fire.boundaryAt`; the same boundary seen again (an agent compacting within 180 s of a `/compact` or an idle
-  compaction, with no request between) is `boundary already put back`, and gets nothing.
+  compaction, with no request between) is `boundary already put back`, and gets nothing. The four entries run in
+  parallel, so only the state part decides: it consumes `expect` (after `/clear`, `cleared.json`) and records its
+  decision as `fire` (`joined`); a task, plan or progress part takes a decision under `PARTS_S` (20 s) old as its own,
+  and decides as above when there is none. The risk: an agent whose SessionStart comes within 20 s of the main's, its
+  own parts running before its state part, gets the three files (the state part, never).
 - **R5.3** After `/clear`: SessionEnd (`clear`, `timeout: 5`) under the old id writes `compact/cleared.json` when its
   sessions file holds a task, and removes it otherwise (after a task is done nothing is put back); SessionStart
   `clear` under the new id, within 120 s and from the same folder, writes `sessions/<new>.json` with the task and the

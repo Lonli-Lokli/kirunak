@@ -5,12 +5,22 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  boundaryIn, CAP, CLEAR_S, cut, EXPECT_S, labelOf, lastOf, planFor, PRUNE_DAYS, stateText, waitingLines,
+  boundaryIn, CAP, CLEAR_S, cut, EXPECT_S, IDLE_MIN, LAG, labelOf, lastOf, OVERSHOOT, PARTS_S, planFor, PRUNE_DAYS, SLACK, stateText,
+  waitingLines,
 } from '../hooks/compact-rules.mjs';
 import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
 import { makeWorkspace } from './helpers.mjs';
 
 // The task put back after a compaction and after /clear (design/orchestrator.md §5, R5.1-R5.5).
+
+// ---- The docs: orchestrator.md §5's numbers name each constant with the value the hooks use ----
+
+test('orchestrator.md §5\'s numbers name every constant of the handover with its value', () => {
+  const doc = readFileSync(fileURLToPath(new URL('../design/orchestrator.md', import.meta.url)), 'utf8');
+  const numbers = /\*\*The numbers\.\*\*[\s\S]*?\n\n/.exec(doc)?.[0].replace(/\s+/g, ' ') ?? '';
+  const all = { SLACK, LAG, OVERSHOOT, IDLE_MIN, CAP, EXPECT_S, CLEAR_S, PARTS_S, PRUNE_DAYS };
+  for (const [name, v] of Object.entries(all)) assert.ok(numbers.includes(`\`${name}\` = ${v.toLocaleString('en-US')}`), name);
+});
 
 // ---- The parts' text (R5.1) ----
 

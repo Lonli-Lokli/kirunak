@@ -366,7 +366,7 @@ export function planBlocks(text) {
 const OPEN = new Set(['running', 'waiting-heavy', 'waiting-owner', 'ready']);
 
 // R5.1's plan part: the header and the blocks of the steps not finished; over `cap`, the header and the blocks of the
-// running and ready steps alone, cut when still over. `states`: a Map of step id → its state (lib/steps.mjs
+// running, paused and ready steps alone (OPEN), cut when still over. `states`: a Map of step id → its state (lib/steps.mjs
 // stepStates' { state } or the word). A last line names the blocks left out.
 export function planFor(text, states, whole = null, cap = CAP) {
   const { header, blocks } = planBlocks(text.endsWith('\n') || !text ? text : `${text}\n`);
