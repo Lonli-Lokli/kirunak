@@ -112,10 +112,12 @@ export default {
   workspace that still sets it.
 - **`ladder`** (lib/ladder.mjs; gulnya/enforced-escalation) holds the rungs a step that failed twice climbs, lowest
   first, and nothing else sets a rung's model, effort, attempts or mode. A rung is `{ model, id?, effort?, mode?,
-  attempts?, agents?, cacheTtl? }`. `model` is a lower-case alias (`sonnet`); `id` pins a full model id of that family;
+  attempts?, agents?, cacheTtl?, autoCompactWindow? }`. `model` is a lower-case alias (`sonnet`); `id` pins a full model id of that family;
   `effort` is one of low, medium, high, xhigh, max; `mode` is `build` (the default) or `design`; `attempts` is a whole
   number, default 1; `agents` lists the workspace's own agents that stand on the rung (a `music-deep`, say), beside the
-  generated `<model>-step`; `cacheTtl` is `5m` or `1h`. Judgement: the list is read in order and no rung is special,
+  generated `<model>-step`; `cacheTtl` is `5m` or `1h`; `autoCompactWindow` (100,000 to 1,000,000) goes into the rung
+  agent's frontmatter, so a long design or review agent keeps its own compaction point instead of the handover
+  window it would inherit in a workspace repo (design/orchestrator.md §5 R8.6). Judgement: the list is read in order and no rung is special,
   so no model is named in the code: a workspace with Haiku at the bottom gets a `sonnet-step` agent and its failed
   Haiku steps go to Sonnet. The workspace is refused at load, naming the rung, for an empty list, a repeated model, an
   unknown effort or mode, a rung 1 that names `mode`, `attempts` or `agents` (the lowest rung is the step's own model,

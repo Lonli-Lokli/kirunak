@@ -500,6 +500,10 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 - **R8.4** These docs: the install section of README.md, `plugins.md` §3 and this section.
 - **R8.5** Undoing it: nothing of the user's changes, so nothing needs restoring; `compact.enabled: false` and
   `k install` take kirunak's window back out of every root.
+- **R8.6** Agents inherit their session's compaction window, so in a workspace repo an agent compacts near the
+  handover size too. A ladder rung's `autoCompactWindow` (design/plugins.md §3) goes into that rung agent's
+  frontmatter, which beats the inherited window: a long design or review agent keeps its own point. A workspace's
+  own agents set the same key in their own frontmatter.
 
 ## 6. Token records (R12)
 
@@ -546,4 +550,4 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 ## 7. Requirements this file satisfies
 
 R8 (§1), R9 (§1 inputs, §2 including the ladder, §3 `--disallowedTools Agent`), R10 (§4), R11 and D9 (§5, with the
-handover, its rules R1.1 to R8.5), R12 (§6).
+handover, its rules R1.1 to R8.6), R12 (§6).

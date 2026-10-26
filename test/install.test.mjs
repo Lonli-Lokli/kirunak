@@ -225,6 +225,14 @@ test('a <model>-step agent for every rung above the lowest, with the rung\'s mod
   assert.ok(actions.includes(`wrote the opus-step agent: ${join(h.agentsDir, 'opus-step.md')}`));
 });
 
+test('a rung\'s autoCompactWindow goes into its agent\'s frontmatter after the effort; none without it', () => {
+  const h = home();
+  const ladder = [LADDER[0], LADDER[1], { ...LADDER[2], autoCompactWindow: 500_000 }];
+  install({ ...h, ws: ws({ ladder }) });
+  assert.match(agent(h, 'fable-step'), /\nmodel: claude-fable-5-1\neffort: high\nautoCompactWindow: 500000\ntools: "\*"\n/);
+  assert.ok(!agent(h, 'opus-step').includes('autoCompactWindow'));
+});
+
 test('an agent path that is a link is written through, and the action names the real file', () => {
   const h = home();
   const repoAgents = join(h.dir, 'portfolio', 'claude', 'agents');
