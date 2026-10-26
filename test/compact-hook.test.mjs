@@ -189,7 +189,9 @@ test('decide: the rows in the table\'s order, each fact read only when its row i
   assert.deepEqual(await row({ ctx: null, attribution: no('attribution') }), ['allow', 'R4.4', 'ctx unknown', false]);
   assert.deepEqual(await row({ attribution: { main: false, why: 'turn closed' }, limit: no('limit') }), ['allow', 'R4.5', 'turn closed', false]);
   assert.deepEqual(await row({ ctx: 500000, task: no('task') }), ['allow', 'R4.6', 'limit', true]);
-  assert.deepEqual(await row({ task: null, running: no('running') }), ['block', 'R4.7', 'no task', false]);
+  assert.deepEqual(await row({ task: null, idle: false, running: no('running') }), ['block', 'R4.7', 'no task', false]);
+  assert.deepEqual(await row({ task: null, idle: true, running: no('running') }), ['allow', 'R4.7a', 'idle, no task', true]);
+  assert.deepEqual(await row({ idle: no('idle') }), ['block', 'R4.8', 'running', false], 'a session holding a task keeps its rule');
   const d = await decide({ ...base, running: async () => ['S-2', 'S-3'] });
   assert.equal(d.reason, 'kirunak: S-2, S-3 are running; the compaction waits for the step boundary');
   assert.deepEqual(await row({ running: null }), ['allow', 'R4.3', 'state unreadable', false]);
@@ -364,6 +366,17 @@ test('R4.7: a session with no task in a workspace repo is held to the limit, as 
   const r = run(makeHome({ session: { step: null } }));
   assert.deepEqual(r.out, { decision: 'block', reason: 'kirunak: this session holds no task; the compaction waits for the mid-step limit' });
   assert.equal(run(makeHome({ session: null })).line.why, 'no task');
+});
+
+test('R4.7a: in a session with no task, an idle compaction (the turn closed IDLE_MIN ago) is let through, as today (E-3)', () => {
+  const closed = (min) => ({ turn: { state: 'closed', at: new Date(Date.now() - min * 60_000).toISOString() } });
+  const h = makeHome({ session: { step: null }, record: closed(IDLE_MIN) });
+  const r = run(h);
+  allowed(r, 'idle, no task');
+  assert.deepEqual([r.line.row, r.line.turn, h.expected().why], ['R4.7a', 'closed', 'idle, no task']);
+  assert.equal(run(makeHome({ session: null, record: closed(IDLE_MIN + 5) })).line.why, 'idle, no task');
+  assert.equal(run(makeHome({ session: null, record: { turn: { state: 'open', at: new Date(Date.now() - 60 * 60_000).toISOString() } } })).line.why, 'no task');
+  assert.equal(run(makeHome({ record: closed(IDLE_MIN + 5) })).out.decision, 'block', 'a session holding a task keeps R4.8');
 });
 
 // ---- compact/<session>.json: one read, change and write at a time (R6.6) ----

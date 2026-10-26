@@ -234,6 +234,10 @@ export function attribute({ turn, ctx, T, agents = [], now = Date.now() }) {
   return { main: true, row: turn ? 5 : 1, why: null };
 }
 
+// R4.7a: the main session idle, its turn closed by a Stop at least IDLE_MIN ago: the fire is Claude Code's idle
+// compaction (after about 54 minutes on the 1-hour cache).
+export const idleOf = (turn, now) => turn?.state === 'closed' && now - Date.parse(turn.at) >= IDLE_MIN * 60_000;
+
 // ---- The rule table (R4) ----
 
 const allow = (row, why, expect = false) => ({ decision: 'allow', row, why, expect });
@@ -242,7 +246,8 @@ const block = (row, why, reason) => ({ decision: 'block', row, why, reason, expe
 // The decision on one PreCompact fire, R4.2 to R4.9 in the table's order (R4.1, KIRUNAK_STEP, ends the hook before
 // anything is read). Each fact of `f` is a value or a function (sync or async) called only when its row is reached,
 // so the cheap rows end before the transcript or progress.md is read: trigger, config, session (the id), window
-// (windowSetting), ctx, attribution, limit, task, running (runningBy, or null when progress.md cannot be read).
+// (windowSetting), ctx, attribution, limit, task, idle (idleOf), running (runningBy, or null when progress.md cannot
+// be read).
 // `expect` marks the allows attributed to the main session, which SessionStart puts the task back after (R5.2).
 export async function decide(f) {
   const get = async (k) => (typeof f[k] === 'function' ? f[k]() : f[k]);
@@ -261,8 +266,11 @@ export async function decide(f) {
   if (!who.main) return allow('R4.5', who.why);
   // E-1, E-3, E-8: past the mid-step limit.
   if (ctx >= (await get('limit'))) return allow('R4.6', 'limit', true);
-  // E-3: no task, so no handover at a boundary; the limit, as today.
-  if (!(await get('task'))) return block('R4.7', 'no task', 'kirunak: this session holds no task; the compaction waits for the mid-step limit');
+  // E-3: no task, so no handover at a boundary; the limit and an idle compaction, as today.
+  if (!(await get('task'))) {
+    if (await get('idle')) return allow('R4.7a', 'idle, no task', true);
+    return block('R4.7', 'no task', 'kirunak: this session holds no task; the compaction waits for the mid-step limit');
+  }
   // AC-4: a step of the session is running.
   const running = await get('running');
   if (!Array.isArray(running)) return allow('R4.3', 'state unreadable');

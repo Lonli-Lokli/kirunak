@@ -397,6 +397,8 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   the user's own window compacts at, so never sooner; with no window set the limit is 867,000, so the held request is
   under 967,000; on a 200k model the limit is 67,000, under `T`, and the hook holds at most one request.
 - **R4.7** No task in `sessions/<id>.json`: block (a session with no task compacts at the limit, as without kirunak).
+- **R4.7a** No task, and the turn closed by a Stop at least `IDLE_MIN` ago: allow (`idle, no task`), record `expect`;
+  Claude Code's idle compaction goes through as without kirunak. A session holding a task keeps R4.8 and R4.9.
 - **R4.8** A step of the chain running (R1.1): block, `kirunak: S-n is running; the compaction waits for the step
   boundary`. The reason reaches nobody: a block of an automatic compaction shows nothing and costs no tokens.
 - **R4.9** Otherwise, a boundary: allow, record `expect`.
@@ -414,7 +416,7 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   model it is the same session and to go on from progress.md's last line without starting a step or asking the owner
   again. The entries run in parallel in any order, so no part refers to another's place.
 - **R5.2** Only the main session's compaction gets the parts: PreCompact records `expect: { at, why, ctx }` in
-  `compact/<session>.json` on every allow it attributes to the main (R4.2, R4.6, R4.9); SessionStart adds the parts
+  `compact/<session>.json` on every allow it attributes to the main (R4.2, R4.6, R4.7a, R4.9); SessionStart adds the parts
   when `expect` is under 180 s old, else when the main transcript's tail holds a compaction boundary newer than its
   last assistant entry and under 180 s old, else nothing. `expect` is consumed. The state part records the boundary's
   time as `fire.boundaryAt`; the same boundary seen again (an agent compacting within 180 s of a `/compact` or an idle

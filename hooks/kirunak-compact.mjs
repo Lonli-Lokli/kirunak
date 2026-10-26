@@ -5,17 +5,18 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  attribute, decide, expectPath, isId, lastUsage, limitOf, logLine, readJson, taskDir, thresholdOf, updateRecord, userWindow,
-  windowOf, windowSetting,
+  attribute, decide, expectPath, idleOf, isId, lastUsage, limitOf, logLine, readJson, taskDir, thresholdOf, updateRecord,
+  userWindow, windowOf, windowSetting,
 } from './compact-rules.mjs';
 
-// The PreCompact hook (design/orchestrator.md §5). In a session started in a workspace repo whose
-// own .claude/settings.local.json sets kirunak's handover window, it blocks an automatic compaction while a step the
+// The PreCompact hook (design/orchestrator.md §5). In a session started in a workspace repo whose own
+// .claude/settings.local.json sets kirunak's handover window, it blocks an automatic compaction while a step the
 // session started is running, and lets it through at the next step boundary (AC-1, AC-4), past the mid-step limit
-// (E-1, E-8), for a manual /compact (E-4), for an agent's fire as far as the hook can tell one (E-6, R3.3), and
-// whenever it cannot read kirunak's state (E-7). Outside the workspace's repos it never blocks (E-10). It exits at
-// once in a k run step (E-6, O-1). A block shows nothing and costs no tokens; every decision is one line of
-// compact.log, and each allow it gives the main session records `expect` for SessionStart (R5.2).
+// (E-1, E-8), for a manual /compact (E-4), for an idle compaction in a session with no task (R4.7a), for an agent's
+// fire as far as the hook can tell one (E-6, R3.3), and whenever it cannot read kirunak's state (E-7). Outside the
+// workspace's repos it never blocks (E-10). It exits at once in a k run step (E-6, O-1). A block shows nothing and
+// costs no tokens; every decision is one line of compact.log, and each allow it gives the main session records
+// `expect` for SessionStart (R5.2).
 //
 // It imports nothing but node: modules, lib/home.mjs and its rules; lib/steps.mjs, for the running steps, is loaded
 // only when the table reaches R4.8, so no other fire pays for it. SessionStart (`--part <name>`) loads
@@ -95,7 +96,7 @@ export function factsOf(input, home, env = process.env, now = new Date()) {
   const running = async () => (seen.running = await stepsRunning(config(), session(), id));
   const facts = {
     trigger: input.trigger, config, session: id, window, ctx: () => usage()?.ctx ?? null, attribution, limit,
-    task: () => session()?.task ?? null, running,
+    task: () => session()?.task ?? null, idle: () => idleOf(turn(), now.getTime()), running,
   };
   return { facts, seen };
 }
