@@ -106,7 +106,11 @@ owner asks: Start intake in `/k-drafts`, or the owner naming it. Run step 1's co
 move staged in git, and the task takes its title. Read `draft.md` as background, never a source: nothing in it is a
 ruling, and the owner's words quoted there are still asked. Its questions come among the first, after the goal, each
 through `k intake question`. Every line of the task is still asked and sourced from the owner's answer;
-`[from kirunak/tasks/<slug>/draft.md]` may sit beside that source, never alone.
+`[from kirunak/tasks/<slug>/draft.md]` may sit beside that source, never alone. **A bug** (`bug-of: <task>`, an
+accepted task; refused, nothing moved, if not) has in `notes.md` the task's Edge cases, Out of scope and Aspects
+lines as they stand. After the goal, propose together those that still apply, in one question naming their ids: a
+yes keeps each under this task's next number, `[owner <date> Q-n] [from <repo>/<slug> <id>]`, an aspect naming this
+task's ids; anything else is a no, each asked alone. Then only what is new: the bug, its criteria.
 
 ## After approval
 
