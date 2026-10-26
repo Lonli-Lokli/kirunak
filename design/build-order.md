@@ -325,8 +325,9 @@ draft with `bug-of`, no new kind of file.
   draft's unchanged); the mod's `drafts.test.ts` (the list, the whole view, Drop by id, no command for bugs).
 - Numbers: `npm test` 664 tests, 662 pass, 2 skipped (the timing tests, run with `KIRUNAK_TIMING=1`);
   `claude plugin test` 139 of 139.
-- Not yet measured: a bug in `/k-drafts` from the phone, and the two bugs of katyafm/music-variety written as drafts
-  (S-5), once the branch merges and the mod runs it from the main checkout.
+- Measured on master: the two bugs of katyafm/music-variety written as drafts, `k draft check` passing on both, `k
+  drafts` and `k board --brief` naming each a bug of katyafm/music-variety (gulnya/kirunak-spikes S-5). Not yet
+  measured: a bug in `/k-drafts` from the phone.
 
 ## Slice 7, later and not detailed here: R17, R18
 

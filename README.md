@@ -21,7 +21,8 @@ is done.
   its shape, `k draft drop <id> --why "..."` removes it with the reason in the commit, and `k drafts` lists them. A
   draft is not a task and nothing in it is a ruling. Start the intake from one (`/k-drafts`, or `k intake start <id>
   --from kirunak/drafts/<slug>.md`): it moves into the task's folder as background and the intake asks every line
-  again.
+  again. A bug found in a task already accepted is a draft too, `k draft new <id> --title "..." --bug-of <task>`: the
+  task stays closed, the draft may name a fix written already, and it shows among the drafts as bug of <task>.
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
