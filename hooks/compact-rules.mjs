@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 // the threshold and the mid-step limit, whose compaction a fire is, and the rule table. It imports nothing but node:
 // modules, because it runs in a hook before a request.
 
-// ---- The constants (design, the table above §1) ----
+// ---- The constants (orchestrator.md §5, the handover's numbers) ----
 
 // Claude Code compacts at window − min(max output, 20,000) − 13,000; every model on the ladder has max
 // output ≥ 20,000.
@@ -164,7 +164,7 @@ export function projectRoot(cwd, { homeDir = homedir(), mode = PROJECT_ROOT } = 
 
 // The window one settings file sets for `model`: its `modelSettings.<model>.autoCompactWindow` (a number) beats its
 // top-level `autoCompactWindow`. `model` may be a function, called only when the file has modelSettings, so
-// the transcript is read for it only then (§4's reading order).
+// the transcript is read for it only then (R4's reading order).
 function windowIn(x, model) {
   if (!x) return null;
   if (x.modelSettings && typeof x.modelSettings === 'object') {
@@ -231,7 +231,7 @@ export function attribute({ turn, ctx, T, agents = [], now = Date.now() }) {
   return { main: true, row: turn ? 5 : 1, why: null };
 }
 
-// ---- The rule table (§4) ----
+// ---- The rule table (R4) ----
 
 const allow = (row, why, expect = false) => ({ decision: 'allow', row, why, expect });
 const block = (row, why, reason) => ({ decision: 'block', row, why, reason, expect: false });
@@ -271,12 +271,12 @@ export async function decide(f) {
   return allow('R4.9', 'boundary', true);
 }
 
-// ---- The records (§4 the log, R5.2) ----
+// ---- The records (R4's log, R5.2) ----
 
 export const logPath = (home) => join(home, 'compact.log');
 export const expectPath = (home, session) => (isId(session) ? join(home, 'compact', `${session}.json`) : null);
 
-// One line of compact.log (§4: S-8 reads it, S-9 counts its `why`); a record, never a reason to fail.
+// One line of compact.log (R4's log, which the usage review counts by `why`); a record, never a reason to fail.
 export function logLine(home, line) {
   try {
     mkdirSync(home, { recursive: true });

@@ -20,7 +20,7 @@ import {
 // It imports nothing but node: modules, lib/home.mjs and its rules; lib/steps.mjs, for the running steps, is loaded
 // only when the table reaches R4.8, so no other fire pays for it. SessionStart (`--part <name>`) loads
 // hooks/compact-start.mjs, which puts the task back after a compaction or /clear (R5.1-R5.5), and SessionEnd
-// hooks/compact-clear.mjs, which hands a cleared session's task to the next id (R5.3). Not wired by k install yet.
+// hooks/compact-clear.mjs, which hands a cleared session's task to the next id (R5.3). k install wires it (R8.1).
 
 // A file read once per run: the user's settings file is read for the window (R2.5) and again for the limit (R4.6).
 function cachedReader() {
@@ -45,7 +45,7 @@ const lazily = (seen) => (key, fn) => {
   };
 };
 
-// The running agents of the session's records (§6: `agents` with no `ended`), each with its own transcript's context
+// The running agents of the session's records (R6: `agents` with no `ended`), each with its own transcript's context
 // (R3.2), for attribution row 2.
 function runningAgents(record, input) {
   const agents = record?.agents && typeof record.agents === 'object' ? record.agents : {};
@@ -69,7 +69,7 @@ async function stepsRunning(config, session, id) {
   return runningBy(text, [id, ...(Array.isArray(session.previous) ? session.previous : [])], dir);
 }
 
-// The facts of §4's table, each read when its row is reached, in the order the design names: config, the settings
+// The facts of R4's table, each read when its row is reached, in the order the design names: config, the settings
 // files, the transcript tail, the sessions file and the escalation record, progress.md, the agents' transcripts.
 export function factsOf(input, home, env = process.env, now = new Date()) {
   const seen = {};
@@ -100,7 +100,7 @@ export function factsOf(input, home, env = process.env, now = new Date()) {
   return { facts, seen };
 }
 
-// compact.log's line (§4): what this fire read, null for what it did not need.
+// compact.log's line (R4): what this fire read, null for what it did not need.
 const lineOf = (input, seen, out, now) => ({
   ts: now.toISOString(), session: input.session_id ?? null, cwd: input.cwd ?? null, trigger: input.trigger ?? null,
   ctx: seen.usage?.ctx ?? null, model: seen.model ?? null,
