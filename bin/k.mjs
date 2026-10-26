@@ -28,6 +28,7 @@ import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
 import * as keeper from '../lib/keeper.mjs';
+import * as worktrees from '../lib/worktrees.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
@@ -56,12 +57,15 @@ Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --
 Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
           k keeper report: keep-alives, misses, hits and skips per task and per week
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
-          k accept <id> [--checklist-open "<why>"] | k hold <id> --why "..." | k resume <id>
+          k accept <id> [--checklist-open "<why>"]: then removes the merged worktrees, printing each removed and kept
+          k hold <id> --why "..." | k resume <id>
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
           k board --brief: a line per task and per draft, for the phone; k board --card <id>: one task's or draft's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
+          k worktrees [--closing <id>]: the worktrees an acceptance would remove (what each holds besides build
+            output) and keep, with why; it removes nothing
           k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept, drafts) and what
             each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
@@ -403,7 +407,20 @@ const VERBS = {
       taskCost = { error: e.message };
     }
     const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: taskCost });
-    return { ...r, text: `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}` };
+    // Once the acceptance is committed, the merged worktrees go (approval.md §5); nothing there undoes or fails it.
+    const w = await worktrees.worktrees({ ws, closing: id, remove: true });
+    const text = `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}`;
+    return { ...r, worktrees: w, text: [text, ...worktrees.lines(w)].join('\n') };
+  },
+
+  // `k worktrees [--closing <id>]`: what an acceptance would remove now and keep, with what each worktree that would
+  // go holds besides build output (k-done shows it before asking for the acceptance); it removes nothing.
+  async worktrees({ ws, flags }) {
+    const closing = flags.closing ?? null;
+    if (closing && !existsSync(taskPaths(ws, closing).task)) throw refuse(`unknown task ${closing}`);
+    const w = await worktrees.worktrees({ ws, closing, sizes: true });
+    const out = worktrees.lines(w, { dry: true });
+    return { ...w, text: out.length ? out.join('\n') : 'no worktrees besides the main checkouts' };
   },
 
   async hold({ ws, pos, flags }) {
