@@ -1,4 +1,7 @@
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
+import {
+  appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -281,4 +284,170 @@ export function logLine(home, line) {
   } catch {
     // the same
   }
+}
+
+// A record written whole and renamed, so a reader never sees half of it; false when it could not be written.
+export function saveJson(path, value) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(value) + '\n');
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The folder of a task `<repo>/<slug>` in the workspace's config.json `repos`; null when it cannot be found.
+export function taskDir(config, task) {
+  const [repo, slug, extra] = typeof task === 'string' ? task.split('/') : [];
+  const root = config?.repos?.[repo];
+  if (typeof root !== 'string' || !slug || extra !== undefined || !/^[A-Za-z0-9._-]+$/.test(slug)) return null;
+  const dir = join(root, 'kirunak', 'tasks', slug);
+  return existsSync(dir) ? dir : null;
+}
+
+// ---- After a compaction and after /clear: the task put back (R5.1-R5.5) ----
+
+// SessionStart `compact` puts the task back when the PreCompact hook's `expect` is this recent, or the main
+// transcript's compact_boundary entry is (R5.2).
+export const EXPECT_S = 180;
+// SessionStart `clear` joins the old id when SessionEnd wrote cleared.json this recently (R5.3).
+export const CLEAR_S = 120;
+// The four entries of one SessionStart run in parallel: the `state` part decides, records it and consumes `expect`
+// or cleared.json; the other three take a decision this recent as theirs (the entries' timeout).
+export const PARTS_S = 20;
+// compact/*.json untouched this long are removed (R5.5).
+export const PRUNE_DAYS = 14;
+export const PARTS = ['state', 'task', 'plan', 'progress'];
+
+const thousands = (x) => x.toLocaleString('en-US');
+
+// A part's first line (R5.1): which of the four, after what. No part refers to another's place, since their order
+// varies from run to run (hooks.md: the hooks of one event run in parallel).
+export const labelOf = (name, source) =>
+  `kirunak, after ${source === 'clear' ? '/clear' : 'a compaction'} (part ${PARTS.indexOf(name) + 1} of 4): ${name}`;
+
+// `text` whole when it fits in `cap`, else cut at a line end and closed by the line naming the whole of it, all
+// within `cap`: a string over 10,000 characters would be filed and only its first 2 KB shown (hooks.md).
+export function cut(text, cap = CAP, whole = null) {
+  if (text.length <= cap) return text;
+  const last = `… cut at ${thousands(cap)} characters; the whole file: ${whole ?? 'none'}`;
+  const room = cap - last.length;
+  if (room < 2) return last.slice(0, cap);
+  const at = text.lastIndexOf('\n', room - 1);
+  return `${at > 0 ? text.slice(0, at + 1) : `${text.slice(0, room - 1)}\n`}${last}`;
+}
+
+// The end of `text` within `cap`, from a line start, after a first line naming the whole file (R5.1's progress part).
+export function lastOf(text, cap = CAP, whole = null) {
+  if (text.length <= cap) return text;
+  const first = `… cut at ${thousands(cap)} characters, its last lines kept; the whole file: ${whole ?? 'none'}\n`;
+  const from = text.length - (cap - first.length);
+  const at = text.indexOf('\n', from - 1);
+  return first + text.slice(at < 0 || at + 1 >= text.length ? from : at + 1);
+}
+
+// plan.md as its header (everything before the first `### `) and its `### <id>` blocks.
+export function planBlocks(text) {
+  const starts = [...text.matchAll(/^### /gm)].map((m) => m.index);
+  const blocks = starts.map((s, i) => {
+    const body = text.slice(s, starts[i + 1] ?? text.length);
+    return { id: /^### (\S+)/.exec(body)[1], text: body };
+  });
+  return { header: text.slice(0, starts[0] ?? text.length), blocks };
+}
+
+// The steps a session can go on with: started (running, or paused on a heavy job or the owner's answer) or ready.
+const OPEN = new Set(['running', 'waiting-heavy', 'waiting-owner', 'ready']);
+
+// R5.1's plan part: the header and the blocks of the steps not finished; over `cap`, the header and the blocks of the
+// running and ready steps alone, cut when still over. `states`: a Map of step id → its state (lib/steps.mjs
+// stepStates' { state } or the word). A last line names the blocks left out.
+export function planFor(text, states, whole = null, cap = CAP) {
+  const { header, blocks } = planBlocks(text.endsWith('\n') || !text ? text : `${text}\n`);
+  const stateOf = (id) => {
+    const v = states?.get?.(id);
+    return typeof v === 'string' ? v : v?.state ?? null;
+  };
+  const pick = (keep) => {
+    const out = blocks.filter((b) => !keep(b)).map((b) => b.id);
+    return {
+      body: header + blocks.filter(keep).map((b) => b.text).join(''),
+      note: out.length ? `… left out, the blocks of ${out.join(', ')}; the whole file: ${whole ?? 'none'}` : '',
+    };
+  };
+  let { body, note } = pick((b) => stateOf(b.id) !== 'done');
+  if (body.length + note.length > cap) ({ body, note } = pick((b) => OPEN.has(stateOf(b.id))));
+  if (!note) return cut(body, cap, whole);
+  return body.length + note.length <= cap ? body + note : `${cut(body, cap - note.length - 1, whole)}\n${note}`;
+}
+
+// R5.2: a compact_boundary entry of the main thread after the transcript's last assistant entry and no older than
+// `since` (ms): the main session compacted, though no PreCompact allow recorded `expect`.
+export function boundaryIn(text, since) {
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.includes('"compact_boundary"') && !line.includes('"assistant"')) continue;
+    let x;
+    try {
+      x = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!x || x.isSidechain === true) continue;
+    if (x.type === 'assistant') return false;
+    if (x.type === 'system' && x.subtype === 'compact_boundary') return Date.parse(x.timestamp) >= since;
+  }
+  return false;
+}
+
+export const boundarySeen = (path, now = Date.now()) =>
+  typeof path === 'string' && !!path && boundaryIn(tail(path, FIRST_READ), now - EXPECT_S * 1000);
+
+// The task's lines of `k waiting --json`: its steps stopped for the owner (each notice's lines), and its rows to
+// approve, amendments to approve and the accept row, each with what k would say of it.
+export function waitingLines(w, task) {
+  if (!w || typeof w !== 'object') return [];
+  const mine = (rows) => (Array.isArray(rows) ? rows.filter((x) => x?.id === task) : []);
+  const verdict = (why, verb) => (why ? `not yet: ${String(why).split('\n')[0]}` : `can ${verb}`);
+  return [
+    ...mine(w.stopped).flatMap((x) => (Array.isArray(x.lines) ? x.lines.map(String) : [])),
+    ...mine(w.approve).map((x) => `to approve: ${verdict(x.why, 'approve')}`),
+    ...mine(w.amendments).map((x) => `amendment ${x.amendment}${x.name ? `: ${x.name}` : ''}, ${verdict(x.refuse, 'approve')}`),
+    ...mine(w.accept).map((x) => `to accept: ${verdict(x.why, 'accept')}`),
+  ];
+}
+
+const indented = (lines, none) => (lines.length ? lines.map((l) => `  ${l}`) : [`  ${none}`]);
+
+// R5.1's state part, from what the hook gathered: three sentences, the task, the running steps of the session's chain
+// with their starts, `k status --session` as it printed, the task's lines of k waiting, the running agents and the
+// background shell tasks of the last Stop. `status` and `waiting` are a text and lines, or an Error-like { failed }.
+export function stateText(f) {
+  const after = f.source === 'clear' ? `after /clear (it was session ${f.from})` : 'after a compaction';
+  const agents = (f.agents ?? []).map((a) =>
+    `${a.description ?? 'no name'}: ${a.type ?? 'agent'}, id ${a.id}, launched ${a.at ?? 'at an unknown time'}${a.by ? `, by ${a.by}` : ''}; output ${a.outputFile ?? 'none'}`);
+  const shells = (f.shells?.list ?? []).map((x) => `${x.id ?? 'no id'} ${x.status ?? 'unknown'}: ${x.command ?? x.description ?? ''}`);
+  const lines = [
+    `This is the same session, ${after}, still on ${f.task}.`,
+    `The parts task, plan and progress hold its task.md, plan.md and progress.md as they are now, and this part kirunak's state: they replace re-reading those files.`,
+    `Go on from progress.md's last line: start no step again, and ask the owner nothing already answered.`,
+    '',
+    `task: ${f.task}${f.title ? `: ${f.title}` : ''}`,
+    `folder: ${f.dir}`,
+    `session: ${f.session}${f.chain?.length ? `, earlier ids ${f.chain.join(', ')}` : ''}`,
+    `running steps of this session: ${f.running?.length ? f.running.map((r) => `${r.step} (started ${r.since ?? 'at an unknown time'})`).join(', ') : 'none, a step boundary'}`,
+    `k status --session ${f.session}:`,
+    ...indented(f.status?.failed ? [`k status failed: ${f.status.failed}`] : String(f.status ?? '').split('\n').filter(Boolean), 'nothing printed'),
+    'k waiting, the lines of this task:',
+    ...indented(f.waiting?.failed ? [`k waiting failed: ${f.waiting.failed}`] : f.waiting ?? [], 'none'),
+    'running agents:',
+    ...indented(agents, 'none'),
+    `background shell tasks at the last Stop${f.shells?.at ? ` (${f.shells.at})` : ''}:`,
+    ...indented(shells, 'none'),
+  ];
+  return cut(lines.join('\n'), CAP, `the records under ${f.home}`);
 }
