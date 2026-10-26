@@ -7,17 +7,22 @@ import type { Screen } from './owner'
 // written; the one picked shows whole, from its file, with Start intake and Drop. Drop takes the reason typed in the
 // free-text row, then "Drop <id>" runs `k draft drop <id> --why` by id, so a draft gone since ends in k's refusal,
 // never on another. Start intake runs no verb: it ends the dialog, and the command hands the draft to the model in a
-// prompt of its own (intakePrompt).
+// prompt of its own (intakePrompt). A bug, a draft that names the accepted task it was found in, shows here among
+// the drafts, its list line and its head saying bug of <task>; it has no command of its own (kirunak-spikes AC-6,
+// O-2).
 
-// A draft as `k drafts --json` gives it: `written` null when its date is missing or no date, `path` absolute.
-export type DraftRow = { id: string; repo: string; slug: string; title: string; written: string | null; path: string }
+// A draft as `k drafts --json` gives it: `written` null when its date is missing or no date, `bugOf` the task a bug
+// was found in and null for a plain draft, `path` absolute.
+export type DraftRow = { id: string; repo: string; slug: string; title: string; written: string | null; bugOf: string | null; path: string }
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 const writtenOf = (d: DraftRow): string => (d.written ? `written ${d.written}` : 'no date written')
+// What follows the title: the date written, after "bug of <task>" on a bug's, in k board's order (kirunak-spikes D-2).
+const tailOf = (d: DraftRow): string => (d.bugOf ? `bug of ${oneLine(d.bugOf)}, ${writtenOf(d)}` : writtenOf(d))
 
-// A draft as the list names it: its id, title and the date written.
-export const draftItem = (d: DraftRow): Item => ({ lead: '', name: d.id, text: `: ${oneLine(d.title)}, ${writtenOf(d)}` })
+// A draft as the list names it: its id, title and the date written, a bug's with its task before the date.
+export const draftItem = (d: DraftRow): Item => ({ lead: '', name: d.id, text: `: ${oneLine(d.title)}, ${tailOf(d)}` })
 
 // `/k-drafts` when there is none, or when the dialog ran nothing: the drafts as a numbered list.
 export function draftsText(rows: readonly DraftRow[]): string {
@@ -26,8 +31,8 @@ export function draftsText(rows: readonly DraftRow[]): string {
   return [head, '', ...numbered(rows.map(draftItem)), '', '/k-drafts shows one whole, to start its intake or drop it.'].join('\n')
 }
 
-// The draft's head: its id and title, and the date written.
-const headLines = (d: DraftRow): string[] => [`${d.id}: ${sentence(oneLine(d.title))}`, `${sentence(writtenOf(d)).replace(/^./, c => c.toUpperCase())}`]
+// The draft's head: its id and title, and the date written, a bug's after "Bug of <task>".
+const headLines = (d: DraftRow): string[] => [`${d.id}: ${sentence(oneLine(d.title))}`, `${sentence(tailOf(d)).replace(/^./, c => c.toUpperCase())}`]
 
 // The draft whole, for the dialog's text: its head, then its file as written below the front matter (which the head
 // says), blank lines at either end left out; `file` null when it could not be read, which the text says.
