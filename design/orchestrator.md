@@ -412,7 +412,9 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 - **R5.2** Only the main session's compaction gets the parts: PreCompact records `expect: { at, why, ctx }` in
   `compact/<session>.json` on every allow it attributes to the main (R4.2, R4.6, R4.9); SessionStart adds the parts
   when `expect` is under 180 s old, else when the main transcript's tail holds a compaction boundary newer than its
-  last assistant entry and under 180 s old, else nothing. `expect` is consumed.
+  last assistant entry and under 180 s old, else nothing. `expect` is consumed. The state part records the boundary's
+  time as `fire.boundaryAt`; the same boundary seen again (an agent compacting within 180 s of a `/compact` or an idle
+  compaction, with no request between) is `boundary already put back`, and gets nothing.
 - **R5.3** After `/clear`: SessionEnd (`clear`, `timeout: 5`) under the old id writes `compact/cleared.json` when its
   sessions file holds a task, and removes it otherwise (after a task is done nothing is put back); SessionStart
   `clear` under the new id, within 120 s and from the same folder, writes `sessions/<new>.json` with the task and the

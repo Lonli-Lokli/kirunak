@@ -74,11 +74,11 @@ test('labelOf, waitingLines (only the task\'s rows, each with what k says) and b
   const since = Date.parse('2026-01-05T11:57:00.000Z');
   const mark = (at, extra = {}) => JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: at, content: 'Conversation compacted', ...extra });
   const reply = JSON.stringify({ type: 'assistant', message: { model: 'm', usage: { input_tokens: 1 } } });
-  assert.equal(boundaryIn(`cut line\n${reply}\n${mark('2026-01-05T11:59:00.000Z')}\n`, since), true);
-  assert.equal(boundaryIn(`${mark('2026-01-05T11:59:00.000Z')}\n${reply}\n`, since), false);
-  assert.equal(boundaryIn(`${reply}\n${mark('2026-01-05T11:56:59.000Z')}\n`, since), false);
-  assert.equal(boundaryIn(`${reply}\n${mark('2026-01-05T11:59:00.000Z', { isSidechain: true })}\n`, since), false);
-  assert.equal(boundaryIn('', since), false);
+  assert.equal(boundaryIn(`cut line\n${reply}\n${mark('2026-01-05T11:59:00.000Z')}\n`, since), '2026-01-05T11:59:00.000Z', 'its time');
+  assert.equal(boundaryIn(`${mark('2026-01-05T11:59:00.000Z')}\n${reply}\n`, since), null);
+  assert.equal(boundaryIn(`${reply}\n${mark('2026-01-05T11:56:59.000Z')}\n`, since), null);
+  assert.equal(boundaryIn(`${reply}\n${mark('2026-01-05T11:59:00.000Z', { isSidechain: true })}\n`, since), null);
+  assert.equal(boundaryIn('', since), null);
 });
 
 test('stateText: three sentences, the task, the running steps, k\'s text or its failure, the agents and the shells', () => {
@@ -192,9 +192,9 @@ test('SessionStart compact after the PreCompact hook\'s allow: four labelled par
   assert.ok(state.endsWith('\n  b1 running: node heavy-lock.mjs run -- make test'));
   const rec = h.json('compact/s-main.json');
   assert.equal(rec.expect, undefined);
-  assert.deepEqual({ ...rec.fire, at: null }, { at: null, source: 'compact', put: true, why: 'expect boundary' });
+  assert.deepEqual({ ...rec.fire, at: null }, { at: null, source: 'compact', put: true, why: 'expect boundary', boundaryAt: null });
   const line = h.log().at(-1);
-  assert.deepEqual([line.event, line.put, line.why, line.boundary, line.chars], ['SessionStart', true, 'expect boundary', false, state.length]);
+  assert.deepEqual([line.event, line.put, line.why, line.boundary, line.chars], ['SessionStart', true, 'expect boundary', null, state.length]);
 });
 
 test('a manual /compact: the parts are put back, and a part run before the state part reads expect itself (E-4, R5.4)', () => {
@@ -218,9 +218,28 @@ test('an agent\'s compaction: no expect and no boundary, or an expect or boundar
   appendFileSync(old.transcript, mark(ago(EXPECT_S + 5)));
   assert.deepEqual(all(old), NONE);
   const seen = makeHome({ expect: null });
-  appendFileSync(seen.transcript, mark(ago(10)));
+  const at = ago(10);
+  appendFileSync(seen.transcript, mark(at));
   assert.ok(all(seen).every((t) => typeof t === 'string'));
-  assert.deepEqual([seen.log().at(-1).why, seen.log().at(-1).boundary], ['boundary seen', true]);
+  assert.deepEqual([seen.log().at(-1).why, seen.log().at(-1).boundary], ['boundary seen', at]);
+});
+
+test('one boundary is the main\'s once: a second state part on the same transcript tail, after expect or not, gives nothing (R5.2, E-6)', () => {
+  const mark = (at) => `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: at, content: 'Conversation compacted' })}\n`;
+  for (const expect of [null, 5]) {
+    const h = makeHome({ expect });
+    const at = ago(10);
+    appendFileSync(h.transcript, mark(at));
+    assert.ok(run(h, 'state'), `the main's, expect ${expect}`);
+    assert.equal(h.json('compact/s-main.json').fire.boundaryAt, at);
+    assert.equal(run(h, 'state'), null, 'an agent\'s compaction within 180 s of the main\'s');
+    assert.deepEqual([h.log().at(-1).put, h.log().at(-1).why], [false, 'boundary already put back']);
+    assert.deepEqual([run(h, 'task'), run(h, 'plan'), run(h, 'progress')], [null, null, null], 'the other parts take its decision');
+    writeJson(join(h.home, 'compact', 's-main.json'), { ...h.json('compact/s-main.json'), fire: { ...h.json('compact/s-main.json').fire, at: ago(30), put: true } });
+    assert.equal(run(h, 'task'), null, 'a part past PARTS_S compares the boundary itself');
+    appendFileSync(h.transcript, mark(ago(2)));
+    assert.ok(run(h, 'state'), 'a newer boundary is a new compaction');
+  }
 });
 
 test('nothing in a k run step, after startup, for an unknown part or unreadable input, a session with no task, a task folder gone (E-6, E-5)', () => {

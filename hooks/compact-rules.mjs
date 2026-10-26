@@ -387,8 +387,9 @@ export function planFor(text, states, whole = null, cap = CAP) {
   return body.length + note.length <= cap ? body + note : `${cut(body, cap - note.length - 1, whole)}\n${note}`;
 }
 
-// R5.2: a compact_boundary entry of the main thread after the transcript's last assistant entry and no older than
-// `since` (ms): the main session compacted, though no PreCompact allow recorded `expect`.
+// R5.2: the time of a compact_boundary entry of the main thread after the transcript's last assistant entry and no
+// older than `since` (ms), as the transcript writes it; null for none. The main session compacted, though no
+// PreCompact allow recorded `expect`; its time tells one boundary from the next.
 export function boundaryIn(text, since) {
   const lines = text.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -401,14 +402,14 @@ export function boundaryIn(text, since) {
       continue;
     }
     if (!x || x.isSidechain === true) continue;
-    if (x.type === 'assistant') return false;
-    if (x.type === 'system' && x.subtype === 'compact_boundary') return Date.parse(x.timestamp) >= since;
+    if (x.type === 'assistant') return null;
+    if (x.type === 'system' && x.subtype === 'compact_boundary') return Date.parse(x.timestamp) >= since ? x.timestamp : null;
   }
-  return false;
+  return null;
 }
 
 export const boundarySeen = (path, now = Date.now()) =>
-  typeof path === 'string' && !!path && boundaryIn(tail(path, FIRST_READ), now - EXPECT_S * 1000);
+  (typeof path === 'string' && path ? boundaryIn(tail(path, FIRST_READ), now - EXPECT_S * 1000) : null);
 
 // The task's lines of `k waiting --json`: its steps stopped for the owner (each notice's lines), and its rows to
 // approve, amendments to approve and the accept row, each with what k would say of it.

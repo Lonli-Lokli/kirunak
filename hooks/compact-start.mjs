@@ -22,19 +22,23 @@ const K_MS = 8_000;
 
 
 // R5.2, R5.4: the main session's compaction (an automatic or manual one the PreCompact hook let through, `expect`
-// recent; else the main transcript's own boundary) or an agent's, which gets nothing.
+// recent; else the main transcript's own boundary, once: the state part records its time as `fire.boundaryAt`, and
+// the same boundary seen again is an agent's compaction within EXPECT_S of the main's) or an agent's, which gets
+// nothing.
 function compactFire(home, input, part, now) {
   const path = expectPath(home, input.session_id);
   const rec = readJson(path) ?? {};
   const expect = within(rec.expect?.at, EXPECT_S, now) ? rec.expect : null;
   const fire = part !== 'state' && rec.fire?.source === 'compact' && within(rec.fire.at, PARTS_S, now) ? rec.fire : null;
   const boundary = part === 'state' || (!expect && !fire) ? boundarySeen(input.transcript_path, now.getTime()) : null;
-  const put = expect ? true : fire ? fire.put === true : boundary;
-  const why = expect ? `expect ${expect.why}` : fire ? fire.why : boundary ? 'boundary seen' : "not the main's";
+  const again = boundary != null && boundary === rec.fire?.boundaryAt;
+  const put = expect ? true : fire ? fire.put === true : boundary != null && !again;
+  const why = expect ? `expect ${expect.why}` : fire ? fire.why : again ? 'boundary already put back' : boundary ? 'boundary seen' : "not the main's";
   if (part === 'state') {
     const rest = { ...rec };
     delete rest.expect;
-    saveJson(path, { ...rest, fire: { at: now.toISOString(), source: 'compact', put, why } });
+    const boundaryAt = boundary ?? rec.fire?.boundaryAt ?? null;
+    saveJson(path, { ...rest, fire: { at: now.toISOString(), source: 'compact', put, why, boundaryAt } });
   }
   const s = readJson(sessionFile(home, input.session_id));
   return { put, why, boundary, task: taskOf(s), previous: Array.isArray(s?.previous) ? s.previous : [] };
