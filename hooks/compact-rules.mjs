@@ -1,6 +1,6 @@
 import {
-  appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync,
-  writeFileSync,
+  appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync,
+  statSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -299,6 +299,67 @@ export function saveJson(path, value) {
     return true;
   } catch {
     return false;
+  }
+}
+
+const LOCK_WAIT = 100;
+const LOCK_STEP = 2;
+const LOCK_STALE = 2000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// The advisory lock of `path`, the folder `<path>.lock`, as the escalation hook locks its state files (approval.md
+// §7): a lock older than 2 s is a crashed hook's and is taken over. → true when taken, false when it is not free within
+// about 100 ms.
+function lockOf(path) {
+  const lock = `${path}.lock`;
+  const until = Date.now() + LOCK_WAIT;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      return true;
+    } catch (e) {
+      if (e?.code === 'ENOENT') {
+        try {
+          mkdirSync(dirname(path), { recursive: true });
+          continue;
+        } catch {
+          return false;
+        }
+      }
+      if (e?.code !== 'EEXIST') return false;
+    }
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE) {
+        rmdirSync(lock);
+        continue;
+      }
+    } catch {
+      continue; // released between the two calls
+    }
+    if (Date.now() >= until) return false;
+    pause(LOCK_STEP);
+  }
+}
+
+// R6.6: compact/<session>.json has two writers that can run at once, the PreCompact hook (`expect`) and SessionStart's
+// state part (`fire`, `joined`), so each reads, changes and writes it under its lock. `change(record)` returns the
+// record to write, or null for none; it runs even when the lock is not free, and only its write is skipped (a record,
+// never a reason to hold a session). → what `change` returned, else the record as read.
+export function updateRecord(path, change) {
+  const locked = lockOf(path);
+  try {
+    const rec = readJson(path) ?? {};
+    const next = change(rec);
+    if (locked && next) saveJson(path, next);
+    return next ?? rec;
+  } finally {
+    if (locked) {
+      try {
+        rmdirSync(`${path}.lock`);
+      } catch {
+        // taken over as stale: nothing left to remove
+      }
+    }
   }
 }
 

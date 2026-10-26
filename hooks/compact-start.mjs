@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { clearFire, sessionFile, taskOf, within } from './compact-clear.mjs';
 import {
   boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, PARTS, PARTS_S, planFor, PRUNE_DAYS,
-  readJson, saveJson, stateText, taskDir, waitingLines,
+  readJson, stateText, taskDir, updateRecord, waitingLines,
 } from './compact-rules.mjs';
 
 // The task put back (design/orchestrator.md §5, R5.1-R5.5): SessionStart after `compact` and after `clear`, one entry
@@ -24,22 +24,29 @@ const K_MS = 8_000;
 // R5.2, R5.4: the main session's compaction (an automatic or manual one the PreCompact hook let through, `expect`
 // recent; else the main transcript's own boundary, once: the state part records its time as `fire.boundaryAt`, and
 // the same boundary seen again is an agent's compaction within EXPECT_S of the main's) or an agent's, which gets
-// nothing.
+// nothing. The state part decides and writes under the record's lock (R6.6).
 function compactFire(home, input, part, now) {
   const path = expectPath(home, input.session_id);
-  const rec = readJson(path) ?? {};
-  const expect = within(rec.expect?.at, EXPECT_S, now) ? rec.expect : null;
-  const fire = part !== 'state' && rec.fire?.source === 'compact' && within(rec.fire.at, PARTS_S, now) ? rec.fire : null;
-  const boundary = part === 'state' || (!expect && !fire) ? boundarySeen(input.transcript_path, now.getTime()) : null;
-  const again = boundary != null && boundary === rec.fire?.boundaryAt;
-  const put = expect ? true : fire ? fire.put === true : boundary != null && !again;
-  const why = expect ? `expect ${expect.why}` : fire ? fire.why : again ? 'boundary already put back' : boundary ? 'boundary seen' : "not the main's";
+  const decision = (rec) => {
+    const expect = within(rec.expect?.at, EXPECT_S, now) ? rec.expect : null;
+    const fire = part !== 'state' && rec.fire?.source === 'compact' && within(rec.fire.at, PARTS_S, now) ? rec.fire : null;
+    const boundary = part === 'state' || (!expect && !fire) ? boundarySeen(input.transcript_path, now.getTime()) : null;
+    const again = boundary != null && boundary === rec.fire?.boundaryAt;
+    const put = expect ? true : fire ? fire.put === true : boundary != null && !again;
+    const why = expect ? `expect ${expect.why}` : fire ? fire.why : again ? 'boundary already put back' : boundary ? 'boundary seen' : "not the main's";
+    return { put, why, boundary };
+  };
+  let d;
   if (part === 'state') {
-    const rest = { ...rec };
-    delete rest.expect;
-    const boundaryAt = boundary ?? rec.fire?.boundaryAt ?? null;
-    saveJson(path, { ...rest, fire: { at: now.toISOString(), source: 'compact', put, why, boundaryAt } });
-  }
+    updateRecord(path, (rec) => {
+      d = decision(rec);
+      const rest = { ...rec };
+      delete rest.expect;
+      const boundaryAt = d.boundary ?? rec.fire?.boundaryAt ?? null;
+      return { ...rest, fire: { at: now.toISOString(), source: 'compact', put: d.put, why: d.why, boundaryAt } };
+    });
+  } else d = decision(readJson(path) ?? {});
+  const { put, why, boundary } = d;
   const s = readJson(sessionFile(home, input.session_id));
   return { put, why, boundary, task: taskOf(s), previous: Array.isArray(s?.previous) ? s.previous : [] };
 }

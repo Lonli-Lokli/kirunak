@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
 import {
-  attribute, decide, expectPath, isId, lastUsage, limitOf, logLine, readJson, saveJson, taskDir, thresholdOf, userWindow,
+  attribute, decide, expectPath, isId, lastUsage, limitOf, logLine, readJson, taskDir, thresholdOf, updateRecord, userWindow,
   windowOf, windowSetting,
 } from './compact-rules.mjs';
 
@@ -109,10 +109,9 @@ const lineOf = (input, seen, out, now) => ({
   steps: seen.running ?? null, decision: out.decision, row: out.row, why: out.why,
 });
 
-// `expect` (R5.2) in compact/<session>.json, merged, written whole and renamed; a record, never a reason to fail.
+// `expect` (R5.2) in compact/<session>.json, merged under its lock (R6.6); a record, never a reason to fail.
 function recordExpect(home, session, expect) {
-  const path = expectPath(home, session);
-  saveJson(path, { ...readJson(path), expect });
+  updateRecord(expectPath(home, session), (rec) => ({ ...rec, expect }));
 }
 
 // `--part <name>` or `--part=<name>`: the SessionStart entry's part (R5.1).

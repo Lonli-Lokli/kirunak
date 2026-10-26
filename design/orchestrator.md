@@ -440,7 +440,10 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 - **R6.5** Stop's `background_tasks` is kept as `tasks: { at, list }`; an agent record older than the snapshot with
   no entry in it is marked ended by the snapshot. Its `shell` entries are the background shell tasks R5.1 lists.
 - **R6.6** One writer per file: the escalation hook writes `escalate/<session>.json`, the compact hook writes
-  `compact/` and `compact.log`, and `sessions/<id>.json` is written through `updateSession` only.
+  `compact/` and `compact.log`, and `sessions/<id>.json` is written through `updateSession` only. Inside the compact
+  hook, the PreCompact hook and SessionStart's state part can write `compact/<session>.json` at once, so each reads,
+  changes and writes it under its lock (`<file>.lock`, as the escalation hook's state files); a lock not free within
+  about 100 ms skips the write, never the decision.
 
 **R7 The workspace settings** (`plugins.md` §3, `compact`).
 - **R7.1** `compact: { enabled: true, handoverSize: 150000, midStepLimit: 'user', alsoIn: [] }`, merged as `hook` is;

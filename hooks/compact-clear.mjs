@@ -1,6 +1,6 @@
 import { existsSync, realpathSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { CLEAR_S, expectPath, isId, logLine, PARTS_S, readJson, saveJson } from './compact-rules.mjs';
+import { CLEAR_S, expectPath, isId, logLine, PARTS_S, readJson, saveJson, updateRecord } from './compact-rules.mjs';
 
 // /clear joined to the session it ended (design/orchestrator.md §5, R5.3): SessionEnd on `clear` under the old id
 // writes cleared.json, and SessionStart `clear` under the new id takes the old id's task and chain from it. After
@@ -64,7 +64,7 @@ export async function clearFire(home, input, part, now) {
   const previous = [...(Array.isArray(c.previous) ? c.previous.filter(isId) : []), c.from];
   if (part === 'state') {
     const { readSession, updateSession } = await import('../lib/keeper.mjs');
-    saveJson(path, { ...rec, joined: { at: now.toISOString(), from: c.from, task: c.task, previous } });
+    updateRecord(path, (r) => ({ ...r, joined: { at: now.toISOString(), from: c.from, task: c.task, previous } }));
     const patch = { task: c.task, step: c.step ?? null, since: c.since ?? null, previous };
     updateSession(home, id, patch);
     // The status line's tracker merges into the same file: a write it made from an older read is made good once.

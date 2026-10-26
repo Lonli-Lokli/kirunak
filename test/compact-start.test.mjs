@@ -323,6 +323,22 @@ test('SessionStart clear refuses cleared.json 121 s old or from another folder; 
   assert.equal(h.log().at(-1).why, 'joined, another parent process');
 });
 
+test('R6.6: the state part decides under the lock: with another writer holding it, the parts still come and nothing is written', () => {
+  const h = makeHome();
+  const lock = join(h.home, 'compact', 's-main.json.lock');
+  mkdirSync(lock);
+  assert.match(run(h, 'state'), /^kirunak, after a compaction \(part 1 of 4\): state\n/);
+  assert.deepEqual([h.json('compact/s-main.json').expect.why, h.json('compact/s-main.json').fire], ['boundary', undefined]);
+  rmSync(lock, { recursive: true });
+  assert.ok(run(h, 'state'));
+  assert.deepEqual([h.json('compact/s-main.json').expect, h.json('compact/s-main.json').fire.why], [undefined, 'expect boundary']);
+  run(h, null, { session_id: 's-main', transcript_path: h.transcript, cwd: h.app, hook_event_name: 'SessionEnd', reason: 'clear' });
+  const start = h.input({ session_id: 's-new', transcript_path: join(h.top, 'projects', 'p', 's-new.jsonl'), source: 'clear', model: undefined });
+  mkdirSync(join(h.home, 'compact', 's-new.json.lock'));
+  assert.ok(run(h, 'state', start), 'joined');
+  assert.equal(h.json('compact/s-new.json'), null, 'joined is written under the lock');
+});
+
 test('prune: the state part removes compact/*.json untouched for 14 days; newer ones and compact.log stay (R5.5)', () => {
   const h = makeHome();
   const aged = (path, days) => utimesSync(path, new Date(Date.now() - days * 86_400_000), new Date(Date.now() - days * 86_400_000));

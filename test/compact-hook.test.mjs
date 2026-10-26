@@ -1,12 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  attribute, decide, IDLE_MIN, LAG, lastUsage, limitOf, OVERSHOOT, projectRoot, SLACK, thresholdOf, userWindow, windowOf,
-  windowSetting,
+  attribute, decide, IDLE_MIN, LAG, lastUsage, limitOf, OVERSHOOT, projectRoot, SLACK, thresholdOf, updateRecord, userWindow,
+  windowOf, windowSetting,
 } from '../hooks/compact-rules.mjs';
 import { factsOf } from '../hooks/kirunak-compact.mjs';
 import { runningBy } from '../lib/steps.mjs';
@@ -364,6 +364,39 @@ test('R4.7: a session with no task in a workspace repo is held to the limit, as 
   const r = run(makeHome({ session: { step: null } }));
   assert.deepEqual(r.out, { decision: 'block', reason: 'kirunak: this session holds no task; the compaction waits for the mid-step limit' });
   assert.equal(run(makeHome({ session: null })).line.why, 'no task');
+});
+
+// ---- compact/<session>.json: one read, change and write at a time (R6.6) ----
+
+test('updateRecord: merged under the lock; nothing written for null; a held lock skips the write, a stale one is taken over', () => {
+  const path = join(makeRepos().top, 'home', 'compact', 's-main.json');
+  const lock = `${path}.lock`;
+  assert.deepEqual(updateRecord(path, (r) => ({ ...r, expect: { why: 'boundary' } })), { expect: { why: 'boundary' } });
+  assert.deepEqual(updateRecord(path, (r) => ({ ...r, fire: { put: true } })), { expect: { why: 'boundary' }, fire: { put: true } });
+  assert.equal(existsSync(lock), false, 'the lock released');
+  let seen = null;
+  assert.deepEqual(updateRecord(path, (r) => ((seen = r), null)), { expect: { why: 'boundary' }, fire: { put: true } });
+  assert.deepEqual(seen, JSON.parse(readFileSync(path, 'utf8')));
+  mkdirSync(lock);
+  const t0 = performance.now();
+  assert.deepEqual(updateRecord(path, () => ({ lost: true })), { lost: true }, 'the change still decides');
+  assert.ok(performance.now() - t0 < 1000);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).lost, undefined, 'another writer holds it: skipped');
+  assert.ok(existsSync(lock), 'another\'s lock is left');
+  utimesSync(lock, new Date(Date.now() - 3000), new Date(Date.now() - 3000));
+  updateRecord(path, (r) => ({ ...r, taken: true }));
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).taken, true, 'a crashed writer\'s lock taken over');
+  assert.equal(existsSync(lock), false);
+});
+
+test('R6.6: the PreCompact hook writes expect under the lock: with another writer holding it, the allow stands and the write waits', () => {
+  const h = makeHome({ progress: `${STARTED}2026-01-05 10:30 S-2 finished\n` });
+  mkdirSync(join(h.home, 'compact', 's-main.json.lock'), { recursive: true });
+  allowed(run(h), 'boundary');
+  assert.equal(h.expected(), null);
+  rmSync(join(h.home, 'compact', 's-main.json.lock'), { recursive: true });
+  run(h);
+  assert.equal(h.expected().why, 'boundary');
 });
 
 // ---- The numbers (§12): the hook's wall time ----
