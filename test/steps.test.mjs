@@ -151,6 +151,22 @@ test('k step fail refuses a stop\'s words, so a failure given by hand always cou
   assert.equal(steps.historyOf(progress(w), 'S-1').failures, 1);
 });
 
+test('a step\'s needs.json takes the name it keeps as its run ends: k step fail moves it and its report says so; k step finish moves it too', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const requests = () => readdirSync(join(w.p.dir, 'steps', 'S-1')).filter((f) => f.startsWith('needs')).sort();
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
+  put(w, 'steps/S-1/needs-1.json', '{}');
+  put(w, 'steps/S-1/needs.json', '{"owner":"Three days or a week?"}');
+  assert.equal(k(w.home, ['step', 'fail', w.id, 'S-1', '--why', 'the owner chose another way']).status, 0);
+  assert.deepEqual(requests(), ['needs-1.json', 'needs-2.json']);
+  assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8'), /\nIts needs\.json is now \S*steps\/S-1\/needs-2\.json\.\n$/);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
+  put(w, 'steps/S-1/needs.json', '{"owner":"Keep a week?"}');
+  for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
+  assert.equal(k(w.home, ['step', 'finish', w.id, 'S-1']).status, 0);
+  assert.deepEqual(requests(), ['needs-1.json', 'needs-2.json', 'needs-3.json']);
+});
+
 test('a step starts only on a task that may run: approved, queued, not on hold, a plan that passes', async () => {
   const w = await approvedWorkspace(PLAN.replace('covers: all\n', 'covers: E-1\n'));
   assert.match(k(w.home, ['step', 'start', w.id, 'S-1']).stderr, /cannot run a step:\n  plan\.md line 1: AC-3 is covered by no step/);

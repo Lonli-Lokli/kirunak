@@ -355,22 +355,29 @@ test('a runner that throws after the step started fails the step instead of leav
   assert.match(progress(w), /S-1 failed: kirunak stopped the step: no runner here\n$/);
 });
 
-// A start refused before the step runs, as in niva/themes-zoom-bests S-44 (gulnya/k-run-start-error-spins): S-2's
-// input is S-1's needs.json, which S-1's fresh attempt moves aside, so the plan's gate refuses S-1's start from then on.
-const NEEDS_INPUT = PLAN.replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task, evidence/S-1-cache-sizes.tsv, steps/S-1/needs.json');
+// A start refused before the step runs, as in niva/themes-zoom-bests S-44 (gulnya/k-run-start-error-spins): a file
+// S-2 names as an input is gone once k run has checked the plan (there, S-1's needs.json, which S-1's fresh attempt
+// moved aside; k plan check now refuses that input), so the plan's gate refuses S-1's start from then on.
+const GONE_INPUT = PLAN.replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task, evidence/S-1-cache-sizes.tsv, steps/S-1/answer.md');
+// run's own check of the plan is synchronous, before its first await: the input is gone just after it.
+const runWithoutInput = (w, opts) => {
+  put(w, 'steps/S-1/answer.md');
+  const r = run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, ...opts });
+  rmSync(join(w.p.dir, 'steps', 'S-1', 'answer.md'));
+  return r;
+};
 
 test('a start that ends in an error is tried again after a doubling wait, and the tenth stops k run for the owner, never spinning', async () => {
-  const w = await approvedWorkspace(NEEDS_INPUT);
-  put(w, 'steps/S-1/needs.json', '{}');
+  const w = await approvedWorkspace(GONE_INPUT);
   const calls = fakeRunner(w);
   const lines = [];
   const t0 = Date.now();
-  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  const r = await runWithoutInput(w, { out: (l) => lines.push(l) });
   assert.equal(lines.filter((l) => l.endsWith(' S-1 starts')).length, 10);
   // 20, 40, 80, 160, then 200 ms five times: the waits between the ten starts.
   assert.ok(Date.now() - t0 >= 1300, `ten starts in ${Date.now() - t0} ms`);
   assert.ok(lines.some((l) => l.endsWith('S-1 is tried again in 0 s (9 of 10 starts ended in an error)')));
-  assert.match(r.stopped, /^S-1 could not start 10 times in a row: .*S-2 input steps\/S-1\/needs\.json/);
+  assert.match(r.stopped, /^S-1 could not start 10 times in a row: .*S-2 input steps\/S-1\/answer\.md: no earlier step produces it/);
   assert.equal(pushes(lines).length, 1);
   assert.match(pushes(lines)[0], /S-1 could not start 10 times in a row\. why: .*once it is fixed: k run weather\/offline-forecast$/);
   assert.equal(calls.length, 0);
@@ -379,15 +386,14 @@ test('a start that ends in an error is tried again after a doubling wait, and th
 });
 
 test('a start whose fault is fixed while it waits for its next try goes on by itself', async () => {
-  const w = await approvedWorkspace(NEEDS_INPUT);
-  put(w, 'steps/S-1/needs.json', '{}');
+  const w = await approvedWorkspace(GONE_INPUT);
   fakeRunner(w);
   const lines = [];
   const out = (l) => {
     lines.push(l);
     if (l.endsWith('(2 of 10 starts ended in an error)')) writeFileSync(join(w.p.dir, 'plan.md'), PLAN);
   };
-  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out });
+  const r = await runWithoutInput(w, { out });
   assert.equal(lines.filter((l) => l.endsWith(' S-1 starts')).length, 3);
   assert.deepEqual(r.states, BOTH);
   assert.match(r.stopped, /^S-3 waits for the owner/);

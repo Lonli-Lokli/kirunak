@@ -106,6 +106,27 @@ test('an input no step produces fails; one a step produces or the repo has passe
   assert.deepEqual(problemsOf(w, PLAN.replace('inputs: task, docs/offline.md', 'inputs: task, steps/S-1/notes.txt')), []);
 });
 
+test('an input naming a step\'s needs.json fails, there or not, naming the needs-<k>.json it moved to; that one passes', async () => {
+  const w = await fixture();
+  const naming = (input) => PLAN.replace('inputs: task, diff, evidence/', `inputs: task, diff, evidence/, ${input}`);
+  const problem = (use) => `S-3 input steps/S-1/needs.json: a needs.json is S-1's request while its run goes on, and it moves to needs-<k>.json when that run ends; name ${use}, or notes.md, which holds the owner's answer`;
+  assert.deepEqual(problemsOf(w, naming('steps/S-1/needs.json')), [problem('the needs-<k>.json it moves to')]);
+  // A live request is refused as well: by the time S-3 starts, S-1's run has ended and the file has moved.
+  mkdirSync(join(w.p.dir, 'steps', 'S-1'), { recursive: true });
+  for (const f of ['needs-1.json', 'needs-2.json', 'needs.json']) writeFileSync(join(w.p.dir, 'steps', 'S-1', f), '{}');
+  assert.deepEqual(problemsOf(w, naming('steps/S-1/needs.json')), [problem('steps/S-1/needs-2.json')]);
+  assert.deepEqual(problemsOf(w, naming('steps/S-1/needs-2.json')), []);
+  // k plan check says so, and so does the gate of a task already running.
+  writeFileSync(join(w.p.dir, 'plan.md'), naming('steps/S-1/needs.json'));
+  const r = k(w.home, ['plan', 'check', ID]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /line 20: S-3 input steps\/S-1\/needs\.json: a needs\.json is S-1's request/);
+  const a = await approvedWorkspace(naming('steps/S-1/needs.json'));
+  const start = k(a.home, ['step', 'start', ID, 'S-1']);
+  assert.equal(start.status, 1);
+  assert.match(start.stderr, /cannot run a step:\n {2}plan\.md line 20: S-3 input steps\/S-1\/needs\.json/);
+});
+
 test('the grammar: a bad header, an unknown kind, effort or field, a needs no step has, a heavy step with no command', async () => {
   const w = await fixture();
   const bad = PLAN.replace('[agent, sonnet, high]', '[agnet, sonnet, hgih]')

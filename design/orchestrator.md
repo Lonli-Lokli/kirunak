@@ -46,7 +46,9 @@ outputs: review.md
   rewritten for a climb. A review step climbs the same way, always in build mode.
 - `covers:` names AC and E ids (or `all`). `k plan check <id>` refuses a plan that leaves an AC or E uncovered, names
   an id the task does not have, or has a step whose `inputs:` no earlier step produces and no file in the repo
-  matches (R8, R9), and a plan with no step of kind `review`, since `k accept` takes only a review (`review.md` §3).
+  matches (R8, R9) or name a step's `needs.json` (only a run still going has one, §2 `failed`; the check names the
+  `needs-<k>.json` to use, or `notes.md`, which holds the owner's answer), and a plan with no step of kind `review`,
+  since `k accept` takes only a review (`review.md` §3).
   Every step start runs the same check (`k step start`, `k run`), so a task already running whose plan has no review
   step is refused at its next step, naming the problem, and `k list` shows it blocked (`task-files.md` §4). `task` and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the
   task's base commit to HEAD, written by `k step start` into `steps/<step>/diff.patch`).
@@ -103,9 +105,13 @@ pending  →  ready  →  running  →  done
   `opus` at high effort in build mode, then `fable` at high effort in design mode, one attempt on each rung above the
   lowest. A step's own model is the lowest rung's in effect: it gets two attempts, the second with a fresh
   conversation and the failure's report as an extra input. A `needs.json` the failed run left is moved to
-  `steps/S-n/needs-<k>.json` first (one index for every request, answered or not), and the report names it, so the
-  retry never reads it. After the second failure `k run` goes on by itself: the next pass hands the step to the next
-  rung, which runs it as a fresh conversation with every failure report of the step as input.
+  `steps/S-n/needs-<k>.json` as the run ends (one index for every request, answered or not), and the report names
+  it, so the retry never reads it. `k step fail` and `k step finish` move it the same way, and a resume as its claude
+  starts, so `needs.json` is only ever the request of a run still going and the name it moves to never changes after:
+  a plan input names that one. (A plan line naming S-44's `needs.json` refused every start of niva/themes-zoom-bests
+  once its fresh attempt had moved the file; gulnya/k-run-start-error-spins.) After the second failure `k run` goes
+  on by itself: the next pass hands the step to the next rung, which runs it as a fresh conversation with every
+  failure report of the step as input.
   - **A rung's mode** says who builds. In `build` mode the rung's model does the step. In `design` mode it runs a
     design conversation first, whose one output is `steps/S-n/design-<k>.md` (brief: `steps/S-n/design-brief.md`,
     from `templates/design-brief.md`, design only, no agents, no heavy job), and then a fresh run of the rung directly
