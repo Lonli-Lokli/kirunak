@@ -2,7 +2,7 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import type { AmendmentRow } from '../hooks/waiting'
+import type { AmendmentRow, Waiting } from '../hooks/waiting'
 
 import { AMENDMENTS, briefOf, HELD, ID, QUEUE, WAITING, world } from './world'
 
@@ -15,6 +15,21 @@ const verbs = (runs: string[][]) => runs.map(argv => argv.slice(2))
 
 // Seven proposed tasks, the second refused: three pages of the dialog.
 const SEVEN = { ...WAITING, approve: [1, 2, 3, 4, 5, 6, 7].map(n => ({ id: `hub/t${n}`, title: `Task ${n}`, why: n === 2 ? 'hub/t2: task.md fails k check: AC-1 has no source' : null })) }
+
+// A task commits after its review block (kirunak-accept-shared-repo AC-6): k accept's refusal, and its row as k waiting
+// gives it.
+const CHANGED = `its work changed after review.md's head abc1234, in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):`
+const FILES = ['src/cache.ts  d4e5f60  weather/other-task', 'src/new.ts  0a1b2c3  no task']
+const BLOCKED = {
+  id: ID,
+  title: 'The last forecast stays readable offline',
+  state: 'reviewed',
+  review: { file: 'review.md', verdict: 'met' },
+  why: [`${ID}: ${CHANGED}`, ...FILES.map(l => `  ${l}`)].join('\n'),
+  blocking: [{ path: 'src/cache.ts', commit: 'd4e5f60', task: 'weather/other-task' }, { path: 'src/new.ts', commit: '0a1b2c3', task: 'no task' }],
+  checklistOpen: 0,
+  onlyChecklist: false,
+}
 
 describe('picking by touch', () => {
   test('/k-approve: the list as numbered lines and the ids as choices, then the task in its own words above "Approve <id>", which runs k approve by id', async ($, on) => {
@@ -139,6 +154,33 @@ describe('picking by touch', () => {
       ['accept', 'weather/was-reviewed', '--via', 'mod'],
       ['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod'],
     ])
+  })
+
+  test('/k-accept: under a task commits after its review block, each file, its commit and its task, in the dialog\'s list and the list after it; picked, or typed and refused, every line of the refusal (kirunak-accept-shared-repo E-2)', async ($, on) => {
+    const accept = [WAITING.accept[0], BLOCKED] as Waiting['accept']
+    const w = world(on, { waiting: [{ ...WAITING, accept }], taps: [ID, 'Back', SKIP], verb: { exitCode: 1, stdout: '', stderr: `k: ${BLOCKED.why}\n` } })
+    const skipped = await run($, 'k-accept', '', { kind: 'bridge' })
+    const list = { header: 'Accept', question: ['Waiting for you to accept:', '1. weather/was-reviewed: reviewed', `2. ${ID}: reviewed`, ...FILES.map(l => `   ${l}`), 'Which task?'].join('\n'), labels: ['weather/was-reviewed', ID] }
+    expect(w.asked[0]).toEqual(list)
+    expect(w.asked[1]).toEqual({
+      header: 'Accept',
+      question: [`${ID}: The last forecast stays readable offline.`, 'State: reviewed.', 'Review: review.md, met.', 'Not yet:', CHANGED, ...FILES, 'k would refuse it now. Back to the list?'].join('\n'),
+      labels: ['Cancel', 'Back'],
+    })
+    expect(w.asked[2]).toEqual(list)
+    expect(skipped).toBe([
+      'Nothing ran: skipped.',
+      '',
+      'Waiting for you to accept:',
+      '  1  weather/was-reviewed  can accept (review.md)',
+      `  2  ${ID}  not yet: ${ID}: ${CHANGED}`,
+      ...FILES.map(l => `       ${l}`),
+      '/k-accept 1 accepts the first. Add --checklist-open "<why>" to accept one with checklist items open.',
+      '(typed in Remote Control)',
+    ].join('\n'))
+    expect(w.runs).toEqual([])
+    expect(await run($, 'k-accept', ID, { kind: 'bridge' })).toBe(`/k-accept refused:\nk: ${BLOCKED.why}\n(typed in Remote Control)`)
+    expect(verbs(w.runs)).toEqual([['accept', ID, '--via', 'mod']])
   })
 
   test('/k-amendments: one k would approve offers "Approve <id> A-n" and Decline; one it would refuse, Decline alone, which takes a reason and runs k amend decline (AC-8)', async ($, on) => {

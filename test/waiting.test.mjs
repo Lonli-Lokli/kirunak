@@ -154,15 +154,31 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
     const [r] = waiting(home).accept;
     return [r.why?.split('\n')[0] ?? null, r.checklistOpen, r.onlyChecklist];
   };
+  // The rows of k waiting's text from "to accept:" to the drafts' line.
+  const acceptText = () => {
+    const lines = run(home, ['waiting']).stdout.split('\n');
+    return lines.slice(lines.indexOf('to accept:') + 1, -2);
+  };
   assert.deepEqual(row(), [`${ID}: checklist.md has 2 unticked item(s):`, 2, true]);
+  // A checklist's items are no blocking files: the row stands alone in the text, as before.
+  assert.deepEqual(waiting(home).accept[0].blocking, []);
+  assert.deepEqual(acceptText(), [`  ${ID}  not yet: ${ID}: checklist.md has 2 unticked item(s):`]);
 
   // The task's own work after the review is a second block: the items are still counted, but they are not all that
   // stops it.
   writeFileSync(join(weather, 'fix.ts'), 'export {};\n');
   gitCommitAll(weather, `a fix after the review (${ID})`);
+  const fix = headOf(weather);
   const [why, open, only] = row();
   assert.match(why, /its work changed after review\.md's head .*, in 1 file\(s\) the review never saw/);
   assert.deepEqual([open, only], [2, false]);
+  // The file, its commit and the task the commit names, in --json and under the row in the text, as k accept names
+  // them; --json keeps the whole refusal in why (AC-6).
+  const [blocked] = waiting(home).accept;
+  assert.deepEqual(blocked.blocking, [{ path: 'fix.ts', commit: fix, task: ID }]);
+  assert.match(blocked.why, new RegExp(`:\\n {2}fix\\.ts {2}${fix} {2}${ID.replace('/', '\\/')}$`));
+  assert.deepEqual(acceptText(), [`  ${ID}  not yet: ${why}`, `    fix.ts  ${fix}  ${ID}`]);
+  assert.match(run(home, ['accept', ID, '--dry-run']).stderr, new RegExp(`\\n {2}fix\\.ts {2}${fix} {2}${ID.replace('/', '\\/')}\\n$`));
 
   // A new review over the fix, its checklist ticked.
   writeFileSync(join(dirOf(weather), 'review-2.md'), REVIEW(headOf(weather)));
@@ -172,6 +188,8 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
   writeFileSync(file, readFileSync(file, 'utf8').replaceAll('- [ ]', '- [x]'));
   gitCommitAll(weather, 'the second review, the checklist ticked');
   assert.deepEqual(row(), [null, 0, false]);
+  assert.deepEqual(waiting(home).accept[0].blocking, []);
+  assert.deepEqual(acceptText(), [`  ${ID}  can accept`]);
 });
 
 test("k waiting says in one line how many drafts wait for the owner's intake and names /k-drafts; --json gains drafts, every other field kept (kirunak-drafts AC-8)", async () => {
