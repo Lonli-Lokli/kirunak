@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -204,17 +204,20 @@ test('check, directly: the record in HEAD when the index has none, and a slug-on
   assert.deepEqual(check({ staged: ['README.md'], show, env: {} }), []);
 });
 
-// The SLAP hook (prepare-commit-msg) as k install writes it, in both repos of the invented workspace: the step's
-// `Task:` trailer, and no new work on a task the owner accepted (accept-shared-repo AC-3, AC-4, AC-8, E-1).
-const MSG_HOOK = fileURLToPath(new URL('../hooks/git-prepare-commit-msg.mjs', import.meta.url));
+// The SLAP hook (prepare-commit-msg) and the commit-msg hook as k install writes them, in both repos of the invented
+// workspace: the step's `Task:` trailer, and no new work on a task the owner accepted (accept-shared-repo AC-3, AC-4,
+// AC-8, E-1).
+const MSG_HOOKS = { 'prepare-commit-msg': 'git-prepare-commit-msg.mjs', 'commit-msg': 'git-commit-msg.mjs' };
 
 async function hooked() {
   const w = await makeWorkspace();
   for (const dir of [w.weather, w.hub]) {
-    const hook = join(dir, '.git', 'hooks', 'prepare-commit-msg');
-    mkdirSync(dirname(hook), { recursive: true });
-    writeFileSync(hook, `#!/bin/sh\nexec "${process.execPath}" "${MSG_HOOK}" "$@"\n`);
-    chmodSync(hook, 0o755);
+    for (const [name, module] of Object.entries(MSG_HOOKS)) {
+      const hook = join(dir, '.git', 'hooks', name);
+      mkdirSync(dirname(hook), { recursive: true });
+      writeFileSync(hook, `#!/bin/sh\nexec "${process.execPath}" "${fileURLToPath(new URL(`../hooks/${module}`, import.meta.url))}" "$@"\n`);
+      chmodSync(hook, 0o755);
+    }
   }
   return w;
 }
@@ -298,4 +301,84 @@ test('the hook lets a merge through, and without a workspace refuses nothing for
   const r = commitAs({ home: nowhere }, w.weather, `${SLUG}: once more`, { KIRUNAK_TASK: ID });
   assert.equal(r.status, 0, r.stderr);
   assert.match(said(w.weather), /\nTask: weather\/offline-forecast$/);
+});
+
+// An editor that puts KIRUNAK_TEST_LINES before what git wrote in the message file: git's status comments stay below.
+function editor() {
+  const file = join(mkdtempSync(join(tmpdir(), 'kirunak-editor-')), 'edit.sh');
+  writeFileSync(file, '#!/bin/sh\n{ printf "%s\\n" "$KIRUNAK_TEST_LINES"; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n');
+  chmodSync(file, 0o755);
+  return file;
+}
+
+function editAs(w, dir, lines, extra = [], env = {}) {
+  git(dir, ['add', '-A']);
+  const r = spawnSync('git', ['commit', '-q', ...extra], { cwd: dir, env: cleanEnv({ KIRUNAK_HOME: w.home, GIT_EDITOR: editor(), KIRUNAK_TEST_LINES: lines, ...env }), encoding: 'utf8' });
+  return { status: r.status, stderr: r.stderr };
+}
+
+async function accepted() {
+  const w = await hooked();
+  put(w.weather, `kirunak/tasks/${SLUG}/done.json`, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0);
+  return w;
+}
+
+const REFUSAL = `kirunak: this commit's message names ${ID}, which the owner has accepted: new work on it is a new task. Reword the message so it does not name ${ID}, or start a new task (/k-intake); only kirunak's records (task folders, drafts, approvals, the queue) may still be committed naming it.`;
+
+test('the message the commit keeps is checked: typed in the editor, or given with -m and edited, it may not name an accepted task beside code (accept-shared-repo AC-8, E-1)', async () => {
+  const w = await accepted();
+  const head = git(w.weather, ['rev-parse', 'HEAD']);
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  for (const [lines, extra] of [[`${SLUG}: one more line`, []], [`for ${ID}`, ['-m', 'one more line', '-e']]]) {
+    const r = editAs(w, w.weather, lines, extra);
+    assert.equal(r.status, 1, lines);
+    assert.equal(r.stderr.trim(), REFUSAL);
+    assert.equal(git(w.weather, ['rev-parse', 'HEAD']), head);
+  }
+  // git's status comments below the message list the task's records; what git leaves out names nothing.
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  assert.equal(editAs(w, w.weather, 'the cache, one more line').status, 0);
+  assert.equal(said(w.weather).split('\n')[0], 'the cache, one more line');
+  // Records alone pass through the editor too.
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n\nThe cache is done.\n');
+  assert.equal(editAs(w, w.weather, `${ID}: the handoff`).status, 0);
+  assert.equal(git(w.weather, ['status', '--porcelain']), '');
+});
+
+test('a line starting with # given with -m stays in the commit and is read; an amend that rewords a commit to name an accepted task is refused, through the editor or with -m (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  put(w.weather, 'src/more.ts', 'export const more = 1;\n');
+  const hash = commitAs(w, w.weather, `#${SLUG} one more line`);
+  assert.equal(hash.status, 1);
+  assert.equal(hash.stderr.trim(), REFUSAL);
+
+  // A commit made a while ago, so an amend keeps an author date older than now.
+  const old = { GIT_AUTHOR_DATE: '@1700000000 +0000', GIT_COMMITTER_DATE: '@1700000000 +0000' };
+  assert.equal(commitAs(w, w.weather, 'one more line', old).status, 0);
+  const head = git(w.weather, ['rev-parse', 'HEAD']);
+  const reword = commitAs(w, w.weather, `${SLUG}: one more line`, {}, ['--amend']);
+  assert.equal(reword.status, 1);
+  assert.equal(reword.stderr.trim(), REFUSAL);
+  const edited = editAs(w, w.weather, `${SLUG}:`, ['--amend']);
+  assert.equal(edited.status, 1);
+  assert.equal(edited.stderr.trim(), REFUSAL);
+  assert.equal(git(w.weather, ['rev-parse', 'HEAD']), head);
+  // A new commit naming it with only records passes, though HEAD has code.
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: the handoff`).status, 0);
+});
+
+test('a merge after a commit under --no-verify, which leaves commit-msg\'s base unread, is let through (accept-shared-repo AC-8)', async () => {
+  const w = await accepted();
+  put(w.weather, 'src/a.ts', 'export {};\n');
+  assert.equal(commitAs(w, w.weather, 'a line', {}, ['--no-verify']).status, 0);
+  assert.ok(existsSync(join(w.weather, '.git', 'KIRUNAK_COMMIT_BASE')));
+  git(w.weather, ['checkout', '-q', '-b', 'side']);
+  put(w.weather, 'src/side.ts', 'export {};\n');
+  assert.equal(commitAs(w, w.weather, 'a side line').status, 0);
+  git(w.weather, ['checkout', '-q', 'master']);
+  const merge = spawnSync('git', ['merge', '-q', '--no-ff', '-m', `${SLUG}'s side, merged`, 'side'], { cwd: w.weather, env: cleanEnv({ KIRUNAK_HOME: w.home }), encoding: 'utf8' });
+  assert.equal(merge.status, 0, merge.stderr);
+  assert.ok(!existsSync(join(w.weather, '.git', 'KIRUNAK_COMMIT_BASE')));
 });

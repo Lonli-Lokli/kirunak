@@ -165,11 +165,13 @@ test('--git writes a hook in a repo with none, and only prints for a repo with i
   assert.ok(actions.some((a) => a.endsWith(`add this line to it: ${line}`)));
   writeFileSync(join(own, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\nnpm test\n${line}\n`);
   const again = install({ ...h, git: [bare, own], nodePath: '/opt/node/bin/node' }).actions;
-  assert.equal(again.filter((a) => a.includes("already runs kirunak's hook")).length, 4);
+  assert.equal(again.filter((a) => a.includes("already runs kirunak's hook")).length, 6);
   for (const r of [bare, own]) {
-    const slap = join(r, '.git', 'hooks', 'prepare-commit-msg');
-    assert.equal(readFileSync(slap, 'utf8'), `#!/bin/sh\n${fallback}\nexec node ${join(h.kirunakRoot, 'hooks', 'git-prepare-commit-msg.mjs')} "$@"\n`);
-    assert.equal(statSync(slap).mode & 0o777, 0o755);
+    for (const [name, module] of [['prepare-commit-msg', 'git-prepare-commit-msg.mjs'], ['commit-msg', 'git-commit-msg.mjs']]) {
+      const msg = join(r, '.git', 'hooks', name);
+      assert.equal(readFileSync(msg, 'utf8'), `#!/bin/sh\n${fallback}\nexec node ${join(h.kirunakRoot, 'hooks', module)} "$@"\n`);
+      assert.equal(statSync(msg).mode & 0o777, 0o755);
+    }
   }
   assert.throws(() => install({ ...h, git: join(h.dir, 'not-a-repo') }), /not a git repository/);
 });
