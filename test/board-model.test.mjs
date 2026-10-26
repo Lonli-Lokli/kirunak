@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { status } from '../lib/board.mjs';
-import { facts, items, model, sessions } from '../lib/board-model.mjs';
+import { snapshot, status } from '../lib/board.mjs';
+import { draftEntry, draftTail, facts, items, model, sessions } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
-import { fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function board({ more = () => {} } = {}) {
   const w = await fixture();
@@ -50,4 +50,20 @@ test('last, the lock, its queue, the running steps, the claims and the task queu
     ['Task queue', ['weather/hourly-chart (in progress)']],
   ]);
   assert.match(m.machine[1].rows[0], /^hub\/reviewed S-3, session s2, since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
+test('a bug among the drafts names its task before the date, "bug of <task>"; a plain draft\'s line is unchanged (kirunak-spikes AC-6, D-2)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  bugAt(w);
+  const m = model(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+  assert.deepEqual(m.drafts.map((d) => [d.id, d.bugOf]), [['weather/wind-alerts', null], ['hub/short-jobs', null], ['hub/midnight-gap', 'weather/recent']]);
+  assert.deepEqual(m.drafts.map(draftEntry), [
+    'weather/wind-alerts: Wind alerts <for> cyclists, written 2026-11-05',
+    'hub/short-jobs: Short jobs first in the heavy-job queue, so a quick test never waits behind a long build, written 2026-11-06',
+    'hub/midnight-gap: The chart skips the hour after midnight, bug of weather/recent, written 2026-11-07',
+  ]);
+  assert.equal(draftTail({ bugOf: 'weather/recent', written: null }), 'bug of weather/recent, no date');
+  assert.equal(draftTail({ bugOf: null, written: '2026-11-05' }), 'written 2026-11-05');
+  assert.doesNotMatch(m.drafts.map(draftEntry).join('\n'), /spike/i, 'called a bug, never a spike');
 });

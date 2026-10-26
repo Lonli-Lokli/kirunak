@@ -6,9 +6,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
-import { bullet, counts, cut, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
+import { bullet, counts, cut, draftBullet, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
-import { addTask, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
@@ -283,4 +283,35 @@ test('k board --card <draft id> answers with the draft\'s card, as the mod\'s /k
     '',
   ].join('\n'));
   assert.equal(k(w.home, ['board', '--card', 'weather/nope']).status, 1, 'no task and no draft');
+});
+
+test('a bug\'s bullet keeps bug of <task> and its date when its title is cut, and its card names the task; the drafts\' bullets as they were (kirunak-spikes AC-6, D-2)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  bugAt(w);
+  const text = await board(w);
+  assert.ok(text.includes([
+    '## Drafts (3)',
+    '',
+    '- weather/wind-alerts: Wind alerts \\<for\\> cyclis…, written 2026-11-05',
+    '- hub/short-jobs: Short jobs first in the heavy-j…, written 2026-11-06',
+    '- hub/midnight-gap: The chart sk…, bug of weather/recent, written 2026-11-07',
+    '',
+  ].join('\n')), text);
+  noHardBreak(text);
+  assert.equal(draftBullet({ id: 'hub/x', title: 'Short', written: null, bugOf: 'weather/a_b' }), '- hub/x: Short, bug of weather/a\\_b, no date', 'its task escaped as text');
+  const r = k(w.home, ['board', '--card', 'hub/midnight-gap']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, [
+    '### hub/midnight-gap',
+    '',
+    'The chart skips the hour after midnight',
+    '',
+    "- a draft, bug of weather/recent, written 2026-11-07, waiting for the owner's intake",
+    '- file: kirunak/drafts/midnight-gap.md in hub',
+    '',
+    '/k-drafts shows it whole, and starts its intake or drops it.',
+    '',
+  ].join('\n'));
+  assert.doesNotMatch(text + r.stdout, /spike/i, 'called a bug, never a spike');
 });

@@ -53,10 +53,14 @@ export const AMENDMENTS: AmendmentRow[] = [
 // The drafts `k drafts --json` gives (kirunak-drafts S-3), by the date written, the undated last; the last one's file
 // cannot be read.
 export const DRAFTS: DraftRow[] = [
-  { id: 'hub/offline-maps', repo: 'hub', slug: 'offline-maps', title: 'Maps that work offline', written: '2026-11-05', path: '/w/hub/kirunak/drafts/offline-maps.md' },
-  { id: 'weather/rain-alerts', repo: 'weather', slug: 'rain-alerts', title: 'Rain alerts', written: '2026-11-06', path: '/w/weather/kirunak/drafts/rain-alerts.md' },
-  { id: 'hub/no-date', repo: 'hub', slug: 'no-date', title: 'no-date', written: null, path: '/w/hub/kirunak/drafts/no-date.md' },
+  { id: 'hub/offline-maps', repo: 'hub', slug: 'offline-maps', title: 'Maps that work offline', written: '2026-11-05', bugOf: null, path: '/w/hub/kirunak/drafts/offline-maps.md' },
+  { id: 'weather/rain-alerts', repo: 'weather', slug: 'rain-alerts', title: 'Rain alerts', written: '2026-11-06', bugOf: null, path: '/w/weather/kirunak/drafts/rain-alerts.md' },
+  { id: 'hub/no-date', repo: 'hub', slug: 'no-date', title: 'no-date', written: null, bugOf: null, path: '/w/hub/kirunak/drafts/no-date.md' },
 ]
+
+// A bug as `k drafts --json` gives it (kirunak-spikes AC-6): a draft whose `bugOf` names the accepted task it was
+// found in, here in another repo than its task.
+export const BUG: DraftRow = { id: 'hub/stale-tiles', repo: 'hub', slug: 'stale-tiles', title: 'Old tiles stay after an update', written: '2026-11-07', bugOf: 'weather/offline-forecast', path: '/w/hub/kirunak/drafts/stale-tiles.md' }
 
 // A draft's file as templates/draft.md shapes it.
 export const DRAFT_FILE = '---\nid: hub/offline-maps\ntitle: Maps that work offline\nwritten: 2026-11-05\n---\n\n## Who raised it\n\n> The maps should work offline too.\n\nowner, 2026-11-05, session s1\n\n## Why\n\nThe forecast works offline; the maps do not.\n\n## What was found\n\n- The tiles load from the network. [file hub/src/Map.kt]\n\n## Questions\n\n1. Which areas are kept?\n2. How old may a tile be?\n'
@@ -66,6 +70,7 @@ export const FILES: Record<string, string> = {
   [`${AMENDMENT_DIR}/A-3.md`]: `---\ntask: ${ID}\nproposed: 2026-11-06\nby: session s1\n---\n\n## Why\nThe age line needs its words. The old one was a time alone.\n\n## Changes\n- replace E-1: A forecast older than a day says "yesterday".\n- replace D-1: Keep the last three days.\n`,
   '/w/hub/kirunak/drafts/offline-maps.md': DRAFT_FILE,
   '/w/weather/kirunak/drafts/rain-alerts.md': '---\nid: weather/rain-alerts\ntitle: Rain alerts\nwritten: 2026-11-06\n---\n\n## Why\n\nRain comes fast.\n',
+  '/w/hub/kirunak/drafts/stale-tiles.md': '---\nid: hub/stale-tiles\ntitle: Old tiles stay after an update\nwritten: 2026-11-07\nbug-of: weather/offline-forecast\n---\n\n## What was found\n\n- The tile cache keeps no version. [file hub/src/Tiles.kt]\n\n## Fix written\n\n- The cache is keyed by version. [commit 3f2a9c1]\n',
 }
 
 // A brief board as `k board --brief --json` gives it (lib/board-brief.mjs): each group's name and entry lines, the

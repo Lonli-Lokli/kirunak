@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { DRAFT_PAIRS, renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { rows } from '../lib/list.mjs';
-import { draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
   return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
@@ -217,6 +217,23 @@ test('the drafts read in order after the tasks: a heading and a list after the l
     'so a quick test never waits behind a long build, written 2026-11-06', 'read as words, in order, with no mark between them');
   assert.ok(!/\saria-(?!hidden)|\srole=/.test(section), 'native semantics only');
   assert.ok(!/content:\s*['"][^'"]/.test(html), 'no CSS mark a reader would speak');
+});
+
+test('a bug\'s row in the Drafts group says bug of <task> before its date, in the text\'s colour, the date alone muted; the drafts\' rows as they were (kirunak-spikes AC-6, D-2)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  bugAt(w);
+  const html = await page(w);
+  const section = html.slice(html.indexOf('<section class="drafts">'), html.indexOf('<section class="machine">'));
+  assert.match(section, new RegExp([
+    '<ul>',
+    '<li><b>weather/wind-alerts</b>: Wind alerts &lt;for&gt; cyclists, <span class="meta">written <time datetime="2026-11-05">2026-11-05</time></span></li>',
+    '<li><b>hub/short-jobs</b>: Short jobs first [^<]*, <span class="meta">written <time datetime="2026-11-06">2026-11-06</time></span></li>',
+    '<li><b>hub/midnight-gap</b>: The chart skips the hour after midnight, bug of weather/recent, <span class="meta">written <time datetime="2026-11-07">2026-11-07</time></span></li>',
+    '</ul>',
+  ].join('\n')));
+  assert.ok(section.replace(/<[^>]*>/g, '').includes('hub/midnight-gap: The chart skips the hour after midnight, bug of weather/recent, written 2026-11-07'), 'read as words, in order');
+  assert.doesNotMatch(section, /spike/i, 'called a bug, never a spike');
 });
 
 test('the drafts\' text pairs are the page\'s, held at 4.5:1 in the light and the dark theme (kirunak-drafts AC-14)', async () => {

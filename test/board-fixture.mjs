@@ -92,3 +92,10 @@ export function draftsAt(w) {
   write(w.hub, 'short-jobs', 'Short jobs first in the heavy-job queue, so a quick test never waits behind a long build', '2026-11-06');
   write(w.weather, 'wind-alerts', 'Wind alerts <for> cyclists', '2026-11-05');
 }
+
+// A bug found in the task done this week (kirunak-spikes AC-6): a draft in the other repo whose front matter names
+// that task, written after the two drafts, so it is listed last.
+export function bugAt(w) {
+  mkdirSync(join(w.hub, 'kirunak', 'drafts'), { recursive: true });
+  writeFileSync(join(w.hub, 'kirunak', 'drafts', 'midnight-gap.md'), '---\nid: hub/midnight-gap\ntitle: The chart skips the hour after midnight\nwritten: 2026-11-07\nbug-of: weather/recent\n---\n\n## Who raised it\nfound by the agent: x\n');
+}

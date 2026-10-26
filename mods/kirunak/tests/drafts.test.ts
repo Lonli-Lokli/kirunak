@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { DraftRow } from '../hooks/drafts'
 
-import { DRAFTS, world } from './world'
+import { BUG, DRAFTS, world } from './world'
 
 const run = async ($: Engine, args = '', origin: PromptOrigin = { kind: 'composer' }): Promise<string> =>
   (await $.command.run({ command: 'k-drafts', args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -21,7 +21,7 @@ const TEXT = '3 drafts, by the date written:\n\n1. **hub/offline-maps**: Maps th
 const WHOLE = 'hub/offline-maps: Maps that work offline.\nWritten 2026-11-05.\n\nWho raised it\n\n> The maps should work offline too.\n\nowner, 2026-11-05, session s1\n\nWhy\n\nThe forecast works offline; the maps do not.\n\nWhat was found\n\n- The tiles load from the network. [file hub/src/Map.kt]\n\nQuestions\n\n1. Which areas are kept?\n2. How old may a tile be?\nStart the intake from it, or drop it?'
 const ITEM = ['Start intake', 'Drop', 'Back']
 
-const many = (n: number): DraftRow[] => Array.from({ length: n }, (_, i) => ({ id: `hub/d${i + 1}`, repo: 'hub', slug: `d${i + 1}`, title: `Draft ${i + 1}`, written: `2026-11-0${i + 1}`, path: `/w/hub/kirunak/drafts/d${i + 1}.md` }))
+const many = (n: number): DraftRow[] => Array.from({ length: n }, (_, i) => ({ id: `hub/d${i + 1}`, repo: 'hub', slug: `d${i + 1}`, title: `Draft ${i + 1}`, written: `2026-11-0${i + 1}`, bugOf: null, path: `/w/hub/kirunak/drafts/d${i + 1}.md` }))
 
 describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
   test('no drafts says so, with no dialog; anything typed after the command is refused; a k that fails says so', async ($, on) => {
@@ -81,6 +81,23 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     expect(await run($)).toBe('Nothing ran: k drafts did not answer, so hub/offline-maps could not be found again: k: the workspace did not load')
     await w.clock.advance(10)
     expect([w.submitted, w.runs]).toEqual([[], []])
+  })
+
+  test('a bug shows among the drafts, its line and its head saying bug of <task> before the date, and drops as a draft does, with no command of its own (kirunak-spikes AC-6, O-2)', async ($, on) => {
+    const rows = [DRAFTS[0] as DraftRow, DRAFTS[1] as DraftRow, BUG]
+    const w = world(on, { drafts: [rows], taps: ['hub/stale-tiles', 'Back', SKIP, 'hub/stale-tiles', 'Drop', 'Fixed in 3f2a9c1', 'Drop hub/stale-tiles'], verb: { exitCode: 0, stdout: 'hub/stale-tiles: dropped in 5b7e2d0\n', stderr: '' } })
+    const head = 'hub/stale-tiles: Old tiles stay after an update.\nBug of weather/offline-forecast, written 2026-11-07.'
+    expect(await run($)).toBe('Nothing ran: skipped.\n\n3 drafts, by the date written:\n\n1. **hub/offline-maps**: Maps that work offline, written 2026-11-05\n2. **weather/rain-alerts**: Rain alerts, written 2026-11-06\n3. **hub/stale-tiles**: Old tiles stay after an update, bug of weather/offline-forecast, written 2026-11-07\n\n/k-drafts shows one whole, to start its intake or drop it.')
+    expect(w.asked[0]).toEqual({ header: 'Drafts', question: 'Drafts, by the date written:\n1. hub/offline-maps: Maps that work offline, written 2026-11-05\n2. weather/rain-alerts: Rain alerts, written 2026-11-06\n3. hub/stale-tiles: Old tiles stay after an update, bug of weather/offline-forecast, written 2026-11-07\nWhich draft?', labels: ['hub/offline-maps', 'weather/rain-alerts', 'hub/stale-tiles'] })
+    expect(w.asked[1]).toEqual({ header: 'Drafts', question: `${head}\n\nWhat was found\n\n- The tile cache keeps no version. [file hub/src/Tiles.kt]\n\nFix written\n\n- The cache is keyed by version. [commit 3f2a9c1]\nStart the intake from it, or drop it?`, labels: ITEM })
+    expect(await run($)).toBe('hub/stale-tiles: dropped in 5b7e2d0')
+    expect(w.asked.slice(-2).map(a => a.question)).toEqual([
+      `${head}\nType the reason in the free-text row: why drop it?`,
+      `${head}\nReason: Fixed in 3f2a9c1\nDrop it, in a commit that carries that reason?`,
+    ])
+    expect(verbs(w.runs)).toEqual([['draft', 'drop', 'hub/stale-tiles', '--why', 'Fixed in 3f2a9c1']])
+    for (const a of w.asked) expect(a.question).not.toMatch(/spike/i)
+    expect(w.registered.filter(name => /bug|spike/.test(name))).toEqual([])
   })
 
   const DROP = ['hub/offline-maps', 'Drop', 'Done in hub/maps', 'Drop hub/offline-maps']
