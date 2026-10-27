@@ -279,7 +279,9 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
   with nothing left in `git cherry`;
 - it has no uncommitted or untracked change;
 - no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS in any case):
-  a task that still needs a worktree writes its path so;
+  a task that still needs a worktree writes its path so. The files are read one at a time in one walk, so a task's
+  evidence costs time, never memory; one over 4 MB, a binary one (a NUL byte in its first 8,000 bytes, git's own
+  test, read no further) and one that cannot be read name nothing (gulnya/worktrees-read-oom);
 - no process works in it or runs a program from it (`lsof`'s cwd and txt; when lsof cannot tell, none goes);
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
