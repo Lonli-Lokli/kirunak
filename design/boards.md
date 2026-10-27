@@ -49,12 +49,25 @@ command except `git show` for a staged hash when asked).
   pairs already held at 4.5:1 in both themes (a test holds them, and that the heading comes after the tasks and
   before the lock, in reading order). `k board --card <draft id>` answers a draft's card (title, date written, file).
   `k list` keeps listing tasks only (R28).
-- **A bug among the drafts** (R29, built 2026-10-26): a draft with `bug-of` names its task before the date on every
-  surface, `id: title, bug of <task>, written <date>` (`draftTail` in `lib/board-model.mjs`), and a plain draft's
-  line is unchanged. The markdown bullet keeps the whole tail when a long title is cut, the task and the date always
-  kept, its task id escaped; the brief's Drafts lines carry it; on the page "bug of <task>" is in the text's colour
-  and only the date is muted; the card reads "a draft, bug of <task>, written <date>, waiting for the owner's
-  intake". The word is bug on every surface, and bugs have no group or command of their own.
+- **Bugs** (R29, gulnya/kirunak-bugs S-3): a group "Bugs" comes after the last task group and before Drafts, shown
+  only when a bug waits, in `k bugs`' order (a fix ready first, then the oldest). Its first line is `k waiting`'s,
+  exactly "N bugs wait, M with a fix ready: /k-bugs" ("1 bug waits, ..." for one), then one line a bug, `<id>:
+  <title>, <its fix>, bug of <task>, written <date>` (`bugTail` in `lib/board-model.mjs`, the task left out when it
+  names none; its fix one of reviewing, fix ready, fix not ready: review-n.md found <verdict>, fix not ready, no
+  fix). In the markdown board it is `## Bugs (n)`, the line, then a bullet a bug, the tail always kept when a long
+  title is cut; in the brief board and its `--json` a group Bugs before Drafts, its ids after the tasks' and before
+  the drafts'; on the page an h2 "Bugs", the line and a plain list, its text pairs (`BUG_PAIRS`) held at 4.5:1 or
+  more in both themes by the contrast test, and in reading order after the tasks and before Drafts. `k board --card
+  <bug id>` answers its card: its fix, its task and date, its file, and "/k-bugs shows it whole, with [Review &
+  merge, ]Start fix and Drop.", Review & merge named only when its fix is ready; in the mod's `/k-board` the group
+  asks "Which bug?" and a bug tapped answers with that card. A draft's line is a plain draft's:
+  bugs are no longer among the drafts (until 2026-10-27, kirunak-spikes, a bug was a draft with `bug-of`).
+- **The same line elsewhere** (AC-7, E-7): `k waiting` prints it first of all, above a step stopped for the owner
+  and before the drafts' line, and `--json` has a first key `bugs: { count, ready, ids }`; a new session the owner
+  starts (SessionStart on `startup` or `clear`, `hooks/kirunak-bugs.mjs`, which `k install` adds and `k doctor`
+  checks) gets it as `systemMessage` and `additionalContext`. None of them says anything when no bug waits, and a
+  step's session (`KIRUNAK_STEP` set, or a headless session's file) and a Review & merge's session
+  (`KIRUNAK_BUG_REVIEW` set) are told nothing.
 - A task is a **brief row that opens its card in place** (kirunak-phone A-7, built 2026-10-21): a native `<details>`,
   closed at first, whose summary is the brief board's entry (§3) and whose body is the card: the title, the state,
   the queue place, the step and since when, who works on it, and every AC and E in full with its latest verdict in
@@ -157,7 +170,8 @@ What it shows and does, each from the skill's table of shapes:
 | `/k-list [all]`, `/k-board [<id>]`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the board's groups in a dialog, then a group's tasks, and a tapped task's card, `/k-board <id>` that card (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --brief --json` and `k board --card <id>`, `k waiting --json` (the `amendments` rows) |
 | `/k-approve`, `/k-accept`, `/k-hold`, `/k-resume`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json`; for `/k-resume`, the tasks on hold of `k list --json --all` |
 | the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold `, `/k-resume ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
-| `/k-drafts` | the drafts waiting, in the order they wait (`task-files.md` §1, the drafts' order; with no order, by the date written): a dialog with one numbered line a draft (id, title, written; a bug's says bug of <task> before the date), three to a page with More; a draft picked is shown whole, with Start intake, Drop and Back, a bug's second line reading "Bug of <task>, written <date>.", as on Drop's two screens. Start intake runs no `k` verb: it reads `k drafts --json` again, refuses a draft that is gone ("no longer a draft"), and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from that draft (`k intake start <id> --from kirunak/drafts/<slug>.md`, which moves it to `kirunak/tasks/<slug>/draft.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, then runs `k draft drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above (R27, R28). A bug is one of these drafts, with no command of its own (R29) | `k drafts --json` |
+| `/k-drafts` | the drafts waiting, in the order they wait (`task-files.md` §1, the drafts' order; with no order, by the date written): a dialog with one numbered line a draft (id, title, written), three to a page with More; a draft picked is shown whole, with Start intake, Drop and Back. Start intake runs no `k` verb: it reads `k drafts --json` again, refuses a draft that is gone ("no longer a draft"), and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from that draft (`k intake start <id> --from kirunak/drafts/<slug>.md`, which moves it to `kirunak/tasks/<slug>/draft.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, then runs `k draft drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above (R27, R28). Bugs are not among them: `/k-bugs` (R29) | `k drafts --json` |
+| `/k-bugs` | every bug in every repo (R29, gulnya/kirunak-bugs S-5): a dialog with one numbered line a bug, a fix ready first, then the oldest (id, title, its fix: fix ready, in review since <time>, fix not ready: review-n.md found <verdict>, fix not ready, no fix yet; bug of <task> and the date written), three to a page with More, Back last; with none, "No bugs: no repo holds one." A bug picked is shown whole, its head (title, bug of and date, where the fix is, the review file) above its file, with Review & merge (D-1) only when its fix is ready and no review runs, Start fix and Drop. Review & merge runs `k bug review <id> --detach --via mod`, the owner's verb, and answers that a fresh session reviews the fix, that it merges into master only with no finding and is never pushed, and that `/k-bugs` or `k bugs` shows the result. Start fix runs no `k` verb: it reads `k bugs --json` again by id, refuses a bug gone or in review, and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from the bug (`k intake start <id> --from kirunak/bugs/<slug>.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, saying the fix branch stays, then runs `k bug drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above | `k bugs --json` |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
 
@@ -304,4 +318,4 @@ As built, where the build chose (each judgement unless marked):
 
 ## 5. Requirements this file satisfies
 
-D5 and R16 (§1, §2), R28 (§2 the Drafts group, §4 `/k-drafts`), R29 (§2 a bug among the drafts, §4 `/k-drafts`), R27 (§4 Drop), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5), R30's names in `k waiting` and `/k-accept` (§4).
+D5 and R16 (§1, §2), R28 (§2 the Drafts group, §4 `/k-drafts`), R29 (§2 the Bugs group and the line in `k waiting` and a new session, §4 `/k-bugs`), R27 (§4 Drop), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5), R30's names in `k waiting` and `/k-accept` (§4).

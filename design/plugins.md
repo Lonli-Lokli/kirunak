@@ -103,6 +103,8 @@ export default {
   ],
   hook: { enabled: true, block: true, repeats: 2, commands: [] },
   compact: { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] },
+  kirunakRoot: '~/code/kirunak',      // kirunak's own checkout; optional
+  bugs: { reviewModel: 'opus', reviewEffort: 'high', heavyLock: 'lock run --' },  // optional
 };
 ```
 
@@ -138,6 +140,12 @@ export default {
   config.json`, which the hook reads, because the hook imports no workspace module (it runs on every failed Bash
   call). `k doctor` says `hook off` and `block off` when either is false, and that the file disagrees with the module
   or is older than it.
+- **`kirunakRoot`** and **`bugs`** serve the bugs list (R29, gulnya/kirunak-bugs). `kirunakRoot` is kirunak's own
+  checkout, where a bug with `fix-repo: kirunak` has its fix made and merged; by default the folder above `lib/` of the
+  code that runs. `bugs.reviewModel` (default `opus`) and `bugs.reviewEffort` (default none, Claude Code's own) set
+  the fresh session `k bug review` runs on a fix's diff; `bugs.heavyLock` is the command its brief and the k-bug skill
+  name for a heavy test, the job's command after it, and with none they name the heavy lock the machine's CLAUDE.md
+  names. Judgement: the machine's resource guard is the workspace's, so kirunak names no path of its own.
 - **`compact`** sets the handover, the compaction a session working a task makes at a step boundary (`orchestrator.md`
   §5): `enabled` (default true; false makes the compact hook allow every compaction and `k install` take its window
   back out of each repo's file), `handoverSize` (default 150000, the context a session hands over at; `k install`

@@ -21,8 +21,16 @@ is done.
   its shape, `k draft drop <id> --why "..."` removes it with the reason in the commit, and `k drafts` lists them. A
   draft is not a task and nothing in it is a ruling. Start the intake from one (`/k-drafts`, or `k intake start <id>
   --from kirunak/drafts/<slug>.md`): it moves into the task's folder as background and the intake asks every line
-  again. A bug found in a task already accepted is a draft too, `k draft new <id> --title "..." --bug-of <task>`: the
-  task stays closed, the draft may name a fix written already, and it shows among the drafts as bug of <task>.
+  again. A fault in something that exists is a bug, never a draft.
+- **Bugs.** A fault with a way to see it, the work of a task already accepted included, is a bug in
+  `kirunak/bugs/`: `k bug new <id> --title "..."` writes the skeleton (`--bug-of <task>` names the accepted task,
+  `--fix-repo <repo>` where its fix is made), `k bug check <id>` holds its shape, and `k bugs` lists them, a fix
+  ready first. The agent that writes one tries its fix on `bug/<slug>`, with a test that fails without it, and never
+  merges it. In `/k-bugs` you pick one: **Review & merge** has a fresh session review the fix and merges it into
+  master only with no finding (never pushed), closing the bug; **Start fix** starts an intake from it, every proposed
+  answer in the first question; **Drop** removes it, the fix branch kept (`k bug drop <id> --why "..."`). A draft that
+  is really a bug moves with `k bug from <id>`. `k waiting`, the board and each new session you start name the bugs
+  before the drafts.
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -64,10 +72,10 @@ You need Node 22 or later, git and Claude Code.
    k doctor
    ```
 
-   `k install` adds a PreToolUse hook and a SessionStart hook to `~/.claude/settings.json` (keeping yours) and links
-   the `k-intake`, `k-draft`, `k-done` and `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as
-   a page, below). It also prints one line to add to your
-   status line command, so the cache keeper sees each session's context and cache and `k cost` its money; it never
+   `k install` adds a PreToolUse hook and two SessionStart hooks to `~/.claude/settings.json` (keeping yours; one
+   says, as a session you start begins, how many bugs wait) and links the `k-intake`, `k-draft`, `k-bug`, `k-done` and
+   `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as a page, below). It also
+   prints one line to add to your status line command, so the cache keeper sees each session's context and cache and `k cost` its money; it never
    edits your status line itself, and `k doctor` warns until the status line, or a script it names, runs that line.
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
    ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
@@ -126,7 +134,8 @@ You need Node 22 or later, git and Claude Code.
    | `/k-board` | the board's groups (working on now, queued, done this week and the rest) and how many tasks each holds, at once and without a model turn; tap a group for its tasks, a line each, then a task for its card, or Skip for the brief board as text |
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
-   | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), as numbered entries; the one picked shows whole, with Start intake (the session starts the intake from it), Drop (you type the reason, then confirm) and Back |
+   | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), as numbered entries; the one picked shows whole, with Start intake (the session starts the intake from it), Drop (you type the reason, then confirm) and Back; bugs are not among them |
+   | `/k-bugs` | the bugs, a fix ready first, then the oldest, as numbered entries; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back |
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |
