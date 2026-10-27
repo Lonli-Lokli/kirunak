@@ -557,6 +557,47 @@ test('a later commit naming the task blocks accept whatever files it touches, un
   assert.throws(() => accept({ ws, id: ID }), (e) => e.message.endsWith(`in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):\n  src/hourly.ts  ${slug}  ${ID}\n  README.md  ${trailer}  ${ID}`));
 });
 
+test('a merge after the review blocks accept by code of its own in a file of the task\'s change and by a conflict it resolved there; a clean merge blocks nothing (accept-merge-gaps AC-2, AC-3, E-2)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  const dir = taskDir(weather);
+  await approve({ ws, id: ID, now: NOV5 });
+  commitFiles(weather, `${ID} S-1: the cache`, ['src/cache.ts']);
+  writeFileSync(join(dir, 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(dir);
+  gitCommitAll(weather, `kirunak/tasks/offline-forecast: the review (${ID})`);
+  const branch = (name, message, files) => {
+    sh(weather, 'git', ['checkout', '-q', '-b', name]);
+    const sha = commitFiles(weather, message, files);
+    sh(weather, 'git', ['checkout', '-q', '-']);
+    return sha;
+  };
+  // Sides that changed other files, merged clean: the merge lists nothing of its own (AC-3).
+  branch('chart', 'a chart for weather/hourly', ['src/chart.ts']);
+  commitFiles(weather, 'notes for weather/hourly', ['src/notes.ts']);
+  sh(weather, 'git', ['merge', '-q', '--no-ff', '-m', 'merge chart', 'chart']);
+  assert.equal(accept({ ws, id: ID, dryRun: true }).state, 'would accept');
+  // A merge of a side that never touched the task's file, with code of its own added there (AC-2).
+  branch('side', 'a side for weather/hourly', ['src/side.ts']);
+  sh(weather, 'git', ['merge', '-q', '--no-ff', '--no-commit', 'side']);
+  writeFileSync(join(weather, 'src/cache.ts'), 'its own line\n', { flag: 'a' });
+  sh(weather, 'git', ['add', '-A']);
+  sh(weather, 'git', ['commit', '-q', '-m', 'merge side']);
+  const evil = headOf(weather);
+  assert.throws(() => accept({ ws, id: ID, dryRun: true }), (e) => e.message.endsWith(`in 1 file(s) the review never saw: run a new review (a review step whose output is review-2.md):\n  src/cache.ts  ${evil}  no task`));
+  // The review again, then both sides change the task's file and the merge resolves the conflict (E-2).
+  writeFileSync(join(dir, 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(dir);
+  gitCommitAll(weather, 'the review again');
+  const theirs = branch('clash', 'the side\'s cache (weather/hourly)', ['src/cache.ts']);
+  const mine = commitFiles(weather, 'master\'s cache (weather/hourly)', ['src/cache.ts']);
+  assert.throws(() => sh(weather, 'git', ['merge', '-q', '--no-ff', 'clash']));
+  writeFileSync(join(weather, 'src/cache.ts'), 'both caches\n');
+  sh(weather, 'git', ['add', '-A']);
+  sh(weather, 'git', ['commit', '-q', '--no-edit']);
+  const merged = headOf(weather);
+  assert.throws(() => accept({ ws, id: ID, dryRun: true }), (e) => [theirs, mine, merged].every((sha) => e.message.includes(`\n  src/cache.ts  ${sha}  `)));
+});
+
 // Rows the owner should check, spelled as no verdict, a cited line past its file, and the last line met anyway.
 const MISSPELT = (head) =>
   REVIEW(head, 'verdict: met')
