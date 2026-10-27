@@ -18,6 +18,8 @@ The owner says when a task is done. You record nothing yourself: the acceptance 
    The task is done only when the command succeeds and `kirunak/tasks/<slug>/done.json` exists. If it refuses (an
    unticked checklist item, a review that fails `k review check`, whose step has not finished or that was changed
    after it finished, a `not met` verdict, code committed after the review, no review), say what it named and stop.
+   With the kirunak mod, /k-accept gives this session a turn of its own that says whether k took it, with its
+   reason: go on to step 4 from there, or work on what blocked it.
    The owner may accept with checklist items open by adding `--checklist-open "<why>"`, which is recorded with the
    items it leaves open; it never accepts a `not met` verdict or a task with no review. Never run `k accept`
    yourself. Once it succeeds, it prints a line for each worktree it removed and each it kept, with why.

@@ -179,6 +179,11 @@ What it shows and does, each from the skill's table of shapes:
   registered command) and read through `k status --session`; `k-done` clears it (through the default `handoff`).
 - `k start` is the one write a mod command makes that is not the owner's alone; it is allowed from the Bash tool
   too (a session may say which task it works on).
+- **The turn after a verb** (gulnya/kirunak-bugs AC-11 to AC-14, `hooks/turns.ts`): once the command has answered,
+  the mod submits a prompt of its own after Review & merge or `/k-start` k took, and after `/k-approve` (an amendment
+  too), `/k-accept` or `/k-resume`, taken or refused, on this session's task (`k status --session`) or one whose
+  intake it ran (its own `k intake` and `k amend` Bash calls, or `by: session <id>`, kept in the module's memory).
+  The prompt says what the owner did, with kirunak's reason on a refusal, and what to do next; it runs no verb.
 - Tests: `claude plugin test mods/kirunak` (`npm run test:mod`, with `claude plugin validate`): the pane renders a
   task's rows from a `k list --json` fixture on the terminal and the desktop; `/k-approve` and the other four with
   origin `sdk`, `plugin`, `peer`, `unclassified`, `peer-send-message`, `task-notification`, `scheduled-trigger` or
