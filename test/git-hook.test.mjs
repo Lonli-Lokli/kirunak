@@ -650,3 +650,167 @@ test('a pick stopped on a conflict passes with git\'s words, by the editor, by -
   assert.equal(ws.status, 0, ws.stderr);
   assert.match(said(w.weather), /^# Conflicts:$/m);
 });
+
+test('a rebase of an accepted task\'s branch passes and keeps its messages in a step; a fixup into its commits is refused (accept-shared-repo AC-3, E-3)', async () => {
+  const w = await hooked();
+  git(w.weather, ['checkout', '-q', '-b', 'feat']);
+  put(w.weather, 'src/cache.ts', 'export const cache = 1;\n');
+  assert.equal(commitAs(w, w.weather, `${SLUG}: the cache`).status, 0);
+  put(w.weather, 'src/view.ts', 'export const view = 1;\n');
+  assert.equal(commitAs(w, w.weather, `${SLUG}: the view`).status, 0);
+  const feat = head(w.weather);
+  const messages = () => git(w.weather, ['log', '--format=%B', 'master..HEAD']);
+  const before = messages();
+  git(w.weather, ['checkout', '-q', 'master']);
+  put(w.weather, DONE, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0);
+  put(w.weather, 'README.md', 'weather, moved on\n');
+  assert.equal(commitAs(w, w.weather, 'master moves on').status, 0);
+  git(w.weather, ['checkout', '-q', 'feat']);
+  const r = replayOf(w, w.weather, ['rebase', 'master'], { KIRUNAK_TASK: 'weather/next-task' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git(w.weather, ['rev-parse', 'HEAD~2']).trim(), git(w.weather, ['rev-parse', 'master']).trim());
+  assert.equal(messages(), before);
+  git(w.weather, ['reset', '-q', '--hard', feat]);
+  const fixup = script('awk \'NR==2{sub(/^pick/,"fixup")}1\' "$1" > "$1.new" && mv "$1.new" "$1"');
+  const f = replayOf(w, w.weather, ['rebase', '-i', 'master'], { GIT_SEQUENCE_EDITOR: fixup });
+  assert.notEqual(f.status, 0);
+  assert.ok(f.stderr.includes(REFUSAL), f.stderr);
+  assert.equal(replayOf(w, w.weather, ['rebase', '--abort']).status, 0);
+  assert.equal(head(w.weather), feat);
+});
+
+test('a rebase stopped on a conflict passes with git\'s words, by --continue or committed through the editor (accept-shared-repo E-3)', async () => {
+  const w = await hooked();
+  put(w.weather, 'm.txt', 'one\n');
+  assert.equal(commitAs(w, w.weather, 'm').status, 0);
+  git(w.weather, ['checkout', '-q', '-b', 'feat']);
+  put(w.weather, 'm.txt', 'feat\n');
+  assert.equal(commitAs(w, w.weather, `${SLUG}: m`).status, 0);
+  git(w.weather, ['checkout', '-q', 'master']);
+  put(w.weather, DONE, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0);
+  put(w.weather, 'm.txt', 'master\n');
+  assert.equal(commitAs(w, w.weather, 'master moves m').status, 0);
+  for (const how of ['continue', 'editor']) {
+    git(w.weather, ['checkout', '-q', '-B', `feat-${how}`, 'feat']);
+    assert.equal(replayOf(w, w.weather, ['rebase', 'master']).status, 1);
+    assert.ok(existsSync(join(w.weather, '.git', 'rebase-merge', 'stopped-sha')));
+    put(w.weather, 'm.txt', 'both\n');
+    git(w.weather, ['add', 'm.txt']);
+    if (how === 'editor') {
+      const r = editAs(w, w.weather, '', [], { GIT_EDITOR: 'true' });
+      assert.equal(r.status, 0, r.stderr);
+    }
+    const cont = replayOf(w, w.weather, ['rebase', '--continue']);
+    assert.equal(cont.status, 0, cont.stderr);
+    assert.equal(said(w.weather).split('\n')[0], `${SLUG}: m`, how);
+  }
+});
+
+test('git revert of an accepted task\'s commit is refused, its revert left staged for a commit in a new task\'s words; a revert of a commit naming no task passes (accept-shared-repo E-5)', async () => {
+  const w = await acceptedWork();
+  put(w.weather, 'src/other.ts', 'export const other = 1;\n');
+  assert.equal(commitAs(w, w.weather, 'another line').status, 0);
+  const other = head(w.weather);
+  const r = replayOf(w, w.weather, ['revert', '--no-edit', w.c]);
+  assert.equal(r.status, 128);
+  assert.ok(r.stderr.includes(REFUSAL), r.stderr);
+  assert.equal(head(w.weather), other);
+  assert.equal(staged(w.weather), 'src/cache.ts');
+  const undo = commitAs(w, w.weather, 'weather/undo-cache: undo the cache');
+  assert.equal(undo.status, 0, undo.stderr);
+  replayOf(w, w.weather, ['revert', '--quit']);
+  const plain = replayOf(w, w.weather, ['revert', '--no-edit', other]);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.equal(said(w.weather).split('\n')[0], 'Revert "another line"');
+});
+
+test('a merge naming an accepted task passes when clean, by its -m or its branch\'s name, when stopped on a conflict, and as an octopus; with code of its own it is refused and with records alone it passes; a squash merge of its branch is refused (accept-shared-repo AC-8, E-4, E-5)', async () => {
+  const w = await hooked();
+  const branch = (name, path, from = 'master', message = `a line for ${path}`) => {
+    git(w.weather, ['checkout', '-q', '-b', name, from]);
+    put(w.weather, path, `${name}\n`);
+    assert.equal(commitAs(w, w.weather, message).status, 0);
+    git(w.weather, ['checkout', '-q', 'master']);
+  };
+  branch('squashed', 'src/squashed.ts', 'master', `${SLUG}: the squashed line`);
+  put(w.weather, DONE, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0);
+  const merge = (args) => replayOf(w, w.weather, ['merge', '-q', ...args]);
+
+  branch(SLUG, 'src/a.ts');
+  const byName = merge(['--no-ff', '--no-edit', SLUG]);
+  assert.equal(byName.status, 0, byName.stderr);
+  assert.equal(said(w.weather), `Merge branch '${SLUG}'`);
+  branch('side-b', 'src/b.ts');
+  const byM = merge(['--no-ff', '-m', `${SLUG}: join`, 'side-b']);
+  assert.equal(byM.status, 0, byM.stderr);
+
+  branch('side-c', 'src/c.ts');
+  assert.equal(merge(['--no-ff', '--no-commit', 'side-c']).status, 0);
+  put(w.weather, 'src/evil.ts', 'export const evil = 1;\n');
+  const evil = commitAs(w, w.weather, `${SLUG}: join`);
+  assert.equal(evil.status, 1);
+  assert.equal(evil.stderr.trim(), REFUSAL);
+  execFileSync('rm', [join(w.weather, 'src/evil.ts')]);
+  put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
+  const records = commitAs(w, w.weather, `${SLUG}: join`);
+  assert.equal(records.status, 0, records.stderr);
+
+  branch('side-e', 'README.md');
+  put(w.weather, 'README.md', 'weather, master\n');
+  assert.equal(commitAs(w, w.weather, 'master readme').status, 0);
+  assert.equal(merge(['-m', `${SLUG}: join e`, 'side-e']).status, 1);
+  put(w.weather, 'README.md', 'weather, both\n');
+  const resolved = editAs(w, w.weather, '', [], { GIT_EDITOR: 'true' });
+  assert.equal(resolved.status, 0, resolved.stderr);
+
+  branch('oct-1', 'src/o1.ts');
+  branch('oct-2', 'src/o2.ts');
+  const octopus = merge(['--no-ff', '-m', `${SLUG}: two at once`, 'oct-1', 'oct-2']);
+  assert.equal(octopus.status, 0, octopus.stderr);
+  assert.equal(git(w.weather, ['rev-list', '--parents', '-1', 'HEAD']).trim().split(' ').length, 4);
+
+  assert.equal(merge(['--squash', 'squashed']).status, 0);
+  const squash = editAs(w, w.weather, '', [], { GIT_EDITOR: 'true' });
+  assert.equal(squash.status, 1);
+  assert.equal(squash.stderr.trim(), REFUSAL);
+});
+
+test('the editor turning git\'s words at a pick\'s stop into the user\'s, naming an accepted task, is refused by commit-msg; after `cherry-pick -e` git runs no commit-msg (accept-shared-repo AC-8, E-3)', async () => {
+  const w = await acceptedWork();
+  git(w.weather, ['checkout', '-q', '-b', 'port', `${w.c}^`]);
+  put(w.weather, 'src/cache.ts', 'export const cache = 0;\n');
+  assert.equal(commitAs(w, w.weather, 'another cache').status, 0);
+  const port = head(w.weather);
+  assert.equal(replayOf(w, w.weather, ['cherry-pick', w.c]).status, 1);
+  put(w.weather, 'src/cache.ts', 'export const cache = 2;\n');
+  const r = editAs(w, w.weather, `${SLUG}: my own words`, [], { GIT_EDITOR: replacer() });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr.trim(), REFUSAL);
+  assert.equal(head(w.weather), port);
+  assert.equal(replayOf(w, w.weather, ['cherry-pick', '--abort']).status, 0);
+  // What it does not check (approval.md §3): prepare-commit-msg sees git's words, and no hook sees the editor's.
+  git(w.weather, ['reset', '-q', '--hard', `${w.c}^`]);
+  const e = replayOf(w, w.weather, ['cherry-pick', '-e', w.c], { GIT_EDITOR: replacer(), KIRUNAK_TEST_LINES: `${SLUG}: my own words` });
+  assert.equal(e.status, 0, e.stderr);
+  assert.equal(said(w.weather), `${SLUG}: my own words`);
+});
+
+test('in a step a merge and a commit after `cherry-pick -n` carry Task: <id> and no SLAP: line (accept-shared-repo AC-3)', async () => {
+  const w = await acceptedWork();
+  const step = { KIRUNAK_TASK: 'weather/next-task' };
+  git(w.weather, ['checkout', '-q', '-b', 'side']);
+  put(w.weather, 'src/side.ts', 'export {};\n');
+  assert.equal(commitAs(w, w.weather, 'a side line').status, 0);
+  git(w.weather, ['checkout', '-q', 'master']);
+  const merge = replayOf(w, w.weather, ['merge', '-q', '--no-ff', '--no-edit', 'side'], step);
+  assert.equal(merge.status, 0, merge.stderr);
+  assert.equal(said(w.weather), "Merge branch 'side'\n\nTask: weather/next-task");
+  git(w.weather, ['checkout', '-q', '-b', 'port', `${w.c}^`]);
+  assert.equal(replayOf(w, w.weather, ['cherry-pick', '-n', w.c]).status, 0);
+  const n = commitAs(w, w.weather, 'other: words', step);
+  assert.equal(n.status, 0, n.stderr);
+  assert.equal(said(w.weather), 'other: words\n\nTask: weather/next-task');
+});
