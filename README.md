@@ -210,10 +210,11 @@ task is started by hand, one task per session:
    task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict. It also refuses
    when the task's own work changed after the review: a later commit to a file the task's own commits touched, or one
-   that names the task. Other work committed in the repo, and kirunak's own records (task folders, drafts, approvals,
-   the queue), never do. The refusal, `k waiting` and `/k-accept` name each such file with its commit and the task
-   that commit names, and the way out is a new review. Once the task is accepted, the git hook refuses a commit that
-   names it unless it touches only kirunak's records: new work on it is a new task.
+   that names the task; and when its work in another repo changed after the head the review saw there, that file
+   named `<repo>:<path>`. Other work committed in the repo, and kirunak's own records (task folders, drafts,
+   approvals, the queue), never do. The refusal, `k waiting` and `/k-accept` name each such file with its commit and
+   the task that commit names, and the way out is a new review. Once the task is accepted, the git hook refuses a
+   commit that names it unless it touches only kirunak's records: new work on it is a new task.
 
 ### Escalation: a step that keeps failing goes one model up
 

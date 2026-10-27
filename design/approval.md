@@ -251,9 +251,24 @@ first line says how many files and names the next review's file ("<id>: its work
 in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):"); a line follows for
 each blocking file and commit, `<path>  <sha>  <task>`, where the task is the commit's `Task:` trailer when it has
 one, else every workspace task its message names, else `no task` (AC-6). `k waiting` and `/k-accept` show the same
-lines, the phone at most ten for a task (`boards.md` §4). Only the task's own repo is judged (O-2). It writes
-`done.json` with the review it took (file, verdict, head, hash, `task-files.md` §3), commits with `KIRUNAK_ACCEPTING`,
-removes the task from the queue. It is what the `k-done` skill asks the owner to type (`review.md` §4).
+lines, the phone at most ten for a task (`boards.md` §4). Another repo of the task's work is judged after the own
+repo, below. It writes `done.json` with the review it took (file, verdict, head, hash, `task-files.md` §3), commits
+with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done` skill asks the owner to type
+(`review.md` §4).
+
+In another repo (gulnya/kirunak-review-base AC-10), `k accept` judges the task's change against the head its latest
+review saw there, which that review step's `given.json` records (`review.md` §1), and its rows follow the own repo's.
+The task's change in each other repo is found again as the review's was, `repos.md` read again: a commit of it that
+the head the review saw does not hold blocks with its paths besides kirunak's records, and so does every commit of it
+in a repo the review saw no part of, or whose head git no longer has. Then each commit after that head on the ref it
+was read from (the default branch once that ref is gone), merges aside, blocks: with its paths when it names the task,
+with the files the review saw there that it touches when it does not. So another task's commit there to files the
+review never saw blocks nothing, unless it is on a branch named after the task or in a `repos.md` range. Each row
+names `<repo>:<path>`, its commit and its task, a repo's rows oldest first, and the refusal's first line adds where,
+`(in <repos>, after the head it saw there)`; `k waiting` and `/k-accept` print the path as given. A review whose step
+has no `given.json` was briefed before kirunak kept one and saw no other repo, so nothing is checked there, as its base
+is not (`review.md` §2). A `repos.md` line kirunak cannot read refuses the accept too (`task-files.md` §3). In the
+task's own repo the rules above are gulnya/kirunak-accept-shared-repo's, unchanged (gulnya/kirunak-review-base O-1).
 
 Once the acceptance is committed, `k accept` removes the worktrees the closed work left (`lib/worktrees.mjs`,
 gulnya/worktrees-on-close). A refusal or `--dry-run` removes nothing, and nothing in the removal undoes or fails the
@@ -508,5 +523,5 @@ that tell the session to send it with PushNotification. Best effort (amendment A
 
 D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
 R15 (`k accept`, with `review.md`), R30 (§4, what blocks `k accept`), R31 (§3, the `Task:` trailer and an accepted
-task).
+task), R32 (§4, what blocks `k accept` in another repo).
 The escalation hook, its block and the owner's `/k-go-on` (§7): gulnya/enforced-escalation AC-8 to AC-14, AC-27, AC-29.

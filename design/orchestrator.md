@@ -50,8 +50,12 @@ outputs: review.md
   `needs-<k>.json` to use, or `notes.md`, which holds the owner's answer), and a plan with no step of kind `review`,
   since `k accept` takes only a review (`review.md` §3).
   Every step start runs the same check (`k step start`, `k run`), so a task already running whose plan has no review
-  step is refused at its next step, naming the problem, and `k list` shows it blocked (`task-files.md` §4). `task` and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the
-  task's base commit to HEAD, written by `k step start` into `steps/<step>/diff.patch`).
+  step is refused at its next step, naming the problem, and `k list` shows it blocked (`task-files.md` §4). `task`
+  and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the task's first approval, the
+  commit that added its approval record, to HEAD, whatever amendments were approved after it, written by `k step
+  start` into `steps/<step>/diff.patch`; gulnya/kirunak-review-base AC-1, AC-2). A review's `diff` holds the task's
+  own change only, and a patch per other repo its work is in comes beside it (`review.md` §1); any other step's
+  `diff` is the whole repo.
 - The plan changes without approval (R8): whoever plans edits it and `k plan check` guards the coverage. Judgement:
   the plan is the model's working document, the task is the owner's contract; keeping the coverage check mechanical
   is what lets the plan stay free.

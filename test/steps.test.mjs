@@ -212,7 +212,9 @@ test('k step finish commits the evidence the step wrote and nothing else; a revi
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
   const rows = ['AC-1', 'AC-2', 'AC-3'].map((id) => `| ${id} | met | file docs/offline.md:1 |`);
   rows.push('| E-1 | met | measure evidence/S-1-cache-sizes.tsv row 2 |');
-  put(w, 'review.md', `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.join('\n')}\n\nverdict: met\n`);
+  // The base kirunak gave the review, the task's first approval (kirunak-review-base AC-4).
+  const base = git('log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json');
+  put(w, 'review.md', `---\ntask: ${w.id}\nhead: ${head}\nbase: ${base}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.join('\n')}\n\nverdict: met\n`);
   const done = k(w.home, ['step', 'finish', w.id, 'S-2']);
   assert.equal(done.status, 0, done.stderr);
   assert.equal(git('rev-parse', '--short', 'HEAD'), head, 'a finish with no new or changed evidence makes no commit');

@@ -9,14 +9,13 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   `--resume` of any implementing step's session, a new `--session-id`, and `k step start` refuses a review step
   whose `needs:` step shares a session id. Judgement: a fresh conversation is the only separation the tool can
   prove; the same model with a different prompt is still separate in what it has read, which is the point.
-- Its inputs are exactly: `task` (the frozen file), `diff` (`steps/S-review/diff.patch`, from the task's base
-  commit recorded at `k approve` to HEAD, leaving out the task's own folder `kirunak/tasks/<slug>`, whose task.md
-  and evidence reach the reviewer through `in/`), and `evidence/` (the files the steps produced: test reports,
-  measurement tables, screenshots, logs). Not `progress.md`, not `notes.md`, not any step's `report.md`, not the
-  plan (R13: "not the implementer's account"). `k step brief` for a `review` step copies the three into
-  `steps/S-review/in/` and the brief names only that folder, and the runner adds `--add-dir` for nothing else.
-  `in/` and `diff.patch` are copies of what git holds (the review records its head), so the step folder's own
-  `.gitignore`, written with them, leaves them and itself out of git.
+- Its inputs are exactly: `task` (the frozen file), `diff` (`steps/S-review/diff.patch`, the task's own change from
+  its first approval to HEAD, below), and `evidence/` (the files the steps produced: test reports, measurement
+  tables, screenshots, logs). Not `progress.md`, not `notes.md`, not any step's `report.md`, not the plan (R13: "not
+  the implementer's account"). `k step brief` for a `review` step copies the three into `steps/S-review/in/`, with a
+  patch per other repo in `in/repos/` (below), and the brief names only that folder, and the runner adds `--add-dir`
+  for nothing else. `in/` and `diff.patch` are copies of what git holds (the review records its head), so the step
+  folder's own `.gitignore`, written with them, leaves them and itself out of git.
   The repo itself is readable (the diff must be read against the code), which is why "the implementer's account"
   is defined as those files, every other step's folder (its brief, report, failure reports and run records, which
   hold the implementer's last message) and the session transcripts under `~/.claude/projects/`, and the brief says
@@ -27,6 +26,49 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   effort) and to the file commands it recognises in Bash (`cat`, `head`, ...), not to a search run from a folder
   above or a script that opens files itself: Bash stays a hole, which the brief names (judgement: the deny rules
   stop the easy reads; a worktree at head without the task folder would close the hole and is not built).
+- **The task's whole change** (R32, gulnya/kirunak-review-base, the owner's words): "A review sees the task's whole
+  change: every commit from the task's first approval to head, in the task's own repo and in any other repo its work
+  is in, and none of other tasks' work in a shared repo. An amendment no longer narrows what the review sees." The
+  diff's base is the task's first approval, the commit that added `kirunak/approvals/<slug>.json` (`approval.md` §4),
+  whatever amendments were approved after it (AC-1). Any other step that takes `diff` starts there too, its patch
+  the whole repo from that commit to HEAD (AC-2, `orchestrator.md` §1).
+- **The own change, `diff.patch`** (D-1, AC-6): the commits `git log <first approval>..<head>` lists whose message
+  names the task (its id, its slug as a whole word, or its `Task:` trailer, `approval.md` §3; a commit naming it and
+  another task counts, E-3) or names no task. A commit that names only other tasks is left out, so another task's
+  commits to other files in the same repo are not in it. Their paths besides kirunak's records (every task folder,
+  this task's own too, the drafts, the queue, the approvals, E-2) are diffed once, `git diff <first approval> <head>
+  -- <files>`, an empty patch when there is none; task.md and evidence reach the reviewer through `in/`. A merge has
+  no paths of its own, and each commit it brings in is judged on its own (E-4). This is wider than the own change `k
+  accept` judges by, which counts only the commits naming the task (`approval.md` §4).
+- **Other repos, `in/repos/<name>.patch`** (AC-8, AC-9, D-2): each workspace repo besides the task's own, and each
+  repo the task's `repos.md` adds (`task-files.md` §3). The task's commits there are: those on any local branch,
+  committed since the first approval was, whose message names the task by its id or its `Task:` trailer (a slug alone
+  names only a task of the repo it is written in); every commit on a branch named after the task (its id, or a name
+  holding its slug as a whole word while that repo has no task of the slug) since it left the default branch,
+  `<default>..<branch>` while it is not merged, and from the commit its reflog says it was made from once it is
+  (the default branch is origin's HEAD branch, else `main`, else `master`; a repo with no local branch of that name
+  gets nothing from a branch); and the commits of each `repos.md` line for that repo. A commit there that names no
+  task and is in none of these is left out, and a merge is not judged (E-4). The diff is read at the tip holding the
+  most of them (the default branch, a branch named after the task, a `repos.md` line's end, then any other branch by
+  name, the first in that order on a tie), from the merge base of the parents of the commits it holds (the empty
+  tree when one is a root commit), over their paths besides kirunak's records, each diffed once. `<name>` is the
+  workspace's name for the repo or its folder's, `-2` for a second of the same name; a repo where the task's commits
+  touch only records gets no patch. A `repos.md` line naming the task's own repo adds its commits' files to
+  `diff.patch`, whatever task they name. A `repos.md` line kirunak cannot read stops the brief and the review step's
+  start (E-6), and so does a branch line whose start it cannot tell, rather than adding nothing (`task-files.md` §3).
+- **What the brief says of them** (`templates/review-brief.md`): `diff.patch` is the own change from the first
+  approval to head. When the task was amended, it names the last amendment and its approval, the newest commit of
+  the approval record whose history, as committed there, ends with that amendment, and `git diff <that commit>
+  <head>` over the same files to see what changed since (AC-3); a task never amended names its first approval only
+  (E-1). It names each other repo's patch with its base, its head and the ref it was read at, and each of the task's
+  commits there that the patch does not hold, with the branches that hold it; those repos are readable at that head.
+  Under `## Commits that name no task` it lists, repo by repo, each commit in a diff whose message names no task,
+  with its short hash, subject and files, so the reviewer knows it may be other work (AC-7).
+- **`given.json`**, in the review step's folder beside `in/` and written with it, records what kirunak gave the
+  review: the base, the last amendment's approval, the head, and for each other repo its name, root, the ref its head
+  was read from, its base, head and files. The step's `.gitignore` does not name it, so it is committed with the
+  step's folder. `k review check` holds the review's `base` to it (§2), and `k accept` reads each other repo's head
+  from it (`approval.md` §4).
 - The reviewer's brief: the task's AC, E and O lines verbatim; "write `review.md` in the grammar below; a row per
   AC and E; `met` only with evidence you verified yourself: a test you can name and whose assertion you read, a
   file and line, a measurement in `evidence/`, a screenshot in `evidence/`; when you cannot verify (a device, the
@@ -60,7 +102,11 @@ verdict: not met (AC-2)
 ```
 
 - Grammar `k review check` enforces: `head` is the reviewed commit's id, 7 to 40 hex characters, of a commit in the
-  repo (a name such as `HEAD` or a branch moves on after the review, and `k accept` compares the code with it); one
+  repo (a name such as `HEAD` or a branch moves on after the review, and `k accept` compares the code with it);
+  `base` is the commit kirunak gave the review step whose output the review is, its `given.json`'s base, the task's
+  first approval (§1), either id written short or long: another base, or none, is refused, naming the step and the
+  base to write, so a review step's finish and `k accept` refuse it too (gulnya/kirunak-review-base AC-4; a review
+  step with no `given.json` was briefed before kirunak kept one, and its review's base is not checked, E-5); one
   row per AC and E of the frozen task (none missing, none extra); verdict ∈
   `met | not met | needs device | needs owner`; a `met` row's evidence starts with `test <Name>`, `file
   <path>:<line>`, `measure <path>`, or `screenshot <path>`, and the path exists at `head` (a test name must appear
@@ -105,9 +151,10 @@ item yet), beside the review it took. It takes only a latest review that counts 
 checklist items, never a criterion); the way out is an amendment and a new review, or a new review after a fix. A
 commit after the review's `head` that changed the task's own work, or that names the task, is refused the same way,
 kirunak's own records aside, while other work in the repo is not (`approval.md` §4,
-gulnya/kirunak-accept-shared-repo): the review never saw it, and the way out is a new review. A task with no review
-cannot be accepted: its plan needs a review step, run, and `k plan check` refuses a plan with none, so the gap shows
-when the plan is written (`orchestrator.md` §1).
+gulnya/kirunak-accept-shared-repo), and so is a change to the task's work in another repo after the head the review
+saw there (gulnya/kirunak-review-base AC-10): the review never saw it, and the way out is a new review. A task with
+no review cannot be accepted: its plan needs a review step, run, and `k plan check` refuses a plan with none, so the
+gap shows when the plan is written (`orchestrator.md` §1).
 
 ## 4. Done only through `k-done` (R15, D12)
 
@@ -143,4 +190,5 @@ handoff) and the record must not (D7). The owner may prefer one name for both; t
 ## 5. Requirements this file satisfies
 
 R13 (§1), R14 (§2), R15 (§3, §4), D12 (§4), R30 (§3, the tick a new review keeps; what blocks `k accept` is
+`approval.md` §4), R32 (§1, what a review sees; §2, its base; what `k accept` refuses in other repos is
 `approval.md` §4).

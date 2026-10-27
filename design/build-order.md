@@ -387,6 +387,42 @@ forces a new review.
   committed, `commentChar=;`, `cleanup=whitespace`, `cleanup=strip` with `-m`, `commit.verbose`; the hooks set by an
   absolute `core.hooksPath`, which a worktree runs), `records.test.mjs` (`kept` against the measured cases).
 
+## What a review sees: the task's whole change. Closes R32
+
+Built 2026-10-27 (gulnya/kirunak-review-base S-1 to S-3, on the branch `kirunak-review-base`), on slice 4's review
+step and the accept above: a review's diff starts at the task's first approval whatever amendments came after, holds
+the task's own change only, and comes with the task's change in every other repo its work is in.
+
+- Files: `lib/change.mjs` (new: `approvals`, the first approval and the last amendment's approval; `whose`;
+  `ownChange`, the task's own change and the commits naming no task; `filesDiff`); `lib/repos-md.mjs` (new:
+  `handLines`, the task's `repos.md` and its refusals); `lib/other-repos.mjs` (new: `commitsOf`, `reposOf`,
+  `otherRepos`, each repo's commits, tip, base and files; `laterElsewhere`, what blocks `k accept` there);
+  `lib/steps.mjs` (`writeDiff` from the first approval, `in/repos/<name>.patch`, `GIVEN` and `given.json`;
+  `reviewBrief`'s lines for the amendment, the other repos and the commits naming no task; `start` reading
+  `repos.md`); `templates/review-brief.md`; `lib/review.mjs` (`givenFor`, `checkReview`'s base); `lib/approval.mjs`
+  (`accept` adding `laterElsewhere`'s rows); `lib/git.mjs` (`commitsIn` with parents, `succeeds`, `isBranch`,
+  `isAncestor`); `lib/records.mjs` (`firstApproval` exported). `REQUIREMENTS.md` R32, `design/review.md` §1 and §2,
+  `task-files.md` §1 and §3, `orchestrator.md` §1 and `approval.md` §4 say how it works.
+- Tests: `review-base.test.mjs` (a task approved, amended and reviewed, its diff from the first approval holding the
+  work done before the amendment; the brief naming both approvals, or the first alone; another task's commit to
+  another file left out and to a file of the task's kept, one naming both kept, one naming none kept and listed,
+  records never in it, a merge's commits judged one by one, a step that is not a review on the same base),
+  `other-repos.test.mjs` (a commit naming the task found on a side branch of another repo, its slug alone and a
+  commit before the approval not; the queue's commit bringing no patch; a branch named after the task unmerged and
+  merged by its reflog, another task's branch of the same slug not; the tip holding most and the commits it does not
+  hold; `repos.md` adding a repo by path, a range in a found repo and in the own repo; each unreadable line refused
+  at brief and start; a repo whose default branch is only on its remote), `review-given.test.mjs` (a wrong or
+  missing base refused by `k review check`, a review step's finish and `k accept`, none checked without
+  `given.json`; `k accept` refused by a later commit naming the task in another repo, another task's commit to a
+  file the review saw there and a task commit on a new branch, not by other files), and `review-step.test.mjs` and
+  `steps.test.mjs`, whose reviews name the base.
+- Numbers: `npm test` 721 tests, 719 pass, none fail (S-3). Live from the branch: this task's own review finds
+  kirunak through its `repos.md` (branch `kirunak-review-base`, base 4536116, 7 files at S-2);
+  gulnya/hronka-pinned finds katyafm, hronka, niva and palon in about 2 s; `k waiting` and `k accept --dry-run` of
+  gulnya/kirunak-accept-shared-repo and niva/themes-zoom-bests print what master prints, their reviews having no
+  `given.json`.
+- Not yet measured: the merge to master and `/k-accept` from a session started after it (S-5).
+
 ## Slice 7, later and not detailed here: R17, R18
 
 Trackers (Linear, It's a Plan, GitHub Issues) and cloud sync as plugins on the `tracker` and `sync` seams, with

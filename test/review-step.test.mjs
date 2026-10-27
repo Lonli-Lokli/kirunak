@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { accept, hashBytes, readRecord } from '../lib/approval.mjs';
+import { accept, hashBytes } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
@@ -27,6 +27,8 @@ outputs: review.md
 `;
 
 const NO_SESSION = { CLAUDE_CODE_SESSION_ID: '' };
+// The task's first approval, where a review's diff starts: the base its review names (kirunak-review-base AC-4).
+const approvedAt = (w) => sh(w.weather, 'git', ['log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json']).trim();
 const put = (w, rel, text = 'x') => {
   mkdirSync(join(w.p.dir, rel, '..'), { recursive: true });
   writeFileSync(join(w.p.dir, rel), text);
@@ -81,7 +83,7 @@ test('the review brief copies the three inputs into in/ and names only that fold
   for (const id of ['AC-1', 'AC-2', 'AC-3', 'E-1', 'O-1']) assert.ok(text.includes(task.find((l) => l.startsWith(`- ${id} `))), `${id} verbatim`);
   assert.ok(!text.includes('- D-1 '), 'the decisions are not the reviewer\'s lines');
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
-  const base = readRecord(w.weather, 'offline-forecast').commit;
+  const base = approvedAt(w);
   for (const s of ['`kirunak/tasks/offline-forecast/steps/S-2/in/task.md`', '`kirunak/tasks/offline-forecast/steps/S-2/in/diff.patch`',
     '`kirunak/tasks/offline-forecast/steps/S-2/in/evidence/`', 'Write `kirunak/tasks/offline-forecast/review.md`', `task: ${w.id}`, `head: ${head}`,
     `base: ${base}`, 'session: rev-1', 'never guess', '`needs device` or `needs owner`', 'k review check weather/offline-forecast']) {
@@ -114,11 +116,11 @@ test('a review step finishes only when its review passes k review check', async 
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
   const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file docs/offline.md:1 |`);
-  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: met\n`;
+  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\nbase: ${approvedAt(w)}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: met\n`;
   put(w, 'review.md', review(rows.slice(1)));
   const bad = k(w.home, ['step', 'finish', w.id, 'S-2']);
   assert.equal(bad.status, 1);
-  assert.match(bad.stderr, /S-2: review\.md fails k review check:\n {2}line 6: AC-1 has no row: one row per AC and E\n$/);
+  assert.match(bad.stderr, /S-2: review\.md fails k review check:\n {2}line 7: AC-1 has no row: one row per AC and E\n$/);
   const ready = () => events(w.home).filter((l) => l.kind === 'review-ready');
   assert.deepEqual(ready(), [], 'neither the implementer\'s finish nor a refused one says a review is ready');
   put(w, 'review.md', review(rows));
@@ -132,7 +134,7 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
   const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file docs/offline.md:1 |`).join('\n');
-  const text = `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`;
+  const text = `---\ntask: ${w.id}\nhead: ${head}\nbase: ${approvedAt(w)}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`;
   put(w, 'review.md', text);
   assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status, 0);
   const progress = readFileSync(join(w.p.dir, 'progress.md'), 'utf8');
@@ -187,7 +189,7 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   w.ws.models = { review: { model: 'opus', effort: 'high' } };
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
   const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file docs/offline.md:1 |`);
-  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: met\n`;
+  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\nbase: ${approvedAt(w)}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: met\n`;
   const calls = [];
   w.ws.seams.runner = {
     start(step) {
@@ -230,7 +232,7 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   }
   const dir = join(w.p.dir, 'steps', 'S-2');
   const failure = readFileSync(join(dir, 'failure-1.md'), 'utf8');
-  assert.match(failure, /S-2 failed\n\n.*: review\.md fails k review check \(1 problem\)\n\nExit code 0, session .*\n\nk review check:\n\n- line 6: AC-1 has no row: one row per AC and E\n$/);
+  assert.match(failure, /S-2 failed\n\n.*: review\.md fails k review check \(1 problem\)\n\nExit code 0, session .*\n\nk review check:\n\n- line 7: AC-1 has no row: one row per AC and E\n$/);
   assert.match(retry.prompt, /`kirunak\/tasks\/offline-forecast\/steps\/S-2\/in\/failure-1\.md`: the last attempt failed/);
   assert.equal(readFileSync(join(dir, 'in', 'failure-1.md'), 'utf8'), failure);
 });
@@ -239,7 +241,7 @@ test('a review that fails k review check twice climbs in build mode; its `not me
   const w = await approvedWorkspace(PLAN);
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
   const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | not met | file docs/offline.md:1 |`);
-  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: not met (AC-1, AC-2, AC-3, E-1)\n`;
+  const review = (r) => `---\ntask: ${w.id}\nhead: ${head}\nbase: ${approvedAt(w)}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${r.join('\n')}\n\nverdict: not met (AC-1, AC-2, AC-3, E-1)\n`;
   const calls = [];
   w.ws.seams.runner = {
     start(step) {
