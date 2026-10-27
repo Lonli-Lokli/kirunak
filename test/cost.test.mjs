@@ -137,6 +137,26 @@ test('an interactive session that names the task is summed', async () => {
   writeFileSync(join(w.home, 'sessions', 's1.json'), JSON.stringify({ task: ID, step: null, cost: { total_cost_usd: 0.42 } }));
   writeFileSync(join(w.home, 'sessions', 's2.json'), JSON.stringify({ task: 'weather/other', cost: { total_cost_usd: 9 } }));
   const c = await costOf(w.ws, ID);
-  assert.deepEqual(c.interactive, { sessions: 1, usd: 0.42 });
-  assert.match(k(w.home, ['cost', ID]).stdout, /interactive sessions 1, 0\.42 USD/);
+  assert.deepEqual(c.interactive, { sessions: 1, usd: 0.42, tracked: 1 });
+  assert.match(k(w.home, ['cost', ID]).stdout, /interactive sessions 1, 0\.42 USD$/m);
+});
+
+test('sessions whose files hold no cost say cost not tracked, never 0.00 USD; a tracked one shows its money, and an old done.json renders as before (cost-untracked-sessions AC-1, AC-2)', async () => {
+  const w = await fixture();
+  mkdirSync(join(w.home, 'sessions'), { recursive: true });
+  writeFileSync(join(w.home, 'sessions', 's1.json'), JSON.stringify({ task: ID, step: null, kind: 'interactive' }));
+  const c = await costOf(w.ws, ID);
+  assert.deepEqual(c.interactive, { sessions: 1, usd: 0, tracked: 0 });
+  const none = 'interactive sessions 1, cost not tracked (the status line does not run kirunak\'s tracker)';
+  assert.ok(k(w.home, ['cost', ID]).stdout.split('\n').includes(`  ${none}`));
+  const md = costMarkdown(ID, JSON.parse(JSON.stringify(summary(c))));
+  assert.ok(md.includes(`\nI${none.slice(1)}.\n`));
+  assert.doesNotMatch(md, /0\.00 USD/);
+  // One tracked beside it: its money, and how many are not (AC-2).
+  writeFileSync(join(w.home, 'sessions', 's2.json'), JSON.stringify({ task: ID, step: null, cost: { total_cost_usd: 0.42 } }));
+  const both = summary(await costOf(w.ws, ID));
+  assert.deepEqual(both.interactive, { sessions: 2, usd: 0.42, tracked: 1 });
+  assert.match(costMarkdown(ID, both), /\nInteractive sessions 2, 0\.42 USD, 1 of them not tracked\.\n/);
+  // A done.json written before `tracked` was counted keeps the cost.md it was committed with.
+  assert.match(costMarkdown(ID, { ...both, interactive: { sessions: 1, usd: 0 } }), /\nInteractive sessions 1, 0\.00 USD\.\n/);
 });

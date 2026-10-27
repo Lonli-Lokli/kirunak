@@ -67,8 +67,8 @@ You need Node 22 or later, git and Claude Code.
    `k install` adds a PreToolUse hook and a SessionStart hook to `~/.claude/settings.json` (keeping yours) and links
    the `k-intake`, `k-draft`, `k-done` and `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as
    a page, below). It also prints one line to add to your
-   status line command, so the cache keeper sees each session's context and cache; it never edits your status line
-   itself.
+   status line command, so the cache keeper sees each session's context and cache and `k cost` its money; it never
+   edits your status line itself, and `k doctor` warns until the status line, or a script it names, runs that line.
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
    ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
    `k-go-on` skill.

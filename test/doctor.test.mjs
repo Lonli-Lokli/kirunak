@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { frontmatter, ladderChecks } from '../lib/doctor.mjs';
+import { frontmatter, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import { install } from '../lib/install.mjs';
 import { k, KIRUNAK, ladderWorkspace } from './helpers.mjs';
 
@@ -169,4 +169,21 @@ test('k doctor --settings --agents prints the ladder lines', async () => {
   assert.match(out, /^ok {3}hook kirunak-escalate\.mjs$/m);
   assert.match(out, /^FAIL models\.escalate is no longer read/m);
   assert.match(out, /^ok {3}push to the phone: on \(agentPushNotifEnabled in .*settings\.json\)$/m);
+  assert.match(out, /^WARN status line tracker: no statusLine command in .*settings\.json, so sessions' cost is not tracked/m);
+});
+
+test('the status line tracker is a WARN naming the line to add until statusLine, or a script it names, runs it (cost-untracked-sessions AC-3)', async () => {
+  const w = await installed();
+  const check = () => trackerLine({ settingsPath: w.settingsPath, kirunakRoot: KIRUNAK, home: w.dir });
+  const add = `add this line to the status line command, fed the same JSON on stdin, with "refreshInterval": 30: node ${join(KIRUNAK, 'hooks', 'statusline-track.mjs')}`;
+  assert.deepEqual(check(), ['warn', `status line tracker: no statusLine command in ${w.settingsPath}, so sessions' cost is not tracked and the cache keeper cannot see them: ${add}`]);
+  // A script of the user's, named from the home folder, that prints a status line without the tracker.
+  const script = join(w.dir, 'statusline.sh');
+  writeFileSync(script, '#!/usr/bin/env bash\necho status\n');
+  w.settings((s) => { s.statusLine = { type: 'command', command: '~/statusline.sh', refreshInterval: 30 }; });
+  assert.deepEqual(check(), ['warn', `status line tracker: statusLine in ${w.settingsPath} and ${script} do not run it, so sessions' cost is not tracked and the cache keeper cannot see them: ${add}`]);
+  writeFileSync(script, `#!/usr/bin/env bash\ninput=$(cat)\nprintf '%s' "$input" | node ${join(KIRUNAK, 'hooks', 'statusline-track.mjs')}\necho status\n`);
+  assert.deepEqual(check(), [true, `status line tracker: run by ${script}`]);
+  w.settings((s) => { s.statusLine.command = `bash -c 'node ${join(KIRUNAK, 'hooks', 'statusline-track.mjs')}'`; });
+  assert.deepEqual(check(), [true, `status line tracker: run by statusLine in ${w.settingsPath}`]);
 });

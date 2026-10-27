@@ -269,7 +269,9 @@ the context size, the TTL and when the cache expires, what the conversation wait
   `cache_read_input_tokens`), `prompt_cache` (`warm`, `ttl`, `expires_at`, `hit_ratio`), `cost.total_cost_usd`
   (statusline.md, fetched 2026-10-18), and runs every `refreshInterval` seconds when one is set (judgement: 30). So
   the user's status line command gains one line, `node <kirunak>/hooks/statusline-track.mjs`, which reads the same
-  stdin and writes the session file (`k install --print` prints it with the path). Evidence that this is the only
+  stdin and writes the session file (`k install --print` prints it with the path); `k doctor` warns, never fails,
+  while neither `statusLine`'s command nor a script it names holds that line, and names the line to add
+  (gulnya/cost-untracked-sessions AC-3). Evidence that this is the only
   documented source: "No hook receives token usage or context size" (hooks.md); the transcript's per-message
   `usage` is "internal to Claude Code and changes between versions" (sessions.md), so it stays a fallback, marked
   observed.
@@ -595,7 +597,11 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   baseline, `k cost` prints the task's own numbers only.
 - The interactive session's own usage for a task (the intake, the owner's turns) comes from the status line's
   `cost.total_cost_usd` and `context_window` per session file, summed by `k cost` for sessions whose
-  `sessions/<id>.json` names the task (`k start <id>` sets it, `boards.md` §4).
+  `sessions/<id>.json` names the task (`k start <id>` sets it, `boards.md` §4). Only the tracker writes that cost, so
+  a session file without one was never measured: `done.json` keeps how many held one (`interactive.tracked`), and
+  `k cost` and `cost.md` say `cost not tracked (the status line does not run kirunak's tracker)` when none did and
+  `<n> of them not tracked` beside the money when some did not, never `0.00 USD` for an unknown
+  (gulnya/cost-untracked-sessions AC-1, AC-2). A `done.json` written before `tracked` renders as it was committed.
 
 ## 7. Requirements this file satisfies
 

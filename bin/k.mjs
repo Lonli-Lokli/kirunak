@@ -22,7 +22,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { compactChecks, ladderChecks } from '../lib/doctor.mjs';
+import { compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -178,9 +178,10 @@ const VERBS = {
   async doctor({ ws, flags }) {
     const lines = [];
     let bad = 0;
+    // ok true, false (a FAIL, counted) or 'warn' (named, never counted).
     const say = (ok, line) => {
       if (!ok) bad++;
-      lines.push(`${ok ? 'ok  ' : 'FAIL'} ${line}`);
+      lines.push(`${ok === 'warn' ? 'WARN' : ok ? 'ok  ' : 'FAIL'} ${line}`);
     };
     say(true, `state folder ${ws.home}, workspace ${ws.modulePath}`);
     for (const r of ws.repos) say(existsSync(join(r.root, '.git')), `repo ${r.name}: ${r.root} is a git repo`);
@@ -200,6 +201,7 @@ const VERBS = {
     const agentsDir = flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents');
     for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     for (const [ok, line] of compactChecks({ ws, settingsPath: settings })) say(ok, line);
+    say(...trackerLine({ settingsPath: settings, kirunakRoot: KIRUNAK }));
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);
