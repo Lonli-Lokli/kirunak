@@ -5,6 +5,8 @@ import { isOwners, reason, refusal, refused } from './commands'
 import { placeLines, plainLines, queueNow, unmarked } from './lists'
 import type { Item } from './lists'
 import { kOf, refresh } from './reads'
+import { told } from './turns'
+import { capBlocking } from './waiting'
 
 // The owner-only rule (kirunak-phone AC-4, D-1; approval.md §5), held by this module's shape:
 // - a command's turn (Turn) is made only by owners(), in the command's own command.run hook, after the command's
@@ -22,7 +24,9 @@ import { kOf, refresh } from './reads'
 //   opens), so no verb choice is ever reached from it; it is the turn's one dialog, so no verb is typed after it;
 // - an item's `ends` choice (/k-drafts' Start intake, /k-bugs' Start fix) ends a verb's dialog with nothing run,
 //   handing its value to the command, which runs no verb with it (it submits a prompt); the turn's one dialog, so no
-//   verb is typed after it.
+//   verb is typed after it;
+// - once a verb ran, the session may get a turn of its own (turns.ts, gulnya/kirunak-bugs AC-11 to AC-14): a prompt
+//   submitted after the answer, which says what the owner did and runs no verb.
 
 // An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
 const COMMIT_MS = 600_000
@@ -99,17 +103,19 @@ export const nothingRan = (why: string): string => `Nothing ran: ${why}.`
 
 // An owner's verb as `node k <argv>`, with the time a commit takes; k's state line (a queue verb's: the queue it left;
 // Review & merge's: what runs now and where its result shows), or why it did not take.
-async function runVerb($: EngineInterface, name: string, k: string, argv: readonly string[]): Promise<{ ok: boolean; text: string }> {
+// `said`: what k said, for the turn after it (turns.ts): its state line, or its reason.
+async function runVerb($: EngineInterface, name: string, k: string, argv: readonly string[]): Promise<{ ok: boolean; text: string; said: string }> {
   let r
   try {
     r = await $.process.run(['node', k, ...argv], { timeoutMs: COMMIT_MS })
   } catch (err) {
-    return { ok: false, text: `/${name}: k did not finish (${reason(err)}); \`k list --all\` says whether it took.` }
+    return { ok: false, text: `/${name}: k did not finish (${reason(err)}); \`k list --all\` says whether it took.`, said: `k did not finish (${reason(err)}); \`k list --all\` says whether it took.` }
   }
   void refresh($)
-  if (r.exitCode !== 0) return { ok: false, text: refused(name, r) }
-  if (argv[0] === 'bug' && argv[1] === 'review') return { ok: true, text: reviewStarted(argv[2] ?? '', r.stdout) }
-  return { ok: true, text: argv[0] === 'queue' ? queueNow(r.stdout) : r.stdout.trim() }
+  const said = r.exitCode !== 0 ? capBlocking((r.stderr || r.stdout).trim().split('\n')).join('\n') : r.stdout.trim()
+  if (r.exitCode !== 0) return { ok: false, text: refused(name, r), said }
+  if (argv[0] === 'bug' && argv[1] === 'review') return { ok: true, text: reviewStarted(argv[2] ?? '', r.stdout), said }
+  return { ok: true, text: argv[0] === 'queue' ? queueNow(r.stdout) : r.stdout.trim(), said }
 }
 
 // The answer of `/<name>`'s own command.run hook: refuses every origin but the owner's with a line, before anything is
@@ -167,6 +173,8 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
   if (verb === undefined || verb.turn !== me || verb.tapped !== asked) throw new Error(`/${name}: a verb this command did not choose`)
   const r = await runVerb($, name, k, verb.argv)
   verb.after?.(r.ok)
+  // The session's turn after it, when it gets one (turns.ts); it runs no verb.
+  await told($, { name, k, argv: verb.argv, tapped: verb.tapped, ok: r.ok, said: r.said })
   return r.text
 }
 

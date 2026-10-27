@@ -15,6 +15,7 @@ import type { Outcome, Turn } from './owner'
 import { acceptScreen, amendmentsScreen, approveScreen, boardScreen, holdScreen, queueScreen, resumeScreen, startScreen } from './picks'
 import type { Brief } from './picks'
 import { lastRows, refresh, sessionTask, tick } from './reads'
+import { forgetRan, noteAuthors, noteRan, submitLater } from './turns'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
 import type { AmendmentRow, Waiting } from './waiting'
 
@@ -31,7 +32,8 @@ const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
 const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success: 'success', error: 'error', warning: 'warning' }
 
 // The owner's verbs (boards.md §4, approval.md §5): run only on the owner's own gesture, as `node k <verb> <id>
-// --via mod`, with no model turn; the state line k prints is the command's output.
+// --via mod`, with no model turn; the state line k prints is the command's output, and a turn of the session's own
+// may follow it (turns.ts).
 // The lists a number picks from, as last shown in this session: with no id, /k-approve and /k-accept list what waits
 // for that verb, and the ids shown, in order, are what `/k-accept <n>` takes; /k-amendments lists the amendments that
 // `/k-amendments <n>` and `/k-approve-amendment <n>` take (E-2). The module's own, so a reload asks for the list again,
@@ -140,6 +142,8 @@ async function amendments($: EngineInterface, turn: Turn): Promise<string | Outc
     if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
     const rows = (offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments)
     if (!rows.length) return amendmentsText(rows)
+    // The ones this session wrote: their approval, or its refusal, gets a turn here (turns.ts).
+    noteAuthors(rows, await $.session.id().catch(() => ''))
     // Each one's file, read before the dialog opens, for the one picked to show in full; one that cannot be read shows
     // k waiting's words instead.
     const files = new Map<string, string>()
@@ -204,22 +208,15 @@ async function draftsDialog($: EngineInterface, turn: Turn): Promise<string | Ou
 // since the list was shown is refused by name, never another; then a prompt of its own, once this answer shows, that
 // starts the intake with the k-intake skill (drafts.ts, intakePrompt). It runs no verb. The engine refuses a submit
 // from inside a command.run hook (it would wait on the turn the hook holds: measured under `claude plugin test`), so
-// a timer of the clock's submits it once the hook has answered; the prompt then waits for the session to be idle.
-const SUBMIT_AFTER_MS = 1
+// a timer of the clock's submits it once the hook has answered (turns.ts, submitLater); the prompt then waits for the
+// session to be idle, and one the engine refuses toasts why.
 async function startIntake($: EngineInterface, k: string, id: string): Promise<string> {
   const r = await $.process.run(['node', k, 'drafts', '--json'])
   if (r.exitCode !== 0) return `Nothing ran: k drafts did not answer, so ${id} could not be found again: ${firstLine(r)}`
   const d = (JSON.parse(r.stdout) as DraftRow[]).find(x => x.id === id)
   if (d === undefined) return `Nothing ran: ${id} is no longer a draft. It was dropped, or its intake started, since the list was shown.`
-  submitLater($, id, intakePrompt(d))
+  submitLater($, intakePrompt(d), `The intake from ${id} did not start`)
   return `The intake from ${id} starts next in this session, with the k-intake skill.`
-}
-
-// The intake's prompt, submitted once the command has answered (above); one the engine refuses toasts why.
-function submitLater($: EngineInterface, id: string, text: string): void {
-  $.clock.after(SUBMIT_AFTER_MS, () => {
-    void $.prompt.submit({ text }).catch(err => $.ui.toast(`The intake from ${id} did not start: ${reason(err)}`))
-  })
 }
 
 // `/k-bugs` (gulnya/kirunak-bugs AC-6, D-1): every bug in every repo, as k bugs gives them, a fix ready first, then the
@@ -255,7 +252,7 @@ async function startFix($: EngineInterface, k: string, id: string): Promise<stri
   const b = (JSON.parse(r.stdout) as BugRow[]).find(x => x.id === id)
   if (b === undefined) return `Nothing ran: ${id} is no longer a bug. It was dropped, merged, or its intake started, since the list was shown.`
   if (b.reviewing) return `Nothing ran: ${id} is ${fixOf(b)}; its fix can be started once that review ends.`
-  submitLater($, id, fixPrompt(b))
+  submitLater($, fixPrompt(b), `The intake from ${id} did not start`)
   return `The intake from ${id} starts next in this session, with the k-intake skill.`
 }
 
@@ -325,8 +322,22 @@ export const register: Register = on => {
     delete offered.approve
     delete offered.accept
     delete offered.amendments
+    forgetRan()
     return next(e)
   })
+
+  // The intakes and amendments this session runs itself, for the turns after the owner's verbs (turns.ts): the call
+  // goes on as it came, and one that failed or was refused notes nothing. It never refuses: its catch replays what
+  // the call settled to.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const r = await next(e)
+    try {
+      if (r.deny === undefined && !r.isError) noteRan(e.command)
+    } catch {
+      // Nothing noted: the call's result stands.
+    }
+    return r
+  }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'kirunak' }, async $ => {
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
