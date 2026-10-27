@@ -6,7 +6,7 @@ import type { Brief } from '../hooks/picks'
 import type { KirunakRow } from '../types'
 
 import type { DraftRow } from '../hooks/drafts'
-import { BRIEF, briefOf, cardOf, DRAFTS, draftCardOf, ID, ROWS, world } from './world'
+import { BRIEF, briefOf, bugCardOf, cardOf, DRAFTS, draftCardOf, ID, NO_FIX, READY, ROWS, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }) =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -106,6 +106,19 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     expect(w.asked[1]).toEqual({ header: 'Board', question: `Drafts (2)\n${lines.join('\n')}\nWhich draft?`, labels: ['hub/offline-maps', 'weather/rain-alerts', 'Back'] })
     expect(w.asked[3]?.question).toBe('Queued (1)\nhub/sync-notes: queued, queue 2\nWhich task\'s card?')
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/offline-maps'], ['board', '--brief', '--json']])
+    expect(w.runs).toEqual([])
+  })
+
+  test('the group Bugs (kirunak-bugs S-5) asks "Which bug?", never for a task\'s card; a bug tapped answers with its card', async ($, on) => {
+    // As k board gives the group: k waiting's line for the bugs first, then a line a bug, its ids the bugs' alone.
+    const entries = [`${READY.id}: ${READY.title}, fix ready`, `${NO_FIX.id}: ${NO_FIX.title}, no fix yet`]
+    const lines = ['2 bugs, 1 with a fix ready: /k-bugs', ...entries]
+    const made = briefOf([{ name: 'Queued', lines: ['hub/sync-notes: queued, queue 2'] }, { name: 'Bugs', lines: entries }])
+    const brief = { ...made, groups: made.groups.map(g => (g.name === 'Bugs' ? { ...g, lines } : g)) }
+    const w = world(on, { brief: json(brief), taps: ['Bugs', 'hub/stale-tiles'] })
+    expect(await run($, 'k-board')).toBe(bugCardOf(READY).trimEnd())
+    expect(w.asked[1]).toEqual({ header: 'Board', question: `Bugs (2)\n${lines.join('\n')}\nWhich bug?`, labels: ['hub/stale-tiles', 'hub/no-fix', 'Back'] })
+    expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/stale-tiles']])
     expect(w.runs).toEqual([])
   })
 

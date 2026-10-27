@@ -1,6 +1,7 @@
 import type { On, PromptOrigin } from 'claude-code'
 import { mock } from 'claude-code/testing'
 
+import type { BugRow } from '../hooks/bugs'
 import type { DraftRow } from '../hooks/drafts'
 import type { Brief } from '../hooks/picks'
 import type { AmendmentRow, Waiting } from '../hooks/waiting'
@@ -62,6 +63,22 @@ export const DRAFTS: DraftRow[] = [
 // found in, here in another repo than its task.
 export const BUG: DraftRow = { id: 'hub/stale-tiles', repo: 'hub', slug: 'stale-tiles', title: 'Old tiles stay after an update', written: '2026-11-07', bugOf: 'weather/offline-forecast', path: '/w/hub/kirunak/drafts/stale-tiles.md' }
 
+// The bugs `k bugs --json` gives (gulnya/kirunak-bugs S-1), in its order, a fix ready first, then the oldest: one with
+// its fix ready on bug/stale-tiles, a bug of a task in another repo; one whose review at the fix's head found things to
+// fix; one with no fix and no date, whose file cannot be read.
+const bug = (id: string, more: Partial<BugRow>): BugRow => {
+  const [repo, slug] = id.split('/') as [string, string]
+  return { id, repo, slug, title: slug, written: null, bugOf: null, fixRepo: repo, branch: null, head: null, ahead: 0, fixReady: false, reviewing: null, review: null, path: `/w/${repo}/kirunak/bugs/${slug}.md`, ...more }
+}
+export const READY: BugRow = bug('hub/stale-tiles', { title: 'Old tiles stay after an update', written: '2026-11-07', bugOf: ID, branch: 'bug/stale-tiles', head: '3f2a9c1d00', ahead: 2, fixReady: true })
+export const FOUND: BugRow = bug('weather/rain-gap', { title: 'Rain alerts skip a gap', written: '2026-11-02', branch: 'bug/rain-gap', head: '7c1e0ab200', ahead: 1, review: { file: 'review-1.md', verdict: 'findings', head: '7c1e0ab200', atHead: true } })
+export const NO_FIX: BugRow = bug('hub/no-fix', {})
+export const BUGS: BugRow[] = [READY, FOUND, NO_FIX]
+export { bug }
+
+// What `k board --card <id>` prints for a bug (gulnya/kirunak-bugs S-3): its card, markdown.
+export const bugCardOf = (b: BugRow): string => `### ${b.id}\n\n${b.title}.\n\n- Bug, ${b.fixReady ? 'fix ready' : 'no fix'}.\n`
+
 // A draft's file as templates/draft.md shapes it.
 export const DRAFT_FILE = '---\nid: hub/offline-maps\ntitle: Maps that work offline\nwritten: 2026-11-05\n---\n\n## Who raised it\n\n> The maps should work offline too.\n\nowner, 2026-11-05, session s1\n\n## Why\n\nThe forecast works offline; the maps do not.\n\n## What was found\n\n- The tiles load from the network. [file hub/src/Map.kt]\n\n## Questions\n\n1. Which areas are kept?\n2. How old may a tile be?\n'
 
@@ -70,6 +87,8 @@ export const FILES: Record<string, string> = {
   [`${AMENDMENT_DIR}/A-3.md`]: `---\ntask: ${ID}\nproposed: 2026-11-06\nby: session s1\n---\n\n## Why\nThe age line needs its words. The old one was a time alone.\n\n## Changes\n- replace E-1: A forecast older than a day says "yesterday".\n- replace D-1: Keep the last three days.\n`,
   '/w/hub/kirunak/drafts/offline-maps.md': DRAFT_FILE,
   '/w/weather/kirunak/drafts/rain-alerts.md': '---\nid: weather/rain-alerts\ntitle: Rain alerts\nwritten: 2026-11-06\n---\n\n## Why\n\nRain comes fast.\n',
+  '/w/hub/kirunak/bugs/stale-tiles.md': '---\nid: hub/stale-tiles\ntitle: Old tiles stay after an update\nwritten: 2026-11-07\nbug-of: weather/offline-forecast\n---\n\n## What was found\n\n- The tile cache keeps no version. [file hub/src/Tiles.kt]\n\n## Fix written\n\n- The cache is keyed by version. [commit 3f2a9c1]\n\n## Questions\n\n1. Is the old cache cleared at once?\n   Proposed: yes, on the first start after an update.\n',
+  '/w/weather/kirunak/bugs/rain-gap.md': '---\nid: weather/rain-gap\ntitle: Rain alerts skip a gap\nwritten: 2026-11-02\n---\n\n## What was found\n\n- An alert in the gap is lost. [file weather/src/Alerts.kt]\n',
   '/w/hub/kirunak/drafts/stale-tiles.md': '---\nid: hub/stale-tiles\ntitle: Old tiles stay after an update\nwritten: 2026-11-07\nbug-of: weather/offline-forecast\n---\n\n## What was found\n\n- The tile cache keeps no version. [file hub/src/Tiles.kt]\n\n## Fix written\n\n- The cache is keyed by version. [commit 3f2a9c1]\n',
 }
 
@@ -134,14 +153,15 @@ export type Asked = { question: string; labels: string[]; header: string }
 // opened at each read of it), a k that exists and answers `k list` (from `rows`, ROWS unless a test gives its own),
 // `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` or a draft (any
 // other id refused) (each owner verb with `verb`), the amendment files,
-// `k drafts --json` from `drafts` (each read takes the next, the last again once they run out; null is a k that failed),
+// `k drafts --json` from `drafts` and `k bugs --json` from `bugs` (each read takes the next, the last again once they
+// run out; null is a k that failed), `k board --card <id>` a bug's card too,
 // the prompts the mod submitted (`submitted`), events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
 // dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
 // left dismisses it; the environment (`env`: KIRUNAK_HOME unset, HOME /home/dev unless a test gives its own) and the
 // files the mod wrote (`files`, read back by fs.read; `unwritable` refuses every write).
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[] } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
-  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, submitted: [] as { text: string; origin: PromptOrigin }[] }
+  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, bugReads: 0, described: {} as Record<string, string>, submitted: [] as { text: string; origin: PromptOrigin }[] }
   on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
     const q = e.questions[0]
     if (q === undefined) return { deny: 'no question' }
@@ -151,6 +171,7 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
   })
   on('command.register', ($, e) => {
     w.registered.push(e.name)
+    w.described[e.name] = e.description
     return { value: { command: e.name } }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -190,10 +211,15 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       const id = at < 0 ? null : (e.argv[at + 1] ?? '')
       const r = rows.find(x => x.id === id)
       const d = DRAFTS.find(x => x.id === id)
-      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : d ? { exitCode: 0, stdout: draftCardOf(d), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
+      const b = BUGS.find(x => x.id === id)
+      answer = id === null ? brief : r ? { exitCode: 0, stdout: cardOf(r), stderr: '' } : d ? { exitCode: 0, stdout: draftCardOf(d), stderr: '' } : b ? { exitCode: 0, stdout: bugCardOf(b), stderr: '' } : { exitCode: 1, stdout: '', stderr: `k: no task ${id}\n` }
     } else if (what === 'drafts') {
       w.draftReads++
       const next = drafts.length > 1 ? drafts.shift() : drafts[0]
+      answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
+    } else if (what === 'bugs') {
+      w.bugReads++
+      const next = bugs.length > 1 ? bugs.shift() : bugs[0]
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
     } else if (what === 'waiting') {
       w.waits++

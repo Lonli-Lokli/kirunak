@@ -14,7 +14,10 @@ describe('the owner\'s commands', () => {
     const w = world(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await w.clock.advance(60_000)
-    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-resume', 'k-start', 'k-list', 'k-board', 'k-amendments', 'k-approve-amendment', 'k-queue', 'k-drafts', 'kirunak'])
+    expect(w.registered).toEqual(['k-approve', 'k-accept', 'k-hold', 'k-resume', 'k-start', 'k-list', 'k-board', 'k-amendments', 'k-approve-amendment', 'k-queue', 'k-drafts', 'k-bugs', 'kirunak'])
+    // Bugs have a list of their own, so /k-drafts no longer says they are among its drafts (kirunak-bugs AC-6).
+    expect(w.described['k-drafts']).toBe('The kirunak drafts, intakes prepared ahead: one shown whole, to start its intake or drop it by touch')
+    expect(w.described['k-bugs']).toBe('The kirunak bugs, a fix ready first: one shown whole, to review and merge its fix, start a fix or drop it by touch')
     expect([w.reads, w.tails.length]).toEqual([0, 0])
   })
 
