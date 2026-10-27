@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import runnerClaude, { claudeArgs, KEEP_ALIVE_PROMPT, parseResult } from '../plugins/runner-claude.mjs';
-import { fakeClaude, RESULT } from './helpers.mjs';
+import runnerClaude, { claudeArgs, KEEP_ALIVE_PROMPT, limitsArgs, LIMITS_PROMPT, parseResult, readLimits } from '../plugins/runner-claude.mjs';
+import { fakeClaude, FIXTURES, RESULT } from './helpers.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -90,4 +90,72 @@ test('keepAlive: one turn on the conversation with the step\'s flags, its handle
     '-p', KEEP_ALIVE_PROMPT, '--output-format', 'json', '--permission-mode', 'auto', '--max-turns', '1',
     '--disallowedTools', 'Agent', '--add-dir', '/w/hub', '--resume', 'abc-session',
   ]);
+});
+
+// gulnya/quad-damage AC-9, AC-10: the limits reading. limits.jsonl is a real session's stream (`claude -p` on Haiku,
+// stream-json), its ids, paths and request ids replaced by dummies, its hook lines left out.
+const STREAM = readFileSync(join(FIXTURES, 'run', 'limits.jsonl'), 'utf8');
+const lines = STREAM.trim().split('\n').map((l) => JSON.parse(l));
+const EVENT = lines.find((x) => x.type === 'rate_limit_event');
+const stream = (...xs) => xs.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n');
+const withInfo = (info) => ({ ...EVENT, rate_limit_info: { ...EVENT.rate_limit_info, ...info } });
+const windows = (five, week) => ({ unifiedWindows: { five_hour: { utilization: five, resetsAt: 1793142600, status: 'allowed' }, seven_day: { utilization: week, resetsAt: 1793545200, status: 'allowed' } } });
+
+// A node script as `claude`, for what fakeClaude cannot do: fail, or never end.
+function fakeBin(body) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-fake-claude-')));
+  writeFileSync(join(dir, 'claude'), `#!${process.execPath}\n${body}\n`);
+  chmodSync(join(dir, 'claude'), 0o755);
+  return join(dir, 'claude');
+}
+
+test('limits: one turn on Haiku with no tools, read from the stream\'s rate_limit_event, used in percent', () => {
+  assert.deepEqual(limitsArgs(), ['-p', LIMITS_PROMPT, '--model', 'haiku', '--max-turns', '1', '--output-format', 'stream-json', '--verbose', '--tools', '']);
+  const reading = { fiveHour: { used: 33, resetsAt: 1793142600 }, week: { used: 52, resetsAt: 1793545200 }, overage: false };
+  assert.deepEqual(readLimits(STREAM), reading);
+  assert.deepEqual(readLimits(`not json\n${STREAM}\n{"partial`), reading, 'a line not JSON is passed over');
+  const later = readLimits(stream(...lines, withInfo({ ...windows(0.29, 0.987), isUsingOverage: true })));
+  assert.deepEqual(later, { fiveHour: { used: 29, resetsAt: 1793142600 }, week: { used: 98.7, resetsAt: 1793545200 }, overage: true }, 'the last event, its floats rounded');
+  // A turn refused for a window used up still says how full the windows are.
+  const refused = { type: 'result', subtype: 'success', is_error: true, result: "You've hit your limit", num_turns: 1 };
+  assert.deepEqual(readLimits(stream(withInfo({ ...windows(1, 0.6), status: 'rejected' }), refused), { exitCode: 1 }).fiveHour, { used: 100, resetsAt: 1793142600 });
+});
+
+test('limits: no reading says why, an event without its windows, a failed session, the login gone, no event', () => {
+  const [init, said, , result] = lines;
+  const { unifiedWindows, ...bare } = EVENT.rate_limit_info;
+  assert.deepEqual(readLimits(stream(init, said, { ...EVENT, rate_limit_info: bare }, result)), { error: 'its rate_limit_event has no unifiedWindows with five_hour and seven_day' });
+  const half = { ...EVENT, rate_limit_info: { ...bare, unifiedWindows: { five_hour: unifiedWindows.five_hour } } };
+  assert.deepEqual(readLimits(stream(half, result)), { error: 'its rate_limit_event has no unifiedWindows with five_hour and seven_day' });
+  assert.deepEqual(readLimits(stream(init, said, result)), { error: 'the session gave no rate_limit_event' });
+  assert.deepEqual(readLimits(''), { error: 'the session gave no rate_limit_event' });
+
+  const failed = { ...result, is_error: true, subtype: 'error_during_execution', result: 'API Error: 529 overloaded' };
+  assert.deepEqual(readLimits(stream(init, failed), { exitCode: 1, stderr: '' }), { error: 'the session failed (exit 1): API Error: 529 overloaded' });
+  assert.deepEqual(readLimits('', { exitCode: 2, stderr: 'error: unknown option\n' }), { error: 'the session failed (exit 2): error: unknown option' });
+  assert.deepEqual(readLimits(stream(init, failed)), { error: 'the session failed (exit 0): API Error: 529 overloaded' });
+
+  // The login gone: the assistant message's `error` (the SDK's authentication_failed), or the words that ask for /login.
+  const text = 'Not logged in · Please run /login';
+  const authSaid = { ...said, error: 'authentication_failed', message: { ...said.message, content: [{ type: 'text', text }] } };
+  const authResult = { ...result, is_error: true, result: text };
+  assert.deepEqual(readLimits(stream(init, authSaid, authResult), { exitCode: 1 }), { error: `the login is gone: ${text}` });
+  assert.deepEqual(readLimits(stream(init, { ...authSaid, message: { ...said.message, content: [] } }, { ...result, result: '' }), { exitCode: 1 }), { error: 'the login is gone: authentication failed' });
+  assert.deepEqual(readLimits('', { exitCode: 1, stderr: 'Invalid API key · Fix external API key' }), { error: 'the login is gone: Invalid API key · Fix external API key' });
+});
+
+test('limits(): the runner spawns the reading in the temporary folder and reads its stream; a failure or a hang is an error', async () => {
+  const fake = fakeClaude(STREAM);
+  const runner = runnerClaude({}, { bin: fake.bin }).provides.runner;
+  assert.deepEqual(await runner.limits(), readLimits(STREAM));
+  assert.deepEqual(await runner.limits({ cwd: fake.dir }), readLimits(STREAM));
+  const [first, second] = fake.calls();
+  assert.deepEqual([first.argv, first.stdin, first.cwd, second.cwd], [limitsArgs(), '', realpathSync(tmpdir()), fake.dir]);
+
+  const failing = runnerClaude({}, { bin: fakeBin("process.stderr.write('Not logged in · Please run /login\\n'); process.exit(1);") }).provides.runner;
+  assert.deepEqual(await failing.limits(), { error: 'the login is gone: Not logged in · Please run /login' });
+  const missing = await runnerClaude({}, { bin: join(fake.dir, 'no-such-claude') }).provides.runner.limits();
+  assert.match(missing.error, /^the session failed \(exit 127\)/);
+  const hung = runnerClaude({}, { bin: fakeBin('setInterval(() => {}, 1000);') }).provides.runner;
+  assert.deepEqual(await hung.limits({ timeoutMs: 300 }), { error: 'no reading in 0.3 s: the session was stopped' });
 });
