@@ -82,6 +82,8 @@ Bugs      k bug new <repo>/<slug> --title "..." [--bug-of <task>] [--fix-repo <r
             with its history, draft/<slug> renamed bug/<slug>, each repo's paths committed alone
           k bugs: every bug in every repo, one line each (id, title, date written, its fix, bug of <task>), those with a
             fix ready first, then the oldest first
+          k intake start <id> --from kirunak/bugs/<slug>.md: Start fix, the intake takes the bug, moved to the task's
+            bug.md, its records to bug/
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
           k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
           k drafts: every draft in every repo, one line each (id, title, date written), in the drafts' order: those it
@@ -236,7 +238,9 @@ const VERBS = {
     if (sub === 'start') {
       if (flags['dry-run']) return { text: `would start ${id} in ${taskPaths(ws, id).dir}` };
       const r = await intake.start({ ws, id, from: flags.from, title: flags.title });
-      const moved = r.draft ? `; the draft is now ${r.draft}${r.staged ? ', the move staged' : ''}: commit it with the intake` : '';
+      const was = r.bug ? 'bug' : r.draft ? 'draft' : null;
+      const records = r.records ? `, its records ${r.records}/` : '';
+      const moved = was ? `; the ${was} is now ${r[was]}${records}${r.staged ? ', the move staged' : ''}: commit it with the intake` : '';
       return { ...r, text: `started ${id}: ${r.dir} (${r.aspects} aspects open)${moved}` };
     }
     if (sub === 'aspects') {
