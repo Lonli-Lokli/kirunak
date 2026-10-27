@@ -35,9 +35,10 @@ import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
 import * as drafts from '../lib/drafts.mjs';
+import * as bugs from '../lib/bugs.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -72,12 +73,19 @@ Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
+Bugs      k bug new <repo>/<slug> --title "..." [--bug-of <task>] [--fix-repo <repo>]: a bug's skeleton,
+            kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo (a repo of
+            the workspace, or kirunak for kirunak's own checkout; its own when none is named)
+          k bug check <id>: the bug's shape, its task and its fix's commits | k bug drop <id> --why "...": removes it
+            and its folder in a commit of their own, a fix branch kept and named in it
+          k bug from <id> [--no-commit]: a draft, or a task whose intake is not approved, moved into kirunak/bugs/
+            with its history, draft/<slug> renamed bug/<slug>, each repo's paths committed alone
+          k bugs: every bug in every repo, one line each (id, title, date written, its fix, bug of <task>), those with a
+            fix ready first, then the oldest first
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
-          k draft new <repo>/<slug> --title "..." --bug-of <task>: a bug of that accepted task, in any repo, with its
-            section Fix written for a fix that exists already (deleted when none does)
           k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
-          k drafts: every draft in every repo, one line each (id, title, date written, bug of <task> on a bug's), in
-            the drafts' order: those it names first, the others by the date written
+          k drafts: every draft in every repo, one line each (id, title, date written), in the drafts' order: those it
+            names first, the others by the date written
           k drafts move <id>... [--first|--last|--before <id>|--after <id>]: those drafts, in that order, to that
             place (no flag: last), in a commit of the order alone
           k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
@@ -490,21 +498,18 @@ const VERBS = {
   },
 
   // A prepared intake for a future task (kirunak-drafts): not the owner's, so any session runs these. Neither `new`
-  // nor `check` commits; the session that writes the draft commits it. `--bug-of <task>` writes a bug of that accepted
-  // task (kirunak-spikes AC-2).
+  // nor `check` commits; the session that writes the draft commits it. A bug is no draft: `--bug-of` is refused,
+  // naming `k bug new` (gulnya/kirunak-bugs AC-1).
   async draft({ ws, pos, flags }) {
     const sub = need(pos[0], 'draft verb: new|check|drop');
     const id = need(pos[1], 'draft id <repo>/<slug>');
     const dryRun = !!flags['dry-run'];
     if (sub === 'new') {
       const bugOf = flags['bug-of'] ?? null;
-      if (bugOf !== null && typeof bugOf !== 'string') throw usage('--bug-of names one accepted task: --bug-of <repo>/<slug>');
       const title = typeof flags.title === 'string' ? flags.title : '';
-      const r = drafts.newDraft({ ws, id, title, bugOf, session: session(flags), dryRun });
-      const bug = r.bugOf ? `, a bug of ${r.bugOf}` : '';
-      if (dryRun) return { ...r, text: `would write ${r.path}${bug}` };
-      const fix = r.bugOf ? ` (name the fix under ${drafts.FIX}, or delete that section when no fix exists)` : '';
-      return { ...r, text: `${r.path}${bug}: fill in every section${fix}, then \`k draft check ${id}\`, and commit it` };
+      const r = drafts.newDraft({ ws, id, title, bugOf: bugOf === null || typeof bugOf === 'string' ? bugOf : '', session: session(flags), dryRun });
+      if (dryRun) return { ...r, text: `would write ${r.path}` };
+      return { ...r, text: `${r.path}: fill in every section, then \`k draft check ${id}\`, and commit it` };
     }
     if (sub === 'check') return report(id, drafts.check(ws, id), '');
     if (sub === 'drop') {
@@ -513,6 +518,60 @@ const VERBS = {
       return { ...r, text: r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit` };
     }
     throw usage(`unknown draft verb ${sub}`);
+  },
+
+  // A bug, a fault in something that exists (gulnya/kirunak-bugs): not the owner's, so any session runs these. `new`
+  // and `check` commit nothing; the session that writes the bug commits it. `drop` and `from` commit each repo's own
+  // paths alone; `from --no-commit` only stages them.
+  async bug({ ws, pos, flags }) {
+    const sub = need(pos[0], 'bug verb: new|check|drop|from');
+    const id = need(pos[1], 'bug id <repo>/<slug>');
+    const dryRun = !!flags['dry-run'];
+    const one = (name, what) => {
+      const v = flags[name] ?? null;
+      if (v !== null && typeof v !== 'string') throw usage(`--${name} names ${what}`);
+      return v;
+    };
+    if (sub === 'new') {
+      const bugOf = one('bug-of', 'one accepted task: --bug-of <repo>/<slug>');
+      const fixRepo = one('fix-repo', 'the repo of the fix branch: --fix-repo <repo>');
+      const title = typeof flags.title === 'string' ? flags.title : '';
+      const r = bugs.newBug({ ws, id, title, bugOf, fixRepo, session: session(flags), dryRun });
+      const of = [r.bugOf && `a bug of ${r.bugOf}`, r.fixRepo && `its fix in ${r.fixRepo}`].filter(Boolean).join(', ');
+      const about = of ? `, ${of}` : '';
+      if (dryRun) return { ...r, text: `would write ${r.path}${about}` };
+      return { ...r, text: `${r.path}${about}: fill in every section (name the fix on ${r.branch} under ${drafts.FIX}, ` +
+        `or delete that section when no fix exists), then \`k bug check ${id}\`, and commit it` };
+    }
+    if (sub === 'check') return report(id, bugs.checkBug(ws, id), '');
+    if (sub === 'drop') {
+      const r = bugs.drop({ ws, id, why: typeof flags.why === 'string' ? flags.why : '', dryRun });
+      const kept = r.branch ? `; its fix branch ${r.branch.branch} is kept in ${r.branch.repo}` : '';
+      if (dryRun) return { ...r, text: `would remove ${r.rel} and ${r.dir} in ${r.repo}${r.tracked ? ` and commit "${r.message.split('\n')[0]}"` : ' (never committed, so no commit)'}${kept}` };
+      return { ...r, text: (r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit`) + kept };
+    }
+    if (sub === 'from') {
+      const r = bugs.from({ ws, id, dryRun, noCommit: !!flags['no-commit'] });
+      const lines = [
+        ...r.moves.map((m) => `${m.from} -> ${m.to}`),
+        ...r.renames.map((b) => `${b.repo}: branch ${b.from} -> ${b.to}`),
+        ...(r.skeleton ? [`${r.rel}: a bug's skeleton, to fill in from the intake and commit`] : []),
+        ...(r.fixRepo ? [`fix-repo: ${r.fixRepo}`] : []),
+        ...(r.order ? [`${r.order}: ${id} left the drafts' order`] : []),
+      ];
+      if (dryRun) return { ...r, text: [`would move the ${r.kind} ${id} into kirunak/bugs/:`, ...lines.map((l) => `  ${l}`)].join('\n') };
+      const done = flags['no-commit'] ? ['staged, not committed: commit each repo\'s paths alone (git commit -- <paths>)']
+        : r.commits.filter((c) => c.commit).map((c) => `committed in ${c.repo}: ${c.commit}`);
+      return { ...r, text: [`${id}: moved from the ${r.kind} into kirunak/bugs/`, ...lines.map((l) => `  ${l}`), ...done].join('\n') };
+    }
+    throw usage(`unknown bug verb ${sub}`);
+  },
+
+  // Every bug in every repo, those with a fix ready first, then the oldest: for /k-bugs, as an array with --json.
+  async bugs({ ws, pos }) {
+    if (pos.length) throw usage(`unknown bugs verb ${pos[0]}: k bugs`);
+    const rows = bugs.list(ws);
+    return { json: rows, text: bugs.format(rows) };
   },
 
   // Every draft in every repo, in the drafts' order: for /k-drafts, as an array with --json. `move` changes the order;
