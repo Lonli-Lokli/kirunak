@@ -12,6 +12,7 @@ import { costMarkdown } from '../lib/cost-md.mjs';
 // 3. a staged intake.md is not an append of the committed one (or, removed, of the one `k bug from` moved);
 // 4. a staged cost.md is not the rendering of its done.json's cost (`k cost <id> --write` writes it again).
 // The owner's commands set those variables on the one `git commit` they run. A mistake guard, not a lock.
+// `ownerRecord` tells the SLAP hook (git-prepare-commit-msg.mjs) which paths are those records, from the same patterns.
 
 const TASK = /^kirunak\/tasks\/([^/]+)\/task\.md$/;
 const INTAKE = /^kirunak\/tasks\/([^/]+)\/intake\.md$/;
@@ -20,12 +21,22 @@ const RECORD = /^kirunak\/approvals\/(?:.*\/)?([^/]+?)(?:\.json)?$/;
 const AMENDMENT = /^kirunak\/tasks\/([^/]+)\/amendments\/[^/]+$/;
 const COST = /^kirunak\/tasks\/([^/]+)\/cost\.md$/;
 const STAMP = /^(applied|declined):/gm;
-const OWNER_VARS = ['KIRUNAK_APPROVING', 'KIRUNAK_ACCEPTING', 'KIRUNAK_HOLDING'];
+export const OWNER_VARS = ['KIRUNAK_APPROVING', 'KIRUNAK_ACCEPTING', 'KIRUNAK_HOLDING'];
 
 const hashBytes = (buf) => 'sha256:' + createHash('sha256').update(buf).digest('hex');
 
 // A variable names the task when it is its id (`<repo>/<slug>`) or its slug.
 const names = (value, slug) => typeof value === 'string' && value !== '' && value.split('/').pop() === slug;
+
+// Whether `path` is a record the owner's commands write for the task one of their variables names: its approval
+// record, done.json, hold.md, an amendment or cost.md, and task.md when KIRUNAK_APPROVING names it. The SLAP hook
+// leaves a commit of only these out (change-size.md §3, bug gulnya/accept-refused-by-slap).
+export function ownerRecord(path, env = process.env) {
+  const task = TASK.exec(path);
+  if (task) return names(env.KIRUNAK_APPROVING, task[1]);
+  const m = RECORD.exec(path) ?? OWNED.exec(path) ?? AMENDMENT.exec(path) ?? COST.exec(path);
+  return Boolean(m) && OWNER_VARS.some((v) => names(env[v], m[1]));
+}
 
 const stamps = (buf) => (buf ? (buf.toString('utf8').match(STAMP) ?? []).length : 0);
 

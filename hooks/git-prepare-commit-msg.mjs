@@ -6,7 +6,8 @@
 // kirunak's records (approval.md §3). git runs this hook even under --no-verify, before the editor: it checks a
 // message given with -m or -F, and leaves the commit's base for commit-msg, which checks the message the commit keeps.
 // Inside a merge, pick, rebase or revert the SLAP gate is skipped, while AC-8 still judges what the commit stages
-// beyond git's own replay (lib/replay.mjs); git's pick keeps its message, with no `Task:` added (AC-3).
+// beyond git's own replay (lib/replay.mjs); git's pick keeps its message, with no `Task:` added (AC-3). It is skipped
+// too for the owner's own record commit, one whose every path is a record of the task an owner's variable names.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -14,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { BASE_FILE, commitConfig, doneNamed, doneRefusal } from '../lib/records.mjs';
 import { ownBase, replayState, sameAsGit } from '../lib/replay.mjs';
 import { EMPTY_TREE, gate, line, parentOf, repoInfo } from '../lib/slap.mjs';
+import { OWNER_VARS, ownerRecord } from './git-pre-commit.mjs';
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -21,6 +23,16 @@ const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ign
 // revert leaves only MERGE_MSG behind (git 2.54), so that counts too.
 function replaying(gitDir) {
   return ['rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'sequencer', 'MERGE_MSG'].some((p) => existsSync(join(gitDir, p)));
+}
+
+// For the SLAP gate only: the owner's own record commit, as `k accept`, `k hold` and `k approve` make it, whose every
+// path is a record the owner's commands write for the task their variable names (git-pre-commit.mjs ownerRecord; the
+// pre-commit hook refuses those records without it). kirunak writes it and nobody can split it, so it is not measured,
+// as a merge is not; one path besides, and the whole commit is measured (bug gulnya/accept-refused-by-slap).
+function ownersRecords(base, env) {
+  if (!OWNER_VARS.some((v) => env[v])) return false;
+  const paths = git(['diff', '--cached', '--name-only', '--no-renames', '--no-relative', '-z', base]).split('\0').filter(Boolean);
+  return paths.length > 0 && paths.every((p) => ownerRecord(p, env));
 }
 
 // Whether a commit given -m or -F amends HEAD, for AC-8: git passes such an amend `message` like any commit, but keeps
@@ -36,7 +48,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const info = repoInfo(process.cwd());
   const baseFile = join(info.gitDir, BASE_FILE);
   rmSync(baseFile, { force: true });
-  const skipSlap = source === 'merge' || replaying(info.gitDir);
   let head = null;
   try {
     head = git(['rev-parse', '--verify', '-q', 'HEAD']);
@@ -46,6 +57,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   // An amend passes `commit HEAD`: git 2.54 passes the word; githooks(5) says a commit object name, so a sha counts too.
   const amending = source === 'commit' && head && (sha === 'HEAD' || sha === head);
   const base = amending ? parentOf(process.cwd(), 'HEAD') : head || EMPTY_TREE;
+  const skipSlap = source === 'merge' || replaying(info.gitDir) || ownersRecords(base, env);
   let m = null;
   if (!skipSlap) {
     const g = gate(process.cwd(), base, undefined, info);

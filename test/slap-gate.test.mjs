@@ -23,15 +23,15 @@ function repo() {
 
 const lines = (n, tag = 'x') => Array.from({ length: n }, (_, i) => `const ${tag}${i} = ${i};`).join('\n') + '\n';
 const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('KIRUNAK_') && !k.startsWith('GIT_')));
-const git = (r, args) => spawnSync('git', args, { cwd: r.dir, encoding: 'utf8', env: { ...clean, KIRUNAK_HOME: r.home } });
+const git = (r, args, env = {}) => spawnSync('git', args, { cwd: r.dir, encoding: 'utf8', env: { ...clean, KIRUNAK_HOME: r.home, ...env } });
 const put = (r, path, text) => {
   mkdirSync(join(r.dir, path, '..'), { recursive: true });
   writeFileSync(join(r.dir, path), text);
 };
 const message = (r) => sh(r.dir, 'git', ['log', '-1', '--format=%B']).trim();
-const commit = (r, msg, extra = []) => {
+const commit = (r, msg, extra = [], env = {}) => {
   git(r, ['add', '-A']);
-  return git(r, ['commit', '-q', ...extra, '-m', msg]);
+  return git(r, ['commit', '-q', ...extra, '-m', msg], env);
 };
 const root = (r) => {
   put(r, 'src/root.mjs', 'export {};\n');
@@ -111,4 +111,49 @@ test('a file deleted whole is left out; lines deleted inside a kept file count',
   const res = commit(r, 'Cut the kept file');
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /300 lines of code in 1 files/);
+});
+
+// The owner's own record commits (bug gulnya/accept-refused-by-slap): `k accept` commits done.json, which holds k cost's
+// numbers (518 lines in one accept), and a starter .slapignore does not list *.json.
+const ID = 'weather/offline-forecast';
+const TASK_DIR = 'kirunak/tasks/offline-forecast';
+const json = (n) => JSON.stringify({ task: ID, rows: Array.from({ length: n - 5 }, (_, i) => i) }, null, 1) + '\n';
+
+test("an owner's command committing only the records of the task its variable names is not measured; one more file, or no variable, is (R22)", () => {
+  const r = repo();
+  put(r, '.slapignore', '*.md\n');
+  approve(r);
+  root(r);
+  put(r, `${TASK_DIR}/done.json`, json(600));
+  put(r, `${TASK_DIR}/cost.md`, lines(40));
+  const plain = commit(r, `kirunak: accept ${ID}`);
+  assert.notEqual(plain.status, 0, 'without the variable it is measured as any commit');
+  assert.match(plain.stderr, /this commit is L, SLAP \d+: 600 lines of code in 1 files \(kirunak\/tasks\/offline-forecast\/done\.json\)/);
+  const other = commit(r, `kirunak: accept ${ID}`, [], { KIRUNAK_ACCEPTING: 'weather/radar-tiles' });
+  assert.notEqual(other.status, 0, "another task's id leaves it measured");
+  put(r, 'src/app.kt', lines(600));
+  const mixed = commit(r, `kirunak: accept ${ID}`, [], { KIRUNAK_ACCEPTING: ID });
+  assert.notEqual(mixed.status, 0, 'a path besides the records keeps the whole commit measured');
+  assert.match(mixed.stderr, /1200 lines of code in 2 files \(.*src\/app\.kt/);
+  // As `k accept` commits (git.mjs commit): only its own paths, whatever else is staged beside them.
+  const own = [`${TASK_DIR}/done.json`, `${TASK_DIR}/cost.md`];
+  const ok = git(r, ['commit', '-q', '-m', `kirunak: accept ${ID}`, '--', ...own], { KIRUNAK_ACCEPTING: ID });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.doesNotMatch(message(r), /SLAP:/, 'not measured, as a merge is not');
+  assert.equal(git(r, ['status', '--porcelain']).stdout, 'A  src/app.kt\n', 'the other staged file stays staged');
+});
+
+test("hold.md under KIRUNAK_HOLDING and task.md with its approval under KIRUNAK_APPROVING are the owner's records too", () => {
+  const r = repo();
+  root(r);
+  // No .slapignore: everything counts, prose too.
+  put(r, `${TASK_DIR}/hold.md`, lines(600));
+  assert.notEqual(commit(r, `kirunak: hold ${ID}`).status, 0);
+  const held = commit(r, `kirunak: hold ${ID}`, [], { KIRUNAK_HOLDING: ID });
+  assert.equal(held.status, 0, held.stderr);
+  put(r, `${TASK_DIR}/task.md`, lines(600, 't'));
+  put(r, 'kirunak/approvals/offline-forecast.json', json(10));
+  assert.notEqual(commit(r, `kirunak: approve ${ID}`, [], { KIRUNAK_HOLDING: ID }).status, 0, 'task.md is the approval\'s alone');
+  const approved = commit(r, `kirunak: approve ${ID}`, [], { KIRUNAK_APPROVING: ID });
+  assert.equal(approved.status, 0, approved.stderr);
 });
