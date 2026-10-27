@@ -187,8 +187,8 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
 - **What it does not check**: under `--no-verify` git skips commit-msg, so only a message given with `-m` or `-F` is
   checked: a mistake guard, as the pre-commit checks are. An amend with `--reset-author`, or one within two seconds of
   the commit it amends, given `-m`, is taken as a new commit. A merge or pick stopped on a conflict and committed with
-  git's words passes, since the resolution cannot be told from new work (merge-tree exits 1), as does an octopus merge;
-  `rebase --apply` runs no hook; a git older than 2.38 has no `merge-tree --write-tree` and passes every replay as
+  git's words passes, since the resolution cannot be told from new work (merge-tree exits 1), as do an octopus merge
+  and git's pick of a root commit, which has no parent to pick against; `rebase --apply` runs no hook; a git older than 2.38 has no `merge-tree --write-tree` and passes every replay as
   before. After the editor of `cherry-pick -e`, `revert -e` (a revert's default at a terminal) or a rebase's `squash`,
   git runs no commit-msg, so words typed there are not checked: prepare-commit-msg judged the message git wrote (code
   staged while the editor of `cherry-pick -e` is open stays out of that commit, whose tree git wrote before). A merge by
