@@ -386,175 +386,45 @@ test('the verbs: k draft new, check, drop and k drafts, with --json and --dry-ru
   assert.equal(run('drafts').stdout, 'no drafts\n');
 });
 
-// kirunak-spikes: a bug is a draft whose front matter names the accepted task it was found in (D-1).
+// gulnya/kirunak-bugs AC-1: a bug is no draft (the bugs' own tests are in bugs.test.mjs). A draft's bug marks, its
+// bug-of and its Fix written, and `--bug-of` in `k draft new`, are refused, each naming the bug verb.
 const TASK = 'weather/offline-forecast';
 const BUG = 'hub/stale-tiles';
-const taskDir = (w) => join(rootOf(w), 'kirunak', 'tasks', 'offline-forecast');
 const bugFile = (w) => fileOf(w, 'stale-tiles', 'hub');
 const lineOf = (text, s) => text.split('\n').findIndex((l) => l.includes(s)) + 1;
 
-// Every file and folder under dir with its bytes: the folder byte for byte.
-const snapshot = (dir) =>
-  readdirSync(dir, { recursive: true }).sort().map((f) => [f, statSync(join(dir, f)).isFile() ? readFileSync(join(dir, f)) : 'folder']);
-
-// The invented workspace with weather/offline-forecast accepted: approved, and its done.json committed as k accept does.
-async function acceptedWorkspace() {
-  const w = await makeWorkspace();
-  await approve({ ws: w.ws, id: TASK });
-  writeFileSync(join(taskDir(w), 'done.json'), '{"accepted":"2026-10-20"}\n');
-  gitCommitAll(w.weather, 'accept');
-  return w;
-}
-
-// FILLED as a bug of the accepted task, in hub, with the given Fix written section (none when null).
-const bugText = (fix = '- the cache expires [commit 1a2b3c4]\n- the rest of it [file patches/tiles.patch]\n', task = TASK) =>
-  FILLED.replace('id: weather/wind-alerts', `id: ${BUG}`).replace('written: 2026-10-22\n', `written: 2026-10-22\nbug-of: ${task}\n`)
+// FILLED as kirunak-spikes wrote a bug: in hub, bug-of the task, with a Fix written section unless `fix` is null.
+const bugText = (fix = '- the cache expires [commit 1a2b3c4]\n') =>
+  FILLED.replace('id: weather/wind-alerts', `id: ${BUG}`).replace('written: 2026-10-22\n', `written: 2026-10-22\nbug-of: ${TASK}\n`)
     .replace('## Questions', fix === null ? '## Questions' : `## Fix written\n${fix}\n## Questions`);
 
-const putBug = (w, text) => {
-  mkdirSync(join(rootOf(w, 'hub'), 'kirunak', 'drafts'), { recursive: true });
-  writeFileSync(bugFile(w), text);
-};
-
-test('k draft new --bug-of: bug-of in the front matter, Fix written before the questions, every placeholder refused', async () => {
-  const w = await acceptedWorkspace();
-  const r = newDraft({ ws: w.ws, id: BUG, title: 'Stale map tiles', bugOf: ` ${TASK} `, session: '5f0c2a', now: OCT22 });
-  assert.deepEqual([r.path, r.bugOf], [bugFile(w), TASK]);
-  const text = readFileSync(r.path, 'utf8');
-  assert.match(text, /^---\nid: hub\/stale-tiles\ntitle: Stale map tiles\nwritten: 2026-10-22\nbug-of: weather\/offline-forecast\n---\n/);
-  assert.deepEqual(parseDraft(text).sections.map((s) => s.name), ['Who raised it', 'Why', 'What was found', 'Fix written', 'Questions']);
-  assert.match(text, /\n## Fix written\n<!-- fill in: .*\[commit <sha>\] or \[file <patch path>\]; or delete this section, heading and all, when no fix exists -->\n/);
-  // Besides those two, a plain draft's skeleton word for word.
-  const plain = newDraft({ ws: w.ws, id: 'hub/plain', title: 'Stale map tiles', session: '5f0c2a', now: OCT22 });
-  assert.equal(plain.bugOf, null);
-  const stripped = text.replace(`bug-of: ${TASK}\n`, '').replace(/## Fix written\n.*\n\n/, '').replace(BUG, 'hub/plain');
-  assert.equal(stripped, readFileSync(plain.path, 'utf8'));
-  assert.deepEqual(check(w.ws, BUG).map((p) => p.problem), [
-    '## Who raised it is empty: it still holds its placeholder',
-    '## Why is empty: it still holds its placeholder',
-    '## What was found is empty: it still holds its placeholder',
-    "## Fix written still holds its placeholder: name the fix's commits or patch file, or delete the section when no fix exists",
-    '## Questions is empty: it still holds its placeholder',
-  ]);
-});
-
-test('AC-2, AC-3: a bug in another repo than its task; the accepted task stays byte for byte, done and frozen', async () => {
-  const w = await acceptedWorkspace();
-  const before = snapshot(taskDir(w));
-  const head = sh(w.weather, 'git', ['rev-parse', 'HEAD']);
-  newDraft({ ws: w.ws, id: BUG, title: 'Stale map tiles', bugOf: TASK });
-  assert.equal(sh(w.hub, 'git', ['status', '--porcelain', '--', 'kirunak/drafts']).trim(), '?? kirunak/drafts/');
-  // The fix is a commit of the task's repo, not of the bug's.
-  putBug(w, bugText(`- the cache expires [commit ${head.slice(0, 7)}]\n`));
-  assert.deepEqual(check(w.ws, BUG), []);
-  assert.deepEqual(snapshot(taskDir(w)), before);
-  assert.equal(sh(w.weather, 'git', ['status', '--porcelain']), '');
-  assert.equal(sh(w.weather, 'git', ['rev-parse', 'HEAD']), head);
-  assert.equal(verify(w.ws, TASK), 'ok');
-  assert.equal((await taskRows(w.ws, { all: true })).find((r) => r.id === TASK).state, 'done');
-});
-
-test('E-1: --bug-of naming no task is refused, a dry run too, and nothing is written', async () => {
-  const w = await acceptedWorkspace();
-  const nu = (bugOf, dryRun) => () => newDraft({ ws: w.ws, id: BUG, title: 'Stale tiles', bugOf, dryRun });
-  const gone = join(rootOf(w), 'kirunak', 'tasks', 'gone', 'task.md');
-  for (const dry of [false, true]) {
-    assert.throws(nu('weather/gone', dry), (e) => e.code === 1 && e.message === `unknown task weather/gone: ${gone} does not exist; a bug names the accepted task it was found in`);
-    assert.throws(nu('radio/gone', dry), (e) => e.code === 1 && e.message === 'unknown repo radio: the workspace lists weather, hub');
-    assert.throws(nu('weather/Gone', dry), (e) => e.code === 2 && /^not a task id: weather\/Gone/.test(e.message));
-    assert.throws(nu(' ', dry), (e) => e.code === 2 && e.message === '--bug-of names the accepted task the bug was found in: --bug-of <repo>/<slug>');
-  }
-  assert.equal(existsSync(bugFile(w)), false);
-});
-
-test('E-2: --bug-of naming a task not accepted yet is refused, naming its review or an amendment', async () => {
+test('k draft new --bug-of is refused, naming k bug new, a dry run too, and nothing is written', async () => {
   const w = await makeWorkspace();
-  const open = `${TASK} is not accepted yet: a bug found while a task is open goes into that task, through its review or an amendment (k amend new ${TASK} --title "...")`;
-  assert.throws(() => newDraft({ ws: w.ws, id: BUG, title: 'Stale tiles', bugOf: TASK }), (e) => e.code === 1 && e.message === open);
-  await approve({ ws: w.ws, id: TASK });
   for (const dryRun of [false, true]) {
-    assert.throws(() => newDraft({ ws: w.ws, id: BUG, title: 'Stale tiles', bugOf: TASK, dryRun }), (e) => e.code === 1 && e.message === open);
+    for (const [bugOf, named] of [[TASK, TASK], [' ', '<task>'], ['', '<task>']]) {
+      assert.throws(() => newDraft({ ws: w.ws, id: BUG, title: 'Stale tiles', bugOf, dryRun }), (e) => e.code === 1 &&
+        e.message === `a bug is not a draft: \`k bug new ${BUG} --title "..." --bug-of ${named}\` writes it in kirunak/bugs/`);
+    }
   }
   assert.equal(existsSync(bugFile(w)), false);
+  assert.equal(newDraft({ ws: w.ws, id: BUG, title: 'Stale tiles', bugOf: null }).path, bugFile(w));
 });
 
-test('the check of a bug: bug-of a task id, Fix written in its place with sourced lines, or left out', () => {
-  const bug = (fix, task) => problemsOf(bugText(fix, task), BUG);
-  assert.deepEqual(bug(), []);
-  assert.deepEqual(bug(null), []);
-  assert.deepEqual(bug('- the fix, in\n  two lines [commit 1a2b3c4d5e6f]\n- a patch [file patches/a b.patch]\n'), []);
-  assert.deepEqual(checkDraft(bugText(undefined, 'weather'), BUG), [
-    { line: 5, problem: 'bug-of weather is not a task id: name the accepted task the bug was found in, <repo>/<slug>' },
-  ]);
-  assert.deepEqual(bug(undefined, ''), ['bug-of is empty: name the accepted task the bug was found in, <repo>/<slug>']);
-  const hint = '[commit <sha>] or [file <patch path>]';
-  for (const line of ['- the cache expires\n', '- the cache expires [commit HEAD]\n', '- the cache expires [research https://example.org]\n']) {
-    assert.deepEqual(bug(line), [`## Fix written: this fix names no commit or patch file: end it with ${hint}`]);
-  }
-  assert.deepEqual(bug('The cache expires. [commit 1a2b3c4]\n'), [
-    `## Fix written: no fix: one "- " line each, ending with ${hint}`,
-    `## Fix written: write each fix as a "- " line ending with ${hint}`,
-  ]);
-  assert.deepEqual(bug(''), ["## Fix written is empty: name the fix's commits or patch file, or delete the section when no fix exists"]);
-  assert.deepEqual(bug('<!-- fill in: the fix -->\n- the cache expires [commit 1a2b3c4]\n'), [
-    "## Fix written still holds its placeholder: name the fix's commits or patch file, or delete the section when no fix exists",
-  ]);
-  const order = 'Who raised it, Why, What was found, Fix written, Questions';
-  assert.deepEqual(problemsOf(bugText(null) + '\n## Fix written\n- the cache [commit 1a2b3c4]\n', BUG), [`section Fix written is out of order: ${order}`]);
-  assert.deepEqual(problemsOf(bugText() + '\n## Notes\nmore\n', BUG), [`unknown section "## Notes": the sections are ${order}`]);
-});
-
-test('a plain draft has no Fix written, and keeps passing as before', () => {
-  assert.deepEqual(problemsOf(FILLED), []);
+test('a draft refuses bug-of and Fix written, each naming k bug from, and has no state field', () => {
+  const ofTask = bugText(null);
+  assert.deepEqual(checkDraft(ofTask, BUG), [{
+    line: lineOf(ofTask, 'bug-of:'),
+    problem: "bug-of is a bug's: a fault in something that exists is a bug in kirunak/bugs/, never a draft; `k bug from hub/stale-tiles` moves this one there",
+  }]);
   const fixed = FILLED.replace('## Questions', '## Fix written\n- the cache [commit 1a2b3c4]\n\n## Questions');
-  assert.deepEqual(checkDraft(fixed, ID), [
-    { line: lineOf(fixed, '## Fix written'), problem: "## Fix written is a bug's: only a draft with bug-of: <task> holds the fix already written" },
-  ]);
-});
-
-test('AC-5: no draft has a state field; the check says where a bug\'s state is', () => {
-  const why = 'a draft has no state field: a bug is parked while it waits in kirunak/drafts/, taken once an intake moves it, and closed by `k draft drop --why`';
+  assert.deepEqual(checkDraft(fixed, ID), [{
+    line: lineOf(fixed, '## Fix written'),
+    problem: "## Fix written is a bug's: a draft holds no fix; `k bug from weather/wind-alerts` moves this one into kirunak/bugs/",
+  }]);
+  assert.deepEqual(problemsOf(bugText(), BUG).length, 2);
+  assert.deepEqual(problemsOf(FILLED), []);
+  const why = 'a draft has no state field: it waits in kirunak/drafts/ until an intake takes it, and `k draft drop --why` closes it';
   assert.deepEqual(checkDraft(FILLED.replace('written: 2026-10-22\n', 'written: 2026-10-22\nstate: parked\n'), ID), [{ line: 5, problem: why }]);
-  assert.deepEqual(checkDraft(bugText().replace(`bug-of: ${TASK}\n`, `bug-of: ${TASK}\nstate: closed\n`), BUG), [{ line: 6, problem: why }]);
-});
-
-test('E-4: k draft check refuses a bug whose task is gone or not accepted, and a fix commit in neither repo', async () => {
-  const w = await acceptedWorkspace();
-  const inTask = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
-  const inBug = sh(w.hub, 'git', ['rev-parse', 'HEAD']).trim();
-  const blob = sh(w.weather, 'git', ['rev-parse', 'HEAD:README.md']).trim();
-  const nowhere = '0123456789abc';
-  const at = (text, s) => lineOf(text, s);
-  putBug(w, bugText(`- the cache expires [commit ${inTask}]\n- the menu too [commit ${inBug}]\n- the rest [file patches/tiles.patch]\n`));
-  assert.deepEqual(check(w.ws, BUG), []);
-
-  const lost = bugText(`- the cache expires [commit ${nowhere}]\n- a blob is no commit [commit ${blob}]\n`);
-  putBug(w, lost);
-  assert.deepEqual(check(w.ws, BUG), [
-    { line: at(lost, nowhere), problem: `## Fix written: commit ${nowhere} is found in neither hub nor weather` },
-    { line: at(lost, blob), problem: `## Fix written: commit ${blob} is found in neither hub nor weather` },
-  ]);
-
-  const gone = bugText(`- the cache expires [commit ${nowhere}]\n`, 'radio/gone');
-  putBug(w, gone);
-  assert.deepEqual(check(w.ws, BUG), [
-    { line: 5, problem: 'bug-of: unknown repo radio: the workspace lists weather, hub' },
-    { line: at(gone, nowhere), problem: `## Fix written: commit ${nowhere} is not found in hub` },
-  ]);
-  putBug(w, bugText(null, 'weather/gone'));
-  assert.deepEqual(check(w.ws, BUG), [
-    { line: 5, problem: `bug-of: unknown task weather/gone: ${join(rootOf(w), 'kirunak', 'tasks', 'gone', 'task.md')} does not exist; a bug names the accepted task it was found in` },
-  ]);
-
-  // A bug in its task's own repo looks there alone; a task not accepted any more is refused.
-  rmSync(join(taskDir(w), 'done.json'));
-  const here = bugText(`- the cache expires [commit ${inBug}]\n`).replace(`id: ${BUG}`, 'id: weather/stale-tiles');
-  mkdirSync(join(rootOf(w), 'kirunak', 'drafts'), { recursive: true });
-  writeFileSync(fileOf(w, 'stale-tiles'), here);
-  assert.deepEqual(check(w.ws, 'weather/stale-tiles'), [
-    { line: 5, problem: `bug-of: ${TASK} is not accepted yet: a bug found while a task is open goes into that task, through its review or an amendment (k amend new ${TASK} --title "...")` },
-    { line: at(here, inBug), problem: `## Fix written: commit ${inBug} is not found in weather` },
-  ]);
 });
 
 test('k drafts: a bug\'s row names its task, and its line says bug of <task>', async () => {
