@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { accept, hashBytes, readRecord } from '../lib/approval.mjs';
+import { accept, hashBytes } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
@@ -81,7 +81,7 @@ test('the review brief copies the three inputs into in/ and names only that fold
   for (const id of ['AC-1', 'AC-2', 'AC-3', 'E-1', 'O-1']) assert.ok(text.includes(task.find((l) => l.startsWith(`- ${id} `))), `${id} verbatim`);
   assert.ok(!text.includes('- D-1 '), 'the decisions are not the reviewer\'s lines');
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
-  const base = readRecord(w.weather, 'offline-forecast').commit;
+  const base = sh(w.weather, 'git', ['log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json']).trim();
   for (const s of ['`kirunak/tasks/offline-forecast/steps/S-2/in/task.md`', '`kirunak/tasks/offline-forecast/steps/S-2/in/diff.patch`',
     '`kirunak/tasks/offline-forecast/steps/S-2/in/evidence/`', 'Write `kirunak/tasks/offline-forecast/review.md`', `task: ${w.id}`, `head: ${head}`,
     `base: ${base}`, 'session: rev-1', 'never guess', '`needs device` or `needs owner`', 'k review check weather/offline-forecast']) {
