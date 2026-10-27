@@ -4,6 +4,7 @@ title: {{title}}
 written: {{written}}
 bug-of: {{bugOf}}
 fix-repo: {{fixRepo}}
+quad-damage: {{quadDamage}}
 ---
 
 ## Who raised it

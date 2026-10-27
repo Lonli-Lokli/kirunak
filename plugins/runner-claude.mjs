@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { constants } from 'node:os';
+import { constants, tmpdir } from 'node:os';
 
 // The core's default `runner` (orchestrator.md §3): a headless `claude -p`, every flag from cli-reference.md and
 // headless.md. Not --bare: a step needs the repo's CLAUDE.md, the PreToolUse hooks and the subscription. The process
 // gets its own process group, so the orchestrator's timeout can kill its tree.
 
 export const KEEP_ALIVE_PROMPT = 'keep-alive: reply with the word ok';
+export const LIMITS_PROMPT = 'reply with the word ok';
+const LIMITS_TIMEOUT_MS = 120000;
 const OUTPUT_CAP = 10 * 1024 * 1024;
 
 // The argv after `claude`. step: { prompt, model, effort, permissionMode, maxTurns, maxBudgetUsd, allowedTools,
@@ -48,7 +50,47 @@ export function parseResult(stdout) {
   return null;
 }
 
-function spawnClaude(bin, args, { cwd, env, stdin }) {
+// The limits reading (gulnya/quad-damage AC-9, AC-10): the argv after `claude` for one turn on Haiku with no tools,
+// whose stream carries the plan's `rate_limit_event`. --tools takes a list, so its empty one goes last.
+export function limitsArgs() {
+  return ['-p', LIMITS_PROMPT, '--model', 'haiku', '--max-turns', '1', '--output-format', 'stream-json', '--verbose', '--tools', ''];
+}
+
+// The reading in a stream's lines: the last rate_limit_event with both windows, unifiedWindows' five_hour and
+// seven_day, as { fiveHour: { used, resetsAt }, week: { used, resetsAt }, overage }, used in percent (two decimals) and
+// resetsAt in epoch seconds; a refused turn after it still leaves a reading, the windows being why it was refused. With
+// none, { error } says why: the login gone (an assistant message's `error`, or its words), the session failed, or no
+// event came, or one without its windows.
+export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
+  const lines = [];
+  for (const line of String(stdout || '').split('\n')) {
+    try {
+      const x = JSON.parse(line);
+      if (x && typeof x === 'object') lines.push(x);
+    } catch {}
+  }
+  const window = (w) => (Number.isFinite(w?.utilization) && Number.isFinite(w?.resetsAt) ? { used: Math.round(w.utilization * 10000) / 100, resetsAt: w.resetsAt } : null);
+  const events = lines.filter((x) => x.type === 'rate_limit_event');
+  for (const e of [...events].reverse()) {
+    const u = e.rate_limit_info?.unifiedWindows;
+    const fiveHour = window(u?.five_hour);
+    const week = window(u?.seven_day);
+    if (fiveHour && week) return { fiveHour, week, overage: e.rate_limit_info.isUsingOverage === true };
+  }
+  const result = lines.filter((x) => x.type === 'result').pop() ?? null;
+  const assistant = lines.filter((x) => x.type === 'assistant');
+  const words = (x) => (x?.message?.content || []).filter((c) => c?.type === 'text').map((c) => c.text);
+  const parts = [...assistant.flatMap(words), result?.result, stderr].filter((t) => typeof t === 'string' && t.trim()).map((t) => t.replace(/\s+/g, ' ').trim());
+  const said = [...new Set(parts)].join(' ').slice(0, 200);
+  if (assistant.some((x) => x.error === 'authentication_failed') || /\/login\b|not logged in|invalid api key|oauth token/i.test(said)) {
+    return { error: `the login is gone: ${said || 'authentication failed'}` };
+  }
+  if (exitCode !== 0 || result?.is_error) return { error: `the session failed (exit ${exitCode})${said ? `: ${said}` : ''}` };
+  if (events.length) return { error: 'its rate_limit_event has no unifiedWindows with five_hour and seven_day' };
+  return { error: 'the session gave no rate_limit_event' };
+}
+
+function spawnClaude(bin, args, { cwd, env, stdin, raw = false }) {
   let out = '';
   let err = '';
   const cap = (s, b) => (s.length + b.length > OUTPUT_CAP ? (s + b).slice(-OUTPUT_CAP) : s + b);
@@ -56,7 +98,7 @@ function spawnClaude(bin, args, { cwd, env, stdin }) {
   try {
     child = spawn(bin, args, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
-    return { pid: undefined, done: Promise.resolve({ exitCode: 127, result: null, usage: null, stderr: e.message }) };
+    return { pid: undefined, done: Promise.resolve({ exitCode: 127, result: null, usage: null, stderr: e.message, ...(raw ? { stdout: '' } : {}) }) };
   }
   child.stdout.on('data', (b) => (out = cap(out, String(b))));
   child.stderr.on('data', (b) => (err = cap(err, String(b))));
@@ -64,11 +106,11 @@ function spawnClaude(bin, args, { cwd, env, stdin }) {
   child.stdin.end(stdin ?? '');
   const closed = new Promise((r) => child.on('close', r));
   const done = new Promise((resolve) => {
-    child.on('error', (e) => resolve({ exitCode: 127, result: null, usage: null, stderr: err + e.message }));
+    child.on('error', (e) => resolve({ exitCode: 127, result: null, usage: null, stderr: err + e.message, ...(raw ? { stdout: out } : {}) }));
     child.on('exit', async (code, signal) => {
       await Promise.race([closed, new Promise((r) => setTimeout(r, 1000))]);
       const result = parseResult(out);
-      resolve({ exitCode: code ?? 128 + (constants.signals[signal] || 0), result, usage: result?.usage ?? null, stderr: err });
+      resolve({ exitCode: code ?? 128 + (constants.signals[signal] || 0), result, usage: result?.usage ?? null, stderr: err, ...(raw ? { stdout: out } : {}) });
     });
   });
   return { pid: child.pid, done };
@@ -100,6 +142,24 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
           const args = claudeArgs({ ...step, resume: sessionId, prompt: KEEP_ALIVE_PROMPT, maxTurns: 1, maxBudgetUsd: null, permissionMode: step.permissionMode || mode() });
           const run = spawnClaude(bin, args, { cwd, env: step.env });
           return { pid: run.pid, done: run.done.then(({ exitCode, result, usage }) => ({ exitCode, result, usage })) };
+        },
+
+        // limits({ cwd, env, timeoutMs }) → Promise<the reading, or { error }> (readLimits): one turn on Haiku in an
+        // empty place (the temporary folder unless `cwd` names one), killed with its tree when it outlasts timeoutMs.
+        // Not part of the seam: a runner without it gives no reading.
+        limits({ cwd = tmpdir(), env, timeoutMs = LIMITS_TIMEOUT_MS } = {}) {
+          const run = spawnClaude(bin, limitsArgs(), { cwd, env, raw: true });
+          let timer;
+          const late = new Promise((resolve) => {
+            timer = setTimeout(() => {
+              try {
+                process.kill(-run.pid, 'SIGKILL');
+              } catch {}
+              resolve({ error: `no reading in ${timeoutMs / 1000} s: the session was stopped` });
+            }, timeoutMs);
+          });
+          const read = run.done.then(({ exitCode, stdout, stderr }) => readLimits(stdout, { exitCode, stderr }));
+          return Promise.race([read, late]).finally(() => clearTimeout(timer));
         },
       },
     },

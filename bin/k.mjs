@@ -74,13 +74,15 @@ Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
-Bugs      k bug new <repo>/<slug> --title "..." [--bug-of <task>] [--fix-repo <repo>]: a bug's skeleton,
-            kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo (a repo of
-            the workspace, or kirunak for kirunak's own checkout; its own when none is named)
+Bugs      k bug new <repo>/<slug> --title "..." --quad-damage yes|no [--bug-of <task>] [--fix-repo <repo>]: a bug's
+            skeleton, kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo
+            (a repo of the workspace, or kirunak for kirunak's own checkout; its own when none is named); its mark yes
+            when Quad Damage may take it (the k-bug skill says when), else no
           k bug check <id>: the bug's shape, its task and its fix's commits | k bug drop <id> --why "...": removes it
             and its folder in a commit of their own, a fix branch kept and named in it
-          k bug from <id> [--no-commit]: a draft, or a task whose intake is not approved, moved into kirunak/bugs/
-            with its history, draft/<slug> renamed bug/<slug>, each repo's paths committed alone
+          k bug from <id> --quad-damage yes|no [--no-commit]: a draft, or a task whose intake is not approved, moved
+            into kirunak/bugs/ with its history and its mark, draft/<slug> renamed bug/<slug>, each repo's paths
+            committed alone
           k bug review <id> [--detach] [--dry-run] (the owner's): Review & merge, a fresh Opus session reviews the fix's
             diff and kirunak reads its verdict; clean, bug/<slug> is merged into its fix repo's master (never pushed)
             and the bug closes; a finding or a conflict merges nothing, written in kirunak/bugs/<slug>/review-<n>.md
@@ -569,11 +571,13 @@ const VERBS = {
       if (v !== null && typeof v !== 'string') throw usage(`--${name} names ${what}`);
       return v;
     };
+    // The mark (gulnya/quad-damage AC-3): `new` and `from` refuse a bug without it, naming the option.
+    const mark = () => one(bugs.MARK, 'the mark, yes or no: --quad-damage yes|no') ?? '';
     if (sub === 'new') {
       const bugOf = one('bug-of', 'one accepted task: --bug-of <repo>/<slug>');
       const fixRepo = one('fix-repo', 'the repo of the fix branch: --fix-repo <repo>');
       const title = typeof flags.title === 'string' ? flags.title : '';
-      const r = bugs.newBug({ ws, id, title, bugOf, fixRepo, session: session(flags), dryRun });
+      const r = bugs.newBug({ ws, id, title, quadDamage: mark(), bugOf, fixRepo, session: session(flags), dryRun });
       const of = [r.bugOf && `a bug of ${r.bugOf}`, r.fixRepo && `its fix in ${r.fixRepo}`].filter(Boolean).join(', ');
       const about = of ? `, ${of}` : '';
       if (dryRun) return { ...r, text: `would write ${r.path}${about}` };
@@ -588,12 +592,13 @@ const VERBS = {
       return { ...r, text: (r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit`) + kept };
     }
     if (sub === 'from') {
-      const r = bugs.from({ ws, id, dryRun, noCommit: !!flags['no-commit'] });
+      const r = bugs.from({ ws, id, quadDamage: mark(), dryRun, noCommit: !!flags['no-commit'] });
       const lines = [
         ...r.moves.map((m) => `${m.from} -> ${m.to}`),
         ...r.renames.map((b) => `${b.repo}: branch ${b.from} -> ${b.to}`),
         ...(r.skeleton ? [`${r.rel}: a bug's skeleton, to fill in from the intake and commit`] : []),
         ...(r.fixRepo ? [`fix-repo: ${r.fixRepo}`] : []),
+        `${bugs.MARK}: ${r.quadDamage}`,
         ...(r.order ? [`${r.order}: ${id} left the drafts' order`] : []),
       ];
       if (dryRun) return { ...r, text: [`would move the ${r.kind} ${id} into kirunak/bugs/:`, ...lines.map((l) => `  ${l}`)].join('\n') };
