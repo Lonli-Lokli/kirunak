@@ -50,8 +50,8 @@ export const AMENDMENTS: AmendmentRow[] = [
   { id: ID, amendment: 'A-4', title: 'The last forecast stays readable offline', name: 'replaces E-1', proposed: '2026-11-06', by: 'session s1', why: 'E-1 is covered by AC-1.', lines: 1, refuse: `${ID} with A-4 applied fails k check: line 9: aspect offline: in (E-1) names E-1, which the task does not have`, file: `${AMENDMENT_DIR}/A-4.md` },
 ]
 
-// The drafts `k drafts --json` gives (kirunak-drafts S-3), by the date written, the undated last; the last one's file
-// cannot be read.
+// The drafts `k drafts --json` gives (kirunak-drafts S-3), with no order file: by the date written, the undated last;
+// the last one's file cannot be read.
 export const DRAFTS: DraftRow[] = [
   { id: 'hub/offline-maps', repo: 'hub', slug: 'offline-maps', title: 'Maps that work offline', written: '2026-11-05', bugOf: null, path: '/w/hub/kirunak/drafts/offline-maps.md' },
   { id: 'weather/rain-alerts', repo: 'weather', slug: 'rain-alerts', title: 'Rain alerts', written: '2026-11-06', bugOf: null, path: '/w/weather/kirunak/drafts/rain-alerts.md' },

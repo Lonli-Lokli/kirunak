@@ -13,10 +13,10 @@ const SKIP = '[No preference]'
 // k's arguments after `node <k>`.
 const verbs = (runs: string[][]) => runs.map(argv => argv.slice(2))
 
-const LIST = 'Drafts, by the date written:\n1. hub/offline-maps: Maps that work offline, written 2026-11-05\n2. weather/rain-alerts: Rain alerts, written 2026-11-06\n3. hub/no-date: no-date, no date written\nWhich draft?'
+const LIST = 'Drafts, in the order they wait:\n1. hub/offline-maps: Maps that work offline, written 2026-11-05\n2. weather/rain-alerts: Rain alerts, written 2026-11-06\n3. hub/no-date: no-date, no date written\nWhich draft?'
 const LABELS = ['hub/offline-maps', 'weather/rain-alerts', 'hub/no-date']
 // The answer's list when nothing ran.
-const TEXT = '3 drafts, by the date written:\n\n1. **hub/offline-maps**: Maps that work offline, written 2026-11-05\n2. **weather/rain-alerts**: Rain alerts, written 2026-11-06\n3. **hub/no-date**: no-date, no date written\n\n/k-drafts shows one whole, to start its intake or drop it.'
+const TEXT = '3 drafts, in the order they wait:\n\n1. **hub/offline-maps**: Maps that work offline, written 2026-11-05\n2. **weather/rain-alerts**: Rain alerts, written 2026-11-06\n3. **hub/no-date**: no-date, no date written\n\n/k-drafts shows one whole, to start its intake or drop it.'
 // The first draft whole, as the dialog draws it: its head, then its file below the front matter, the marks left out.
 const WHOLE = 'hub/offline-maps: Maps that work offline.\nWritten 2026-11-05.\n\nWho raised it\n\n> The maps should work offline too.\n\nowner, 2026-11-05, session s1\n\nWhy\n\nThe forecast works offline; the maps do not.\n\nWhat was found\n\n- The tiles load from the network. [file hub/src/Map.kt]\n\nQuestions\n\n1. Which areas are kept?\n2. How old may a tile be?\nStart the intake from it, or drop it?'
 const ITEM = ['Start intake', 'Drop', 'Back']
@@ -44,8 +44,8 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     const w = world(on, { drafts: [many(5)], taps: ['More', 'Back', SKIP] })
     await run($)
     const [one, two] = [w.asked[0], w.asked[1]]
-    expect(one).toEqual({ header: 'Drafts', question: 'Drafts, by the date written: (1 to 3 of 5)\n1. hub/d1: Draft 1, written 2026-11-01\n2. hub/d2: Draft 2, written 2026-11-02\n3. hub/d3: Draft 3, written 2026-11-03\nWhich draft?', labels: ['hub/d1', 'hub/d2', 'hub/d3', 'More'] })
-    expect(two).toEqual({ header: 'Drafts', question: 'Drafts, by the date written: (4 to 5 of 5)\n1. hub/d4: Draft 4, written 2026-11-04\n2. hub/d5: Draft 5, written 2026-11-05\nWhich draft?', labels: ['hub/d4', 'hub/d5', 'Back'] })
+    expect(one).toEqual({ header: 'Drafts', question: 'Drafts, in the order they wait: (1 to 3 of 5)\n1. hub/d1: Draft 1, written 2026-11-01\n2. hub/d2: Draft 2, written 2026-11-02\n3. hub/d3: Draft 3, written 2026-11-03\nWhich draft?', labels: ['hub/d1', 'hub/d2', 'hub/d3', 'More'] })
+    expect(two).toEqual({ header: 'Drafts', question: 'Drafts, in the order they wait: (4 to 5 of 5)\n1. hub/d4: Draft 4, written 2026-11-04\n2. hub/d5: Draft 5, written 2026-11-05\nWhich draft?', labels: ['hub/d4', 'hub/d5', 'Back'] })
     expect(w.asked[2]).toEqual(one)
     expect(w.runs).toEqual([])
   })
@@ -87,8 +87,8 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     const rows = [DRAFTS[0] as DraftRow, DRAFTS[1] as DraftRow, BUG]
     const w = world(on, { drafts: [rows], taps: ['hub/stale-tiles', 'Back', SKIP, 'hub/stale-tiles', 'Drop', 'Fixed in 3f2a9c1', 'Drop hub/stale-tiles'], verb: { exitCode: 0, stdout: 'hub/stale-tiles: dropped in 5b7e2d0\n', stderr: '' } })
     const head = 'hub/stale-tiles: Old tiles stay after an update.\nBug of weather/offline-forecast, written 2026-11-07.'
-    expect(await run($)).toBe('Nothing ran: skipped.\n\n3 drafts, by the date written:\n\n1. **hub/offline-maps**: Maps that work offline, written 2026-11-05\n2. **weather/rain-alerts**: Rain alerts, written 2026-11-06\n3. **hub/stale-tiles**: Old tiles stay after an update, bug of weather/offline-forecast, written 2026-11-07\n\n/k-drafts shows one whole, to start its intake or drop it.')
-    expect(w.asked[0]).toEqual({ header: 'Drafts', question: 'Drafts, by the date written:\n1. hub/offline-maps: Maps that work offline, written 2026-11-05\n2. weather/rain-alerts: Rain alerts, written 2026-11-06\n3. hub/stale-tiles: Old tiles stay after an update, bug of weather/offline-forecast, written 2026-11-07\nWhich draft?', labels: ['hub/offline-maps', 'weather/rain-alerts', 'hub/stale-tiles'] })
+    expect(await run($)).toBe('Nothing ran: skipped.\n\n3 drafts, in the order they wait:\n\n1. **hub/offline-maps**: Maps that work offline, written 2026-11-05\n2. **weather/rain-alerts**: Rain alerts, written 2026-11-06\n3. **hub/stale-tiles**: Old tiles stay after an update, bug of weather/offline-forecast, written 2026-11-07\n\n/k-drafts shows one whole, to start its intake or drop it.')
+    expect(w.asked[0]).toEqual({ header: 'Drafts', question: 'Drafts, in the order they wait:\n1. hub/offline-maps: Maps that work offline, written 2026-11-05\n2. weather/rain-alerts: Rain alerts, written 2026-11-06\n3. hub/stale-tiles: Old tiles stay after an update, bug of weather/offline-forecast, written 2026-11-07\nWhich draft?', labels: ['hub/offline-maps', 'weather/rain-alerts', 'hub/stale-tiles'] })
     expect(w.asked[1]).toEqual({ header: 'Drafts', question: `${head}\n\nWhat was found\n\n- The tile cache keeps no version. [file hub/src/Tiles.kt]\n\nFix written\n\n- The cache is keyed by version. [commit 3f2a9c1]\nStart the intake from it, or drop it?`, labels: ITEM })
     expect(await run($)).toBe('hub/stale-tiles: dropped in 5b7e2d0')
     expect(w.asked.slice(-2).map(a => a.question)).toEqual([

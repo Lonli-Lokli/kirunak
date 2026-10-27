@@ -3,9 +3,10 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, st
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve, verify } from '../lib/approval.mjs';
-import { check, checkDraft, drop, format, list, newDraft, parseDraft } from '../lib/drafts.mjs';
+import { check, checkDraft, drop, format, list, move, newDraft, parseDraft } from '../lib/drafts.mjs';
 import { start } from '../lib/intake.mjs';
 import { rows as taskRows } from '../lib/list.mjs';
+import { recordPaths } from '../lib/records.mjs';
 import { gitCommitAll, k, makeWorkspace, sh } from './helpers.mjs';
 
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
@@ -244,6 +245,107 @@ test('k drafts: every draft in every repo, by date written then id, an undated o
     'weather/undated      No date             no date',
   ].join('\n'));
   assert.equal(format([]), 'no drafts');
+});
+
+// The drafts' order (owner, 2026-10-27): four drafts across both repos, committed, and the order file beside hub's queue.
+async function orderedWorkspace() {
+  const w = await makeWorkspace();
+  const put = (repo, slug, written) => {
+    mkdirSync(join(rootOf(w, repo), 'kirunak', 'drafts'), { recursive: true });
+    writeFileSync(fileOf(w, slug, repo), `---\nid: ${repo}/${slug}\ntitle: ${slug}\nwritten: ${written}\n---\n`);
+  };
+  put('weather', 'pollen', '2026-10-20');
+  put('hub', 'lanes', '2026-10-21');
+  put('weather', 'wind', '2026-10-22');
+  put('hub', 'tiles', '2026-10-23');
+  gitCommitAll(w.weather, 'drafts');
+  gitCommitAll(w.hub, 'drafts');
+  const ids = () => list(w.ws).map((r) => r.id);
+  const hubGit = (...args) => sh(w.hub, 'git', args).trim();
+  return { ...w, ids, hubGit, order: join(rootOf(w, 'hub'), 'kirunak', 'drafts-order.md') };
+}
+
+test('k drafts: the drafts the order names first, as it names them, then the others by the date written', async () => {
+  const w = await orderedWorkspace();
+  assert.equal(w.ws.draftOrder, w.order);
+  assert.deepEqual(w.ids(), ['weather/pollen', 'hub/lanes', 'weather/wind', 'hub/tiles']);
+  writeFileSync(w.order, '# a comment\nhub/tiles\n\nweather/gone\n  weather/wind  \nhub/tiles\n');
+  assert.deepEqual(w.ids(), ['hub/tiles', 'weather/wind', 'weather/pollen', 'hub/lanes']);
+  assert.ok(recordPaths(w.ws).includes('kirunak/drafts-order.md'));
+});
+
+test('k drafts move: to the end, the start, before or after a draft; several in the order named, one commit each', async () => {
+  const w = await orderedWorkspace();
+  writeFileSync(join(w.hub, 'README.md'), 'changed\n');
+  w.hubGit('add', 'README.md');
+  const r = move({ ws: w.ws, ids: ['weather/pollen'] });
+  assert.deepEqual(r.order, ['hub/lanes', 'weather/wind', 'hub/tiles', 'weather/pollen']);
+  assert.deepEqual(w.ids(), r.order);
+  assert.equal(r.commit, w.hubGit('rev-parse', '--short', 'HEAD'));
+  assert.equal(w.hubGit('log', '-1', '--format=%s'), 'kirunak: drafts move weather/pollen');
+  assert.equal(w.hubGit('show', '--name-status', '--format=', 'HEAD'), 'A\tkirunak/drafts-order.md');
+  assert.equal(w.hubGit('diff', '--cached', '--name-only'), 'README.md');
+  assert.match(readFileSync(w.order, 'utf8'), /^# .*\n# .*\nhub\/lanes\nweather\/wind\nhub\/tiles\nweather\/pollen\n$/);
+
+  assert.deepEqual(move({ ws: w.ws, ids: ['hub/tiles'], place: { first: true } }).order, ['hub/tiles', 'hub/lanes', 'weather/wind', 'weather/pollen']);
+  assert.deepEqual(move({ ws: w.ws, ids: ['weather/pollen'], place: { before: 'hub/lanes' } }).order, ['hub/tiles', 'weather/pollen', 'hub/lanes', 'weather/wind']);
+  assert.deepEqual(move({ ws: w.ws, ids: ['hub/tiles'], place: { after: 'weather/wind' } }).order, ['weather/pollen', 'hub/lanes', 'weather/wind', 'hub/tiles']);
+  const several = move({ ws: w.ws, ids: ['hub/tiles', 'weather/pollen'], place: { first: true } });
+  assert.deepEqual(several.order, ['hub/tiles', 'weather/pollen', 'hub/lanes', 'weather/wind']);
+  assert.equal(w.hubGit('log', '-1', '--format=%B'), 'kirunak: drafts move 2 drafts\n\nhub/tiles\nweather/pollen');
+  assert.equal(w.hubGit('rev-list', '--count', 'HEAD'), '7'); // the fixture's and the drafts' commits, then five moves
+
+  const head = w.hubGit('rev-parse', 'HEAD');
+  assert.equal(move({ ws: w.ws, ids: ['weather/wind'] }).commit, null);
+  assert.equal(w.hubGit('rev-parse', 'HEAD'), head);
+});
+
+test('k drafts move: a new draft follows the order, one gone is left out, and a refused commit puts the file back', async () => {
+  const w = await orderedWorkspace();
+  move({ ws: w.ws, ids: ['hub/lanes'], place: { first: true } });
+  writeFileSync(fileOf(w, 'frost', 'weather'), '---\nid: weather/frost\ntitle: frost\nwritten: 2026-10-01\n---\n');
+  assert.deepEqual(w.ids(), ['hub/lanes', 'weather/pollen', 'weather/wind', 'hub/tiles', 'weather/frost']);
+  rmSync(fileOf(w, 'wind', 'weather'));
+  move({ ws: w.ws, ids: ['weather/frost'], place: { after: 'hub/lanes' } });
+  assert.match(readFileSync(w.order, 'utf8'), /\nhub\/lanes\nweather\/frost\nweather\/pollen\nhub\/tiles\n$/);
+
+  const kept = readFileSync(w.order, 'utf8');
+  writeFileSync(join(w.hub, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "refused by the hook" >&2\nexit 1\n');
+  chmodSync(join(w.hub, '.git', 'hooks', 'pre-commit'), 0o755);
+  assert.throws(() => move({ ws: w.ws, ids: ['hub/tiles'], place: { first: true } }), (e) => e.code === 1 && /refused by the hook/.test(e.message));
+  assert.equal(readFileSync(w.order, 'utf8'), kept);
+  assert.equal(w.hubGit('status', '--porcelain'), '');
+});
+
+test('k drafts move: refuses no draft, an unknown one, one named twice, a target unknown or moved; a dry run writes nothing', async () => {
+  const w = await orderedWorkspace();
+  const mv = (ids, place) => () => move({ ws: w.ws, ids, place });
+  assert.throws(mv([]), (e) => e.code === 2 && /names one draft or more/.test(e.message));
+  assert.throws(mv(['weather/gone']), (e) => e.code === 1 && e.message === 'no draft weather/gone: k drafts lists every draft');
+  assert.throws(mv(['hub/tiles', 'hub/tiles']), (e) => e.code === 2 && e.message === 'hub/tiles is named twice');
+  assert.throws(mv(['hub/tiles'], { before: 'weather/gone' }), (e) => e.code === 1 && /^no draft weather\/gone/.test(e.message));
+  assert.throws(mv(['hub/tiles', 'hub/lanes'], { after: 'hub/lanes' }), (e) => e.code === 1 && e.message === 'hub/lanes cannot move relative to itself');
+  const dry = move({ ws: w.ws, ids: ['weather/pollen'], dryRun: true });
+  assert.deepEqual(dry.order, ['hub/lanes', 'weather/wind', 'hub/tiles', 'weather/pollen']);
+  assert.equal(dry.commit, null);
+  assert.equal(existsSync(w.order), false);
+});
+
+test('the verbs: k drafts move with its flags, --dry-run and --json, in the help, and an unknown drafts verb refused', async () => {
+  const w = await orderedWorkspace();
+  const run = (...args) => k(w.home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  assert.match(run('help').stdout, /k drafts move <id>\.\.\. \[--first\|--last\|--before <id>\|--after <id>\]/);
+  assert.equal(run('drafts', 'move', 'weather/pollen', '--dry-run').stdout,
+    'would commit "kirunak: drafts move weather/pollen", the order then:\n 1  hub/lanes\n 2  weather/wind\n 3  hub/tiles\n 4  weather/pollen\n');
+  assert.equal(existsSync(w.order), false);
+  const moved = run('drafts', 'move', 'hub/tiles', 'weather/wind', '--first');
+  assert.equal(moved.status, 0, moved.stderr);
+  assert.equal(moved.stdout.split('\n')[0], `moved in ${w.hubGit('rev-parse', '--short', 'HEAD')}`);
+  assert.deepEqual(run('drafts').stdout.split('\n').map((l) => l.split(' ')[0]), ['hub/tiles', 'weather/wind', 'weather/pollen', 'hub/lanes', '']);
+  assert.deepEqual(JSON.parse(run('drafts', 'move', 'hub/tiles', '--last', '--json').stdout).order, ['weather/wind', 'weather/pollen', 'hub/lanes', 'hub/tiles']);
+  assert.match(run('drafts', 'move', 'hub/tiles').stdout, /^already in that order: nothing to commit\n/);
+  assert.equal(run('drafts', 'shuffle').status, 2);
+  assert.equal(run('drafts', 'move', 'weather/gone').status, 1);
 });
 
 test('the verbs: k draft new, check, drop and k drafts, with --json and --dry-run, and in the help', async () => {
