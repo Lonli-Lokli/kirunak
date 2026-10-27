@@ -178,6 +178,27 @@ test('a non-append intake.md is refused; an append and a new intake are allowed'
   assert.equal(commit(dir).status, 0);
 });
 
+test('an intake moved whole into kirunak/bugs/ by k bug from is allowed; one removed or rewritten on the way is refused (gulnya/kirunak-bugs AC-3)', () => {
+  const dir = makeRepo();
+  const from = 'kirunak/tasks/radar-tiles/intake.md';
+  put(dir, from, '# Intake\n\nQ-1 (2026-11-02): which tiles?\n');
+  assert.equal(commit(dir).status, 0);
+  git(dir, ['rm', '-q', '--', from]);
+  let r = commit(dir);
+  assert.equal(r.status, 1, 'an intake removed with no moved copy is refused');
+  assert.match(r.stderr, /radar-tiles\/intake\.md: intake\.md is append-only/);
+  git(dir, ['reset', '-q', '--hard']);
+  mkdirSync(join(dir, 'kirunak/bugs'), { recursive: true });
+  git(dir, ['mv', 'kirunak/tasks/radar-tiles', 'kirunak/bugs/radar-tiles']);
+  put(dir, 'kirunak/bugs/radar-tiles/intake.md', '# Intake\n');
+  r = commit(dir);
+  assert.equal(r.status, 1, 'a moved intake that lost lines is refused');
+  put(dir, 'kirunak/bugs/radar-tiles/intake.md', '# Intake\n\nQ-1 (2026-11-02): which tiles?\nA-1 (2026-11-03): "all" [owner 2026-11-03]\n');
+  r = commit(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(join(dir, from)));
+});
+
 test('a commit touching no kirunak file is allowed', () => {
   const dir = makeRepo();
   put(dir, 'src/main.txt', 'code\n');
@@ -259,7 +280,7 @@ test('a commit naming a task the owner accepted is refused unless it stages only
   for (const [message, env] of [[`${SLUG}: one more line`, {}], ['the cache, as weather/offline-forecast left it', {}], ['one more line', { KIRUNAK_TASK: ID }]]) {
     const r = commitAs(w, w.weather, message, env);
     assert.equal(r.status, 1, message);
-    assert.equal(r.stderr.trim(), `kirunak: this commit's message names ${ID}, which the owner has accepted: new work on it is a new task. Reword the message so it does not name ${ID}, or start a new task (/k-intake); only kirunak's records (task folders, drafts, approvals, the queue, and what the workspace names as records) may still be committed naming it.`);
+    assert.equal(r.stderr.trim(), `kirunak: this commit's message names ${ID}, which the owner has accepted: new work on it is a new task. Reword the message so it does not name ${ID}, or start a new task (/k-intake); only kirunak's records (task folders, drafts, bugs, approvals, the queue, and what the workspace names as records) may still be committed naming it.`);
   }
   // Records beside the code do not make it a records' commit.
   put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
@@ -328,7 +349,7 @@ async function accepted() {
   return w;
 }
 
-const REFUSAL = `kirunak: this commit's message names ${ID}, which the owner has accepted: new work on it is a new task. Reword the message so it does not name ${ID}, or start a new task (/k-intake); only kirunak's records (task folders, drafts, approvals, the queue, and what the workspace names as records) may still be committed naming it.`;
+const REFUSAL = `kirunak: this commit's message names ${ID}, which the owner has accepted: new work on it is a new task. Reword the message so it does not name ${ID}, or start a new task (/k-intake); only kirunak's records (task folders, drafts, bugs, approvals, the queue, and what the workspace names as records) may still be committed naming it.`;
 
 test('the message the commit keeps is checked: typed in the editor, or given with -m and edited, it may not name an accepted task beside code (accept-shared-repo AC-8, E-1)', async () => {
   const w = await accepted();
