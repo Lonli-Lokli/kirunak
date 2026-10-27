@@ -157,6 +157,9 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   assert.match(step.brief, /git diff master\.\.\.bug\/stale-tiles/);
   assert.match(step.brief, /cache: one hour/);
   assert.match(step.brief, /Stale map tiles/);
+  // E-2: a heavy test runs only through the heavy lock, at most that one job; with no bugs.heavyLock, CLAUDE.md's.
+  assert.match(step.brief, /runs only through this machine's heavy lock, never bare: the heavy-lock command this machine's CLAUDE\.md names/);
+  assert.match(step.brief, /Run at most that one queued job in this session/);
   assert.ok(!existsSync(step.cwd), 'the review tree is removed after the session');
   // The merge: a merge commit on master whose second parent is the fix, nothing pushed (there is no remote to push to).
   const merge = git(w.hub, 'rev-parse', r.merged);
