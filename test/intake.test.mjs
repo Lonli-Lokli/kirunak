@@ -508,6 +508,108 @@ test('k intake start --from a bug never committed, and with no folder, renames i
   assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '?? kirunak/');
 });
 
+test('start --from a bug takes only the bug of its own id: another id\'s bug, a path under kirunak/bugs/ that is no bug, a bug whose front matter names another, one gone and one whose Review & merge runs are refused, and nothing is written (gulnya/kirunak-bugs AC-8, E-3)', async () => {
+  const { ws, home, weather } = await makeWorkspace({ finished: false });
+  writeBug(weather, BUG.replace(/offline-forecast/g, 'wind-alerts'), 'kirunak/bugs/wind-alerts.md');
+  await assert.rejects(start({ ws, id: ID, from: 'kirunak/bugs/wind-alerts.md', now: NOV2 }),
+    (e) => e.code === 1 && e.message === '--from kirunak/bugs/wind-alerts.md is the bug weather/wind-alerts, not weather/offline-forecast: ' +
+      'k intake start weather/wind-alerts --from kirunak/bugs/wind-alerts.md');
+  mkdirSync(join(weather, 'kirunak/bugs/offline-forecast'));
+  writeFileSync(join(weather, 'kirunak/bugs/offline-forecast/review-1.md'), 'verdict: findings\n');
+  await assert.rejects(start({ ws, id: ID, from: 'kirunak/bugs/offline-forecast/review-1.md', now: NOV2 }),
+    (e) => e.code === 1 && e.message === '--from kirunak/bugs/offline-forecast/review-1.md is not a bug: a bug is kirunak/bugs/<slug>.md, ' +
+      'k intake start weather/offline-forecast --from kirunak/bugs/offline-forecast.md');
+  writeBug(weather, BUG.replace(`id: ${ID}`, 'id: weather/other'));
+  await assert.rejects(start({ ws, id: ID, from: BUG_REL, now: NOV2 }),
+    /--from kirunak\/bugs\/offline-forecast\.md is the bug weather\/other, not weather\/offline-forecast: its front matter says id: weather\/other/);
+  assert.equal(existsSync(dirOf(weather)), false);
+
+  // A Review & merge running on it holds it (E-3); a dead pid's lock does not.
+  writeBug(weather);
+  const lock = reviewLockPath(home, ID);
+  mkdirSync(join(lock, '..'), { recursive: true });
+  writeFileSync(lock, JSON.stringify({ pid: process.pid, started: '2026-11-02T19:00:00Z' }));
+  await assert.rejects(start({ ws, id: ID, from: BUG_REL, now: NOV2 }),
+    (e) => e.code === 1 && e.message === `the bug ${ID} cannot start its intake: its Review & merge runs (pid ${process.pid}, started ` +
+      '2026-11-02T19:00:00Z) and may merge its fix and close it; k bugs shows its result once it ends');
+  assert.equal(readFileSync(join(weather, BUG_REL), 'utf8'), BUG);
+  assert.equal(existsSync(join(weather, 'kirunak/bugs/offline-forecast/review-1.md')), true);
+  assert.equal(existsSync(dirOf(weather)), false);
+  writeFileSync(lock, JSON.stringify({ pid: 2 ** 22 + 12345, started: '2026-11-02T19:00:00Z' }));
+
+  rmSync(join(weather, BUG_REL));
+  await assert.rejects(start({ ws, id: ID, from: BUG_REL, now: NOV2 }),
+    /the bug weather\/offline-forecast is gone: kirunak\/bugs\/offline-forecast\.md does not exist .*\(merged, dropped, or its intake started elsewhere\); k bugs lists the bugs that wait/);
+  assert.equal(existsSync(dirOf(weather)), false);
+
+  writeBug(weather);
+  await start({ ws, id: ID, from: BUG_REL, now: NOV2 });
+  await assert.rejects(start({ ws, id: ID, from: BUG_REL, now: NOV2 }),
+    /the bug weather\/offline-forecast is gone: .*\(its intake started already, and it is kirunak\/tasks\/offline-forecast\/bug\.md\)/);
+});
+
+test('a task written from the one answer to the first question and each open question\'s passes k check, and its commit with the bug\'s move passes the task repo\'s hook (gulnya/kirunak-bugs AC-8)', async () => {
+  const { ws, home, weather } = await makeWorkspace({ finished: false });
+  const hook = join(weather, '.git/hooks/pre-commit');
+  mkdirSync(join(hook, '..'), { recursive: true });
+  writeFileSync(hook, `#!/bin/sh\nexec "${process.execPath}" "${join(KIRUNAK, 'hooks/git-pre-commit.mjs')}"\n`);
+  chmodSync(hook, 0o755);
+  // The bug as k bug from leaves an intake it moved: its folder holds that intake's log.
+  writeBug(weather);
+  mkdirSync(join(weather, 'kirunak/bugs/offline-forecast'));
+  writeFileSync(join(weather, 'kirunak/bugs/offline-forecast/intake.md'), BUG_LOG);
+  gitCommitAll(weather, 'kirunak: weather/offline-forecast is a bug');
+  await start({ ws, id: ID, from: BUG_REL, now: NOV2 });
+
+  const first = question(ws, ID, 'bug', 'Do these stand, each as proposed? 1. The goal: after a restart the app shows today\'s ' +
+    'forecast, or none: yes. 2. AC-1 a forecast kept from yesterday is never shown as today\'s after a restart. 4. The ' +
+    'aspects: platforms and large text n/a, no screen changes; offline in (AC-1).', NOV2);
+  const yes = answer(ws, ID, first, 'Yes, all of them.', '→ Goal, AC-1, platforms, large-text, offline', NOV2);
+  const third = question(ws, ID, 'acceptance', 'Should the screen say when the forecast was fetched?', NOV2);
+  const words = answer(ws, ID, third, 'Yes, in words.', '→ AC-2', NOV2);
+  assert.deepEqual([first, third], ['Q-1', 'Q-2']);
+  const from = '[from kirunak/tasks/offline-forecast/bug.md]';
+  writeFileSync(join(dirOf(weather), 'task.md'), [
+    '---',
+    `id: ${ID}`,
+    'title: The kept forecast is stale after a restart',
+    'created: 2026-11-02',
+    'from: kirunak/tasks/offline-forecast/bug.md',
+    '---',
+    '',
+    '## Goal',
+    `After a restart the app shows today's forecast, or none. ${yes.tag} ${from}`,
+    '',
+    '## Acceptance criteria',
+    `- AC-1 A forecast kept from yesterday is never shown as today's after a restart. ${yes.tag} ${from}`,
+    `- AC-2 The forecast screen says in words when the forecast was fetched. ${words.tag}`,
+    '',
+    '## Edge cases',
+    '',
+    '## Out of scope',
+    '',
+    '## Decisions',
+    '',
+    '## Aspects',
+    `- platforms: n/a: no screen changes ${yes.tag}`,
+    `- large-text: n/a: no screen changes ${yes.tag}`,
+    `- offline: in (AC-1) ${yes.tag}`,
+    '',
+    '## Open questions',
+    '',
+  ].join('\n'));
+  const checked = k(home, ['check', ID]);
+  assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+
+  sh(weather, 'git', ['add', '--', 'kirunak/tasks/offline-forecast']);
+  // The hook reads the scratch home, never the real one, and no GIT_ variable of the run that runs the tests.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([n]) => !n.startsWith('KIRUNAK_') && !n.startsWith('GIT_')));
+  const committed = spawnSync('git', ['commit', '-q', '-m', `kirunak: intake ${ID}`], { cwd: weather, env: { ...env, KIRUNAK_HOME: home }, encoding: 'utf8' });
+  assert.equal(committed.status, 0, committed.stderr);
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']), '');
+  assert.equal(readFileSync(join(dirOf(weather), 'bug/intake.md'), 'utf8'), BUG_LOG);
+});
+
 // kirunak-spikes: an intake from a bug, a draft whose front matter names the accepted task it was found in.
 const BUG_REL = 'kirunak/drafts/stale-tiles.md';
 const bugDir = (repo) => join(repo, 'kirunak/tasks/stale-tiles');
