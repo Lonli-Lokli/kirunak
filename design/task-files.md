@@ -19,6 +19,7 @@ kirunak/
   tasks/<slug>/checklist.md       the owner's checklist, generated from the review (R15)
   tasks/<slug>/handoff.md         the closing session's handoff, when the workspace keeps it here (review.md §4)
   tasks/<slug>/amendments/A-<n>.md a proposed change to the frozen task (R7)
+  tasks/<slug>/repos.md           written by hand: another repo or range of the task's work (review.md §1, R32)
   tasks/<slug>/steps/<step>/      a step's brief, inputs, outputs and token records (R9, R12); its .gitignore
                                   keeps kirunak's own files out of git (in/, diff.patch, the run records)
   tasks/<slug>/evidence/          what steps produce for the reviewer: reports, measurements, screenshots (R14)
@@ -158,6 +159,18 @@ parser of about a hundred lines with no dependency.
 - `handoff.md`: written at closing when the workspace's `handoff` seam points there (the core's default does,
   `plugins.md` §2).
 - `amendments/A-n.md`: §5 below.
+- `repos.md` (gulnya/kirunak-review-base AC-9, E-6): written by hand when the task's work is in a repo kirunak does
+  not find by itself, or in a range it does not reach (`review.md` §1); read when a review is briefed, when it starts,
+  and by `k accept` once a review has `given.json` (`approval.md` §4). Each line starting `- ` is `- <repo>
+  <branch>` or `- <repo> <from>..<to>`, such as `- ~/sources/forecast-api offline-cache`; any other line is prose.
+  The repo is a workspace repo's name or a path (`/…` or `~/…`) to a git repository's top, and a path that is a
+  workspace repo's root is that repo. A branch adds its commits since it left the repo's default branch, as a branch
+  named after the task does; a range adds the commits `git log <from>..<to>` lists. A line naming the task's own repo
+  adds its commits' files to the review's `diff.patch`. A line naming a repo that is neither, a branch or range git
+  cannot read, a branch whose start kirunak cannot tell (the default branch itself, one merged with no reflog, or one
+  in a repo with no default branch of its own: such a line takes a range instead), or a line that is not those two
+  words stops the review's brief and its start, and `k accept` too, and kirunak names each such line by its number
+  and its text, saying which of them it stops.
 - `done.json`: `{ "task": id, "accepted": ISO date, "by": "owner", "via": "shell"|"mod", "commit": sha, "review":
   "review-2.md", "verdict": "needs owner (E-3)", "head": sha, "reviewHash": "sha256:…" }`, written only by `k accept`
   (the owner's command, `approval.md` §4). `review`, `verdict` and `head` are the review it took as that file states
@@ -169,7 +182,8 @@ parser of about a hundred lines with no dependency.
   total, with the baseline's comparisons, committed with `done.json` by `k accept` and written again by `k cost <id>
   --write`; the git hook refuses any other text (`approval.md` §3). The run records the numbers are read from stay
   on disk and out of git: the step folder's `.gitignore` names `in/`, `diff.patch`, `run-<k>.json`, `keep-<k>.json`
-  and a heavy job's `heavy-<k>.json` and log; the brief and the step's outputs are the session's to commit.
+  and a heavy job's `heavy-<k>.json` and log; the brief and the step's outputs are the session's to commit, and so
+  is a review step's `given.json`, what kirunak gave the review (`review.md` §1).
 
 ## 4. States and who moves a task
 
@@ -270,4 +284,4 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 ## 7. Requirements this file satisfies
 
 R24 to R27 (§1: drafts), R29 (§1: a bug), R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
-D4 (§6), D6 (§2 rule 1).
+R32 (§3 `repos.md`), D4 (§6), D6 (§2 rule 1).

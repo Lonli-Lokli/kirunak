@@ -165,6 +165,20 @@ validation, archives) then go unused, and what the owner needs is not in it:
   commit touches only kirunak's records; the refusal names the task and says new work on it is a new task, to reword
   the message or start a new task. A task's commits outside a step that do not name it, and its commits in a repo
   other than its own, are not guarded.
+- R32 A review sees the task's whole change: every commit from the task's first approval to head, in the task's own
+  repo and in any other repo its work is in, and none of other tasks' work in a shared repo; an amendment no longer
+  narrows what it sees (gulnya/kirunak-review-base). In its own repo the review's diff holds each path of the commits
+  from the first approval to head whose message names the task, by its id, its slug or its `Task:` trailer, or names
+  no task, diffed once from the first approval; a commit that names only other tasks is left out, and so are
+  kirunak's records (R30). Any other step that takes the diff starts at the first approval too. kirunak finds the
+  task's other repos by itself, each workspace repo with a commit since the first approval, on any branch, that names
+  the task, or with a branch named after it, and a hand-written `repos.md` in the task's folder adds a repo, with its
+  branch or range, or a range in a repo it found; the review gets one diff per repo. A `repos.md` line kirunak cannot
+  read stops the review from starting, naming the line. The review's brief names the first approval and the last
+  amendment's approval, and lists each commit in its diff that names no task, with its hash, subject and files.
+  `k review check` refuses a review whose `base` is not the commit kirunak gave its review step. `k accept` also
+  refuses a task whose change in another repo changed after its latest review's head in that repo, naming the repo
+  and the file. A review briefed before this was built is not checked for either.
 
 ### Change size
 - R21 Every commit in a repo where kirunak's git hooks are installed is measured by SLAP:
