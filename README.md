@@ -95,8 +95,9 @@ You need Node 22 or later, git and Claude Code.
    tracks is left alone and named. It never overwrites a window that is not its own: a value you set in that file, a
    window in the repo's committed `.claude/settings.json`, a per-model `modelSettings` window and the
    `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable are each named, with what to change, and `k doctor` fails them until
-   you do. A compaction in the middle of a step waits for the **mid-step limit**, by default 167,000 tokens of
-   context (a 200,000 window, measured as the least weight); `compact.midStepLimit` sets another number, or `'user'`
+   you do; inside a `k run` step the variable is k run's own, failed only at a value k run would not set. A
+   compaction in the middle of a step waits for the **mid-step limit**, by default 167,000 tokens of context (a
+   200,000 window, measured as the least weight); `compact.midStepLimit` sets another number, or `'user'`
    for your own `autoCompactWindow` (the one in `~/.claude/settings.json`, or Claude Code's own point when you set
    none), so it never comes sooner than it does without kirunak. `k install` and `k doctor` name your window, and
    each `modelSettings.<model>.autoCompactWindow` beside it, as yours; neither writes it. A session outside every

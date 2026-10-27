@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { compactEvents, configPath, install } from '../lib/install.mjs';
 import { KIRUNAK, sh } from './helpers.mjs';
-import { json, LOCAL, put, read, setup } from './fixtures/compact/install.mjs';
+import { json, LOCAL, put, read, setup, stepTask } from './fixtures/compact/install.mjs';
 
 // k install's compact part (orchestrator.md §5, R8.1, R8.2): the compact hook's blocks in the user's file, and the
 // handover window in each root's own .claude/settings.local.json, in every case; the user's file never changes for it,
@@ -97,6 +97,21 @@ test('e: a window in the repo\'s committed settings.json is kept and named, noth
   assert.ok(actions.includes(`CLAUDE_CODE_AUTO_COMPACT_WINDOW=600000 in ${s.paths.settingsPath} env ${tail}`));
   assert.ok(actions.includes(`CLAUDE_CODE_AUTO_COMPACT_WINDOW=700000 in ${s.local(s.hub)} env ${tail}`));
   assert.ok(actions.some((a) => a.startsWith(`${s.local(s.hub)}: autoCompactWindow is already 183000`)), 'a local window beats the shared per-model one');
+});
+
+test('g inside a k run step: k run\'s own variable is named as its own, not as beating every setting; with no KIRUNAK_STEP as before (gulnya/kirunak-doctor-in-step)', () => {
+  const s = setup();
+  const step = stepTask(s);
+  const go = (env) => {
+    Object.assign(process.env, env);
+    try {
+      return s.go().filter((a) => a.startsWith('CLAUDE_CODE_AUTO_COMPACT_WINDOW='));
+    } finally {
+      for (const k of Object.keys(env)) delete process.env[k];
+    }
+  };
+  assert.deepEqual(go(step('S-1', 400000)), ['CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 in the shell is k run\'s own for weather/offline-forecast S-1, the window it sets for the step\'s model (R7.4)']);
+  assert.deepEqual(go({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: '400000' }), ['CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 in the shell beats every setting: the handover window is not in force while it is set']);
 });
 
 test('compact.enabled false removes kirunak\'s own window and keeps the owner\'s; a tracked file and one not JSON are named, the others still written', () => {
