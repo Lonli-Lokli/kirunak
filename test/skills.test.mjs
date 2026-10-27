@@ -8,7 +8,7 @@ import { KIRUNAK } from './helpers.mjs';
 // of an allow-list, every path is in this repo, a task folder or Claude Code's own settings, every skill is kirunak's.
 const FILES = ['skills/k-intake/SKILL.md', 'skills/k-done/SKILL.md', 'skills/k-board-page/SKILL.md', 'skills/k-draft/SKILL.md', 'skills/k-go-on/SKILL.md', 'README.md'];
 const COMMANDS = new Set(['k', 'claude', 'git', 'node', 'npm', 'cd']);
-const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-resume', '/k-start', '/kirunak', '/k-board-page', '/clear', '/k-list', '/k-board', '/k-amendments', '/k-approve-amendment', '/k-queue', '/k-drafts', '/k-go-on']);
+const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-resume', '/k-start', '/kirunak', '/k-board-page', '/clear', '/k-list', '/k-board', '/k-amendments', '/k-approve-amendment', '/k-queue', '/k-drafts', '/k-bugs', '/k-go-on']);
 const SKILLS = new Set(['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-go-on']);
 
 const read = (f) => readFileSync(join(KIRUNAK, f), 'utf8');
@@ -56,7 +56,8 @@ for (const f of FILES) {
 }
 
 test('the skills stay short', () => {
-  assert.ok(read('skills/k-intake/SKILL.md').split('\n').length <= 120);
+  // 130 since a bug's Start fix (gulnya/kirunak-bugs AC-8) took its own section.
+  assert.ok(read('skills/k-intake/SKILL.md').split('\n').length <= 130);
   assert.ok(read('skills/k-done/SKILL.md').split('\n').length <= 60);
   assert.ok(read('skills/k-board-page/SKILL.md').split('\n').length <= 40);
   assert.ok(read('skills/k-draft/SKILL.md').split('\n').length <= 80);
