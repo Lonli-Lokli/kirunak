@@ -778,6 +778,49 @@ test('a merge naming an accepted task passes when clean, by its -m or its branch
   assert.equal(squash.stderr.trim(), REFUSAL);
 });
 
+test('an octopus naming an accepted task is judged against the join git\'s octopus makes: refused with code of its own, passing with none, its heads\' changes to one file apart joined in turn, and passing when git stops it on a conflict (accept-merge-gaps AC-1, E-1)', async () => {
+  const w = await hooked();
+  put(w.weather, 'src/lines.ts', '1\n2\n3\n4\n5\n');
+  assert.equal(commitAs(w, w.weather, 'five lines').status, 0);
+  put(w.weather, DONE, JSON.stringify({ task: ID }) + '\n');
+  assert.equal(commitAs(w, w.weather, `${ID}: accepted`).status, 0);
+  const branch = (name, path, text) => {
+    git(w.weather, ['checkout', '-q', '-b', name, 'master']);
+    put(w.weather, path, text);
+    assert.equal(commitAs(w, w.weather, `a line for ${path}`).status, 0);
+    git(w.weather, ['checkout', '-q', 'master']);
+  };
+  const merge = (args) => replayOf(w, w.weather, ['merge', '-q', ...args]);
+  const parents = () => git(w.weather, ['rev-list', '--parents', '-1', 'HEAD']).trim().split(' ').length - 1;
+
+  branch('oct-1', 'src/o1.ts', 'o1\n');
+  branch('oct-2', 'src/o2.ts', 'o2\n');
+  assert.equal(merge(['--no-ff', '--no-commit', 'oct-1', 'oct-2']).status, 0);
+  put(w.weather, 'src/evil.ts', 'export const evil = 1;\n');
+  const evil = commitAs(w, w.weather, `${SLUG}: two at once`);
+  assert.equal(evil.status, 1, 'code of its own beside the heads');
+  assert.equal(evil.stderr.trim(), REFUSAL);
+  execFileSync('rm', [join(w.weather, 'src/evil.ts')]);
+  const clean = commitAs(w, w.weather, `${SLUG}: two at once`);
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.equal(parents(), 3);
+
+  branch('oct-3', 'src/lines.ts', 'one\n2\n3\n4\n5\n');
+  branch('oct-4', 'src/lines.ts', '1\n2\n3\n4\nfive\n');
+  branch('oct-5', 'src/o5.ts', 'o5\n');
+  const three = merge(['--no-ff', '-m', `${SLUG}: three at once`, 'oct-3', 'oct-4', 'oct-5']);
+  assert.equal(three.status, 0, three.stderr);
+  assert.equal(parents(), 4);
+  assert.equal(readFileSync(join(w.weather, 'src/lines.ts'), 'utf8'), 'one\n2\n3\n4\nfive\n');
+
+  branch('oct-6', 'src/lines.ts', 'one\n2\nthree\n4\nfive\n');
+  branch('oct-7', 'src/lines.ts', 'one\n2\nTHREE\n4\nfive\n');
+  assert.notEqual(merge(['--no-ff', '--no-commit', 'oct-6', 'oct-7']).status, 0, 'git stops the octopus on the conflict');
+  put(w.weather, 'src/lines.ts', 'one\n2\nthree, THREE\n4\nfive\n');
+  const stopped = commitAs(w, w.weather, `${SLUG}: the conflict resolved`);
+  assert.equal(stopped.status, 0, stopped.stderr);
+});
+
 test('the editor turning git\'s words at a pick\'s stop into the user\'s, naming an accepted task, is refused by commit-msg; after `cherry-pick -e` git runs no commit-msg (accept-shared-repo AC-8, E-3)', async () => {
   const w = await acceptedWork();
   git(w.weather, ['checkout', '-q', '-b', 'port', `${w.c}^`]);

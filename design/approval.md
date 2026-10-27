@@ -171,6 +171,9 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   tree against `git merge-tree --write-tree HEAD MERGE_HEAD`, so a merge whose message names an accepted task, given
   with `-m` or written by git from a branch's name, passes when it adds nothing beyond what the two branches already
   hold, and is refused when it carries code of its own, an evil merge or a `--no-commit` merge with new code (E-4).
+  An octopus (two heads or more in `MERGE_HEAD`) is judged the same way, against the join git's octopus makes: each
+  head joined in turn onto the join so far by `merge-tree`, each join but the last made a commit with `git
+  commit-tree` (left dangling for git's gc) so the next finds its merge base (gulnya/accept-merge-gaps AC-1).
   For a pick git is making (`CHERRY_PICK_HEAD`, or a rebase stopped on a conflict: `rebase-merge/stopped-sha` without
   `rebase-merge/amend`) whose message is git's (`MERGE_MSG`, else `rebase-merge/message`, both read as git's `strip`
   cleanup reads them, so the editor's status block and a conflict's `# Conflicts:` lines are git's words too), the
@@ -187,8 +190,10 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
 - **What it does not check**: under `--no-verify` git skips commit-msg, so only a message given with `-m` or `-F` is
   checked: a mistake guard, as the pre-commit checks are. An amend with `--reset-author`, or one within two seconds of
   the commit it amends, given `-m`, is taken as a new commit. A merge or pick stopped on a conflict and committed with
-  git's words passes, since the resolution cannot be told from new work (merge-tree exits 1), as do an octopus merge
-  and git's pick of a root commit, which has no parent to pick against; `rebase --apply` runs no hook; a git older than 2.38 has no `merge-tree --write-tree` and passes every replay as
+  git's words passes, since the resolution cannot be told from new work (merge-tree exits 1), as does an octopus with a
+  conflict in any join, which git's octopus refuses too (E-1), and git's pick of a root commit, which has no parent to
+  pick against. An octopus over a rename is judged against merge-ort's joins, which follow renames where git's octopus
+  (`read-tree` and `merge-one-file`) does not, so the two trees can differ there; `rebase --apply` runs no hook; a git older than 2.38 has no `merge-tree --write-tree` and passes every replay as
   before. After the editor of `cherry-pick -e`, `revert -e` (a revert's default at a terminal) or a rebase's `squash`,
   git runs no commit-msg, so words typed there are not checked: prepare-commit-msg judged the message git wrote (code
   staged while the editor of `cherry-pick -e` is open stays out of that commit, whose tree git wrote before). A merge by
@@ -245,8 +250,10 @@ out. Then each commit in `<review head>..HEAD` is judged by its own paths, recor
   change, and a change to them after the review never blocks `k accept` (AC-5), so a commit whose paths are all
   records blocks nothing, even one naming the task.
 
-A file changed and changed back still blocks: the commits are judged, not the net diff. A merge adds no paths of its
-own; the commits it brings in count one by one. No flag waives a block, and the way out is a new review. The refusal's
+A file changed and changed back still blocks: the commits are judged, not the net diff. A merge's paths are those
+`git log --cc` lists for it, whose result differs from every parent: code of its own, a conflict it resolved, and a
+file both sides changed that git joined clean, which a side's commit lists already; a clean merge of sides that changed
+different files lists none, and the commits it brings in count one by one (gulnya/accept-merge-gaps AC-2, AC-3, E-2). No flag waives a block, and the way out is a new review. The refusal's
 first line says how many files and names the next review's file ("<id>: its work changed after review.md's head <sha>,
 in 2 file(s) the review never saw: run a new review (a review step whose output is review-2.md):"); a line follows for
 each blocking file and commit, `<path>  <sha>  <task>`, where the task is the commit's `Task:` trailer when it has
