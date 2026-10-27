@@ -427,7 +427,7 @@ test('a draft refuses bug-of and Fix written, each naming k bug from, and has no
   assert.deepEqual(checkDraft(FILLED.replace('written: 2026-10-22\n', 'written: 2026-10-22\nstate: parked\n'), ID), [{ line: 5, problem: why }]);
 });
 
-test('k drafts: a bug\'s row names its task, and its line says bug of <task>', async () => {
+test('k drafts: a draft that still names bug-of keeps its task in its row until k bug from moves it', async () => {
   const w = await makeWorkspace();
   const put = (repo, slug, front) => {
     mkdirSync(join(rootOf(w, repo), 'kirunak', 'drafts'), { recursive: true });
@@ -435,37 +435,29 @@ test('k drafts: a bug\'s row names its task, and its line says bug of <task>', a
   };
   put('weather', 'wind-alerts', 'id: weather/wind-alerts\ntitle: Wind alerts\nwritten: 2026-10-22\n');
   put('hub', 'stale-tiles', `id: hub/stale-tiles\ntitle: Stale map tiles\nwritten: 2026-10-23\nbug-of: ${TASK}\n`);
-  put('weather', 'undated-bug', `title: Undated bug\nbug-of: ${TASK}\n`);
   const rows = list(w.ws);
-  assert.deepEqual(rows.map((r) => [r.id, r.bugOf]), [['weather/wind-alerts', null], ['hub/stale-tiles', TASK], ['weather/undated-bug', TASK]]);
+  assert.deepEqual(rows.map((r) => [r.id, r.bugOf]), [['weather/wind-alerts', null], ['hub/stale-tiles', TASK]]);
   assert.equal(format(rows), [
     'weather/wind-alerts  Wind alerts      2026-10-22',
     'hub/stale-tiles      Stale map tiles  2026-10-23  bug of weather/offline-forecast',
-    'weather/undated-bug  Undated bug      no date     bug of weather/offline-forecast',
   ].join('\n'));
 });
 
-test('the verbs: k draft new --bug-of with --dry-run and --json, its refusals, and k drafts naming the bug', async () => {
-  const w = await acceptedWorkspace();
+test('the verbs: k draft new --bug-of refused naming k bug new, and k draft check naming k bug from', async () => {
+  const w = await makeWorkspace();
   const run = (...args) => k(w.home, args, { CLAUDE_CODE_SESSION_ID: '' });
-  assert.match(run('help').stdout, /k draft new <repo>\/<slug> --title "\.\.\." --bug-of <task>: a bug of that accepted task/);
+  assert.doesNotMatch(run('help').stdout, /k draft new <repo>\/<slug> --title "\.\.\." --bug-of/);
   const nu = (...more) => run('draft', 'new', BUG, '--title', 'Stale map tiles', ...more);
-  assert.equal(nu('--bug-of', TASK, '--dry-run').stdout, `would write ${bugFile(w)}, a bug of ${TASK}\n`);
-  assert.deepEqual(JSON.parse(nu('--bug-of', TASK, '--dry-run', '--json').stdout).bugOf, TASK);
-  assert.equal(existsSync(bugFile(w)), false);
-  assert.equal(nu('--bug-of', 'weather/gone').status, 1);
-  assert.match(nu('--bug-of', 'weather/gone', '--dry-run').stderr, /^k: unknown task weather\/gone: /);
-  assert.equal(nu('--bug-of', TASK, '--bug-of', TASK).status, 2);
   assert.equal(nu('--bug-of').status, 2);
+  for (const more of [['--bug-of', TASK], ['--bug-of', TASK, '--dry-run'], ['--bug-of', TASK, '--bug-of', TASK]]) {
+    const r = nu(...more);
+    assert.equal(r.status, 1, more.join(' '));
+    assert.match(r.stderr, /^k: a bug is not a draft: `k bug new hub\/stale-tiles --title "\.\.\." --bug-of /);
+  }
   assert.equal(existsSync(bugFile(w)), false);
-
-  const made = nu('--bug-of', TASK);
-  assert.equal(made.status, 0, made.stderr);
-  assert.match(made.stdout, /, a bug of weather\/offline-forecast: fill in every section \(name the fix under Fix written, or delete that section when no fix exists\), then `k draft check hub\/stale-tiles`/);
-  assert.match(readFileSync(bugFile(w), 'utf8'), /\nbug-of: weather\/offline-forecast\n---\n/);
-  assert.equal(run('draft', 'check', BUG).status, 1);
-  putBug(w, bugText(null));
-  assert.equal(run('draft', 'check', BUG).stdout, 'hub/stale-tiles: check passes\n');
-  assert.equal(run('drafts').stdout, 'hub/stale-tiles  Wind alerts for cyclists  2026-10-22  bug of weather/offline-forecast\n');
-  assert.equal(JSON.parse(run('drafts', '--json').stdout)[0].bugOf, TASK);
+  mkdirSync(join(w.hub, 'kirunak', 'drafts'), { recursive: true });
+  writeFileSync(bugFile(w), bugText());
+  const r = run('draft', 'check', BUG);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /`k bug from hub\/stale-tiles` moves this one there/);
 });
