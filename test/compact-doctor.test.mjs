@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { compactChecks } from '../lib/doctor.mjs';
 import { configPath } from '../lib/install.mjs';
 import { sh } from './helpers.mjs';
-import { json, LOCAL, put, setup } from './fixtures/compact/install.mjs';
+import { json, LOCAL, put, setup, stepTask } from './fixtures/compact/install.mjs';
 
 // k doctor's lines on the handover (orchestrator.md §5, R8.3), after k install into scratch repos.
 
@@ -91,6 +91,24 @@ test('the default limit: a small user window passes, one under the limit\'s wind
   ]);
   const none = installed({ compact: { midStepLimit: 'user' }, user: { autoCompactWindow: undefined, modelSettings: undefined } });
   assert.match(none.check()[0][1], /mid-step limit the user's own window: none set, the model's own window$/);
+});
+
+test('inside a k run step the variable is k run\'s own: ok at the window k run sets for the model the step runs on, a FAIL naming both at another; no step, or one gone, as before (gulnya/kirunak-doctor-in-step)', () => {
+  const s = installed();
+  const step = stepTask(s, '2026-10-26 10:00 S-2 escalated: to opus (high, build) after 2 failures on sonnet\n');
+  const shell = (env) => s.check({ env }).filter(([, l]) => l.startsWith('CLAUDE_CODE_AUTO_COMPACT_WINDOW='));
+  const own = (v, at) => [true, `CLAUDE_CODE_AUTO_COMPACT_WINDOW=${v} in the shell is k run's own for weather/offline-forecast ${at}, the window it sets for the step's model (R7.4)`];
+  assert.deepEqual(shell(step('S-1', 400000)), [own(400000, 'S-1')], 'opus: the user\'s modelSettings.opus window');
+  assert.deepEqual(shell(step('S-3', 500000)), [own(500000, 'S-3')], 'sonnet: the user\'s own window');
+  assert.deepEqual(shell(step('S-2', 400000)), [own(400000, 'S-2')], 'a sonnet step climbed to opus runs on opus');
+  assert.deepEqual(s.fails({ env: step('S-1', 400000) }), [], 'no FAIL inside a step at k run\'s window');
+  assert.deepEqual(shell(step('S-1', 500000)), [[false, 'CLAUDE_CODE_AUTO_COMPACT_WINDOW=500000 in the shell is not the window k run sets for weather/offline-forecast S-1, 400000 (R7.4): the step does not compact where k run meant it to']]);
+  const now = [[false, 'CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 in the shell beats every setting: the handover window is not in force while it is set']];
+  assert.deepEqual(shell({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: '400000' }), now, 'no KIRUNAK_STEP: as before');
+  assert.deepEqual(shell(step('S-9', 400000)), now, 'a step the plan does not have: as before');
+  assert.deepEqual(shell({ ...step('S-1', 400000), KIRUNAK_TASK: 'weather/gone' }), now, 'a task gone: as before');
+  s.ws.compact = { ...s.ws.compact, enabled: false };
+  assert.deepEqual(shell(step('S-1', 400000)), now, 'the handover off: k run sets no variable, so it is not k run\'s');
 });
 
 test('here: outside the roots the user\'s own window, under the variable its value, never blocking; the session\'s model and its window', () => {

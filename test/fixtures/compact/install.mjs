@@ -1,11 +1,11 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_COMPACT } from '../../../lib/compact.mjs';
 import { install } from '../../../lib/install.mjs';
 import { DEFAULT_HOOK, DEFAULT_LADDER } from '../../../lib/ladder.mjs';
-import { gitCommitAll, gitInit, KIRUNAK } from '../../helpers.mjs';
+import { FIXTURES, gitCommitAll, gitInit, KIRUNAK } from '../../helpers.mjs';
 
 // The scratch workspace k install's and k doctor's compact tests share (orchestrator.md §5, R8.2, R8.3).
 
@@ -53,4 +53,16 @@ export function setup({ compact = {}, repos = null, user = {} } = {}) {
     return actions;
   };
   return { dir, weather, hub, ws, paths, go, local: (r) => join(r, ...LOCAL) };
+}
+
+// A task in weather whose plan runs S-1 on opus and S-2, S-3 on sonnet, with the given progress.md, for the variable
+// k run sets inside a step (R7.4): → (step, value) the environment such a step runs with.
+const STEP_PLAN = ['### S-1 Build [agent, opus]', '### S-2 Test [agent, sonnet]', '### S-3 Docs [agent, sonnet]']
+  .map((h, i) => `${h}\ncovers: all\ninputs: task\noutputs: steps/S-${i + 1}/report.md\n`).join('\n');
+export function stepTask(s, progress = '') {
+  const dir = join(s.weather, 'kirunak', 'tasks', 'offline-forecast');
+  cpSync(join(FIXTURES, 'workspace', 'weather', 'kirunak', 'tasks', 'offline-forecast'), dir, { recursive: true });
+  put(join(dir, 'plan.md'), STEP_PLAN);
+  put(join(dir, 'progress.md'), progress);
+  return (step, value) => ({ KIRUNAK_TASK: 'weather/offline-forecast', KIRUNAK_STEP: step, CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(value) });
 }

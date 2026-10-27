@@ -537,7 +537,10 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   and named; (e) a window in the committed shared file and none in the local one → nothing written, named (a local
   key would silently beat the repo's). Beside them, (f) a `modelSettings.<model>.autoCompactWindow` in the local file
   is named (it beats the handover window for that model), and (g) `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the shell or in
-  a settings file's `env` is named (it beats every setting). With `enabled: false`, kirunak's own window is removed
+  a settings file's `env` is named (it beats every setting); inside a `k run` step (`KIRUNAK_TASK` and `KIRUNAK_STEP`
+  set) the shell's is named as k run's own (R7.4), and `k doctor` fails it only at a value other than the window k run
+  sets for the model the step runs on, naming both; a step whose task or step is gone reads as outside one
+  (gulnya/kirunak-doctor-in-step). With `enabled: false`, kirunak's own window is removed
   and any other kept. Then, when git does not ignore the file (`git check-ignore`), `/.claude/settings.local.json` is
   added to the repo's own excludes file (`git rev-parse --git-path info/exclude`, shared with its worktrees); never
   the committed `.gitignore` and never the global excludes file, which is Claude Code's. The user's settings file is
