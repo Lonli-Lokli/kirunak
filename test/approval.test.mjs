@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { accept, approve, hashBytes, hold, readRecord, resume, verify } from '../lib/approval.mjs';
@@ -679,4 +679,75 @@ test('hold writes hold.md with the date and why, resume deletes it, each in its 
   assert.equal(subject(weather), `kirunak: resume ${ID}`);
   assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
   assert.throws(() => resume({ ws, id: ID }), /not on hold/);
+});
+
+// A hook that refuses every commit, as the SLAP gate refused an accept's (bug gulnya/accept-refused-by-slap); the
+// returned function takes it away.
+function refusingHook(repo) {
+  const hook = join(repo, '.git', 'hooks', 'pre-commit');
+  mkdirSync(join(hook, '..'), { recursive: true });
+  writeFileSync(hook, '#!/bin/sh\necho "refused by the test" >&2\nexit 1\n');
+  chmodSync(hook, 0o755);
+  return () => rmSync(hook);
+}
+
+test('a refused accept leaves nothing behind: no done.json or cost.md, on disk or staged, and a retry reaches the commit again (bug gulnya/accept-refused-by-slap)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  const head = headOf(weather);
+  const allow = refusingHook(weather);
+  for (const attempt of ['first', 'retry']) {
+    assert.throws(() => accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }), /git commit in .* failed: refused by the test/, attempt);
+    assert.equal(existsSync(join(taskDir(weather), 'done.json')), false, attempt);
+    assert.equal(existsSync(join(taskDir(weather), 'cost.md')), false, attempt);
+    assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '', attempt);
+    assert.equal(headOf(weather), head, attempt);
+  }
+  assert.deepEqual(queue.read(ws), [ID], 'still queued');
+  allow();
+  assert.equal(accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }).state, 'done');
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
+});
+
+test('a refused hold leaves no hold.md and a refused resume leaves it as it was (bug gulnya/accept-refused-by-slap)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  const file = join(taskDir(weather), 'hold.md');
+  let allow = refusingHook(weather);
+  for (const attempt of ['first', 'retry']) {
+    assert.throws(() => hold({ ws, id: ID, why: 'waiting for the provider', now: NOV6 }), /refused by the test/, attempt);
+    assert.equal(existsSync(file), false, attempt);
+    assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '', attempt);
+  }
+  allow();
+  hold({ ws, id: ID, why: 'waiting for the provider', now: NOV6 });
+  const held = readFileSync(file);
+  allow = refusingHook(weather);
+  assert.throws(() => resume({ ws, id: ID }), /refused by the test/);
+  assert.deepEqual(readFileSync(file), held);
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
+  allow();
+  resume({ ws, id: ID });
+  assert.equal(existsSync(file), false);
+});
+
+test('a done.json git does not hold, left by an accept refused before the fix, is written over and committed; a committed one is already accepted (bug gulnya/accept-refused-by-slap)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  writeFileSync(join(taskDir(weather), 'done.json'), JSON.stringify({ task: ID, accepted: 'left over' }) + '\n');
+  writeFileSync(join(taskDir(weather), 'cost.md'), 'left over\n');
+  sh(weather, 'git', ['add', '--', taskDir(weather)]);
+  const r = accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 });
+  assert.equal(r.state, 'done');
+  assert.equal(subject(weather), `kirunak: accept ${ID}`);
+  const files = sh(weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort();
+  assert.deepEqual(files, ['kirunak/tasks/offline-forecast/cost.md', 'kirunak/tasks/offline-forecast/done.json']);
+  assert.equal(JSON.parse(readFileSync(join(taskDir(weather), 'done.json'), 'utf8')).review, 'review.md');
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
+  assert.throws(() => accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }), /already accepted/);
 });

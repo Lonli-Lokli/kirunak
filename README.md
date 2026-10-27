@@ -191,7 +191,8 @@ Code hook refuses an agent's edit of it.
 
 `k slap --staged` measures what you are about to commit, and `k slap <range>` a stretch of history. Over M, split
 the commit: `git restore --staged <file>` takes a file out, `git add -p` stages part of one. The check runs in git's
-prepare-commit-msg hook, so `--no-verify` does not skip it; merges, reverts and cherry-picks are not measured.
+prepare-commit-msg hook, so `--no-verify` does not skip it; merges, reverts and cherry-picks are not measured,
+nor are the records `k approve`, `k accept` and `k hold` commit for their task when the commit holds nothing else.
 
 ## Working a task
 

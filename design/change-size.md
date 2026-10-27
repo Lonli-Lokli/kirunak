@@ -91,6 +91,14 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   commit's message. Judgement: a replayed commit was measured when it was made, and refusing a rebase over history
   older than the rule would stop ordinary work; R22 is about the change a person or an agent writes now. Like the rest
   of kirunak this guards against mistakes, not a deliberate bypass (`core.hooksPath=/dev/null` is one).
+- **The owner's own records are skipped too** (bug gulnya/accept-refused-by-slap): a commit made under
+  `KIRUNAK_APPROVING`, `KIRUNAK_ACCEPTING` or `KIRUNAK_HOLDING` whose every path is a record of the task that
+  variable names (its approval record, `done.json`, `hold.md`, an amendment, `cost.md`, and `task.md` under
+  `KIRUNAK_APPROVING`), decided by `ownerRecord` in `hooks/git-pre-commit.mjs`, the same patterns pre-commit guards.
+  One more path and the whole commit is measured as before. Evidence: `k accept niva/themes-zoom-bests` was refused
+  on 2026-10-27 as L, SLAP 61, for the 518 lines of k cost's numbers in its `done.json`, which a starter
+  `.slapignore` does not list. Judgement: like a replay, such a commit is no change a person or an agent wrote; the
+  owner's command writes it whole, and the work it records was measured commit by commit.
 - **It fails closed**: if the hook cannot run (kirunak moved, git failed, the record unreadable), the commit is refused
   with the error. Judgement: R22 has no override, so a gate that silently lets everything through when broken would
   be one.
@@ -138,7 +146,10 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   pattern; an unapproved or changed `.slapignore` is refused and the approved one passes; a removed one needs no
   approval; a worktree shares its repo's approval; a whole deletion of 1,000 lines scores 0 while 300 lines deleted
   inside a kept file count; an amend is measured against the parent; a merge, a revert and a cherry-pick pass; a
-  first commit is measured against the empty tree. `test/slapignore.test.mjs`: the starter's sections, `k install
+  first commit is measured against the empty tree. `test/slap-gate.test.mjs` also: a 600-line `done.json` and its
+  `cost.md` pass under `KIRUNAK_ACCEPTING` naming their task and are refused without it, under another task's id
+  or with a 600-line source file beside them, and pass as `k accept` commits them, by path, with that file left
+  staged; `hold.md` passes under `KIRUNAK_HOLDING`, and `task.md` with its approval only under `KIRUNAK_APPROVING`. `test/slapignore.test.mjs`: the starter's sections, `k install
   --git` writing and keeping it, `approve` for one repo, by name and `--all` with its history and dry run, a refusal
   that writes nothing, and the whole path through `k`. `test/freeze-hook.test.mjs`: the edits, shell writes and verb
   R23 refuses. `test/install.test.mjs`: the hook written beside pre-commit, `core.hooksPath` followed.
