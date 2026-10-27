@@ -1,5 +1,6 @@
 import type { CommandRunInput, CommandRunResult, EngineInterface } from 'claude-code'
 
+import { reviewStarted } from './bugs'
 import { isOwners, reason, refusal, refused } from './commands'
 import { placeLines, plainLines, queueNow, unmarked } from './lists'
 import type { Item } from './lists'
@@ -19,18 +20,21 @@ import { kOf, refresh } from './reads'
 // - a dialog that runs no verb (`pick`, /k-board's) offers labels alone, no verb choice, and ends on a tap with such a
 //   label, which the command reads; a choice of it may open the next step, always another pick dialog (checked as it
 //   opens), so no verb choice is ever reached from it; it is the turn's one dialog, so no verb is typed after it;
-// - an item's `ends` choice (/k-drafts' Start intake) ends a verb's dialog with nothing run, handing its value to the
-//   command, which runs no verb with it (it submits a prompt); the turn's one dialog, so no verb is typed after it.
+// - an item's `ends` choice (/k-drafts' Start intake, /k-bugs' Start fix) ends a verb's dialog with nothing run,
+//   handing its value to the command, which runs no verb with it (it submits a prompt); the turn's one dialog, so no
+//   verb is typed after it.
 
 // An owner's verb commits with the repo's git hooks, as `!` does, so it gets the ten minutes $.process.run allows.
 const COMMIT_MS = 600_000
 
-// The verbs a turn may run: k's owner verbs, and `draft drop` (no owner's verb in k, A-11's R27, but a write the mod
-// makes only on the owner's tap); never a read or a session's own command.
-const VERBS = /^(?:approve|accept|hold|resume|start|amend decline|queue (?:add|move|remove)|draft drop)$/
+// The verbs a turn may run: k's owner verbs, `bug review` among them (Review & merge, gulnya/kirunak-bugs AC-5), and
+// `draft drop` and `bug drop` (no owner's verbs in k, A-11's R27, but writes the mod makes only on the owner's tap);
+// never a read or a session's own command.
+const VERBS = /^(?:approve|accept|hold|resume|start|amend decline|queue (?:add|move|remove)|draft drop|bug (?:review|drop))$/
 
 // How a command's turn ends: why nothing ran, or (nothing null) the verb chosen in it, which only this module reads;
-// `ended`, with nothing set, is the value of the `ends` choice that ended the dialog (/k-drafts' Start intake).
+// `ended`, with nothing set, is the value of the `ends` choice that ended the dialog (/k-drafts' Start intake, /k-bugs'
+// Start fix).
 export type Outcome = { readonly nothing: string | null; readonly ended?: string }
 
 // `tapped`: chosen by the dialog's last tap, not typed.
@@ -93,8 +97,8 @@ const CHOICES = 4
 
 export const nothingRan = (why: string): string => `Nothing ran: ${why}.`
 
-// An owner's verb as `node k <argv>`, with the time a commit takes; k's state line (a queue verb's: the queue it left),
-// or why it did not take.
+// An owner's verb as `node k <argv>`, with the time a commit takes; k's state line (a queue verb's: the queue it left;
+// Review & merge's: what runs now and where its result shows), or why it did not take.
 async function runVerb($: EngineInterface, name: string, k: string, argv: readonly string[]): Promise<{ ok: boolean; text: string }> {
   let r
   try {
@@ -104,6 +108,7 @@ async function runVerb($: EngineInterface, name: string, k: string, argv: readon
   }
   void refresh($)
   if (r.exitCode !== 0) return { ok: false, text: refused(name, r) }
+  if (argv[0] === 'bug' && argv[1] === 'review') return { ok: true, text: reviewStarted(argv[2] ?? '', r.stdout) }
   return { ok: true, text: argv[0] === 'queue' ? queueNow(r.stdout) : r.stdout.trim() }
 }
 
@@ -166,7 +171,7 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
 }
 
 function choose(turn: object, tapped: boolean, argv: readonly string[], after?: (ok: boolean) => void): Outcome {
-  const head = argv.slice(0, argv[0] === 'amend' || argv[0] === 'queue' || argv[0] === 'draft' ? 2 : 1).join(' ')
+  const head = argv.slice(0, argv[0] === 'amend' || argv[0] === 'queue' || argv[0] === 'draft' || argv[0] === 'bug' ? 2 : 1).join(' ')
   if (!VERBS.test(head)) throw new Error(`not an owner's verb: ${head}`)
   const out: Outcome = { nothing: null }
   chosen.set(out, { turn, tapped, argv: [...argv], after })
