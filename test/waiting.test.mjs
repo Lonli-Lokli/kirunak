@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
 import { amendmentName, decline, newAmendment } from '../lib/amend.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { newDraft } from '../lib/drafts.mjs';
-import { draftsLine, stoppedFor, stoppedText } from '../lib/waiting.mjs';
+import { bugsLine, draftsLine, stoppedFor, stoppedText } from '../lib/waiting.mjs';
 import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 // What k waiting gives the mod's pick lists (kirunak-phone S-4): the amendments waiting, the tasks k hold and k start
@@ -194,7 +194,7 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
 
 test("k waiting says in one line how many drafts wait for the owner's intake and names /k-drafts; --json gains drafts, every other field kept (kirunak-drafts AC-8)", async () => {
   const { ws, home } = await makeWorkspace();
-  const keys = ['approve', 'accept', 'amendments', 'hold', 'start', 'drafts', 'stopped'];
+  const keys = ['bugs', 'approve', 'accept', 'amendments', 'hold', 'start', 'drafts', 'stopped'];
   let w = waiting(home);
   assert.deepEqual(Object.keys(w), keys);
   assert.deepEqual(w.drafts, { count: 0, ids: [] });
@@ -208,6 +208,41 @@ test("k waiting says in one line how many drafts wait for the owner's intake and
   const text = run(home, ['waiting']).stdout.split('\n');
   assert.deepEqual(text.slice(-3), ['nothing to accept', "2 drafts wait for the owner's intake: /k-drafts", '']);
   assert.equal(draftsLine({ count: 1 }), "1 draft waits for the owner's intake: /k-drafts");
+});
+
+// A bug as k bug new leaves it (gulnya/kirunak-bugs S-1), in `root`'s kirunak/bugs/; with `fix`, a commit on bug/<slug>
+// that master lacks, made without checking anything out, so its fix is ready.
+function bugAt(root, slug, title, written, { fix = false } = {}) {
+  mkdirSync(join(root, 'kirunak', 'bugs'), { recursive: true });
+  writeFileSync(join(root, 'kirunak', 'bugs', `${slug}.md`), `---\nid: x/${slug}\ntitle: ${title}\nwritten: ${written}\n---\n\n## Who raised it\nfound by the agent: x\n`);
+  if (fix) sh(root, 'git', ['branch', `bug/${slug}`, sh(root, 'git', ['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'the fix']).trim()]);
+}
+
+test('k waiting names the bugs first, in one line with how many have a fix ready and /k-bugs, and says nothing of them when none waits; --json gains bugs first (gulnya/kirunak-bugs AC-7)', async () => {
+  const { ws, weather, hub, home } = await makeWorkspace();
+  let w = waiting(home);
+  assert.deepEqual(w.bugs, { count: 0, ready: 0, ids: [] });
+  const quiet = run(home, ['waiting']).stdout;
+  assert.equal(quiet.split('\n')[0], 'to approve:', 'no line at all when no bug waits');
+  assert.doesNotMatch(quiet, /k-bugs|bugs? waits?/);
+
+  bugAt(weather, 'rain-icon', 'The rain icon shows sun', '2026-11-04');
+  bugAt(hub, 'queue-stuck', 'The queue keeps a finished job', '2026-11-06', { fix: true });
+  newDraft({ ws, id: 'weather/wind-alerts', title: 'Wind alerts', now: NOV5 });
+  w = waiting(home);
+  assert.deepEqual(Object.keys(w)[0], 'bugs');
+  assert.deepEqual(w.bugs, { count: 2, ready: 1, ids: ['hub/queue-stuck', 'weather/rain-icon'] });
+  const text = run(home, ['waiting']).stdout.split('\n');
+  assert.equal(text[0], '2 bugs wait, 1 with a fix ready: /k-bugs');
+  assert.ok(text.indexOf(text[0]) < text.indexOf("1 draft waits for the owner's intake: /k-drafts"), 'before the drafts\' line');
+  assert.deepEqual(text.slice(1), quiet.replace('no draft waits for the owner\'s intake', "1 draft waits for the owner's intake: /k-drafts").split('\n'), 'every other line as it was');
+});
+
+test('the bugs\' line in AC-7\'s words, singular and plural, and nothing when none waits (gulnya/kirunak-bugs AC-7)', () => {
+  assert.equal(bugsLine({ count: 1, ready: 0 }), '1 bug waits, 0 with a fix ready: /k-bugs');
+  assert.equal(bugsLine({ count: 1, ready: 1 }), '1 bug waits, 1 with a fix ready: /k-bugs');
+  assert.equal(bugsLine({ count: 3, ready: 2 }), '3 bugs wait, 2 with a fix ready: /k-bugs');
+  assert.equal(bugsLine({ count: 0, ready: 0 }), '');
 });
 
 test('k waiting\'s group Stopped for you: per stopped step of a task not done, its notice indented two spaces, each line within 80 characters, the title and id first (design/orchestrator.md §2, E-15)', () => {

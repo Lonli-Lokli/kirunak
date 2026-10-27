@@ -22,7 +22,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
+import { bugsHookLine, compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -68,7 +68,7 @@ Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k worktrees [--closing <id>]: the worktrees an acceptance would remove (what each holds besides build
             output) and keep, with why; it removes nothing
-          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept, drafts) and what
+          k waiting: what waits for the owner (bugs, tasks and amendments to approve, tasks to accept, drafts) and what
             each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
@@ -230,7 +230,7 @@ const VERBS = {
     for (const a of aspects) {
       say((a.sources || []).length > 0 && (a.edgeCases || []).length > 0, `aspect ${a.id} has a source and an edge case`);
     }
-    for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
+    for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'kirunak-bugs.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
     const settings = flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json');
     const wired = existsSync(settings) && readFileSync(settings, 'utf8').includes('hooks/kirunak-freeze.mjs');
     say(wired, `the freeze hook is wired in ${settings}${wired ? '' : ' (run k install)'}`);
@@ -241,6 +241,7 @@ const VERBS = {
     for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     for (const [ok, line] of compactChecks({ ws, settingsPath: settings })) say(ok, line);
     say(...trackerLine({ settingsPath: settings, kirunakRoot: KIRUNAK }));
+    say(...bugsHookLine({ settingsPath: settings }));
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);
@@ -634,8 +635,11 @@ const VERBS = {
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
   // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
   // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
-  // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15).
+  // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15). First of all, the bugs
+  // that wait, in one line with how many have a fix ready, and first in --json: a count, that count and their ids; no
+  // line at all when none waits (gulnya/kirunak-bugs AC-7).
   async waiting({ ws }) {
+    const bugs = waiting.waitingBugs(ws);
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
     const approve = [];
@@ -656,6 +660,7 @@ const VERBS = {
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
+      ...(bugs.count ? [waiting.bugsLine(bugs)] : []),
       ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
@@ -663,7 +668,7 @@ const VERBS = {
       accept.length ? ['to accept:', ...accept.flatMap((x) => [line('accept')(x), ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
-    return { approve, accept, amendments, hold, start, drafts, stopped, text };
+    return { bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { DRAFT_PAIRS, renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
+import { BUG_PAIRS, DRAFT_PAIRS, renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { rows } from '../lib/list.mjs';
-import { bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
   return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
@@ -247,6 +247,51 @@ test('the drafts\' text pairs are the page\'s, held at 4.5:1 in the light and th
   const light = tokens(/:root \{([^}]*)\}/.exec(html)[1]);
   const dark = tokens(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)[1]);
   for (const [fg, bg] of DRAFT_PAIRS) {
+    assert.ok(TEXT_PAIRS.some(([f, b]) => f === fg && b === bg), `--${fg} on --${bg} is in the page's contrast test`);
+    for (const [name, t] of [['light', light], ['dark', dark]]) assert.ok(ratio(t[fg], t[bg]) >= 4.5, `${name}: --${fg} on --${bg} is ${ratio(t[fg], t[bg]).toFixed(2)}:1`);
+  }
+});
+
+test('the bugs read in order before the drafts: a heading, k waiting\'s line and a list, after the last task group, nothing when none waits (gulnya/kirunak-bugs AC-7)', async () => {
+  const w = await fixture();
+  sessionsAt(w);
+  queuedAndParked(w);
+  draftsAt(w);
+  assert.ok(!(await page(w)).includes('<section class="bugs">'), 'no group when no bug waits');
+  bugsAt(w);
+  const html = await page(w);
+  const body = html.slice(html.indexOf('<body>'));
+  assert.deepEqual(h2s(body), ['Working on now', 'proposed', 'queued', 'parked', 'done this week', 'Bugs', 'Drafts', 'Lock, queue and running steps']);
+  const at = body.indexOf('<section class="bugs">');
+  assert.ok(at > body.lastIndexOf('</details>') && at < body.indexOf('<section class="drafts">'), 'after the last task group, before the drafts');
+  assert.match(body.slice(at), new RegExp([
+    '^<section class="bugs">',
+    '<h2>Bugs <span class="n">\\(2\\)</span></h2>',
+    '<p>2 bugs wait, 1 with a fix ready: /k-bugs</p>',
+    '<ul>',
+    '<li><b>hub/queue-stuck</b>: The queue keeps a finished job, fix ready, bug of weather/recent, <span class="meta">written <time datetime="2026-11-06">2026-11-06</time></span></li>',
+    '<li><b>weather/rain-icon</b>: The rain icon shows &lt;sun&gt;, no fix, <span class="meta">written <time datetime="2026-11-04">2026-11-04</time></span></li>',
+    '</ul>',
+    '</section>',
+  ].join('\n')));
+  const section = body.slice(at, body.indexOf('<section class="drafts">'));
+  assert.equal(section.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
+    'Bugs (2) 2 bugs wait, 1 with a fix ready: /k-bugs hub/queue-stuck: The queue keeps a finished job, fix ready, bug of weather/recent, written 2026-11-06 ' +
+    'weather/rain-icon: The rain icon shows &lt;sun&gt;, no fix, written 2026-11-04', 'read as words, in order, with no mark between them');
+  assert.ok(!/\saria-(?!hidden)|\srole=/.test(section), 'native semantics only');
+});
+
+test('the bugs\' text pairs are the page\'s, held at 4.5:1 in the light and the dark theme (gulnya/kirunak-bugs AC-7)', async () => {
+  const w = await fixture();
+  bugsAt(w);
+  const html = await page(w);
+  const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
+  assert.match(style, /\.bugs li \{ background: var\(--card\);/, 'a bug row on the card ground');
+  assert.doesNotMatch(style, /\.bugs[^{]*\{[^}]*\bcolor:/, 'no colour of its own: text, the line on the page\'s ground, muted for the date');
+  const light = tokens(/:root \{([^}]*)\}/.exec(html)[1]);
+  const dark = tokens(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)[1]);
+  assert.deepEqual(BUG_PAIRS, [['text', 'bg'], ['text', 'card'], ['muted', 'card']]);
+  for (const [fg, bg] of BUG_PAIRS) {
     assert.ok(TEXT_PAIRS.some(([f, b]) => f === fg && b === bg), `--${fg} on --${bg} is in the page's contrast test`);
     for (const [name, t] of [['light', light], ['dark', dark]]) assert.ok(ratio(t[fg], t[bg]) >= 4.5, `${name}: --${fg} on --${bg} is ${ratio(t[fg], t[bg]).toFixed(2)}:1`);
   }

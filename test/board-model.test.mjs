@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { snapshot, status } from '../lib/board.mjs';
-import { draftEntry, draftTail, facts, items, model, sessions } from '../lib/board-model.mjs';
+import { bugEntry, bugTail, draftEntry, draftTail, facts, items, model, sessions } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
-import { bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function board({ more = () => {} } = {}) {
   const w = await fixture();
@@ -66,4 +66,22 @@ test('a bug among the drafts names its task before the date, "bug of <task>"; a 
   assert.equal(draftTail({ bugOf: 'weather/recent', written: null }), 'bug of weather/recent, no date');
   assert.equal(draftTail({ bugOf: null, written: '2026-11-05' }), 'written 2026-11-05');
   assert.doesNotMatch(m.drafts.map(draftEntry).join('\n'), /spike/i, 'called a bug, never a spike');
+});
+
+test('the bugs that wait, before the drafts: k bugs\' order, a fix ready first, each line with its fix, its task and its date, and k waiting\'s line for them; none and no line when none waits (gulnya/kirunak-bugs AC-7)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  let m = model(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+  assert.deepEqual([m.bugs, m.bugsLine], [[], '']);
+  bugsAt(w);
+  m = model(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+  assert.deepEqual(Object.keys(m).slice(Object.keys(m).indexOf('bugs'), Object.keys(m).indexOf('bugs') + 3), ['bugs', 'bugsLine', 'drafts']);
+  assert.deepEqual(m.bugs.map((b) => [b.id, b.fixReady, b.fix, b.bugOf]), [['hub/queue-stuck', true, 'fix ready', 'weather/recent'], ['weather/rain-icon', false, 'no fix', null]]);
+  assert.equal(m.bugsLine, '2 bugs wait, 1 with a fix ready: /k-bugs');
+  assert.deepEqual(m.bugs.map(bugEntry), [
+    'hub/queue-stuck: The queue keeps a finished job, fix ready, bug of weather/recent, written 2026-11-06',
+    'weather/rain-icon: The rain icon shows <sun>, no fix, written 2026-11-04',
+  ]);
+  assert.equal(bugTail({ fix: 'reviewing', bugOf: null, written: null }), 'reviewing, no date');
+  assert.equal(m.drafts.length, 2, 'the drafts as they were');
 });
