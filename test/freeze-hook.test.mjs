@@ -363,6 +363,9 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['if true; then k approve x; fi', 'approve'],
     ['echo y | k approve x', 'approve'],
     ['k approve x 2>&1 | tail -1', 'approve'],
+    ['k bug review weather/stale-tiles', 'bug review'],
+    ['k bug review weather/stale-tiles --detach --json', 'bug review'],
+    ['node bin/k.mjs bug review weather/stale-tiles --via mod', 'bug review'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -371,6 +374,7 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     "echo 'run k approve x when ready'",
     'k approve x --dry-run',
     'k amend decline x A-1 --dry-run',
+    'k bug review weather/stale-tiles --dry-run',
     'k queue add x --dry-run',
     'k queue show',
     'k amend new weather/offline-forecast',

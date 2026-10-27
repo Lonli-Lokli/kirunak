@@ -293,6 +293,8 @@ function ownerVerbOf(args) {
   if (OWNER_VERBS.has(verb)) return verb;
   if (verb === 'amend' && sub === 'decline') return 'amend decline';
   if (verb === 'slapignore' && sub === 'approve') return 'slapignore approve';
+  // Review & merge merges a bug's fix into master (gulnya/kirunak-bugs AC-5); the other bug verbs are an agent's.
+  if (verb === 'bug' && sub === 'review') return 'bug review';
   return null;
 }
 

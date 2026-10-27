@@ -36,9 +36,10 @@ import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
 import * as drafts from '../lib/drafts.mjs';
 import * as bugs from '../lib/bugs.mjs';
+import * as bugReview from '../lib/bug-review.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -80,6 +81,9 @@ Bugs      k bug new <repo>/<slug> --title "..." [--bug-of <task>] [--fix-repo <r
             and its folder in a commit of their own, a fix branch kept and named in it
           k bug from <id> [--no-commit]: a draft, or a task whose intake is not approved, moved into kirunak/bugs/
             with its history, draft/<slug> renamed bug/<slug>, each repo's paths committed alone
+          k bug review <id> [--detach] [--dry-run] (the owner's): Review & merge, a fresh Opus session reviews the fix's
+            diff and kirunak reads its verdict; clean, bug/<slug> is merged into its fix repo's master (never pushed)
+            and the bug closes; a finding or a conflict merges nothing, written in kirunak/bugs/<slug>/review-<n>.md
           k bugs: every bug in every repo, one line each (id, title, date written, its fix, bug of <task>), those with a
             fix ready first, then the oldest first
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
@@ -149,6 +153,33 @@ async function approvalProblems(ws, id, amendmentId) {
     for (const x of checkTaskDir(p.dir, aspectIds, id).problems) out.push(`line ${x.line}: ${x.problem}`);
   }
   return out;
+}
+
+// `k bug review <id>`: Review & merge, here or (--detach) in a process of its own whose log it names.
+async function reviewed(ws, id, flags) {
+  const via = typeof flags.via === 'string' ? flags.via : 'shell';
+  if (flags['dry-run']) {
+    const r = bugReview.preview({ ws, id });
+    const then = !r.merges ? `would write a conflict in ${r.conflict.join(', ') || 'files git does not name'} and merge nothing`
+      : r.reuses ? `would take ${r.reuses}, clean at this head, and merge` : 'would run a review and merge when it is clean';
+    return { ...r, text: `${id}: ${r.branch} at ${r.head.slice(0, 12)} in ${r.fixRepo}; ${then}` };
+  }
+  if (flags.detach) {
+    const r = bugReview.detach({ ws, id, via });
+    return { ...r, text: `${id}: Review & merge runs as pid ${r.pid}; its log is ${r.log}, and k bugs shows its result` };
+  }
+  const r = await bugReview.review({ ws, id, via });
+  const at = `${r.branch} at ${r.head.slice(0, 12)}`;
+  const said = {
+    merged: () => `${id}: ${r.review.rel} clean${r.review.reused ? ' (taken again)' : ''}; ${at} merged into ${r.fixRepo}'s master as ` +
+      `${r.merged.slice(0, 12)}, not pushed; the bug closed${r.closed ? ` in ${r.closed}` : ''}`,
+    findings: () => `${id}: ${r.review.rel} found ${r.findings.length} thing${r.findings.length === 1 ? '' : 's'}${r.malformed ? ' (the review was malformed)' : ''}; ` +
+      `nothing merged, and the fix is not ready at ${r.head.slice(0, 12)}`,
+    conflict: () => `${id}: ${at} conflicts with master in ${r.conflict.join(', ') || 'files git does not name'}; nothing merged, written in ${r.review.rel}`,
+    'merge-refused': () => `${id}: ${r.review.rel} clean, but the merge was refused: ${r.why}`,
+  }[r.outcome]();
+  const problems = r.problems.map((p) => `  ${p}`);
+  return { ...r, code: r.outcome === 'merged' ? 0 : 1, text: [said, ...problems].join('\n') };
 }
 
 const VERBS = {
@@ -520,11 +551,12 @@ const VERBS = {
     throw usage(`unknown draft verb ${sub}`);
   },
 
-  // A bug, a fault in something that exists (gulnya/kirunak-bugs): not the owner's, so any session runs these. `new`
-  // and `check` commit nothing; the session that writes the bug commits it. `drop` and `from` commit each repo's own
-  // paths alone; `from --no-commit` only stages them.
+  // A bug, a fault in something that exists (gulnya/kirunak-bugs): `new`, `check`, `drop` and `from` are not the
+  // owner's, so any session runs them. `new` and `check` commit nothing; the session that writes the bug commits it.
+  // `drop` and `from` commit each repo's own paths alone; `from --no-commit` only stages them. `review`, Review &
+  // merge, is the owner's: kirunak-freeze refuses it from an agent's Bash tool.
   async bug({ ws, pos, flags }) {
-    const sub = need(pos[0], 'bug verb: new|check|drop|from');
+    const sub = need(pos[0], 'bug verb: new|check|drop|from|review');
     const id = need(pos[1], 'bug id <repo>/<slug>');
     const dryRun = !!flags['dry-run'];
     const one = (name, what) => {
@@ -564,6 +596,7 @@ const VERBS = {
         : r.commits.filter((c) => c.commit).map((c) => `committed in ${c.repo}: ${c.commit}`);
       return { ...r, text: [`${id}: moved from the ${r.kind} into kirunak/bugs/`, ...lines.map((l) => `  ${l}`), ...done].join('\n') };
     }
+    if (sub === 'review') return reviewed(ws, id, flags);
     throw usage(`unknown bug verb ${sub}`);
   },
 
