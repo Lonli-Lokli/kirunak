@@ -113,6 +113,9 @@ test('k accept refuses a task whose change in another repo changed after the hea
   const c = work(w.hub, 'tools/later.txt', 'later\n', `tools/later.txt (${w.id})`);
   sh(w.hub, 'git', ['checkout', '-q', 'master']);
   refused([`hub:tools/later.txt  ${c}  ${w.id}`]);
+  writeFileSync(join(w.p.dir, 'repos.md'), '- nowhere main\n');
+  assert.throws(() => accept({ ws: w.ws, id: w.id, dryRun: true }), /repos\.md names what kirunak cannot read, so it cannot be accepted:\n {2}line 1, "- nowhere main"/);
+  rmSync(join(w.p.dir, 'repos.md'));
   rmSync(given(w));
   ok();
 });

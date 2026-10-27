@@ -170,3 +170,21 @@ test('a repo whose default branch is only on its remote: the branch rule finds n
   await brief(w);
   assert.deepEqual(files(patchOf(w, 'hub')), ['tools/named.txt']);
 });
+
+test('a repos.md branch line whose start kirunak cannot tell refuses rather than adding nothing: the default branch itself, merged with no reflog, no default branch of its own (E-6)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sh(w.hub, 'git', ['checkout', '-qb', 'merged']);
+  work(w.hub, 'tools/merged.txt', 'merged\n', 'tools/merged.txt');
+  sh(w.hub, 'git', ['checkout', '-q', 'master']);
+  sh(w.hub, 'git', ['merge', '-q', '--no-ff', '-m', 'Merge merged', 'merged']);
+  sh(w.hub, 'git', ['reflog', 'expire', '--expire=now', 'refs/heads/merged']);
+  hand(w, 'hub master', 'hub merged');
+  await assert.rejects(brief(w), (e) => {
+    assert.ok(e.message.includes('line 4, "- hub master": master is the default branch itself: give a range instead, `<from>..master`'), e.message);
+    assert.ok(e.message.includes('line 5, "- hub merged": kirunak cannot tell where merged began: it is merged into master and has no reflog'), e.message);
+    return true;
+  });
+  sh(w.hub, 'git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  hand(w, 'hub merged');
+  await assert.rejects(brief(w), /line 4, "- hub merged": kirunak cannot tell where merged began, .* having no default branch of its own/);
+});
