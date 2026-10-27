@@ -87,10 +87,10 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   accepted, unless it stages only kirunak's records.
 - **What it skips**: a merge (the hook's `merge` argument), and a commit made while a rebase, cherry-pick or revert
   replays others (`rebase-merge`, `rebase-apply`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `sequencer` or `MERGE_MSG` in
-  the git folder; a revert leaves only `MERGE_MSG`, measured on git 2.54). Judgement: a replayed commit was measured
-  when it was made, and refusing a rebase over history older than the rule would stop ordinary work; R22 is about
-  the change a person or an agent writes now. Like the rest of kirunak this guards against mistakes, not a deliberate
-  bypass (`core.hooksPath=/dev/null` is one).
+  the git folder; a revert leaves only `MERGE_MSG`, measured on git 2.54). AC-8 (approval.md §3) still judges such a
+  commit's message. Judgement: a replayed commit was measured when it was made, and refusing a rebase over history
+  older than the rule would stop ordinary work; R22 is about the change a person or an agent writes now. Like the rest
+  of kirunak this guards against mistakes, not a deliberate bypass (`core.hooksPath=/dev/null` is one).
 - **It fails closed**: if the hook cannot run (kirunak moved, git failed, the record unreadable), the commit is refused
   with the error. Judgement: R22 has no override, so a gate that silently lets everything through when broken would
   be one.

@@ -110,15 +110,19 @@ under 100 ms).
 ### A step's `Task:` trailer, and no new work on an accepted task (gulnya/kirunak-accept-shared-repo)
 
 The prepare-commit-msg hook (`hooks/git-prepare-commit-msg.mjs`, the SLAP gate of `change-size.md` §3, which git runs
-even under `--no-verify`) does two things for tasks once the SLAP gate passes; the commit-msg hook
+even under `--no-verify`) does two things for tasks once the SLAP gate passes, or skips a replay; the commit-msg hook
 (`hooks/git-commit-msg.mjs`) checks the second again on the message the commit keeps, after the editor. What names a
 task and what kirunak's records are is `lib/records.mjs`, the same for the hooks and for `k accept` (§4).
 
 - **The trailer** (AC-3, AC-4): with `KIRUNAK_TASK` in the commit's environment, which `k run` sets on every step
   (`orchestrator.md` §3), the hook writes `Task: <id>` after the `SLAP:` line, through `git interpret-trailers
-  --if-exists replace`, so an amend keeps one. A commit with no task in its environment gets no trailer and is never
-  refused for it. A task's commit made outside a step `k run` started, such as one from an interactive session, is
-  not stamped (O-1); it is the task's own change only if its message names the task.
+  --if-exists replace`, so an amend keeps one; a merge gets it with no `SLAP:` line, since the SLAP gate skips a replay.
+  A commit git makes as a pick, by `git cherry-pick` or a rebase, keeps its message as it is, with no trailer added
+  (AC-3 as amendment A-2 words it): it carries the `Task:` of the step that made it, and stamping a rebase with the
+  current step's task would make every picked path that task's own change under D-1. A commit is git's pick when it is
+  judged so inside a replay (below); the user's commits there get the trailer. A commit with no task in its environment
+  gets no trailer and is never refused for it. A task's commit made outside a step `k run` started, such as one from an
+  interactive session, is not stamped (O-1); it is the task's own change only if its message names the task.
 - **Naming a task**: a message names a task by its id, or, in the task's own repo, by its slug as a whole word (a
   letter, digit, `-` or `_` on either side ends it, so `kit-wanted` does not name `kit`). A slug right after another
   repo's name and a slash names that repo's task (`katyafm/settings` never names gulnya's `settings`). The `Task:`
@@ -130,12 +134,12 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   worktree of that repo.
 - **No new work on an accepted task** (AC-8, E-1): a commit whose message names a task of this repo the owner has
   accepted (its folder in the main checkout holds `done.json`, whose `task` is its id, or the default branch has that
-  file committed: the accepted set below), the trailer the hook is about to write included, is
-  refused when it stages anything besides records. A message that only mentions the task names it too. The refusal:
-  "kirunak: this commit's message names <id>, which the owner has accepted: new work on it is a new task. Reword the
-  message so it does not name <id>, or start a new task (/k-intake); only kirunak's records (task folders, drafts,
-  approvals, the queue, and what the workspace names as records) may still be committed naming it." So the accept's
-  own commit and the handoff written after it pass.
+  file committed: the accepted set below), the trailer the hook is about to write included, is refused when it stages
+  anything besides records (inside a replay, beyond what git's replay alone stages: below). A message that only mentions
+  the task names it too. The refusal: "kirunak: this commit's message names <id>, which the owner has accepted: new work
+  on it is a new task. Reword the message so it does not name <id>, or start a new task (/k-intake); only kirunak's
+  records (task folders, drafts, approvals, the queue, and what the workspace names as records) may still be committed
+  naming it." So the accept's own commit and the handoff written after it pass.
 - **The message the commit keeps** (review.md of the task found a message typed in the editor let through):
   prepare-commit-msg runs before the editor and checks a message given with `-m` or `-F`; commit-msg runs after it and
   checks the final message, whether typed, given, edited with `-e` or kept by an amend. Both read the text as git will
@@ -160,17 +164,42 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   main checkout on the default branch costs no git call; without those files, one `for-each-ref` or `symbolic-ref`
   says. Off the default branch, one `ls-tree` and one `cat-file --batch` read the committed files. The staged paths
   are still those of the committing worktree.
+- **Inside a replay** (review-3.md of the task found `revert -n`, `cherry-pick -n` and a conflict stop let through;
+  `lib/replay.mjs`, the task's steps/S-16/design.md, measured on git 2.54): a commit made while git merges, picks,
+  rebases or reverts is judged like any other, by the message it keeps and the paths it stages, with one difference:
+  what git's replay alone would stage is not its own change. For a merge (`MERGE_HEAD`) the own change is the staged
+  tree against `git merge-tree --write-tree HEAD MERGE_HEAD`, so a merge whose message names an accepted task, given
+  with `-m` or written by git from a branch's name, passes when it adds nothing beyond what the two branches already
+  hold, and is refused when it carries code of its own, an evil merge or a `--no-commit` merge with new code (E-4).
+  For a pick git is making (`CHERRY_PICK_HEAD`, or a rebase stopped on a conflict: `rebase-merge/stopped-sha` without
+  `rebase-merge/amend`) whose message is git's (`MERGE_MSG`, else `rebase-merge/message`, both read as git's `strip`
+  cleanup reads them, so the editor's status block and a conflict's `# Conflicts:` lines are git's words too), the
+  own change is the staged tree against `git merge-tree --write-tree --merge-base <sha>^ HEAD <sha>`, so git's picks
+  and rebases of an accepted task's commits, with git's message and nothing added, pass and keep their messages (E-3).
+  Everything else is the user's commit, judged whole, and refused when it names an accepted task beside code: a `-n`
+  pick or revert then committed, a conflict stop committed with `-m`, a `reword`, `squash` or `fixup` of its commits,
+  an amend at a rebase's `edit` stop (E-3), a `git merge --squash` of its branch, and `git revert` of its commit,
+  since git's `Revert "<subject>"` names the task and undoing its change is new work (E-5; the way out:
+  `git revert -n <c>`, then `git commit -m` with the new task's words). prepare-commit-msg leaves the base file with a
+  second line, `replay`, and commit-msg redoes the test on the message the commit keeps, so an editor that turns git's
+  words into the user's at a stop is judged as the user's commit. The SLAP gate still skips every replay
+  (change-size.md). An ordinary commit pays three file reads for this and no git call.
 - **What it does not check**: under `--no-verify` git skips commit-msg, so only a message given with `-m` or `-F` is
-  checked: a mistake guard, as the pre-commit checks are. An amend with `--reset-author`, or one within two seconds
-  of the commit it amends, given `-m`, is taken as a new commit. A merge and a replayed commit (rebase, cherry-pick,
-  revert) pass, as the SLAP gate lets them: prepare-commit-msg leaves no base for them, and commit-msg checks nothing
-  without one. A workspace that cannot be loaded refuses nothing here, since its queue file cannot be told from
-  code; the trailer is still written. The hooks load the workspace, and read git's `commit.cleanup` and
-  `core.commentChar`, only when the message's raw text names a done task's slug or id. An accept committed while the
-  main checkout was on a side branch is known on that branch and from the main checkout's tree, and lost once the
-  main checkout moves to another branch without merging it, until the merge. A `done.json` left uncommitted in the
-  main checkout counts as an accept until it goes. A sparse checkout of the main checkout that leaves out
-  `kirunak/tasks` hides its accepts from the first read. `--cleanup=<mode>` and `--verbose` on the command line are
+  checked: a mistake guard, as the pre-commit checks are. An amend with `--reset-author`, or one within two seconds of
+  the commit it amends, given `-m`, is taken as a new commit. A merge or pick stopped on a conflict and committed with
+  git's words passes, since the resolution cannot be told from new work (merge-tree exits 1), as does an octopus merge;
+  `rebase --apply` runs no hook; a git older than 2.38 has no `merge-tree --write-tree` and passes every replay as
+  before. After the editor of `cherry-pick -e`, `revert -e` (a revert's default at a terminal) or a rebase's `squash`,
+  git runs no commit-msg, so words typed there are not checked: prepare-commit-msg judged the message git wrote (code
+  staged while the editor of `cherry-pick -e` is open stays out of that commit, whose tree git wrote before). A merge by
+  another strategy than git's default, such as `-s ours`, is judged against the default join, so one naming an accepted
+  task is refused when the side it drops holds code. A workspace that cannot be loaded refuses nothing here, since its
+  queue file cannot be told from code; the trailer is still written. The hooks load the workspace, and read git's
+  `commit.cleanup` and `core.commentChar`, only when the message's raw text names a done task's slug or id. An accept
+  committed while the main checkout was on a side branch is known on that branch and from the main checkout's tree, and
+  lost once the main checkout moves to another branch without merging it, until the merge. A `done.json` left
+  uncommitted in the main checkout counts as an accept until it goes. A sparse checkout of the main checkout that leaves
+  out `kirunak/tasks` hides its accepts from the first read. `--cleanup=<mode>` and `--verbose` on the command line are
   not seen (config is), nor a scissors line typed by hand where git keeps what follows it; `core.commentChar=auto`
   (deprecated, gone in Git 3.0) is read as `#`.
 - Only the task's own repo is guarded: its commits in another repo are out of scope (O-2).
