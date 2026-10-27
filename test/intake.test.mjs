@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { approve } from '../lib/approval.mjs';
+import { approve, localDate } from '../lib/approval.mjs';
+import { list as listBugs, reviewLockPath } from '../lib/bugs.mjs';
 import { list as listDrafts } from '../lib/drafts.mjs';
 import { answer, aspects, question, start } from '../lib/intake.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
-import { FIXTURES, gitCommitAll, k, makeWorkspace, sh } from './helpers.mjs';
+import { FIXTURES, KIRUNAK, gitCommitAll, k, makeWorkspace, sh } from './helpers.mjs';
 
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
 
@@ -346,6 +348,164 @@ test('start --from a draft refuses another id\'s draft naming both, and a draft 
   await start({ ws, id: ID, from: DRAFT_REL, now: NOV2 });
   await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }),
     /the draft weather\/offline-forecast is gone: .*\(its intake started already, and it is kirunak\/tasks\/offline-forecast\/draft\.md\)/);
+});
+
+test('start --from a draft naming bug-of is refused, naming k bug from, the draft not moved and nothing written (gulnya/kirunak-bugs AC-1)', async () => {
+  const { ws, home, weather } = await makeWorkspace({ finished: false });
+  const text = DRAFT.replace('written: 2026-10-22\n', 'written: 2026-10-22\nbug-of: hub/older-task\n');
+  writeDraft(weather, text);
+  gitCommitAll(weather, 'kirunak: a bug left among the drafts');
+  const why = `--from ${DRAFT_REL} is a bug, not a draft: it names bug-of. \`k bug from ${ID}\` moves it into kirunak/bugs/, ` +
+    `then k intake start ${ID} --from kirunak/bugs/offline-forecast.md`;
+  await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }), (e) => e.code === 1 && e.message === why);
+  const cli = k(home, ['intake', 'start', ID, '--from', DRAFT_REL]);
+  assert.equal(cli.status, 1);
+  assert.match(cli.stderr, /is a bug, not a draft: it names bug-of\. `k bug from weather\/offline-forecast` moves it/);
+  assert.equal(readFileSync(join(weather, DRAFT_REL), 'utf8'), text);
+  assert.equal(existsSync(dirOf(weather)), false);
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']), '');
+});
+
+// gulnya/kirunak-bugs AC-8, Start fix: an intake from a bug, kirunak/bugs/<slug>.md, as k bug new and the agent that
+// groomed it leave it: two questions with a proposed answer, one open, and the last proposed again.
+const BUG = `---
+id: weather/offline-forecast
+title: The kept forecast is stale after a restart
+written: 2026-10-22
+---
+
+## Who raised it
+> the forecast is a day old after a restart
+owner, 2026-10-22, session 5f0c2a
+
+## Why
+After a restart the app shows yesterday's forecast as today's.
+
+## What was found
+- the cache key leaves out the date [file src/Cache.kt]
+
+## Fix written
+- the cache key holds the date [commit 1a2b3c4]
+
+## Questions
+1. The goal: "after a restart the app shows today's forecast, or none". Keep it?
+   Proposed: yes, as written.
+2. The criteria:
+   AC-1 a forecast kept from yesterday is never shown as today's after a restart.
+   Proposed: this one.
+3. Should the screen say when the forecast was fetched?
+4. The aspects: platforms and large text n/a, no screen changes; offline in (AC-1).
+   Proposed: as written.
+`;
+const BUG_REL = 'kirunak/bugs/offline-forecast.md';
+const BUG_LOG = '# Intake: weather/offline-forecast\n\n### Q-1 (2026-10-21) goal\nWhy is the forecast stale?\n';
+
+function writeBug(repo, text = BUG, rel = BUG_REL) {
+  mkdirSync(join(repo, 'kirunak/bugs'), { recursive: true });
+  writeFileSync(join(repo, rel), text);
+}
+
+// notes.md of the bug `id` at `rel`, a bug of weather/offline-forecast when `lines` (its lines in notes.md) are given;
+// `records` the files of its folder.
+const bugNotesOf = (id, { rel = BUG_REL, records = null, lines = null, read = '2026-11-02' } = {}) => {
+  const slug = rel.split('/').pop().replace(/\.md$/, '');
+  return [
+    `# Notes: ${id}`,
+    '',
+    `Background from the bug ${rel}, written 2026-10-22, now kirunak/tasks/${slug}/bug.md, read ${read}. ` +
+      'Background only: nothing in a bug is a ruling, and every line is asked again in the intake: first its proposed ' +
+      'answers, all in one question, then each open question alone.',
+    '',
+    ...(records ? [`Its records, from kirunak/bugs/${slug}/, are now in kirunak/tasks/${slug}/bug/: ${records}.`, ''] : []),
+    ...(lines ? [
+      `The bug is a bug of ${ID}, a task accepted already.`,
+      '',
+      `## The lines of ${ID}, for the intake's first question (background only)`,
+      'As they stand in kirunak/tasks/offline-forecast/task.md, in weather. The intake proposes them in its first ' +
+        "question, with the bug's proposed answers, for one yes or no; on a no, it asks each one alone.",
+      ...lines,
+      '',
+    ] : []),
+    '## bug.md',
+    'Headings:',
+    '- Who raised it',
+    '- Why',
+    '- What was found',
+    '- Fix written',
+    '- Questions',
+    `Fix written, on bug/${slug} in ${id.split('/')[0]}:`,
+    '- the cache key holds the date [commit 1a2b3c4]',
+    '',
+    "## Proposed answers, for the intake's first question, every one in its own text",
+    '1. The goal: "after a restart the app shows today\'s forecast, or none". Keep it?',
+    '   Proposed: yes, as written.',
+    '2. The criteria:',
+    '   AC-1 a forecast kept from yesterday is never shown as today\'s after a restart.',
+    '   Proposed: this one.',
+    '4. The aspects: platforms and large text n/a, no screen changes; offline in (AC-1).',
+    '   Proposed: as written.',
+    '',
+    '## Open questions, each asked alone after it',
+    '3. Should the screen say when the forecast was fetched?',
+    '',
+  ].join('\n');
+};
+
+test('start --from a bug moves it by git mv into the task folder as bug.md and its records as bug/, staged; notes.md lists its proposed answers and its open questions; k bugs lists it no more and git keeps its history (gulnya/kirunak-bugs AC-8)', async () => {
+  const { ws, home, weather } = await makeWorkspace({ finished: false });
+  writeBug(weather);
+  mkdirSync(join(weather, 'kirunak/bugs/offline-forecast'));
+  writeFileSync(join(weather, 'kirunak/bugs/offline-forecast/review-1.md'), 'verdict: findings\nhead: 1a2b3c4d\n\n1. no test\n');
+  writeFileSync(join(weather, 'kirunak/bugs/offline-forecast/intake.md'), BUG_LOG);
+  gitCommitAll(weather, 'kirunak: a bug, weather/offline-forecast');
+  const before = sh(weather, 'git', ['rev-parse', 'HEAD']).trim();
+  assert.deepEqual(listBugs(ws).map((b) => b.id), [ID]);
+
+  const r = await start({ ws, id: ID, from: BUG_REL, now: NOV2 });
+  assert.deepEqual(r, { dir: join(ws.repos[0].root, 'kirunak/tasks/offline-forecast'), aspects: 3, bug: 'kirunak/tasks/offline-forecast/bug.md',
+    records: 'kirunak/tasks/offline-forecast/bug', staged: true });
+  assert.equal(readFileSync(join(dirOf(weather), 'bug.md'), 'utf8'), BUG);
+  assert.equal(readFileSync(join(dirOf(weather), 'bug/intake.md'), 'utf8'), BUG_LOG);
+  assert.equal(existsSync(join(weather, BUG_REL)), false);
+  assert.equal(existsSync(join(weather, 'kirunak/bugs/offline-forecast')), false);
+  // The title is the bug's; the front matter names the bug as where the task came from: background, not a source.
+  assert.equal(readFileSync(join(dirOf(weather), 'task.md'), 'utf8'), SKELETON
+    .replace(`title: ${TITLE}`, 'title: The kept forecast is stale after a restart')
+    .replace('created: 2026-11-02\n', 'created: 2026-11-02\nfrom: kirunak/tasks/offline-forecast/bug.md\n'));
+  assert.equal(readFileSync(join(dirOf(weather), 'notes.md'), 'utf8'), bugNotesOf(ID, { records: 'intake.md, review-1.md' }));
+
+  // Staged, not committed: the moves are renames in the index, the intake's own files are untracked.
+  assert.equal(sh(weather, 'git', ['rev-parse', 'HEAD']).trim(), before);
+  assert.deepEqual(sh(weather, 'git', ['status', '--porcelain']).trim().split('\n').sort(), [
+    '?? kirunak/tasks/offline-forecast/intake.md',
+    '?? kirunak/tasks/offline-forecast/notes.md',
+    '?? kirunak/tasks/offline-forecast/task.md',
+    'R  kirunak/bugs/offline-forecast.md -> kirunak/tasks/offline-forecast/bug.md',
+    'R  kirunak/bugs/offline-forecast/intake.md -> kirunak/tasks/offline-forecast/bug/intake.md',
+    'R  kirunak/bugs/offline-forecast/review-1.md -> kirunak/tasks/offline-forecast/bug/review-1.md',
+  ]);
+  assert.deepEqual(listBugs(ws), []);
+  const out = k(home, ['bugs']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.doesNotMatch(out.stdout, /offline-forecast/);
+
+  gitCommitAll(weather, 'kirunak: weather/offline-forecast intake');
+  const history = sh(weather, 'git', ['log', '--follow', '--format=%s', '--', 'kirunak/tasks/offline-forecast/bug.md']);
+  assert.deepEqual(history.trim().split('\n'), ['kirunak: weather/offline-forecast intake', 'kirunak: a bug, weather/offline-forecast']);
+});
+
+test('k intake start --from a bug never committed, and with no folder, renames it and says where it is now (gulnya/kirunak-bugs AC-8)', async () => {
+  const { home, weather } = await makeWorkspace({ finished: false });
+  writeBug(weather);
+  const r = k(home, ['intake', 'start', ID, '--from', BUG_REL]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /started weather\/offline-forecast: .*kirunak\/tasks\/offline-forecast \(3 aspects open\); the bug is now kirunak\/tasks\/offline-forecast\/bug\.md: commit it with the intake/);
+  assert.equal(readFileSync(join(dirOf(weather), 'bug.md'), 'utf8'), BUG);
+  assert.equal(existsSync(join(dirOf(weather), 'bug')), false);
+  // The CLI reads it today.
+  const read = localDate();
+  assert.equal(readFileSync(join(dirOf(weather), 'notes.md'), 'utf8'), bugNotesOf(ID, { read }));
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '?? kirunak/');
 });
 
 // kirunak-spikes: an intake from a bug, a draft whose front matter names the accepted task it was found in.
