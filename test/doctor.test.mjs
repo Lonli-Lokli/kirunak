@@ -126,6 +126,15 @@ test('the escalation hook not wired, or wired as before the agent records (the r
   assert.match(w.fails().find((l) => l.startsWith('escalation hook')), /not wired on PostToolUseFailure, PostToolUse, SubagentStop, UserPromptSubmit, UserPromptExpansion, SessionStart, PostModelSwitch, Stop \(/);
 });
 
+test('the escalation hook with a timeout other than kirunak\'s, or none, FAILs naming the event and both timeouts (gulnya/kirunak-install-hook-timeouts)', async () => {
+  const w = await installed();
+  w.settings((json) => {
+    json.hooks.Stop[0].hooks[0].timeout = 30;
+    delete json.hooks.PostToolUse[0].hooks[0].timeout;
+  });
+  assert.deepEqual(w.fails(), ['escalation hook: not wired on PostToolUse (timeout none, kirunak\'s 10 s), Stop (timeout 30 s, kirunak\'s 10 s) (run k install)']);
+});
+
 test('config.json missing, disagreeing with the workspace, or older than its module FAILs', async () => {
   const w = await installed();
   const path = join(w.home, 'escalate', 'config.json');
