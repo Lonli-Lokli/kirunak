@@ -3,13 +3,13 @@ import type { Item } from './lists'
 import type { Screen } from './owner'
 
 // /k-drafts (A-11's R27, R28; kirunak-drafts AC-2, AC-7, E-3): the drafts, prepared intakes for future tasks, as
-// `k drafts --json` gives them, every repo's, by the date written. The list names each by its id, title and the date
-// written; the one picked shows whole, from its file, with Start intake and Drop. Drop takes the reason typed in the
-// free-text row, then "Drop <id>" runs `k draft drop <id> --why` by id, so a draft gone since ends in k's refusal,
-// never on another. Start intake runs no verb: it ends the dialog, and the command hands the draft to the model in a
-// prompt of its own (intakePrompt). A bug, a draft that names the accepted task it was found in, shows here among
-// the drafts, its list line and its head saying bug of <task>; it has no command of its own (kirunak-spikes AC-6,
-// O-2).
+// `k drafts --json` gives them, every repo's, in the order they wait (k drafts move). The list names each by its id,
+// title and the date written; the one picked shows whole, from its file, with Start intake and Drop. Drop takes the
+// reason typed in the free-text row, then "Drop <id>" runs `k draft drop <id> --why` by id, so a draft gone since
+// ends in k's refusal, never on another. Start intake runs no verb: it ends the dialog, and the command hands the
+// draft to the model in a prompt of its own (intakePrompt). A bug, a draft that names the accepted task it was found
+// in, shows here among the drafts, its list line and its head saying bug of <task>; it has no command of its own
+// (kirunak-spikes AC-6, O-2).
 
 // A draft as `k drafts --json` gives it: `written` null when its date is missing or no date, `bugOf` the task a bug
 // was found in and null for a plain draft, `path` absolute.
@@ -27,7 +27,7 @@ export const draftItem = (d: DraftRow): Item => ({ lead: '', name: d.id, text: `
 // `/k-drafts` when there is none, or when the dialog ran nothing: the drafts as a numbered list.
 export function draftsText(rows: readonly DraftRow[]): string {
   if (!rows.length) return 'No drafts: no repo holds one.'
-  const head = `${rows.length} ${rows.length === 1 ? 'draft' : 'drafts'}, by the date written:`
+  const head = `${rows.length} ${rows.length === 1 ? 'draft' : 'drafts'}, in the order they wait:`
   return [head, '', ...numbered(rows.map(draftItem)), '', '/k-drafts shows one whole, to start its intake or drop it.'].join('\n')
 }
 
@@ -78,7 +78,7 @@ export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<strin
     ],
     question: 'Start the intake from it, or drop it?',
   })
-  return { kind: 'list', header: 'Drafts', head: 'Drafts, by the date written:', question: 'Which draft?', rows: rows.map(d => ({ item: draftItem(d), label: d.id, open: () => item(d) })) }
+  return { kind: 'list', header: 'Drafts', head: 'Drafts, in the order they wait:', question: 'Which draft?', rows: rows.map(d => ({ item: draftItem(d), label: d.id, open: () => item(d) })) }
 }
 
 // What Start intake submits, a turn of its own, which the model reads as the plugin's message: the owner's tap, the

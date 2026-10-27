@@ -76,7 +76,10 @@ Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/d
           k draft new <repo>/<slug> --title "..." --bug-of <task>: a bug of that accepted task, in any repo, with its
             section Fix written for a fix that exists already (deleted when none does)
           k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
-          k drafts: every draft in every repo, one line each (id, title, date written, bug of <task> on a bug's)
+          k drafts: every draft in every repo, one line each (id, title, date written, bug of <task> on a bug's), in
+            the drafts' order: those it names first, the others by the date written
+          k drafts move <id>... [--first|--last|--before <id>|--after <id>]: those drafts, in that order, to that
+            place (no flag: last), in a commit of the order alone
           k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
 Every verb takes --json and --dry-run.`;
 
@@ -510,8 +513,19 @@ const VERBS = {
     throw usage(`unknown draft verb ${sub}`);
   },
 
-  // Every draft in every repo, by the date written: for /k-drafts, as an array with --json.
-  async drafts({ ws }) {
+  // Every draft in every repo, in the drafts' order: for /k-drafts, as an array with --json. `move` changes the order;
+  // a draft is not the owner's, so any session runs it (owner, 2026-10-27).
+  async drafts({ ws, pos, flags }) {
+    if (pos[0] === 'move') {
+      const r = drafts.move({ ws, ids: pos.slice(1), place: place(flags), dryRun: !!flags['dry-run'] });
+      if (flags['dry-run']) {
+        const then = r.order.map((id, i) => `${String(i + 1).padStart(2)}  ${id}`);
+        return { ...r, text: [`would commit "${r.message.split('\n')[0]}", the order then:`, ...then].join('\n') };
+      }
+      const done = r.commit ? `moved in ${r.commit}` : 'already in that order: nothing to commit';
+      return { ...r, text: `${done}\n${drafts.format(drafts.list(ws))}` };
+    }
+    if (pos.length) throw usage(`unknown drafts verb ${pos[0]}: k drafts, or k drafts move <id>...`);
     const rows = drafts.list(ws);
     return { json: rows, text: drafts.format(rows) };
   },
