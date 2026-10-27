@@ -159,3 +159,14 @@ test('a repos.md line kirunak cannot read stops the review from starting, and ki
   assert.match(r.stderr, /line 4, "- nowhere main"/);
   assert.ok(!existsSync(join(w.p.dir, 'steps', 'S-2', 'in')), 'nothing written');
 });
+
+test('a repo whose default branch is only on its remote: the branch rule finds nothing there, and the commits naming the task are still found', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sh(w.hub, 'git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  sh(w.hub, 'git', ['checkout', '-qb', 'offline-forecast']);
+  work(w.hub, 'tools/quiet.txt', 'quiet\n', 'tools/quiet.txt: names nothing');
+  work(w.hub, 'tools/named.txt', 'named\n', `tools/named.txt (${w.id})`);
+  sh(w.hub, 'git', ['checkout', '-q', 'master']);
+  await brief(w);
+  assert.deepEqual(files(patchOf(w, 'hub')), ['tools/named.txt']);
+});
