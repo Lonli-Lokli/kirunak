@@ -121,6 +121,46 @@ test('AC-1: a worktree an open task names stays, unless that task is the one clo
   assert.deepEqual(paths((await worktrees({ ws, processes: none })).removed), [named], 'an accepted task is not open');
 });
 
+// gulnya/worktrees-read-oom: a second open task, its files written under its folder.
+function openTask(weather, slug, files) {
+  const dir = join(weather, 'kirunak/tasks', slug);
+  mkdirSync(join(dir, 'evidence'), { recursive: true });
+  writeFileSync(join(dir, 'task.md'), `# ${slug}\n`);
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  return dir;
+}
+
+test('read-oom AC-1, AC-2: with open tasks holding more text than the heap, k worktrees --closing finishes, and a worktree a text file names still stays', async () => {
+  const { root, weather, home } = await makeWorkspace();
+  const free = add(weather, join(root, 'free'), 'free');
+  const named = add(weather, join(root, 'named'), 'named');
+  const big = 'a line of evidence that names no worktree\n'.repeat(75_000); // 3.2 MB
+  const files = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`evidence/log-${i}.txt`, big]));
+  openTask(weather, 'heavy', { ...files, 'evidence/notes.md': `work in ${named}\n` });
+  const r = k(home, ['worktrees', '--closing', ID], { NODE_OPTIONS: '--max-old-space-size=48' });
+  assert.equal(r.status, 0, r.stderr.split('\n').find((l) => /heap|FATAL/.test(l)) ?? r.stderr);
+  assert.match(r.stdout, new RegExp(`^would remove ${free} \\(free merged into master\\): `, 'm'));
+  assert.match(r.stdout, new RegExp(`^would keep ${named}: the open task weather/heavy names it \\(evidence/notes\\.md\\)$`, 'm'));
+});
+
+test('read-oom AC-3, E-1: a binary file naming a worktree names nothing, and a file that cannot be read is skipped, never a stop', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const shot = add(weather, join(root, 'shot'), 'shot');
+  const dir = openTask(weather, 'shots', { 'evidence/shot.png': Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n\0\0'), Buffer.from(`made in ${shot}\n`)]) });
+  let look = await worktrees({ ws, processes: none });
+  assert.deepEqual(paths(look.removed), [shot], 'a NUL byte in the first 8,000 bytes: binary');
+  writeFileSync(join(dir, 'evidence', 'locked.md'), `work in ${shot}\n`);
+  chmodSync(join(dir, 'evidence', 'locked.md'), 0o000);
+  try {
+    look = await worktrees({ ws, processes: none });
+    assert.deepEqual(look.problems, []);
+    assert.deepEqual(paths(look.removed), [shot]);
+  } finally {
+    chmodSync(join(dir, 'evidence', 'locked.md'), 0o644);
+  }
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [shot]: `the open task weather/shots names it (evidence/locked.md)` });
+});
+
 test('AC-1: a worktree a process works in stays (lsof), and so does every one when lsof cannot tell', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const busy = add(weather, join(root, 'busy'), 'busy');
