@@ -1,6 +1,6 @@
 # kirunak: a task system for Claude Code workspaces. Requirements
 
-kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R31). A change from here on is an
+kirunak (кірунак) means direction. Status: **approved by the owner** (D1-D14, R1-R32). A change from here on is an
 amendment the owner approves (R7 applies to this file too). "The owner" is the person whose workspace kirunak serves:
 the one who approves tasks and says when one is done. A **workspace** is the set of repos one owner works on with
 Claude Code on one machine.
@@ -103,18 +103,30 @@ validation, archives) then go unused, and what the owner needs is not in it:
   shows whole, with Start intake (the session starts the intake from it), Drop and Back. The waiting summary
   (`k waiting`) says in one line how many drafts wait and names `/k-drafts`. The board, in brief and as its page
   (D10, D13), shows a group Drafts after the tasks, one line per draft. The task list (`k list`) lists tasks only.
-- R29 A **bug** found in a task the owner has accepted is a draft (R24) that names that task, `bug-of: <task id>` in
-  its front matter: no new kind of file, and it is called a bug wherever it shows. The command
-  `k draft new <repo>/<slug> --title "..." --bug-of <task>` writes it in the repo its fix belongs to, which may be
-  another than the task's. A task that does not exist, or is not accepted yet, is refused: a bug found while a task
-  is open goes into that task, through its review or an amendment (R7). Writing a bug leaves the task as it is: still
-  accepted, its `task.md` frozen, nothing written in its folder. A bug holds what every draft holds (R26) and one
-  section more, Fix written, used only when a fix exists already (its commits or a patch file). `k draft check` also
-  refuses a bug whose task is gone or not accepted, and a Fix written commit found in neither the bug's repo nor the
-  task's. A bug has no state field: it is parked while it waits, taken once an intake starts from it, and closed by
-  a drop (R27). Bugs show among the drafts (R28), each line saying `bug of <task>`, with no command of their own. An
-  intake started from a bug first proposes together the task's edge cases, out of scope and aspects that still
-  apply, for one yes or no (a no asks each alone), then asks one at a time only what is new (the bug, its criteria).
+- R29 A **bug** is a fault in something that already exists, with a way to see it, and it has a list of its own
+  (gulnya/kirunak-bugs): `kirunak/bugs/<slug>.md` in the repo its id `<repo>/<slug>` names, never among the drafts,
+  which keep new work and the owner's choices. Any session or agent writes one without approval, as a draft (R25),
+  with `k bug new`, and says in one line of its reply that it did, and its id. A bug holds what a draft holds (R26),
+  each question with a proposed answer, and Fix written when a fix exists; it may name the accepted task it came
+  from, `bug-of: <task id>`, which is only read (a fault found while a task is open goes into that task, through its
+  review or an amendment, R7), and the repo its fix is made in, `fix-repo:`, when that is not its own (kirunak's own
+  code, under another repo's id). `k bug check` holds that shape, the task accepted and every Fix written commit
+  found. Its fix is the branch `bug/<slug>` in its fix repo, tried with a test that fails without it; a heavy test
+  runs only through the resource guard (R10). A fix is **ready** when that branch holds commits master does not and
+  no review refused its head, worked out each time and never stored. `k draft new --bug-of` and a draft naming
+  `bug-of` or Fix written are refused, naming the bug's verb; `k bug from <id>` moves a draft, or a task whose intake
+  is not approved, into the bugs, its history kept and its `draft/<slug>` branch renamed `bug/<slug>`.
+  `/k-bugs`, typed at the terminal or through Remote Control, lists every bug in every repo, those with a fix ready
+  first, then the oldest; one picked shows whole, with Review & merge (only when its fix is ready), Start fix and
+  Drop. **Review & merge** is the owner's verb (D7): one fresh session reviews the fix's diff and writes its findings
+  beside the bug; with none kirunak merges the branch into the fix repo's master, never pushed, and closes the bug in
+  its own repo with no second tap; with a finding, or a branch that no longer merges, it merges nothing and the bug
+  waits, its fix not ready at that head. A second Review & merge of a bug while one runs is refused. **Start fix**
+  starts the intake from the bug: one question asks whether all its proposed answers stand (and, for a bug of a
+  task, that task's edge cases, out of scope and aspects that still apply), each open question is asked alone, then
+  the owner approves. **Drop** removes the bug as a draft's drop does (R27), its fix branch kept and named. `k
+  waiting`, the board and every session the owner starts name the bugs before the drafts, as "N bugs wait, M with a
+  fix ready: /k-bugs", and say nothing when there are none; a step's session is told nothing.
 
 ### The task is frozen
 - R5 On approval, the task's file is frozen: its goal, numbered acceptance criteria (AC-1, AC-2, ...), numbered edge

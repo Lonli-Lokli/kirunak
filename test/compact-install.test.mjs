@@ -21,13 +21,13 @@ test('R8.1: the compact hook on PreCompact, SessionEnd and four SessionStart par
   const evs = compactEvents();
   for (const e of evs) assert.deepEqual(evs.filter((x) => x.own.test(command(e.part))).map((x) => x.part), e.part ? [e.part] : [null, null], 'one pattern per part');
   const actions = s.go();
-  assert.equal(actions.filter((a) => /already has the kirunak (PreCompact|SessionEnd|SessionStart) hook/.test(a)).length, 8, 'the six, the escalation hook\'s and the session hook\'s');
+  assert.equal(actions.filter((a) => /already has the kirunak (PreCompact|SessionEnd|SessionStart) hook/.test(a)).length, 9, 'the six, the escalation hook\'s, the session hook\'s and the bugs\' notice\'s');
   const user = json(s.paths.settingsPath);
   user.hooks.SessionStart.find((b) => b.hooks[0].command.endsWith('--part plan')).hooks[0].command = 'node /old/kirunak/hooks/kirunak-compact.mjs --part plan';
   writeFileSync(s.paths.settingsPath, JSON.stringify(user, null, 2) + '\n');
   const again = install({ ...s.paths, ws: s.ws });
   assert.ok(again.actions.includes(`updated the kirunak SessionStart hook in ${s.paths.settingsPath} to ${command('plan')} (matcher compact|clear)`));
-  assert.equal(json(s.paths.settingsPath).hooks.SessionStart.length, 6, 'pointed here, never added twice');
+  assert.equal(json(s.paths.settingsPath).hooks.SessionStart.length, 7, 'pointed here, never added twice');
 });
 
 test('a: the window written into each root\'s local file, its keys and indent kept, the not-ignored root given the exclude line once; b: already; the user\'s own window named, kept', () => {

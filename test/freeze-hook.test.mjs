@@ -179,6 +179,26 @@ test('Bash: k draft new, check and drop, k drafts, and writes to kirunak/drafts/
   }
 });
 
+// gulnya/kirunak-bugs: a bug is not the owner's either, so its verbs and its files are an agent's to run and write.
+test('Bash: k bug new, check, drop and from, k bugs, and writes to kirunak/bugs/ are allowed', () => {
+  const r = makeRepo();
+  const bug = join(r.repo, 'kirunak', 'bugs', 'stale-tiles.md');
+  for (const command of ['k bug new weather/stale-tiles --title "Stale tiles" --bug-of weather/offline-forecast',
+    'k bug new weather/stale-tiles --title "Stale tiles" --fix-repo kirunak', 'k bug check weather/stale-tiles',
+    'k bug drop weather/stale-tiles --why "fixed by offline-forecast"', `k bug from weather/${DRAFT}`, `k bug from weather/${DRAFT} --no-commit`,
+    'k bugs', 'k bugs --json', 'node bin/k.mjs bug from weather/wind-alerts --dry-run',
+    'git add kirunak/bugs/stale-tiles.md && git commit -m "a bug"', 'git rm -r kirunak/bugs/stale-tiles', 'git branch -m draft/stale-tiles bug/stale-tiles',
+    'echo "   Proposed: hourly" >> kirunak/bugs/stale-tiles.md']) {
+    const res = run(bash(command, r.repo), r.home);
+    assert.equal(res.status, 0, command);
+    assert.equal(res.stdout, '', command);
+  }
+  for (const input of [write(bug, '---\nid: weather/stale-tiles\n---\n'), edit(bug, '## Why\n', '## Why\nThe tiles stay.\n'),
+    write(join(r.repo, 'kirunak', 'bugs', 'stale-tiles', 'review-1.md'), 'verdict: clean\n')]) {
+    assert.equal(run(input, r.home).stdout, '', input.tool_name);
+  }
+});
+
 test('a subagent\'s input (agent_id, agent_type) is treated the same', () => {
   const r = makeRepo();
   const res = run(edit(r.task(FROZEN, 'task.md'), 'something', 'else', { agent_id: 'a1b2', agent_type: 'general-purpose' }), r.home);
@@ -343,6 +363,9 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['if true; then k approve x; fi', 'approve'],
     ['echo y | k approve x', 'approve'],
     ['k approve x 2>&1 | tail -1', 'approve'],
+    ['k bug review weather/stale-tiles', 'bug review'],
+    ['k bug review weather/stale-tiles --detach --json', 'bug review'],
+    ['node bin/k.mjs bug review weather/stale-tiles --via mod', 'bug review'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -351,6 +374,7 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     "echo 'run k approve x when ready'",
     'k approve x --dry-run',
     'k amend decline x A-1 --dry-run',
+    'k bug review weather/stale-tiles --dry-run',
     'k queue add x --dry-run',
     'k queue show',
     'k amend new weather/offline-forecast',

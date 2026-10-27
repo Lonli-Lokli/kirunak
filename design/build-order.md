@@ -307,7 +307,8 @@ ships on by default.
 ## Bugs of accepted tasks. Closes R29
 
 Built 2026-10-26 (gulnya/kirunak-spikes S-1 to S-4, on the branch `bugs/drafts`), on the drafts above: a bug is a
-draft with `bug-of`, no new kind of file.
+draft with `bug-of`, no new kind of file. Replaced on 2026-10-27 by the bugs list below, which rewrote R29: what
+follows is the history of that first step.
 
 - Files: `templates/bug.md` (new: the draft's skeleton with `bug-of` and Fix written) and `lib/drafts.mjs` (`newDraft`
   with `bugOf`, `notAccepted`, a bug's shape in `checkDraft`, its task and its fix's commits in `check`, `bugOf` in
@@ -422,6 +423,38 @@ the task's own change only, and comes with the task's change in every other repo
   gulnya/kirunak-accept-shared-repo and niva/themes-zoom-bests print what master prints, their reviews having no
   `given.json`.
 - Not yet measured: the merge to master and `/k-accept` from a session started after it (S-5).
+
+## Bugs: a list of their own. Closes R29 as rewritten
+
+Built 2026-10-27 (gulnya/kirunak-bugs S-1 to S-6, on the branch `bugs/list`, with S-2 to S-4 on `bugs/review`,
+`bugs/notice` and `bugs/intake` merged into it), on the drafts and the bugs of accepted tasks above: a bug, a fault in
+something that exists, leaves the drafts for `kirunak/bugs/`, its fix on `bug/<slug>` is reviewed and merged in one
+tap, and it is named before the drafts everywhere the owner looks.
+
+- Files: `lib/bugs.mjs` (new: `k bug new|check|drop|from`, `k bugs`, fix ready, the review lock) and
+  `templates/bug.md` (now a bug's own skeleton, `fix-repo` and a `Proposed:` line under each question);
+  `lib/bug-review.mjs` and `templates/bug-review-brief.md` (new: `k bug review`, Review & merge); `lib/drafts.mjs`
+  (`bug-of`, Fix written and `--bug-of` refused, naming the bug's verbs); `lib/workspace.mjs` (`kirunakRoot`);
+  `lib/records.mjs` (`kirunak/bugs/` a record); `lib/worktrees.mjs` (`only`); `lib/waiting.mjs` (the bugs' line,
+  first); the board model, page, markdown and brief (the group Bugs) and `k board --card <bug id>`;
+  `hooks/kirunak-bugs.mjs` (new: the line at a new session's start), `lib/install.mjs` and `lib/doctor.mjs` (its
+  SessionStart block, the `k-bug` skill linked); `hooks/kirunak-freeze.mjs` (`k bug review` the owner's);
+  `hooks/git-pre-commit.mjs` (an intake moved whole into the bugs commits); `lib/intake.mjs` (Start fix);
+  `mods/kirunak/hooks/bugs.ts` (new: `/k-bugs`), `owner.ts`, `register.tsx`, `picks.ts`, `drafts.ts`;
+  `skills/k-bug/SKILL.md` (new), `skills/k-draft/SKILL.md` and `skills/k-intake/SKILL.md`. `REQUIREMENTS.md` R29,
+  `design/task-files.md` §1, `intake.md` §1, `boards.md` §2 and §4, `approval.md` §2 and `plugins.md` §3 say how it
+  works.
+- Tests: `bugs.test.mjs` (every refusal of `new`, `check`, `drop` and `from`, fix ready and its order, the lock, the
+  kept branch, the renamed `draft/<slug>`, `fix-repo`, the drafts' order, each repo's commit alone),
+  `bug-review.test.mjs` (a fake runner in scratch repos: clean merges and closes, findings and a malformed review
+  merge nothing, a conflict written, a second run refused, a fix in another repo, a dirty index never swept in, a
+  clean review reused, a branch moved), `bugs-hook.test.mjs`, `waiting`, `board-model`, `board`, `board-md`,
+  `board-brief`, `install`, `doctor`, `intake`, `drafts`, `freeze-hook`, `git-hook`, `records` and `skills.test.mjs`
+  (k-bug linked and checked, a fault sent to k-bug and new work to k-draft); the mod's `bugs.test.ts` (the list,
+  pages, a bug whole, Review & merge only when ready, Start fix, Drop) and the board's Bugs group.
+- Numbers: `npm test` 770 tests, 768 pass, 2 skipped (S-6); `claude plugin test` 154 of 154 (141 before, S-5).
+- Not yet measured: the merge to master, `k install` and the move of the drafts that are bugs (S-7); Review &
+  merge, Start fix and the new session's line from the owner's phone (S-8).
 
 ## Slice 7, later and not detailed here: R17, R18
 

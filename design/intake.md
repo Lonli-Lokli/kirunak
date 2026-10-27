@@ -26,16 +26,26 @@ Two parts, one in Claude Code and one in `k`:
   move with itself. The task's `from:` names the moved file, and `notes.md` says it is background only: nothing in it
   is a ruling, and the interview starts from its questions and still asks every line again (R1, R4). The `k-intake`
   skill does this only when the owner asks, never on its own.
-- **A bug as `--from`** (R29): a draft with `bug-of` in its front matter (an empty one counts) starts only while its
-  task exists and is accepted; otherwise the start is refused, "the bug <id> cannot start its intake: <why>", before
-  anything moves or is written. Its `notes.md` says, before the draft's part, that it is a bug of `<task>`, a task
-  accepted already, and under `## The lines of <task>, for the intake's one proposal (background only)` names that
-  task's `task.md` and repo and gives its Edge cases, Out of scope and Aspects lines as they stand, in that order (an
-  empty one reads `Out of scope: none`). The task is only read. After the goal, the `k-intake` skill proposes
-  together those lines that still apply, in one question naming their ids: a yes keeps each under this task's next
-  number, sourced `[owner <date> Q-n] [from <repo>/<slug> <id>]`, an aspect line naming this task's ids; anything
-  else is a no, and each is asked alone, as any line of a draft. Then it asks only what is new: the bug and its
-  criteria. A plain draft's `notes.md` is unchanged.
+- **A draft naming a bug** (R29, gulnya/kirunak-bugs): a draft with `bug-of` in its front matter is refused as
+  `--from`, naming `k bug from <id>`, which moves it into `kirunak/bugs/` first. A bug starts only from its own list.
+- **A bug as `--from`, Start fix** (R29): `k intake start <id> --from kirunak/bugs/<slug>.md` takes only the bug of
+  that same id, its place and its front-matter `id` both. Refused, before anything moves or is written: a bug of
+  another id, a path under `kirunak/bugs/` that is not `<slug>.md`, a bug gone (saying where, when its intake started
+  already), a bug whose Review & merge runs (its lock held by a live pid), and a `bug-of` task that is gone, not
+  accepted or in an unknown repo. The bug moves with `git mv` to `kirunak/tasks/<slug>/bug.md`, and its records
+  folder `kirunak/bugs/<slug>/` to `kirunak/tasks/<slug>/bug/`, both staged and committed with the intake, so `k bugs`
+  lists it no more and `git log --follow` keeps its history. The task takes the bug's title and `from:` names
+  `bug.md`. `notes.md` holds, as background only: where the bug was and is, its records, its headings and Fix written
+  lines, then `## Proposed answers, for the intake's first question, every one in its own text` (each question with
+  a `Proposed:` line, copied whole) and `## Open questions, each asked alone after it`; for a bug of an accepted task,
+  before them, `## The lines of <task>, for the intake's first question (background only)`, that task's Edge cases,
+  Out of scope and Aspects lines as they stand (an empty one reads `Out of scope: none`). The task is only read.
+  The `k-intake` skill's first question holds every proposed answer, and each of that task's lines that still
+  applies, quoted whole in its own text (the phone's dialog covers the text above it), for one yes or no: a yes
+  sources each `[owner <date> Q-1]`, a task's line renumbered and also `[from <repo>/<slug> <id>]`; anything else is
+  a no, and each is asked alone, as is a `Proposed:` line that only says what is missing. Then each open question
+  alone, `k check`, the commit, and the owner types `/k-approve`. The skill does this only when the owner asks
+  (Start fix in `/k-bugs`, or naming the bug), never on its own.
 
 Judgement: the model runs the conversation, the tool keeps the ledger. An interview the model wrote straight into
 Markdown would drift from the grammar; an interview run by a tool with no model could not follow up a vague answer.
@@ -135,5 +145,5 @@ question, then AC-1 with the owner's answer as its source. 2.1 becomes a questio
 
 ## 6. Requirements this file satisfies
 
-R26 (§1: a draft as `--from`), R29 (§1: a bug as `--from`), R1 (§1, §2: only through the interview, with kirunak's own method), R2 (§3, §2 step 4), R3 (§2 step 4), R4 (§2
+R26 (§1: a draft as `--from`), R29 (§1: a bug as `--from`, Start fix), R1 (§1, §2: only through the interview, with kirunak's own method), R2 (§3, §2 step 4), R3 (§2 step 4), R4 (§2
 steps 2 to 7), R20 and D6 (§4, §5), D8 (§5: the first repo's migration path), D12 (`k-intake`).

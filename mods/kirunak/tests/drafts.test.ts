@@ -83,7 +83,7 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     expect([w.submitted, w.runs]).toEqual([[], []])
   })
 
-  test('a bug shows among the drafts, its line and its head saying bug of <task> before the date, and drops as a draft does, with no command of its own (kirunak-spikes AC-6, O-2)', async ($, on) => {
+  test('an older draft that still names the task it is a bug of says bug of <task> before the date, and drops as a draft does (kirunak-spikes AC-6, O-2)', async ($, on) => {
     const rows = [DRAFTS[0] as DraftRow, DRAFTS[1] as DraftRow, BUG]
     const w = world(on, { drafts: [rows], taps: ['hub/stale-tiles', 'Back', SKIP, 'hub/stale-tiles', 'Drop', 'Fixed in 3f2a9c1', 'Drop hub/stale-tiles'], verb: { exitCode: 0, stdout: 'hub/stale-tiles: dropped in 5b7e2d0\n', stderr: '' } })
     const head = 'hub/stale-tiles: Old tiles stay after an update.\nBug of weather/offline-forecast, written 2026-11-07.'
@@ -97,7 +97,6 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     ])
     expect(verbs(w.runs)).toEqual([['draft', 'drop', 'hub/stale-tiles', '--why', 'Fixed in 3f2a9c1']])
     for (const a of w.asked) expect(a.question).not.toMatch(/spike/i)
-    expect(w.registered.filter(name => /bug|spike/.test(name))).toEqual([])
   })
 
   const DROP = ['hub/offline-maps', 'Drop', 'Done in hub/maps', 'Drop hub/offline-maps']

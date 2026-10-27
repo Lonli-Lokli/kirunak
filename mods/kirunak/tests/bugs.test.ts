@@ -1,0 +1,152 @@
+import type { PromptOrigin } from 'claude-code'
+import { describe, expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+
+import type { BugRow } from '../hooks/bugs'
+
+import { bug, BUGS, FOUND, NO_FIX, READY, world } from './world'
+
+const run = async ($: Engine, args = '', origin: PromptOrigin = { kind: 'composer' }): Promise<string> =>
+  (await $.command.run({ command: 'k-bugs', args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
+
+const SKIP = '[No preference]'
+// k's arguments after `node <k>`.
+const verbs = (runs: string[][]) => runs.map(argv => argv.slice(2))
+
+const LINES = [
+  'hub/stale-tiles: Old tiles stay after an update, fix ready, bug of weather/offline-forecast, written 2026-11-07',
+  'weather/rain-gap: Rain alerts skip a gap, fix not ready: review-1.md found things to fix, written 2026-11-02',
+  'hub/no-fix: no-fix, no fix yet, no date written',
+]
+const LIST = `Bugs, a fix ready first, then the oldest:\n${LINES.map((l, i) => `${i + 1}. ${l}`).join('\n')}\nWhich bug?`
+const LABELS = ['hub/stale-tiles', 'weather/rain-gap', 'hub/no-fix']
+// The answer's list when nothing ran.
+const TEXT = `3 bugs, a fix ready first, then the oldest:\n\n${LINES.map((l, i) => `${i + 1}. **${l.replace(/^([^:]+):/, '$1**:')}`).join('\n')}\n\n/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.`
+// The bug with its fix ready, whole: its head, its file below the front matter, the marks left out, then what Review &
+// merge does, in the dialog's own text.
+const HEAD = 'hub/stale-tiles: Old tiles stay after an update.\nBug of weather/offline-forecast, written 2026-11-07.\nFix ready: bug/stale-tiles in hub, 2 commits ahead of master.'
+const WHOLE = `${HEAD}\n\nWhat was found\n\n- The tile cache keeps no version. [file hub/src/Tiles.kt]\n\nFix written\n\n- The cache is keyed by version. [commit 3f2a9c1]\n\nQuestions\n\n1. Is the old cache cleared at once?\n   Proposed: yes, on the first start after an update.\n\nReview & merge: a fresh Opus session reviews bug/stale-tiles; only when it finds nothing is the fix merged into hub's master, never pushed, and the bug closed.\nReview and merge its fix, start a task to fix it, or drop it?`
+const REVIEWED = 'hub/stale-tiles: Review & merge runs as pid 4242; its log is /w/hub/kirunak/bugs/stale-tiles/review.log, and k bugs shows its result\n'
+// A review running since 11:50 on this machine's clock, whatever its zone.
+const REVIEWING: BugRow = { ...READY, reviewing: { pid: 4242, started: '2026-11-07T11:50:00' } }
+
+const many = (n: number): BugRow[] => Array.from({ length: n }, (_, i) => bug(`hub/b${i + 1}`, { title: `Bug ${i + 1}`, written: `2026-11-0${i + 1}` }))
+
+describe('/k-bugs (kirunak-bugs AC-6, D-1)', () => {
+  test('no bugs says so, with no dialog; anything typed after the command is refused; a k that fails says so', async ($, on) => {
+    const w = world(on, { bugs: [[], null] })
+    expect(await run($)).toBe('No bugs: no repo holds one.')
+    expect(await run($, 'all')).toBe('/k-bugs takes nothing, not all.')
+    expect(await run($)).toBe('/k-bugs refused:\nk: the workspace did not load')
+    expect([w.asked, w.runs]).toEqual([[], []])
+  })
+
+  test('the bugs numbered in k bugs\' order, a fix ready first, each line saying its fix: ready, what a review found, or none; Skip runs nothing and answers with the list', async ($, on) => {
+    const w = world(on, { taps: [SKIP] })
+    expect(await run($)).toBe(`Nothing ran: skipped.\n\n${TEXT}`)
+    expect(w.asked).toEqual([{ header: 'Bugs', question: LIST, labels: LABELS }])
+    expect(await run($, '', { kind: 'bridge' })).toBe(`Nothing ran: dismissed.\n\n${TEXT}\n\n(typed in Remote Control)`)
+    expect([w.bugReads, w.runs]).toEqual([2, []])
+  })
+
+  test('a bug in review says so, from when, on its line', async ($, on) => {
+    const w = world(on, { bugs: [[REVIEWING]], taps: [SKIP] })
+    expect(await run($)).toBe('Nothing ran: skipped.\n\n1 bug, a fix ready first, then the oldest:\n\n1. **hub/stale-tiles**: Old tiles stay after an update, in review since 2026-11-07 11:50, bug of weather/offline-forecast, written 2026-11-07\n\n/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.')
+    expect(w.runs).toEqual([])
+  })
+
+  test('more than fit come in pages of three and More, later pages under Back, numbered as the app numbers them', async ($, on) => {
+    const w = world(on, { bugs: [many(5)], taps: ['More', 'Back', SKIP] })
+    await run($)
+    const [one, two] = [w.asked[0], w.asked[1]]
+    expect(one).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: (1 to 3 of 5)\n1. hub/b1: Bug 1, no fix yet, written 2026-11-01\n2. hub/b2: Bug 2, no fix yet, written 2026-11-02\n3. hub/b3: Bug 3, no fix yet, written 2026-11-03\nWhich bug?', labels: ['hub/b1', 'hub/b2', 'hub/b3', 'More'] })
+    expect(two).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: (4 to 5 of 5)\n1. hub/b4: Bug 4, no fix yet, written 2026-11-04\n2. hub/b5: Bug 5, no fix yet, written 2026-11-05\nWhich bug?', labels: ['hub/b4', 'hub/b5', 'Back'] })
+    expect(w.asked[2]).toEqual(one)
+    expect(w.runs).toEqual([])
+  })
+
+  test('a bug picked shows whole from its file; Review & merge only while its fix is ready and no review runs, what it does in the text above; Back shows the list again; a file that cannot be read says so', async ($, on) => {
+    const w = world(on, { bugs: [[...BUGS, { ...REVIEWING, id: 'hub/in-review', slug: 'in-review', path: '/w/hub/kirunak/bugs/in-review.md' }]], taps: ['hub/stale-tiles', 'Back', 'weather/rain-gap', 'Back', 'hub/in-review', 'Back', 'hub/no-fix', SKIP] })
+    await run($)
+    expect(w.asked[1]).toEqual({ header: 'Bugs', question: WHOLE, labels: ['Review & merge', 'Start fix', 'Drop', 'Back'] })
+    expect(w.asked[2]).toEqual(w.asked[0])
+    expect(w.asked[3]).toEqual({ header: 'Bugs', question: 'weather/rain-gap: Rain alerts skip a gap.\nWritten 2026-11-02.\nFix not ready: review-1.md found things to fix on bug/rain-gap in weather.\nThe review: /w/weather/kirunak/bugs/rain-gap/review-1.md\n\nWhat was found\n\n- An alert in the gap is lost. [file weather/src/Alerts.kt]\nStart a task to fix it, or drop it?', labels: ['Start fix', 'Drop', 'Back'] })
+    expect(w.asked[5]).toEqual({ header: 'Bugs', question: 'hub/in-review: Old tiles stay after an update.\nBug of weather/offline-forecast, written 2026-11-07.\nIn Review & merge since 2026-11-07 11:50: bug/stale-tiles in hub.\nIts file could not be read: /w/hub/kirunak/bugs/in-review.md\nStart a task to fix it, or drop it?', labels: ['Start fix', 'Drop', 'Back'] })
+    expect(w.asked[7]).toEqual({ header: 'Bugs', question: 'hub/no-fix: no-fix.\nNo date written.\nNo fix yet.\nIts file could not be read: /w/hub/kirunak/bugs/no-fix.md\nStart a task to fix it, or drop it?', labels: ['Start fix', 'Drop', 'Back'] })
+    expect(w.runs).toEqual([])
+  })
+
+  test('Review & merge runs k bug review <id> --detach --via mod, the owner\'s verb, and answers that a fresh Opus session reviews it, merges only with no finding, never pushes, and where the result shows (D-1)', async ($, on) => {
+    const w = world(on, { taps: ['hub/stale-tiles', 'Review & merge'], verb: { exitCode: 0, stdout: REVIEWED, stderr: '' } })
+    expect(await run($)).toBe(`A fresh Opus session reviews the fix of hub/stale-tiles now. Only when it finds nothing is the fix merged into master, never pushed, and the bug closed; a finding or a conflict merges nothing and is written beside the bug.\n/k-bugs or \`k bugs\` shows the result.\n\n${REVIEWED.trim()}`)
+    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod']])
+    expect(w.submitted).toEqual([])
+  })
+
+  test('a Review & merge k refuses (a review running, the fix no longer ready) answers in k\'s own words', async ($, on) => {
+    const w = world(on, { taps: ['hub/stale-tiles', 'Review & merge'], verb: { exitCode: 1, stdout: '', stderr: 'k: hub/stale-tiles: a Review & merge of it runs already, as pid 4242\n' } })
+    expect(await run($)).toBe('/k-bugs refused:\nk: hub/stale-tiles: a Review & merge of it runs already, as pid 4242')
+    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod']])
+  })
+
+  test('Start fix reads the bugs again and submits a prompt of its own that names the bug, the k-intake skill and k intake start; it runs no verb', async ($, on) => {
+    const w = world(on, { taps: ['weather/rain-gap', 'Start fix'] })
+    expect(await run($)).toBe('The intake from weather/rain-gap starts next in this session, with the k-intake skill.')
+    // Submitted once the command answered: the engine refuses a submit from inside its hook.
+    expect(w.submitted).toEqual([])
+    await w.clock.advance(10)
+    expect(w.toasts).toEqual([])
+    expect(w.submitted).toEqual([{
+      text: 'The owner tapped Start fix on the bug weather/rain-gap in /k-bugs. Start the intake from it now: first load the k-intake skill with the Skill tool (skill "k-intake"), then follow its "Starting from a bug (Start fix)": run `k intake start weather/rain-gap --from kirunak/bugs/rain-gap.md`, that moves the bug to kirunak/tasks/rain-gap/bug.md, read it there (it is at /w/weather/kirunak/bugs/rain-gap.md until then) and the notes.md it writes, then ask the owner first one question that holds every proposed answer in its own text, then each open question alone, as the skill says.',
+      origin: { kind: 'plugin', name: 'kirunak' },
+    }])
+    expect([w.bugReads, w.runs]).toEqual([2, []])
+  })
+
+  test('Start fix on a bug gone since the list, one whose review started since, or with a k that fails runs nothing and says so by the id tapped, never another', async ($, on) => {
+    const since = [FOUND, { ...NO_FIX, id: 'hub/stale-tiles-2', slug: 'stale-tiles-2' }]
+    const w = world(on, { bugs: [BUGS, since, BUGS, null, BUGS, [REVIEWING]], taps: ['hub/stale-tiles', 'Start fix', 'hub/stale-tiles', 'Start fix', 'hub/stale-tiles', 'Start fix'] })
+    expect(await run($)).toBe('Nothing ran: hub/stale-tiles is no longer a bug. It was dropped, merged, or its intake started, since the list was shown.')
+    expect(await run($)).toBe('Nothing ran: k bugs did not answer, so hub/stale-tiles could not be found again: k: the workspace did not load')
+    expect(await run($)).toBe('Nothing ran: hub/stale-tiles is in review since 2026-11-07 11:50; its fix can be started once that review ends.')
+    await w.clock.advance(10)
+    expect([w.submitted, w.runs]).toEqual([[], []])
+  })
+
+  const DROP = ['hub/stale-tiles', 'Drop', 'Fixed by hand', 'Drop hub/stale-tiles']
+
+  test('Drop takes the reason typed in the free-text row, then "Drop <id>" under it runs k bug drop by id, saying the fix branch stays, and answers k\'s line', async ($, on) => {
+    const said = 'hub/stale-tiles: dropped in 5b7e2d0; its fix branch bug/stale-tiles is kept in hub'
+    const w = world(on, { taps: [...DROP], verb: { exitCode: 0, stdout: `${said}\n`, stderr: '' } })
+    expect(await run($)).toBe(said)
+    expect(w.asked.slice(2)).toEqual([
+      { header: 'Bugs', question: `${HEAD}\nType the reason in the free-text row: why drop it?`, labels: ['Cancel', 'Back'] },
+      { header: 'Bugs', question: `${HEAD}\nIts fix branch bug/stale-tiles stays in hub.\nReason: Fixed by hand\nDrop it, in a commit that carries that reason?`, labels: ['Drop hub/stale-tiles', 'Back'] },
+    ])
+    expect(verbs(w.runs)).toEqual([['bug', 'drop', 'hub/stale-tiles', '--why', 'Fixed by hand']])
+  })
+
+  test('Drop skipped, dismissed, cancelled, with an empty reason, or skipped under its reason: nothing runs and the answer says why', async ($, on) => {
+    const cases: [(string | null)[], string][] = [
+      [['hub/no-fix', 'Drop', SKIP], 'skipped'],
+      [['hub/no-fix', 'Drop', null], 'dismissed'],
+      [['hub/no-fix', 'Drop', 'Cancel'], 'cancelled'],
+      [['hub/no-fix', 'Drop', '   '], 'no reason was typed'],
+      [['hub/no-fix', 'Drop', 'Not a bug', SKIP], 'skipped'],
+    ]
+    const w = world(on, { taps: cases.flatMap(([taps]) => taps) })
+    for (const [, why] of cases) expect(await run($)).toBe(`Nothing ran: ${why}.\n\n${TEXT}`)
+    expect(w.asked[w.asked.length - 1]?.question).toBe('hub/no-fix: no-fix.\nNo date written.\nNo fix yet.\nReason: Not a bug\nDrop it, in a commit that carries that reason?')
+    expect(w.runs).toEqual([])
+  })
+
+  test('from any origin but the owner\'s it is refused before k is read; no answer names kirunak, which the engine does', async ($, on) => {
+    const w = world(on, { bugs: [BUGS, BUGS, BUGS, BUGS, BUGS, []], taps: ['hub/stale-tiles', 'Review & merge', 'weather/rain-gap', 'Start fix', SKIP, 'hub/no-fix', 'Drop', 'Not a bug', 'Drop hub/no-fix'], verb: { exitCode: 0, stdout: REVIEWED, stderr: '' } })
+    expect(await run($, '', { kind: 'plugin', name: 'other' })).toBe('/k-bugs runs only from your own prompt or from Remote Control; this one came from the plugin other, so nothing ran.')
+    expect([w.bugReads, w.asked]).toEqual([0, []])
+    const answers = [await run($), await run($, '', { kind: 'bridge' }), await run($), await run($), await run($), await run($, 'x')]
+    expect(answers[4]).toBe('No bugs: no repo holds one.')
+    // A path or an id may hold the word; the mod's own words never do.
+    for (const text of answers) expect(text.replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
+  })
+})

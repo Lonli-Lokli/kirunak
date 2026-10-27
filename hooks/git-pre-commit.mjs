@@ -9,7 +9,7 @@ import { costMarkdown } from '../lib/cost-md.mjs';
 // 1. a staged task.md no longer matches its approval record's hash, unless KIRUNAK_APPROVING names the task;
 // 2. it stages what only the owner's commands write (approvals/, done.json, hold.md, an amendment's stamp), unless
 //    KIRUNAK_APPROVING, KIRUNAK_ACCEPTING or KIRUNAK_HOLDING names the task;
-// 3. a staged intake.md is not an append of the committed one;
+// 3. a staged intake.md is not an append of the committed one (or, removed, of the one `k bug from` moved);
 // 4. a staged cost.md is not the rendering of its done.json's cost (`k cost <id> --write` writes it again).
 // The owner's commands set those variables on the one `git commit` they run. A mistake guard, not a lock.
 
@@ -82,10 +82,12 @@ export function check({ staged, show, env = process.env }) {
       else if (bytes.toString('utf8') !== rendered) {
         problems.push(`kirunak: ${path}: cost.md is generated from done.json; \`k cost ${done.task} --write\` writes it again`);
       }
-    } else if (INTAKE.test(path)) {
+    } else if ((m = INTAKE.exec(path))) {
       const before = read(`HEAD:${path}`);
       if (!before) continue;
-      const after = read(`:${path}`);
+      // `k bug from` moves an intake never approved, whole, into kirunak/bugs/<slug>/ (gulnya/kirunak-bugs AC-3): its
+      // intake.md leaves only when the moved one in the index starts with every byte of it.
+      const after = read(`:${path}`) ?? read(`:kirunak/bugs/${m[1]}/intake.md`);
       if (!after || after.length < before.length || !after.subarray(0, before.length).equals(before)) {
         problems.push(`kirunak: ${path}: intake.md is append-only; use \`k intake\``);
       }

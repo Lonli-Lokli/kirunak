@@ -1,7 +1,7 @@
 {
   "name": "kirunak",
   "version": "0.1.0",
-  "description": "kirunak's working view in Claude Code: the owner's /k-approve, /k-approve-amendment, /k-accept, /k-hold, /k-resume and /k-start, /k-queue, the lists /k-list, /k-amendments and /k-drafts, the board in brief /k-board with each task's card, a pane, a line above the prompt and toasts",
+  "description": "kirunak's working view in Claude Code: the owner's /k-approve, /k-approve-amendment, /k-accept, /k-hold, /k-resume and /k-start, /k-queue, the lists /k-list, /k-amendments, /k-drafts and /k-bugs, the board in brief /k-board with each task's card, a pane, a line above the prompt and toasts",
   "author": { "name": "kirunak" },
   "license": "MIT",
   "types": "./types/index.d.ts"

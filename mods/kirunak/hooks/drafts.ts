@@ -7,12 +7,12 @@ import type { Screen } from './owner'
 // title and the date written; the one picked shows whole, from its file, with Start intake and Drop. Drop takes the
 // reason typed in the free-text row, then "Drop <id>" runs `k draft drop <id> --why` by id, so a draft gone since
 // ends in k's refusal, never on another. Start intake runs no verb: it ends the dialog, and the command hands the
-// draft to the model in a prompt of its own (intakePrompt). A bug, a draft that names the accepted task it was found
-// in, shows here among the drafts, its list line and its head saying bug of <task>; it has no command of its own
-// (kirunak-spikes AC-6, O-2).
+// draft to the model in a prompt of its own (intakePrompt). Bugs have their own list, /k-bugs (gulnya/kirunak-bugs
+// AC-1); a draft written before then that still names the accepted task it was found in says bug of <task>, in its
+// list line and its head, until `k bug from` moves it there.
 
-// A draft as `k drafts --json` gives it: `written` null when its date is missing or no date, `bugOf` the task a bug
-// was found in and null for a plain draft, `path` absolute.
+// A draft as `k drafts --json` gives it: `written` null when its date is missing or no date, `bugOf` the task an older
+// draft names as found in, null for every other, `path` absolute.
 export type DraftRow = { id: string; repo: string; slug: string; title: string; written: string | null; bugOf: string | null; path: string }
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()

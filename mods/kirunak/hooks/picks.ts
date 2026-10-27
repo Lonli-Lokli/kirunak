@@ -121,9 +121,11 @@ export type Brief = { made: string; text: string; ids: string[]; groups: BriefGr
 // the machine's line, and the groups that hold a task as the choices (k names group by words, never a digit, so the
 // app's own numbers stand alone). A group picked: its paragraph of the brief board, its tasks as the choices, and
 // Back; the task tapped answers with its card. Both page three and More, as every list does. It runs no verb. The
-// group Drafts (kirunak-drafts S-4: the drafts after the tasks, `k board --card` a draft's card too) asks for a draft.
+// group Drafts (kirunak-drafts S-4: the drafts after the tasks, `k board --card` a draft's card too) asks for a draft,
+// the group Bugs (gulnya/kirunak-bugs AC-7: the bugs before the drafts, a bug's card too) for a bug.
+const GROUP_ASKS: Readonly<Record<string, string>> = { Bugs: 'Which bug?', Drafts: 'Which draft?' }
 export function boardScreen(brief: Brief): PickScreen {
-  const group = (g: BriefGroup): PickScreen => ({ kind: 'pick', header: 'Board', text: [`${g.name} (${g.count})`, ...g.lines], labels: g.ids, question: g.name === 'Drafts' ? 'Which draft?' : 'Which task\'s card?' })
+  const group = (g: BriefGroup): PickScreen => ({ kind: 'pick', header: 'Board', text: [`${g.name} (${g.count})`, ...g.lines], labels: g.ids, question: GROUP_ASKS[g.name] ?? 'Which task\'s card?' })
   return {
     kind: 'pick',
     header: 'Board',

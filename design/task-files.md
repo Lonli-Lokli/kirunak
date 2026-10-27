@@ -26,11 +26,13 @@ kirunak/
   tasks/<slug>/done.json          the owner's acceptance record (R15)
   tasks/<slug>/cost.md            the task's cost at acceptance, generated from done.json (R12, orchestrator.md §6)
   approvals/<slug>.json           the approval record: the task's hash, the date, who, how (D7)
-  drafts/<slug>.md                a draft: an intake prepared ahead, for a task that does not exist yet (R24), or
-                                  a bug of a task already accepted (R29)
+  drafts/<slug>.md                a draft: an intake prepared ahead, for a task that does not exist yet (R24)
+  bugs/<slug>.md                  a bug: a fault in something that exists, with a way to see it (R29)
+  bugs/<slug>/review-<n>.md       a Review & merge of the bug's fix: its verdict, head, base and findings (R29)
 ```
 
-`tasks/<slug>/draft.md` is the draft once an intake has started from it (R26).
+`tasks/<slug>/draft.md` is the draft once an intake has started from it (R26); `tasks/<slug>/bug.md` is the bug once
+Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R29).
 
 - A **draft** sits in `kirunak/drafts/`, beside `tasks/`, in the repo its task is for. Its id is `<repo>/<slug>`
   from the start and the task keeps it (R24). It has front matter (`id`, `title`, `written`) and four sections once
@@ -39,20 +41,42 @@ kirunak/
   (R26). A draft is not a task: it has no state, no approval record and no queue place, nothing in it is a ruling,
   and the freeze hooks leave it alone (R25, R27). Judgement: any session writes one unasked, so it must freeze
   nothing and cost the owner nothing until the owner starts it.
-- A **bug** (R29) is a draft whose front matter adds `bug-of: <task id>`, the accepted task it was found in: a task
-  whose folder holds `done.json`, in any repo of the workspace. The bug sits in the repo its fix belongs to, which
-  may be another than the task's. `k draft new <id> --title "..." --bug-of <task>` writes `templates/bug.md`, the
-  draft's skeleton with `bug-of` after `written` and a section `## Fix written` between What was found and
-  Questions. It refuses, a dry run too, a task that does not exist or is not accepted (a bug found while a task is
-  open goes into that task, through its review or an amendment), and only reads the task, so its folder stays byte
-  for byte as it was. Fix written holds a fix that exists already, a `- ` line each ending with
-  `[commit <sha>]` or `[file <patch path>]`, or is deleted when none does: `k draft check` refuses its placeholder,
-  an empty section, and the section in a draft with no `bug-of`. Beyond the shape, `k draft check` refuses a bug
-  whose task is gone or not accepted, and a Fix written commit that `git cat-file -e` finds in neither the bug's
-  repo nor the task's; a `[file ...]` is checked for its shape only. No draft has a `state` field, and the check
-  refuses one: a bug is parked while it waits here, taken once an intake moves it, and closed by `k draft drop`.
-  `k drafts` names its task, and its `--json` row carries `bugOf` (null for a plain draft). Evidence: the owner's
-  ruling (R29): no new kind of file, so a bug waits, shows and goes as any draft does.
+- A **bug** (R29, gulnya/kirunak-bugs) is a fault in something that exists, with a way to see it, in a list of its
+  own: `kirunak/bugs/<slug>.md` in the repo its id `<repo>/<slug>` names, beside `drafts/`, never in it. Its shape is
+  a groomed draft's (`templates/bug.md`): front matter `id`, `title`, `written`, and two optional keys, `bug-of:
+  <task id>`, the accepted task it came from (a folder with `done.json`, in any repo of the workspace, only read), and
+  `fix-repo: <repo>`, the repo its fix branch is in when that is not its own: a workspace repo by name, or `kirunak`
+  for kirunak's own checkout (`ws.kirunakRoot`, else the folder above `lib/`), where every fix to kirunak is made;
+  then Who raised it, Why, What was found, `## Fix written` when a fix exists (a `- ` line each ending with
+  `[commit <sha>]` or `[file <patch path>]`; deleted, heading and all, when none does), and Questions, each with an
+  indented `Proposed:` line. `k bug new <id> --title "..." [--bug-of <task>] [--fix-repo <repo>]` writes the skeleton
+  and commits nothing; it refuses an id that is already a bug, a draft (naming `k bug from`) or a task, an unknown
+  repo or fix repo, and a task that does not exist or is not accepted. `k bug check <id>` holds the shape, the task
+  accepted, the fix repo known, and every Fix written commit found by `git cat-file -e` in the fix repo, the bug's or
+  the task's. No bug has a `state` field. Judgement: a bug and a draft wait for different things, a bug for a fix
+  and its review, a draft for the owner's choices, so they wait in different lists, and a draft that names `bug-of`
+  or holds Fix written is refused by `k draft check`, naming `k bug from`.
+- **A bug's fix** is the branch `bug/<slug>` in its fix repo. **Fix ready** is worked out each time, never stored:
+  the branch holds commits master (else main) does not, and no review beside the bug carries `head:` equal to the
+  branch's head (a prefix of 7 or more) with a verdict other than `clean`. So a new commit on a refused fix makes it
+  ready again by itself. `k bugs [--json]` lists every repo's bugs, fix ready first, then by the date written (oldest
+  first, an undated one last), then by id; a row `{ id, repo, slug, title, written, bugOf, fixRepo, branch, head,
+  ahead, fixReady, reviewing, review, path }`, `reviewing` the `{ pid, started }` of a Review & merge that runs, and
+  `review` the latest review beside it. Only the `<slug>.md` files are bugs; the folder beside one holds its records.
+- **Review & merge** (`k bug review <id>`, the owner's verb, `approval.md` §2) holds the lock
+  `$KIRUNAK_HOME/bugs/<repo>/<slug>.review.json`, `{ pid, started }`, a second run refused while that pid lives;
+  writes `kirunak/bugs/<slug>/review-<n>.md` (front matter `verdict: clean | findings | conflict`, `head:`, `base:`,
+  then `## Findings` numbered, or `## Conflict` with its files) and commits that path alone. Clean: the fix is merged
+  with `--no-ff` into its repo's master, never pushed, and the bug and its folder go in one commit of those paths in
+  the bug's own repo, naming the merge and the review. The review session's brief, diff, log and session file are
+  machine state, under `$KIRUNAK_HOME/bugs/<repo>/<slug>/`.
+- `k bug drop <id> --why "..."` removes the bug and its folder in a commit of those paths alone, the reason in its
+  message, other staged files left staged and out; a fix branch is kept and named with its head. `k bug from <id>
+  [--no-commit]` moves a draft (`git mv` to `kirunak/bugs/<slug>.md`) or a task whose intake is not approved (its
+  folder to `kirunak/bugs/<slug>/`, its `draft.md`, if any, on to `<slug>.md`, else a bug's skeleton there to fill
+  in), renames `draft/<slug>` to `bug/<slug>` in every repo that has it (adding `fix-repo:` when that is another
+  repo than the bug's), takes the id out of the drafts' order, and commits each repo's paths alone. It refuses an
+  approved task, an id that is already a bug, and a `bug/<slug>` that exists already.
 - **The drafts' order** (owner, 2026-10-27: the drafts that need a longer intake wait at the end) is one file,
   `drafts-order.md`, beside the queue in the repo that holds it (`ws.draftOrder`), one draft id a line, first first,
   `#` lines comments, a record like the queue (`approval.md` §3). `k drafts`, the board, `k waiting` and `/k-drafts`
@@ -65,9 +89,10 @@ kirunak/
   session runs it, since a draft is not the owner's (R25); a new draft waits after the drafts the file names until a
   move places it.
 - `k intake start <id> --from kirunak/drafts/<slug>.md` moves the draft with `git mv` to `tasks/<slug>/draft.md`, so
-  it is never in two places and git follows its history (`intake.md` §1); a bug moves only while its task is still
-  accepted, and its `notes.md` holds that task's lines. `k draft drop <id> --why "..."` removes it in a commit of
-  that file alone, with the reason in the message (R27).
+  it is never in two places and git follows its history (`intake.md` §1). `k intake start <id> --from
+  kirunak/bugs/<slug>.md` (Start fix) moves a bug the same way to `tasks/<slug>/bug.md`, and its records folder to
+  `tasks/<slug>/bug/`. `k draft drop <id> --why "..."` removes a draft in a commit of that file alone, with the
+  reason in the message (R27).
 
 - `evidence/` is committed by `k step finish`: the files the step wrote there that are new or changed, and nothing
   else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks; a commit git
@@ -283,5 +308,5 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 
 ## 7. Requirements this file satisfies
 
-R24 to R27 (§1: drafts), R29 (§1: a bug), R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
+R24 to R27 (§1: drafts), R29 (§1: a bug, its fix, Review & merge, drop and move), R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
 R32 (§3 `repos.md`), D4 (§6), D6 (§2 rule 1).

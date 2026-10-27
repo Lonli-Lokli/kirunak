@@ -1,13 +1,14 @@
 ---
 name: k-draft
-description: Write a kirunak draft, an intake prepared ahead for a task that does not exist yet, or drop one. Use when the owner names a future task ("its own task", "later", "another session"), when you find something worth its own task yourself (a bug in a shared library, a missing tool), when a bug turns up in a task the owner has accepted already (a bug of that task, `--bug-of`), and when a draft should go (it landed already, the owner said no, another draft says the same).
+description: Write a kirunak draft, an intake prepared ahead for a task that does not exist yet, or drop one. Use when the owner names a future task ("its own task", "later", "another session"), when you find new work worth its own task yourself (a missing tool, a change to a shared library), and when a draft should go (it landed already, the owner said no, another draft says the same). Not for a fault in something that exists already, the work of an accepted task included: that is a bug, the k-bug skill.
 ---
 
 # k-draft: an intake prepared ahead
 
-A future task goes into a draft in git, never only into scratch files or a session's memory. A draft is not a task:
-you write one without asking, and it approves and freezes nothing. The owner later starts the intake from it, which
-reads it as background and still asks every line.
+A future task goes into a draft in git, never only into scratch files or a session's memory: new work, or something
+only the owner's choice settles. A fault in something that exists, with a way to see it, is a bug, never a draft (the
+k-bug skill). A draft is not a task: you write one without asking, and it approves and freezes nothing. The owner
+later starts the intake from it, which reads it as background and still asks every line.
 
 ## Writing one
 
@@ -32,10 +33,9 @@ reads it as background and still asks every line.
    would write it, each part a question with its `Proposed:` answer: the goal, the criteria, the edge cases and out of
    scope, the aspects (all n/a in one question when nothing has an app), the plan's steps. When the fix is small and
    safe (no heavy job, nothing outside the machine), try it on a `draft/<slug>` branch in its own worktree, with a test
-   that fails without it and the docs, never merged, and cite its commits and test runs under What was found (a bug's
-   Fix written names them the same way). A question stays open only where you cannot know (the owner's taste, a fact
-   you cannot measure), its `Proposed:` line saying what is missing. Nothing in a draft is a ruling: the owner's
-   answers at the intake decide.
+   that fails without it and the docs, never merged, and cite its commits and test runs under What was found. A
+   question stays open only where you cannot know (the owner's taste, a fact you cannot measure), its `Proposed:`
+   line saying what is missing. Nothing in a draft is a ruling: the owner's answers at the intake decide.
 4. **Check**: `k draft check <id>` until it passes. It names each problem with its line.
 5. **Commit the draft alone**, in its repo:
 
@@ -50,20 +50,12 @@ reads it as background and still asks every line.
 Never start an intake from a draft on your own: the owner starts it, with Start intake in `/k-drafts` or by naming
 the draft (the k-intake skill says how).
 
-## A bug of an accepted task
+## A bug is not a draft
 
-A bug found in a task the owner has accepted (done in `k list`) is a draft that names that task, which stays as it
-is: still accepted, frozen, nothing written in its folder. A bug found while its task is open is not a draft: it goes
-into that task, through its review or an amendment, and `--bug-of` refuses an open task or one that does not exist.
-Write it as above, except:
-
-- **The skeleton**, in the repo the fix belongs to, which may be another than the task's:
-  `k draft new <repo>/<slug> --title "<a few words>" --bug-of <task> --session <session id>`.
-- **Fix written**, before Questions: a `- ` line a fix that exists already, ending with `[commit <sha>]` or
-  `[file <patch path>]`; delete the section, heading and all, when no fix exists. No `state` field: a bug is parked
-  while it waits here, taken once an intake starts from it, and closed by a drop.
-- **`k draft check`** also checks that the task is accepted, and that every commit under Fix written is in the
-  bug's repo or the task's.
+A fault in something that exists, a fault in the work of a task the owner has accepted included, goes into
+`kirunak/bugs/` through `k bug new` (the k-bug skill). `k draft new --bug-of` is refused, naming `k bug new`, and
+`k draft check` refuses a draft with `bug-of:` or Fix written, naming `k bug from <id>`, which moves it into the bugs
+with its history and renames its `draft/<slug>` branch `bug/<slug>`.
 
 ## Dropping one
 
@@ -74,5 +66,5 @@ and why.
 ## Where the owner sees drafts
 
 `/k-drafts` lists every draft in every repo; one picked shows whole, with Start intake, Drop and Back. `k waiting`
-says how many drafts wait, and the board (`/k-board`, `k board`) shows a group Drafts after the tasks. A bug shows
-among them, and in `k drafts`, as `bug of <task>`; it has no command of its own.
+says how many drafts wait, and the board (`/k-board`, `k board`) shows a group Drafts after the tasks. Bugs are not
+among them: `/k-bugs` lists them, and `k waiting` and the board name them before the drafts.

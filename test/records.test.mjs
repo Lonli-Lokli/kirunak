@@ -42,14 +42,14 @@ test('the Task: trailer names its task, and alone says which task a commit is (a
   assert.equal(namesTask('a typo\n\nTask: gulnya/kit-wanted', 'gulnya/kit-wanted', { here: 'katyafm', repos }), true);
 });
 
-test('kirunak\'s records are the task folders, the drafts, the approvals and the queue file where the workspace keeps it, the drafts\' order beside it (accept-shared-repo AC-5)', async () => {
+test('kirunak\'s records are the task folders, the drafts, the bugs, the approvals and the queue file where the workspace keeps it, the drafts\' order beside it (accept-shared-repo AC-5)', async () => {
   const { ws } = await makeWorkspace();
   const records = recordPaths(ws);
-  assert.deepEqual(records, ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/approvals/', 'kirunak/queue.md', 'kirunak/drafts-order.md']);
-  for (const x of ['kirunak/tasks/a/notes.md', 'kirunak/drafts/b.md', 'kirunak/approvals/a.json', 'kirunak/queue.md', 'kirunak/drafts-order.md']) assert.equal(isRecord(x, records), true, x);
+  assert.deepEqual(records, ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/bugs/', 'kirunak/approvals/', 'kirunak/queue.md', 'kirunak/drafts-order.md']);
+  for (const x of ['kirunak/tasks/a/notes.md', 'kirunak/drafts/b.md', 'kirunak/bugs/c.md', 'kirunak/bugs/c/review-1.md', 'kirunak/approvals/a.json', 'kirunak/queue.md', 'kirunak/drafts-order.md']) assert.equal(isRecord(x, records), true, x);
   for (const x of ['kirunak/workspace.mjs', 'kirunak/queue.md.bak', 'src/kirunak/tasks/a.ts', 'README.md']) assert.equal(isRecord(x, records), false, x);
   const outside = { ...ws, queue: join(ws.home, 'queue.md'), draftOrder: join(ws.home, 'drafts-order.md') };
-  assert.deepEqual(recordPaths(outside), ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/approvals/']);
+  assert.deepEqual(recordPaths(outside), ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/bugs/', 'kirunak/approvals/']);
 });
 
 test('the workspace may name more records, a file or a folder in any of its repos, written yet or not; anything but a list of paths is refused (accept-shared-repo AC-5, D-3)', async () => {
@@ -60,7 +60,7 @@ test('the workspace may name more records, a file or a folder in any of its repo
     return loadWorkspaceModule(join(dir, file));
   };
   const records = recordPaths(await named('records.mjs', ['./plan.md', '../../weather/notes/', '~/elsewhere.md']));
-  assert.deepEqual(records, ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/approvals/', 'kirunak/queue.md', 'kirunak/drafts-order.md', 'kirunak/plan.md', 'notes/']);
+  assert.deepEqual(records, ['kirunak/tasks/', 'kirunak/drafts/', 'kirunak/bugs/', 'kirunak/approvals/', 'kirunak/queue.md', 'kirunak/drafts-order.md', 'kirunak/plan.md', 'notes/']);
   for (const x of ['kirunak/plan.md', 'notes/a.md', 'notes/deep/b.md']) assert.equal(isRecord(x, records), true, x);
   for (const x of ['kirunak/plan.md.bak', 'notes', 'docs/notes/a.md', 'kirunak/workspace.mjs']) assert.equal(isRecord(x, records), false, x);
   for (const [file, bad] of [['one.mjs', './plan.md'], ['empty.mjs', ['']], ['number.mjs', [3]]]) {

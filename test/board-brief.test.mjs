@@ -10,7 +10,7 @@ import { renderBrief } from '../lib/board-brief.mjs';
 import { entry, lastStepShort, metLine } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
 import { STATES } from '../lib/state.mjs';
-import { addTask, bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const brief = async (w) => renderBrief(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
@@ -193,4 +193,22 @@ test('a step k run stopped for the owner: the brief board opens with Stopped for
   assert.equal(b.ids[0], 'weather/hourly-chart');
   // With nothing stopped the board is as it was.
   assert.ok(!renderBrief(list, snapshot(w.ws), NOW).groups.some((g) => g.name === 'Stopped for you'));
+});
+
+test('the bugs before the drafts: a group Bugs, k waiting\'s line first, then one line a bug with its fix, its task and its date, its ids before the drafts\'; no group when none waits (gulnya/kirunak-bugs AC-7)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  assert.ok(!(await brief(w)).groups.some((g) => g.name === 'Bugs'), 'no group when no bug waits');
+  bugsAt(w);
+  const b = await brief(w);
+  const lines = [
+    '2 bugs wait, 1 with a fix ready: /k-bugs',
+    'hub/queue-stuck: The queue keeps a finished job, fix ready, bug of weather/recent, written 2026-11-06',
+    'weather/rain-icon: The rain icon shows <sun>, no fix, written 2026-11-04',
+  ];
+  assert.deepEqual(b.groups.slice(-2).map((g) => g.name), ['Bugs', 'Drafts']);
+  assert.deepEqual(b.groups.at(-2), { name: 'Bugs', count: 2, ids: ['hub/queue-stuck', 'weather/rain-icon'], lines });
+  assert.ok(b.text.includes(`weather/recent: done, 0 of 3 met\n\nBugs (2)\n${lines.join('\n')}\n\nDrafts (2)\n`), b.text);
+  assert.deepEqual(b.ids, b.groups.flatMap((g) => g.ids));
+  assert.deepEqual(b.ids.slice(-4), ['hub/queue-stuck', 'weather/rain-icon', 'weather/wind-alerts', 'hub/short-jobs']);
 });

@@ -3,6 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { bandLine, paneLines } from './board'
 import type { Tone } from './board'
+import { bugsScreen, bugsText, fixOf, fixPrompt } from './bugs'
+import type { BugRow } from './bugs'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
 import { draftsScreen, draftsText, intakePrompt } from './drafts'
@@ -209,10 +211,51 @@ async function startIntake($: EngineInterface, k: string, id: string): Promise<s
   if (r.exitCode !== 0) return `Nothing ran: k drafts did not answer, so ${id} could not be found again: ${firstLine(r)}`
   const d = (JSON.parse(r.stdout) as DraftRow[]).find(x => x.id === id)
   if (d === undefined) return `Nothing ran: ${id} is no longer a draft. It was dropped, or its intake started, since the list was shown.`
-  const text = intakePrompt(d)
+  submitLater($, id, intakePrompt(d))
+  return `The intake from ${id} starts next in this session, with the k-intake skill.`
+}
+
+// The intake's prompt, submitted once the command has answered (above); one the engine refuses toasts why.
+function submitLater($: EngineInterface, id: string, text: string): void {
   $.clock.after(SUBMIT_AFTER_MS, () => {
     void $.prompt.submit({ text }).catch(err => $.ui.toast(`The intake from ${id} did not start: ${reason(err)}`))
   })
+}
+
+// `/k-bugs` (gulnya/kirunak-bugs AC-6, D-1): every bug in every repo, as k bugs gives them, a fix ready first, then the
+// oldest, as the dialog's choices (bugs.ts); each one's file read before the dialog opens, for the one picked to show
+// whole. Review & merge and Drop are verbs the dialog runs by id; Start fix ends it. When nothing ran, the answer says
+// why and shows the list.
+async function bugsDialog($: EngineInterface, turn: Turn): Promise<string | Outcome> {
+  if (turn.args.trim()) return `/k-bugs takes nothing, not ${turn.args.trim()}.`
+  const r = await $.process.run(['node', turn.k, 'bugs', '--json'])
+  if (r.exitCode !== 0) return refused('k-bugs', r)
+  const rows = JSON.parse(r.stdout) as BugRow[]
+  if (!rows.length) return bugsText(rows)
+  const files = new Map<string, string>()
+  for (const b of rows) {
+    try {
+      files.set(b.path, await $.fs.read(b.path))
+    } catch {
+      // bugLines says so.
+    }
+  }
+  const out = await turn.dialog(bugsScreen(rows, files))
+  if (out.ended !== undefined) return startFix($, turn.k, out.ended)
+  return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows)}`
+}
+
+// Start fix (AC-6, AC-8): k bugs read again, and the bug found by its id, so one dropped, merged or taken by an intake
+// since the list was shown is refused by name, never another, and one whose Review & merge started since waits for it
+// (k intake start would refuse it); then a prompt of its own, once this answer shows, as Start intake's, that starts
+// the intake from the bug with the k-intake skill (bugs.ts, fixPrompt). It runs no verb.
+async function startFix($: EngineInterface, k: string, id: string): Promise<string> {
+  const r = await $.process.run(['node', k, 'bugs', '--json'])
+  if (r.exitCode !== 0) return `Nothing ran: k bugs did not answer, so ${id} could not be found again: ${firstLine(r)}`
+  const b = (JSON.parse(r.stdout) as BugRow[]).find(x => x.id === id)
+  if (b === undefined) return `Nothing ran: ${id} is no longer a bug. It was dropped, merged, or its intake started, since the list was shown.`
+  if (b.reviewing) return `Nothing ran: ${id} is ${fixOf(b)}; its fix can be started once that review ends.`
+  submitLater($, id, fixPrompt(b))
   return `The intake from ${id} starts next in this session, with the k-intake skill.`
 }
 
@@ -242,7 +285,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'k-amendments', description: 'The amendments waiting for your approval, to approve or decline by touch; with a number, that one in full', argumentHint: '[<n>]' })
     await $.command.register({ name: 'k-approve-amendment', description: 'Approve an amendment /k-amendments listed: k approve --amendment, as your own command', argumentHint: '<n>' })
     await $.command.register({ name: 'k-queue', description: 'Show the kirunak queue and move, park or put back a task by touch' })
-    await $.command.register({ name: 'k-drafts', description: 'The kirunak drafts, intakes prepared ahead, bugs among them: one shown whole, to start its intake or drop it by touch' })
+    await $.command.register({ name: 'k-drafts', description: 'The kirunak drafts, intakes prepared ahead: one shown whole, to start its intake or drop it by touch' })
+    await $.command.register({ name: 'k-bugs', description: 'The kirunak bugs, a fix ready first: one shown whole, to review and merge its fix, start a fix or drop it by touch' })
     await $.command.register({ name: 'kirunak', description: 'Show or hide kirunak\'s pane: this session\'s task, the queue and the lock' })
     // A `claude -p` run draws nothing: it gets the commands, which refuse its origin, and no reads.
     if (e.isInteractive) {
@@ -275,6 +319,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'k-queue' }, ($, e) => owners($, e, 'k-queue', t => queueDialog($, t), '\n\n')).catch(() => ({ text: FAILED('k-queue') }))
   on('command.run', { command: 'k-drafts' }, ($, e) => owners($, e, 'k-drafts', t => draftsDialog($, t), '\n\n')).catch(() => ({ text: FAILED('k-drafts') }))
+  on('command.run', { command: 'k-bugs' }, ($, e) => owners($, e, 'k-bugs', t => bugsDialog($, t), '\n\n')).catch(() => ({ text: FAILED('k-bugs') }))
 
   on('session.end', ($, e, next) => {
     delete offered.approve

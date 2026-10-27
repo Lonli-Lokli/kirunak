@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hashBytes } from '../lib/approval.mjs';
-import { makeWorkspace } from './helpers.mjs';
+import { makeWorkspace, sh } from './helpers.mjs';
 
 // The board's fixture (test/board.test.mjs, test/board-md.test.mjs): four tasks beside the workspace's own, one
 // reviewed, one done this week, one done long ago, one queued and started.
@@ -98,4 +98,17 @@ export function draftsAt(w) {
 export function bugAt(w) {
   mkdirSync(join(w.hub, 'kirunak', 'drafts'), { recursive: true });
   writeFileSync(join(w.hub, 'kirunak', 'drafts', 'midnight-gap.md'), '---\nid: hub/midnight-gap\ntitle: The chart skips the hour after midnight\nwritten: 2026-11-07\nbug-of: weather/recent\n---\n\n## Who raised it\nfound by the agent: x\n');
+}
+
+// Two bugs that wait (gulnya/kirunak-bugs AC-7), as k bug new leaves them: one in the weather repo with no fix, written
+// first, and one in the hub found in the task done this week, its fix on bug/queue-stuck, a commit master lacks, so
+// it is listed first, its fix ready.
+export function bugsAt(w) {
+  const write = (root, repo, slug, title, written, front = '') => {
+    mkdirSync(join(root, 'kirunak', 'bugs'), { recursive: true });
+    writeFileSync(join(root, 'kirunak', 'bugs', `${slug}.md`), `---\nid: ${repo}/${slug}\ntitle: ${title}\nwritten: ${written}\n${front}---\n\n## Who raised it\nfound by the agent: x\n`);
+  };
+  write(w.weather, 'weather', 'rain-icon', 'The rain icon shows <sun>', '2026-11-04');
+  write(w.hub, 'hub', 'queue-stuck', 'The queue keeps a finished job', '2026-11-06', 'bug-of: weather/recent\n');
+  sh(w.hub, 'git', ['branch', 'bug/queue-stuck', sh(w.hub, 'git', ['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'the fix']).trim()]);
 }

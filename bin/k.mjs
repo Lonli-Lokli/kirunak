@@ -22,7 +22,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
+import { bugsHookLine, compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -35,9 +35,11 @@ import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
 import * as drafts from '../lib/drafts.mjs';
+import * as bugs from '../lib/bugs.mjs';
+import * as bugReview from '../lib/bug-review.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -66,18 +68,30 @@ Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k worktrees [--closing <id>]: the worktrees an acceptance would remove (what each holds besides build
             output) and keep, with why; it removes nothing
-          k waiting: what waits for the owner (tasks and amendments to approve, tasks to accept, drafts) and what
+          k waiting: what waits for the owner (bugs, tasks and amendments to approve, tasks to accept, drafts) and what
             each verb would refuse; with --json also the tasks k hold and k start take
 Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change or of commits, in this repo
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
+Bugs      k bug new <repo>/<slug> --title "..." [--bug-of <task>] [--fix-repo <repo>]: a bug's skeleton,
+            kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo (a repo of
+            the workspace, or kirunak for kirunak's own checkout; its own when none is named)
+          k bug check <id>: the bug's shape, its task and its fix's commits | k bug drop <id> --why "...": removes it
+            and its folder in a commit of their own, a fix branch kept and named in it
+          k bug from <id> [--no-commit]: a draft, or a task whose intake is not approved, moved into kirunak/bugs/
+            with its history, draft/<slug> renamed bug/<slug>, each repo's paths committed alone
+          k bug review <id> [--detach] [--dry-run] (the owner's): Review & merge, a fresh Opus session reviews the fix's
+            diff and kirunak reads its verdict; clean, bug/<slug> is merged into its fix repo's master (never pushed)
+            and the bug closes; a finding or a conflict merges nothing, written in kirunak/bugs/<slug>/review-<n>.md
+          k bugs: every bug in every repo, one line each (id, title, date written, its fix, bug of <task>), those with a
+            fix ready first, then the oldest first
+          k intake start <id> --from kirunak/bugs/<slug>.md: Start fix, the intake takes the bug, moved to the task's
+            bug.md, its records to bug/
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
-          k draft new <repo>/<slug> --title "..." --bug-of <task>: a bug of that accepted task, in any repo, with its
-            section Fix written for a fix that exists already (deleted when none does)
           k draft check <id>: the draft's shape | k draft drop <id> --why "...": removes it in a commit of its own
-          k drafts: every draft in every repo, one line each (id, title, date written, bug of <task> on a bug's), in
-            the drafts' order: those it names first, the others by the date written
+          k drafts: every draft in every repo, one line each (id, title, date written), in the drafts' order: those it
+            names first, the others by the date written
           k drafts move <id>... [--first|--last|--before <id>|--after <id>]: those drafts, in that order, to that
             place (no flag: last), in a commit of the order alone
           k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
@@ -143,6 +157,33 @@ async function approvalProblems(ws, id, amendmentId) {
   return out;
 }
 
+// `k bug review <id>`: Review & merge, here or (--detach) in a process of its own whose log it names.
+async function reviewed(ws, id, flags) {
+  const via = typeof flags.via === 'string' ? flags.via : 'shell';
+  if (flags['dry-run']) {
+    const r = bugReview.preview({ ws, id });
+    const then = !r.merges ? `would write a conflict in ${r.conflict.join(', ') || 'files git does not name'} and merge nothing`
+      : r.reuses ? `would take ${r.reuses}, clean at this head, and merge` : 'would run a review and merge when it is clean';
+    return { ...r, text: `${id}: ${r.branch} at ${r.head.slice(0, 12)} in ${r.fixRepo}; ${then}` };
+  }
+  if (flags.detach) {
+    const r = bugReview.detach({ ws, id, via });
+    return { ...r, text: `${id}: Review & merge runs as pid ${r.pid}; its log is ${r.log}, and k bugs shows its result` };
+  }
+  const r = await bugReview.review({ ws, id, via });
+  const at = `${r.branch} at ${r.head.slice(0, 12)}`;
+  const said = {
+    merged: () => `${id}: ${r.review.rel} clean${r.review.reused ? ' (taken again)' : ''}; ${at} merged into ${r.fixRepo}'s master as ` +
+      `${r.merged.slice(0, 12)}, not pushed; the bug closed${r.closed ? ` in ${r.closed}` : ''}`,
+    findings: () => `${id}: ${r.review.rel} found ${r.findings.length} thing${r.findings.length === 1 ? '' : 's'}${r.malformed ? ' (the review was malformed)' : ''}; ` +
+      `nothing merged, and the fix is not ready at ${r.head.slice(0, 12)}`,
+    conflict: () => `${id}: ${at} conflicts with master in ${r.conflict.join(', ') || 'files git does not name'}; nothing merged, written in ${r.review.rel}`,
+    'merge-refused': () => `${id}: ${r.review.rel} clean, but the merge was refused: ${r.why}`,
+  }[r.outcome]();
+  const problems = r.problems.map((p) => `  ${p}`);
+  return { ...r, code: r.outcome === 'merged' ? 0 : 1, text: [said, ...problems].join('\n') };
+}
+
 const VERBS = {
   async init({ flags }) {
     const module = resolve(expandHome(need(flags.workspace, '--workspace <path to the workspace module>')));
@@ -191,7 +232,7 @@ const VERBS = {
     for (const a of aspects) {
       say((a.sources || []).length > 0 && (a.edgeCases || []).length > 0, `aspect ${a.id} has a source and an edge case`);
     }
-    for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
+    for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'kirunak-bugs.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
     const settings = flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json');
     const wired = existsSync(settings) && readFileSync(settings, 'utf8').includes('hooks/kirunak-freeze.mjs');
     say(wired, `the freeze hook is wired in ${settings}${wired ? '' : ' (run k install)'}`);
@@ -202,6 +243,7 @@ const VERBS = {
     for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     for (const [ok, line] of compactChecks({ ws, settingsPath: settings })) say(ok, line);
     say(...trackerLine({ settingsPath: settings, kirunakRoot: KIRUNAK }));
+    say(...bugsHookLine({ settingsPath: settings }));
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);
@@ -228,7 +270,9 @@ const VERBS = {
     if (sub === 'start') {
       if (flags['dry-run']) return { text: `would start ${id} in ${taskPaths(ws, id).dir}` };
       const r = await intake.start({ ws, id, from: flags.from, title: flags.title });
-      const moved = r.draft ? `; the draft is now ${r.draft}${r.staged ? ', the move staged' : ''}: commit it with the intake` : '';
+      const was = r.bug ? 'bug' : r.draft ? 'draft' : null;
+      const records = r.records ? `, its records ${r.records}/` : '';
+      const moved = was ? `; the ${was} is now ${r[was]}${records}${r.staged ? ', the move staged' : ''}: commit it with the intake` : '';
       return { ...r, text: `started ${id}: ${r.dir} (${r.aspects} aspects open)${moved}` };
     }
     if (sub === 'aspects') {
@@ -490,21 +534,18 @@ const VERBS = {
   },
 
   // A prepared intake for a future task (kirunak-drafts): not the owner's, so any session runs these. Neither `new`
-  // nor `check` commits; the session that writes the draft commits it. `--bug-of <task>` writes a bug of that accepted
-  // task (kirunak-spikes AC-2).
+  // nor `check` commits; the session that writes the draft commits it. A bug is no draft: `--bug-of` is refused,
+  // naming `k bug new` (gulnya/kirunak-bugs AC-1).
   async draft({ ws, pos, flags }) {
     const sub = need(pos[0], 'draft verb: new|check|drop');
     const id = need(pos[1], 'draft id <repo>/<slug>');
     const dryRun = !!flags['dry-run'];
     if (sub === 'new') {
       const bugOf = flags['bug-of'] ?? null;
-      if (bugOf !== null && typeof bugOf !== 'string') throw usage('--bug-of names one accepted task: --bug-of <repo>/<slug>');
       const title = typeof flags.title === 'string' ? flags.title : '';
-      const r = drafts.newDraft({ ws, id, title, bugOf, session: session(flags), dryRun });
-      const bug = r.bugOf ? `, a bug of ${r.bugOf}` : '';
-      if (dryRun) return { ...r, text: `would write ${r.path}${bug}` };
-      const fix = r.bugOf ? ` (name the fix under ${drafts.FIX}, or delete that section when no fix exists)` : '';
-      return { ...r, text: `${r.path}${bug}: fill in every section${fix}, then \`k draft check ${id}\`, and commit it` };
+      const r = drafts.newDraft({ ws, id, title, bugOf: bugOf === null || typeof bugOf === 'string' ? bugOf : '', session: session(flags), dryRun });
+      if (dryRun) return { ...r, text: `would write ${r.path}` };
+      return { ...r, text: `${r.path}: fill in every section, then \`k draft check ${id}\`, and commit it` };
     }
     if (sub === 'check') return report(id, drafts.check(ws, id), '');
     if (sub === 'drop') {
@@ -513,6 +554,62 @@ const VERBS = {
       return { ...r, text: r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit` };
     }
     throw usage(`unknown draft verb ${sub}`);
+  },
+
+  // A bug, a fault in something that exists (gulnya/kirunak-bugs): `new`, `check`, `drop` and `from` are not the
+  // owner's, so any session runs them. `new` and `check` commit nothing; the session that writes the bug commits it.
+  // `drop` and `from` commit each repo's own paths alone; `from --no-commit` only stages them. `review`, Review &
+  // merge, is the owner's: kirunak-freeze refuses it from an agent's Bash tool.
+  async bug({ ws, pos, flags }) {
+    const sub = need(pos[0], 'bug verb: new|check|drop|from|review');
+    const id = need(pos[1], 'bug id <repo>/<slug>');
+    const dryRun = !!flags['dry-run'];
+    const one = (name, what) => {
+      const v = flags[name] ?? null;
+      if (v !== null && typeof v !== 'string') throw usage(`--${name} names ${what}`);
+      return v;
+    };
+    if (sub === 'new') {
+      const bugOf = one('bug-of', 'one accepted task: --bug-of <repo>/<slug>');
+      const fixRepo = one('fix-repo', 'the repo of the fix branch: --fix-repo <repo>');
+      const title = typeof flags.title === 'string' ? flags.title : '';
+      const r = bugs.newBug({ ws, id, title, bugOf, fixRepo, session: session(flags), dryRun });
+      const of = [r.bugOf && `a bug of ${r.bugOf}`, r.fixRepo && `its fix in ${r.fixRepo}`].filter(Boolean).join(', ');
+      const about = of ? `, ${of}` : '';
+      if (dryRun) return { ...r, text: `would write ${r.path}${about}` };
+      return { ...r, text: `${r.path}${about}: fill in every section (name the fix on ${r.branch} under ${drafts.FIX}, ` +
+        `or delete that section when no fix exists), then \`k bug check ${id}\`, and commit it` };
+    }
+    if (sub === 'check') return report(id, bugs.checkBug(ws, id), '');
+    if (sub === 'drop') {
+      const r = bugs.drop({ ws, id, why: typeof flags.why === 'string' ? flags.why : '', dryRun });
+      const kept = r.branch ? `; its fix branch ${r.branch.branch} is kept in ${r.branch.repo}` : '';
+      if (dryRun) return { ...r, text: `would remove ${r.rel} and ${r.dir} in ${r.repo}${r.tracked ? ` and commit "${r.message.split('\n')[0]}"` : ' (never committed, so no commit)'}${kept}` };
+      return { ...r, text: (r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit`) + kept };
+    }
+    if (sub === 'from') {
+      const r = bugs.from({ ws, id, dryRun, noCommit: !!flags['no-commit'] });
+      const lines = [
+        ...r.moves.map((m) => `${m.from} -> ${m.to}`),
+        ...r.renames.map((b) => `${b.repo}: branch ${b.from} -> ${b.to}`),
+        ...(r.skeleton ? [`${r.rel}: a bug's skeleton, to fill in from the intake and commit`] : []),
+        ...(r.fixRepo ? [`fix-repo: ${r.fixRepo}`] : []),
+        ...(r.order ? [`${r.order}: ${id} left the drafts' order`] : []),
+      ];
+      if (dryRun) return { ...r, text: [`would move the ${r.kind} ${id} into kirunak/bugs/:`, ...lines.map((l) => `  ${l}`)].join('\n') };
+      const done = flags['no-commit'] ? ['staged, not committed: commit each repo\'s paths alone (git commit -- <paths>)']
+        : r.commits.filter((c) => c.commit).map((c) => `committed in ${c.repo}: ${c.commit}`);
+      return { ...r, text: [`${id}: moved from the ${r.kind} into kirunak/bugs/`, ...lines.map((l) => `  ${l}`), ...done].join('\n') };
+    }
+    if (sub === 'review') return reviewed(ws, id, flags);
+    throw usage(`unknown bug verb ${sub}`);
+  },
+
+  // Every bug in every repo, those with a fix ready first, then the oldest: for /k-bugs, as an array with --json.
+  async bugs({ ws, pos }) {
+    if (pos.length) throw usage(`unknown bugs verb ${pos[0]}: k bugs`);
+    const rows = bugs.list(ws);
+    return { json: rows, text: bugs.format(rows) };
   },
 
   // Every draft in every repo, in the drafts' order: for /k-drafts, as an array with --json. `move` changes the order;
@@ -542,8 +639,11 @@ const VERBS = {
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
   // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
   // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
-  // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15).
+  // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15). First of all, the bugs
+  // that wait, in one line with how many have a fix ready, and first in --json: a count, that count and their ids; no
+  // line at all when none waits (gulnya/kirunak-bugs AC-7).
   async waiting({ ws }) {
+    const bugs = waiting.waitingBugs(ws);
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
     const approve = [];
@@ -564,6 +664,7 @@ const VERBS = {
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
+      ...(bugs.count ? [waiting.bugsLine(bugs)] : []),
       ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
@@ -571,7 +672,7 @@ const VERBS = {
       accept.length ? ['to accept:', ...accept.flatMap((x) => [line('accept')(x), ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
-    return { approve, accept, amendments, hold, start, drafts, stopped, text };
+    return { bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the
