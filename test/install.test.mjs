@@ -51,7 +51,7 @@ test('the block is written with the absolute path, and every other hook and key 
   }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
-  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-go-on']);
+  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-bug', 'k-go-on']);
   for (const s of SKILLS) {
     const link = join(h.skillsDir, s);
     assert.ok(lstatSync(link).isSymbolicLink());
@@ -164,6 +164,7 @@ test('--print writes nothing and prints everything with the paths filled in', ()
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`));
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-intake')} -> ${join(h.kirunakRoot, 'skills', 'k-intake')}`));
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-draft')} -> ${join(h.kirunakRoot, 'skills', 'k-draft')}`), 'the k-draft skill is linked like the others');
+  assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-bug')} -> ${join(h.kirunakRoot, 'skills', 'k-bug')}`), 'the k-bug skill is linked like the others (gulnya/kirunak-bugs AC-9)');
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`));
   assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"resume"`));
   assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`));

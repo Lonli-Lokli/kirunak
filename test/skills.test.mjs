@@ -1,15 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SKILLS as LINKED } from '../lib/install.mjs';
 import { KIRUNAK } from './helpers.mjs';
 
-// The five skills and the README rely on nothing kirunak does not ship (R1, R15, D2): every command they name is one
+// The six skills and the README rely on nothing kirunak does not ship (R1, R15, D2): every command they name is one
 // of an allow-list, every path is in this repo, a task folder or Claude Code's own settings, every skill is kirunak's.
-const FILES = ['skills/k-intake/SKILL.md', 'skills/k-done/SKILL.md', 'skills/k-board-page/SKILL.md', 'skills/k-draft/SKILL.md', 'skills/k-go-on/SKILL.md', 'README.md'];
+const FILES = ['skills/k-intake/SKILL.md', 'skills/k-done/SKILL.md', 'skills/k-board-page/SKILL.md', 'skills/k-draft/SKILL.md', 'skills/k-bug/SKILL.md', 'skills/k-go-on/SKILL.md', 'README.md'];
 const COMMANDS = new Set(['k', 'claude', 'git', 'node', 'npm', 'cd']);
 const SLASH = new Set(['/k-intake', '/k-done', '/k-approve', '/k-accept', '/k-hold', '/k-resume', '/k-start', '/kirunak', '/k-board-page', '/clear', '/k-list', '/k-board', '/k-amendments', '/k-approve-amendment', '/k-queue', '/k-drafts', '/k-bugs', '/k-go-on']);
-const SKILLS = new Set(['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-go-on']);
+const SKILLS = new Set(['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-bug', 'k-go-on']);
 
 const read = (f) => readFileSync(join(KIRUNAK, f), 'utf8');
 
@@ -61,7 +62,22 @@ test('the skills stay short', () => {
   assert.ok(read('skills/k-done/SKILL.md').split('\n').length <= 60);
   assert.ok(read('skills/k-board-page/SKILL.md').split('\n').length <= 40);
   assert.ok(read('skills/k-draft/SKILL.md').split('\n').length <= 80);
+  assert.ok(read('skills/k-bug/SKILL.md').split('\n').length <= 80);
   assert.ok(read('skills/k-go-on/SKILL.md').split('\n').length <= 20);
+});
+
+test('k install links every skill this repo ships, and only those', () => {
+  const shipped = readdirSync(join(KIRUNAK, 'skills')).filter((d) => !d.startsWith('.')).sort();
+  assert.deepEqual([...LINKED].sort(), shipped);
+  assert.deepEqual([...SKILLS].sort(), shipped);
+});
+
+test('a fault goes to k-bug and new work to k-draft: each description says so (gulnya/kirunak-bugs AC-9)', () => {
+  const description = (name) => /^description: (.+)$/m.exec(read(`skills/${name}/SKILL.md`))[1];
+  assert.match(description('k-bug'), /fault in something that already exists/);
+  assert.match(description('k-bug'), /Not for new work/);
+  assert.match(description('k-draft'), /Not for a fault in something that exists already/);
+  assert.doesNotMatch(description('k-draft'), /--bug-of|a bug turns up/);
 });
 
 test('k-go-on is the owner\'s alone: the model may not invoke it (design/approval.md §7, E-11)', () => {
