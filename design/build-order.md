@@ -66,7 +66,8 @@ test/fixtures/              an invented workspace: two repos, a checklist plugin
 `k` on PATH (`npm link`); `k init --workspace <path to the workspace module>`; `k install`, which:
 
 - writes the PreToolUse block into `~/.claude/settings.json` (or `--settings <path>`), with `<kirunak>` replaced by
-  this repo's absolute path, keeping every other hook; run again, it changes nothing:
+  this repo's absolute path, keeping every other hook; run again, it changes nothing, and a block of its own with
+  another command, matcher or timeout it rewrites to its own:
 
 ```json
 { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Skill",

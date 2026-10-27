@@ -524,7 +524,9 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
 **R8 `k install` and `k doctor`.**
 - **R8.1** The wiring, in the user's settings file as kirunak's other hooks: PreCompact `auto|manual` (`timeout: 10`),
   SessionEnd `clear` (`timeout: 5`), SessionStart `compact|clear` as four blocks, one per part (`timeout: 20`), each
-  recognised by its own command pattern, so one part's block is never taken for another's. They run in every session;
+  recognised by its own command pattern, so one part's block is never taken for another's. A block of its own whose
+  command, matcher or timeout differs from these is rewritten to them, the note naming the timeout found and the new
+  one (gulnya/kirunak-install-hook-timeouts), as every block k install wires is. They run in every session;
   R4.3a keeps them quiet outside the workspace.
 - **R8.2** The window per root: `handoverSize + SLACK` into `<projectRoot(root)>/.claude/settings.local.json` for each
   repo and `alsoIn` folder, after checking everything. A file git tracks is named and not written (a window there would
@@ -545,7 +547,8 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   `k init`, no roots: the line says the next `k install` writes them.
 - **R8.3** `k doctor`: `compact (<module> | kirunak's defaults): handover size, window, mid-step limit`, a number named
   with its window (`167000 (a 200000 window)`) and noting a user window under that window, `'user'` with the user's
-  own window and its per-model values, failing one not above the handover size (R7.2); the compact hook's wiring; per root
+  own window and its per-model values, failing one not above the handover size (R7.2); the compact hook's wiring, failing a block whose matcher or
+  timeout is not R8.1's (naming both timeouts, as the escalation hook's line does with its 10 s); per root
   the window, ignored by git, or the case that keeps it out (failing until the user acts); the user's own window,
   named and never failed; `here`, the window a session started in this folder gets and from where, and that outside
   the roots the hook never blocks; and the window of this session's model, failing a model not in R2.4's table.

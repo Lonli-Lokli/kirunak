@@ -131,6 +131,28 @@ test('its own block from an older checkout is updated, never added twice', () =>
   assert.equal(pre[1].hooks[0].command, `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`);
 });
 
+test('a block of its own whose timeout differs is rewritten to kirunak\'s, the note naming both; --print says the same; one that matches is already there (gulnya/kirunak-install-hook-timeouts)', () => {
+  const h = home();
+  install(h);
+  const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
+  const own = (event, end) => json.hooks[event].find((b) => b.hooks[0].command.endsWith(end)).hooks[0];
+  own('SessionStart', '--part task').timeout = 30;
+  own('SessionEnd', 'kirunak-compact.mjs').timeout = 1;
+  delete own('Stop', 'kirunak-escalate.mjs').timeout;
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  const part = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-compact.mjs')} --part task`;
+  const printed = install({ ...h, print: true }).actions;
+  assert.ok(printed.includes(`would set in ${h.settingsPath} hooks.SessionStart: ${JSON.stringify({ matcher: 'compact|clear', hooks: [{ type: 'command', command: part, timeout: 20 }] })}`), printed.join('\n'));
+  const { actions } = install(h);
+  assert.ok(actions.includes(`updated the kirunak SessionStart hook in ${h.settingsPath} to ${part} (matcher compact|clear), its timeout from 30 s to 20 s`), actions.join('\n'));
+  assert.ok(actions.includes(`updated the kirunak SessionEnd hook in ${h.settingsPath} to node ${join(h.kirunakRoot, 'hooks', 'kirunak-compact.mjs')} (matcher clear), its timeout from 1 s to 5 s`));
+  assert.ok(actions.includes(`updated the kirunak Stop hook in ${h.settingsPath} to node ${join(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs')}, its timeout from none to 10 s`));
+  const after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
+  const task = after.SessionStart.filter((b) => b.hooks[0].command.endsWith('--part task'));
+  assert.deepEqual([task.length, task[0].hooks[0].timeout, after.SessionEnd[0].hooks[0].timeout, after.Stop[0].hooks[0].timeout], [1, 20, 5, 10], 'rewritten, never added twice');
+  assert.ok(!install(h).actions.some((a) => a.startsWith('updated the kirunak')), 'a second run finds every block as kirunak gives it');
+});
+
 test('a foreign skill of the same name is refused by name, and nothing is written', () => {
   const h = home();
   mkdirSync(join(h.skillsDir, 'k-done'), { recursive: true });

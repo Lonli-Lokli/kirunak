@@ -62,6 +62,15 @@ test('a root not written, not ignored, the owner\'s, kirunak\'s earlier window, 
   ]);
 });
 
+test('a compact hook block with a timeout other than kirunak\'s FAILs naming the event and both timeouts (gulnya/kirunak-install-hook-timeouts)', () => {
+  const s = installed();
+  const settings = json(s.paths.settingsPath);
+  settings.hooks.SessionEnd[0].hooks[0].timeout = 1;
+  settings.hooks.SessionStart.find((b) => b.hooks[0].command.endsWith('--part plan')).hooks[0].timeout = 30;
+  writeFileSync(s.paths.settingsPath, JSON.stringify(settings));
+  assert.deepEqual(s.fails(), ['compact hook: not wired on SessionEnd clear (timeout 1 s, kirunak\'s 5 s), SessionStart compact|clear (timeout 30 s, kirunak\'s 20 s) (run k install)']);
+});
+
 test('the default limit: a small user window passes, one under the limit\'s window noted; with \'user\' one not above the handover size FAILs; the variable and a per-model key FAIL', () => {
   const s = installed({ user: { autoCompactWindow: 100000, modelSettings: {} } });
   assert.deepEqual(s.fails(), [], 'a number is the limit: the user\'s window is not in force in a workspace repo');
