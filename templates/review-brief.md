@@ -8,11 +8,14 @@ Your file tools are denied these; the shell is not, and you read none of them by
 Your inputs are in `{{inDir}}/` and nowhere else:
 
 - `{{inDir}}/task.md`: the frozen task.
-- `{{inDir}}/diff.patch`: the change from the approved commit {{base}} to head {{head}}.
+- `{{inDir}}/diff.patch`: the task's own change in {{repo}}, from its first approval {{base}} to head {{head}}: each
+  file touched by a commit in that range that names the task or names no task, diffed once. A commit that names only
+  other tasks is left out, and so are kirunak's records (the task folders, the drafts, the approvals, the
+  queue).{{amended}}{{repos}}
 - `{{inDir}}/evidence/`: what the steps produced (test reports, measurements, screenshots, logs).{{extra}}
 
-The repo itself is readable: read the code at head to check the change against it.
-
+The repo itself is readable: read the code at head to check the change against it.{{readable}}
+{{unnamed}}
 ## The task's lines, quoted from the frozen file
 
 {{lines}}
