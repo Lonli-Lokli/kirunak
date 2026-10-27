@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
+import { BUGS_MATCHER, FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
 import { DEFAULT_HOOK } from '../lib/ladder.mjs';
 import { gitInit, KIRUNAK } from './helpers.mjs';
 
@@ -59,8 +59,8 @@ test('the block is written with the absolute path, and every other hook and key 
   }
   assert.ok(lstatSync(join(h.skillsDir, 'k-go-on')).isSymbolicLink(), 'the owner\'s override, /k-go-on, is linked (R5.4)');
   // The PreToolUse block, the links, the escalation hook's 8 blocks, the compact hook's 6, 2 rung agents, config.json,
-  // the windows' line (no workspace yet), SessionStart, the tracker.
-  assert.equal(actions.length, 1 + SKILLS.length + 8 + 6 + 2 + 1 + 1 + 2);
+  // the windows' line (no workspace yet), the bugs' notice, SessionStart, the tracker.
+  assert.equal(actions.length, 1 + SKILLS.length + 8 + 6 + 2 + 1 + 1 + 3);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
   assert.match(actions.at(-2), /added the kirunak SessionStart hook/);
   assert.ok(actions.at(-1).endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
@@ -78,7 +78,7 @@ test('a missing settings file is created; a second run changes nothing', () => {
   assert.match(actions[0], /already has the kirunak PreToolUse hook/);
   assert.match(actions[1], /already links to/);
   assert.equal(JSON.parse(first).hooks.PreToolUse.length, 1);
-  assert.equal(JSON.parse(first).hooks.SessionStart.length, 6, 'the session hook, the escalation hook and the compact hook\'s 4 parts');
+  assert.equal(JSON.parse(first).hooks.SessionStart.length, 7, 'the session hook, the bugs\' notice, the escalation hook and the compact hook\'s 4 parts');
   assert.match(actions.at(-2), /already has the kirunak SessionStart hook/);
 });
 
@@ -90,10 +90,34 @@ test('the SessionStart block from an older checkout is updated; a status line th
   writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
   const { actions } = install(h);
   const after = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
-  assert.equal(after.hooks.SessionStart.length, 7, 'the old block pointed here, and the escalation hook\'s and the compact hook\'s added');
+  assert.equal(after.hooks.SessionStart.length, 8, 'the old block pointed here, and the bugs\' notice, the escalation hook\'s and the compact hook\'s added');
   assert.equal(after.hooks.SessionStart[1].hooks[0].command, `node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`);
   assert.deepEqual(after.statusLine, json.statusLine, 'k install never writes the status line');
   assert.match(actions.at(-1), /already runs kirunak's tracker/);
+});
+
+test('the bugs\' notice is one SessionStart block on startup|clear, after the session hook, its older checkout\'s pointed here and never added twice; --print names it (gulnya/kirunak-bugs AC-7)', () => {
+  const h = home();
+  const command = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-bugs.mjs')}`;
+  const ours = (hooks) => hooks.SessionStart.filter((b) => b.hooks.some((x) => x.command.endsWith('hooks/kirunak-bugs.mjs')));
+  const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
+  json.hooks.SessionStart.push({ matcher: 'startup', hooks: [{ type: 'command', command: 'node /old/place/hooks/kirunak-bugs.mjs', timeout: 10 }] });
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  install(h);
+  install(h);
+  const after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
+  assert.equal(BUGS_MATCHER, 'startup|clear', 'a session the owner starts, or starts again with /clear; never a resume or a compaction');
+  assert.deepEqual(ours(after), [{ matcher: 'startup|clear', hooks: [{ type: 'command', command, timeout: 10 }] }]);
+  assert.ok(existsSync(join(KIRUNAK, 'hooks', 'kirunak-bugs.mjs')), 'the hook it wires is in this checkout');
+
+  const fresh = home();
+  const settingsPath = join(fresh.dir, 'printed', 'settings.json');
+  const all = install({ ...fresh, settingsPath, print: true }).actions.join('\n');
+  assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"startup|clear","hooks":[{"type":"command","command":${JSON.stringify(`node ${join(fresh.kirunakRoot, 'hooks', 'kirunak-bugs.mjs')}`)}`), all);
+  install({ ...fresh });
+  assert.equal(ours(JSON.parse(readFileSync(fresh.settingsPath, 'utf8')).hooks).length, 1);
+  const s = JSON.parse(readFileSync(fresh.settingsPath, 'utf8')).hooks.SessionStart;
+  assert.ok(s.findIndex((b) => b.matcher === 'resume') < s.findIndex((b) => b.matcher === 'startup|clear'), 'after the session hook');
 });
 
 test('its own block from an older checkout is updated, never added twice', () => {

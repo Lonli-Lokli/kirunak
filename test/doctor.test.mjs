@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { frontmatter, ladderChecks, trackerLine } from '../lib/doctor.mjs';
+import { bugsHookLine, frontmatter, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import { install } from '../lib/install.mjs';
 import { k, KIRUNAK, ladderWorkspace } from './helpers.mjs';
 
@@ -170,6 +170,23 @@ test('k doctor --settings --agents prints the ladder lines', async () => {
   assert.match(out, /^FAIL models\.escalate is no longer read/m);
   assert.match(out, /^ok {3}push to the phone: on \(agentPushNotifEnabled in .*settings\.json\)$/m);
   assert.match(out, /^WARN status line tracker: no statusLine command in .*settings\.json, so sessions' cost is not tracked/m);
+  assert.match(out, /^ok {3}bugs' notice: wired on SessionStart startup\|clear$/m);
+  assert.match(out, /^ok {3}hook kirunak-bugs\.mjs$/m);
+});
+
+test('the bugs\' notice is ok after k install, and FAILs naming k install when it is not wired or wired with another matcher (gulnya/kirunak-bugs AC-7)', async () => {
+  const w = await installed();
+  const check = () => bugsHookLine({ settingsPath: w.settingsPath });
+  assert.deepEqual(check(), [true, "bugs' notice: wired on SessionStart startup|clear"]);
+  const ours = (json) => json.hooks.SessionStart.find((b) => b.hooks[0].command.endsWith('hooks/kirunak-bugs.mjs'));
+  w.settings((json) => { ours(json).matcher = 'startup|resume|clear'; });
+  assert.deepEqual(check(), [false, "bugs' notice: wired on SessionStart with matcher startup|resume|clear, kirunak's startup|clear (run k install)"]);
+  w.settings((json) => { delete ours(json).matcher; });
+  assert.deepEqual(check(), [false, "bugs' notice: wired on SessionStart with matcher none, kirunak's startup|clear (run k install)"]);
+  w.settings((json) => { json.hooks.SessionStart = json.hooks.SessionStart.filter((b) => !b.hooks[0].command.endsWith('hooks/kirunak-bugs.mjs')); });
+  assert.deepEqual(check(), [false, `bugs' notice: not wired on SessionStart in ${w.settingsPath} (run k install)`]);
+  writeFileSync(w.settingsPath, 'not json');
+  assert.equal(check()[0], false, 'a settings file it cannot read');
 });
 
 test('the status line tracker is a WARN naming the line to add until statusLine, or a script it names, runs it (cost-untracked-sessions AC-3)', async () => {
