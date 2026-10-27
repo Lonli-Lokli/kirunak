@@ -52,6 +52,17 @@ kirunak/
   refuses one: a bug is parked while it waits here, taken once an intake moves it, and closed by `k draft drop`.
   `k drafts` names its task, and its `--json` row carries `bugOf` (null for a plain draft). Evidence: the owner's
   ruling (R29): no new kind of file, so a bug waits, shows and goes as any draft does.
+- **The drafts' order** (owner, 2026-10-27: the drafts that need a longer intake wait at the end) is one file,
+  `drafts-order.md`, beside the queue in the repo that holds it (`ws.draftOrder`), one draft id a line, first first,
+  `#` lines comments, a record like the queue (`approval.md` §3). `k drafts`, the board, `k waiting` and `/k-drafts`
+  list the drafts it names first, as it names them, then the others by the date written, then by id, an undated one
+  last; an id that is no longer a draft is passed over. `k drafts move <id>... [--first|--last|--before
+  <id>|--after <id>]` (no flag: last) puts the drafts named, in the order named, in that place, writes the file whole
+  (every draft in its place, no id that is gone) and commits it alone, `kirunak: drafts move <id>` (or `<n> drafts`,
+  the ids in the body); it refuses no draft, an unknown one, one named twice, an unknown target or one being moved,
+  commits nothing when the order is already so, and puts the file back when the commit is refused. Judgement: any
+  session runs it, since a draft is not the owner's (R25); a new draft waits after the drafts the file names until a
+  move places it.
 - `k intake start <id> --from kirunak/drafts/<slug>.md` moves the draft with `git mv` to `tasks/<slug>/draft.md`, so
   it is never in two places and git follows its history (`intake.md` §1); a bug moves only while its task is still
   accepted, and its `notes.md` holds that task's lines. `k draft drop <id> --why "..."` removes it in a commit of

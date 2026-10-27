@@ -124,9 +124,10 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   repo's name and a slash names that repo's task (`katyafm/settings` never names gulnya's `settings`). The `Task:`
   trailer is part of the message, so it names its task the same way.
 - **kirunak's records** (AC-5): in every repo, `kirunak/tasks/`, `kirunak/drafts/`, `kirunak/approvals/`, the
-  workspace's queue file, and each file or folder the workspace's `records` names (`plugins.md` §3; gulnya's names
-  `kirunak/plan.md` and `kirunak/amendments.md`, D-3), each at its path inside the repo that holds it
-  (`kirunak/queue.md` in gulnya), the same path in a worktree of that repo.
+  workspace's queue file, the drafts' order beside it (`task-files.md` §1), and each file or folder the workspace's
+  `records` names (`plugins.md` §3; gulnya's names `kirunak/plan.md` and `kirunak/amendments.md`, D-3), each at its
+  path inside the repo that holds it (`kirunak/queue.md` and `kirunak/drafts-order.md` in gulnya), the same path in a
+  worktree of that repo.
 - **No new work on an accepted task** (AC-8, E-1): a commit whose message names a task of this repo the owner has
   accepted (its folder in the main checkout holds `done.json`, whose `task` is its id, or the default branch has that
   file committed: the accepted set below), the trailer the hook is about to write included, is
