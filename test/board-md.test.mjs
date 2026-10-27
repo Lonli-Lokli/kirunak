@@ -6,9 +6,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
-import { bullet, counts, cut, draftBullet, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
+import { bugBullet, bullet, counts, cut, draftBullet, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
-import { addTask, bugAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
@@ -314,4 +314,59 @@ test('a bug\'s bullet keeps bug of <task> and its date when its title is cut, an
     '',
   ].join('\n'));
   assert.doesNotMatch(text + r.stdout, /spike/i, 'called a bug, never a spike');
+});
+
+test('the bugs before the drafts: a group Bugs, k waiting\'s line, then one bullet a bug with its id, its title cut to fit, its fix, its task and its date; nothing when none waits (gulnya/kirunak-bugs AC-7)', async () => {
+  const w = await fixture();
+  draftsAt(w);
+  assert.ok(!(await board(w)).includes('## Bugs'), 'no group when no bug waits');
+  bugsAt(w);
+  const text = await board(w);
+  const block = [
+    '## Bugs (2)',
+    '',
+    '2 bugs wait, 1 with a fix ready: /k-bugs',
+    '',
+    '- hub/queue-stuck: The queue ke…, fix ready, bug of weather/recent, written 2026-11-06',
+    '- weather/rain-icon: The rain icon shows…, no fix, written 2026-11-04',
+    '',
+    '## Drafts (2)',
+  ].join('\n');
+  assert.ok(text.includes(`- weather/recent: Done this week (3 none)\n\n${block}`), text);
+  for (const l of block.split('\n')) assert.ok(l.length <= 90, l);
+  noHardBreak(text);
+  assert.equal(bugBullet({ id: 'hub/x', title: 'Short', fix: 'no fix', written: null, bugOf: 'weather/a_b' }), '- hub/x: Short, no fix, bug of weather/a\\_b, no date', 'its task escaped as text');
+});
+
+test('k board --card <bug id> answers with the bug\'s card: its fix, its task, its file, and /k-bugs with Review & merge only when its fix is ready (gulnya/kirunak-bugs AC-6, AC-7)', async () => {
+  const w = await fixture();
+  bugsAt(w);
+  const card = (id) => {
+    const r = k(w.home, ['board', '--card', id]);
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout;
+  };
+  assert.equal(card('hub/queue-stuck'), [
+    '### hub/queue-stuck',
+    '',
+    'The queue keeps a finished job',
+    '',
+    '- a bug, fix ready, bug of weather/recent, written 2026-11-06',
+    '- file: kirunak/bugs/queue-stuck.md in hub',
+    '',
+    '/k-bugs shows it whole, with Review & merge, Start fix and Drop.',
+    '',
+  ].join('\n'));
+  assert.equal(card('weather/rain-icon'), [
+    '### weather/rain-icon',
+    '',
+    'The rain icon shows \\<sun\\>',
+    '',
+    '- a bug, no fix, written 2026-11-04',
+    '- file: kirunak/bugs/rain-icon.md in weather',
+    '',
+    '/k-bugs shows it whole, with Start fix and Drop.',
+    '',
+  ].join('\n'));
+  assert.equal(k(w.home, ['board', '--card', 'hub/nope']).status, 1, 'no task, no bug and no draft');
 });
