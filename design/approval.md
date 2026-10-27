@@ -95,7 +95,9 @@ reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuse
    the variables, so not even an accept commits a hand edit: "cost.md is generated from done.json; `k cost <id>
    --write` writes it again" (a removal passes: the command brings it back).
 
-`k approve`, `k accept` and `k hold` set those variables on the one `git commit` they run. The mod's route takes the
+`k approve`, `k accept` and `k hold` set those variables on the one `git commit` they run. The SLAP gate does not
+measure that commit when it holds only the records of the task its variable names (`change-size.md` §3, bug
+gulnya/accept-refused-by-slap), so a long `done.json` never refuses an accept. The mod's route takes the
 same hooks (review N49, settled 2026-10-19): `$.process.run` says "Git runs with repo hooks off", and measured on
 Claude Code 2.1.303 that means only a `git` it starts itself (`argv[0]` git, given `-c core.hooksPath=/dev/null` on
 the command line); a `git` started by `sh` or `node` under it ran the repo's `prepare-commit-msg` in a probe repo.
@@ -260,7 +262,11 @@ each blocking file and commit, `<path>  <sha>  <task>`, where the task is the co
 one, else every workspace task its message names, else `no task` (AC-6). `k waiting` and `/k-accept` show the same
 lines, the phone at most ten for a task (`boards.md` §4). Another repo of the task's work is judged after the own
 repo, below. It writes `done.json` with the review it took (file, verdict, head, hash, `task-files.md` §3), commits
-with `KIRUNAK_ACCEPTING`, removes the task from the queue. It is what the `k-done` skill asks the owner to type
+with `KIRUNAK_ACCEPTING`, removes the task from the queue. A task is already accepted only when HEAD holds its
+`done.json`; a `done.json` or `cost.md` on disk or staged that git does not hold, left by an accept refused before
+the fix of bug gulnya/accept-refused-by-slap, is written over and committed. When the commit is refused, `done.json`
+and `cost.md` are put back as they were, on disk and in the index, so the retry meets nothing of the refused try;
+`k hold` and `k resume` do the same with `hold.md` (`lib/git.mjs` `writeAndCommit`). It is what the `k-done` skill asks the owner to type
 (`review.md` §4).
 
 In another repo (gulnya/kirunak-review-base AC-10), `k accept` judges the task's change against the head its latest
