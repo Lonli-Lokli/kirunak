@@ -45,7 +45,8 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
 8. **Commit the intake**: `git add kirunak/tasks/<slug>` and `git commit -m "kirunak: intake <id>"`, in the
    task's repo, before asking for approval. From a kirunak draft or a bug, its staged move goes in the same commit.
 9. **Hand over.** Print the task once, whole. Then say: "Type `! k approve <id>` to freeze and queue it." Stop
-   there. If the owner wants a change first, edit the draft, `k check`, commit, and hand over again.
+   there. If the owner wants a change first, edit the draft, `k check`, commit, and hand over again. With the
+   kirunak mod, /k-approve gives this session a turn of its own that says whether k took it: go on from there.
 
 ## Writing `task.md` while it is a draft
 
@@ -125,4 +126,4 @@ with the task whole and: "Type /k-approve to freeze and queue it."
 
 The task is frozen. A change is an amendment: `k amend new <id> --title "<a few words>"`, fill in Why and Changes
 (`replace <id>: <line>`, `add <id>: <line>`, `remove <id>`, each new line with its source), `k amend check <id> A-n`,
-then ask the owner to type `! k approve <id> --amendment A-n`.
+then ask the owner to type `! k approve <id> --amendment A-n`. With the mod, a turn says if it took (step 9).

@@ -127,6 +127,7 @@ validation, archives) then go unused, and what the owner needs is not in it:
   the owner approves. **Drop** removes the bug as a draft's drop does (R27), its fix branch kept and named. `k
   waiting`, the board and every session the owner starts name the bugs before the drafts, as "N bugs wait, M with a
   fix ready: /k-bugs", and say nothing when there are none; a step's session is told nothing.
+  After Review & merge, or an owner's verb in the mod on its own task, the session takes a turn of its own and goes on.
 
 ### The task is frozen
 - R5 On approval, the task's file is frozen: its goal, numbered acceptance criteria (AC-1, AC-2, ...), numbered edge

@@ -144,6 +144,9 @@ You need Node 22 or later, git and Claude Code.
 
    A tap in these dialogs is your own gesture, like a typed command; `/k-board-page` is the only one of these that
    uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
+   After a verb on the task this session works on, or ran the intake of, the session takes a turn of its own: it
+   says what you did, or what failed with kirunak's reason, and goes on; after `/k-start` it starts the work, and
+   after Review & merge it watches the review and tells you how it ended.
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
    model included, gets a line saying so and nothing runs (`design/approval.md` §5). That rule is a file of this
