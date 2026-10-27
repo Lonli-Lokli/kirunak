@@ -54,12 +54,13 @@ const put = (path, text) => {
   writeFileSync(path, text);
 };
 
-// A groomed bug: the owner's words, why, findings with sources, the fix written, questions each with its Proposed line.
-const filled = ({ id = BUG, front = `bug-of: ${TASK}\n`, fix = '- the cache expires [commit 1a2b3c4]\n', written = '2026-10-22' } = {}) => `---
+// A groomed bug: the owner's words, why, findings with sources, the fix written, questions each with its Proposed line,
+// marked yes unless `mark` says otherwise ('' for none, as a draft has).
+const filled = ({ id = BUG, front = `bug-of: ${TASK}\n`, mark = 'quad-damage: yes\n', fix = '- the cache expires [commit 1a2b3c4]\n', written = '2026-10-22' } = {}) => `---
 id: ${id}
 title: Stale map tiles
 written: ${written}
-${front}---
+${front}${mark}---
 
 ## Who raised it
 > the map shows yesterday's tiles
@@ -80,10 +81,10 @@ ${fix === null ? '' : `\n## Fix written\n${fix}`}
 
 test('k bug new writes the skeleton in kirunak/bugs/, commits nothing, and the check refuses every placeholder', async () => {
   const w = await bugWorkspace();
-  const r = newBug({ ws: w.ws, id: BUG, title: ' Stale map tiles ', bugOf: ` ${TASK} `, session: '5f0c2a', now: OCT22 });
-  assert.deepEqual([r.path, r.bugOf, r.fixRepo, r.branch], [bugFile(w), TASK, null, 'bug/stale-tiles']);
+  const r = newBug({ ws: w.ws, id: BUG, title: ' Stale map tiles ', quadDamage: ' yes ', bugOf: ` ${TASK} `, session: '5f0c2a', now: OCT22 });
+  assert.deepEqual([r.path, r.bugOf, r.fixRepo, r.branch, r.quadDamage], [bugFile(w), TASK, null, 'bug/stale-tiles', 'yes']);
   const text = readFileSync(r.path, 'utf8');
-  assert.match(text, /^---\nid: hub\/stale-tiles\ntitle: Stale map tiles\nwritten: 2026-10-22\nbug-of: weather\/offline-forecast\n---\n/);
+  assert.match(text, /^---\nid: hub\/stale-tiles\ntitle: Stale map tiles\nwritten: 2026-10-22\nbug-of: weather\/offline-forecast\nquad-damage: yes\n---\n/);
   assert.deepEqual(parseDraft(text).sections.map((s) => s.name), ['Who raised it', 'Why', 'What was found', 'Fix written', 'Questions']);
   assert.match(text, /session 5f0c2a/);
   assert.match(text, /on the branch bug\/stale-tiles/);
@@ -98,21 +99,21 @@ test('k bug new writes the skeleton in kirunak/bugs/, commits nothing, and the c
     '## Questions is empty: it still holds its placeholder',
   ]);
   // No task and no fix repo of its own: neither line is written.
-  const plain = newBug({ ws: w.ws, id: 'weather/slow-start', title: 'Slow start', fixRepo: 'weather', now: OCT22 });
+  const plain = newBug({ ws: w.ws, id: 'weather/slow-start', title: 'Slow start', quadDamage: 'no', fixRepo: 'weather', now: OCT22 });
   assert.equal(plain.fixRepo, null);
-  assert.match(readFileSync(plain.path, 'utf8'), /^---\nid: weather\/slow-start\ntitle: Slow start\nwritten: 2026-10-22\n---\n/);
-  const elsewhere = newBug({ ws: w.ws, id: 'hub/k-crash', title: 'k crashes', fixRepo: 'kirunak', now: OCT22 });
-  assert.match(readFileSync(elsewhere.path, 'utf8'), /\nwritten: 2026-10-22\nfix-repo: kirunak\n---\n/);
+  assert.match(readFileSync(plain.path, 'utf8'), /^---\nid: weather\/slow-start\ntitle: Slow start\nwritten: 2026-10-22\nquad-damage: no\n---\n/);
+  const elsewhere = newBug({ ws: w.ws, id: 'hub/k-crash', title: 'k crashes', quadDamage: 'yes', fixRepo: 'kirunak', now: OCT22 });
+  assert.match(readFileSync(elsewhere.path, 'utf8'), /\nwritten: 2026-10-22\nfix-repo: kirunak\nquad-damage: yes\n---\n/);
 });
 
 test('k bug new refuses an unknown repo, a bad id, a title missing or long, and an id already a bug, a draft or a task', async () => {
   const w = await bugWorkspace();
-  const nu = (id, more = {}) => () => newBug({ ws: w.ws, id, title: 'Stale tiles', ...more });
+  const nu = (id, more = {}) => () => newBug({ ws: w.ws, id, title: 'Stale tiles', quadDamage: 'yes', ...more });
   assert.throws(nu('radio/x'), (e) => e.code === 1 && /^unknown repo radio: kirunak's workspace lists weather, hub\. Ask the owner to add radio to kirunak's workspace first \(.*\), then write the bug$/.test(e.message));
   assert.throws(nu('hub/Stale'), (e) => e.code === 2 && /^not a bug id: hub\/Stale/.test(e.message));
   assert.throws(nu(BUG, { title: ' ' }), (e) => e.code === 2 && /^a bug needs its title/.test(e.message));
   assert.throws(nu(BUG, { title: 'x'.repeat(81) }), (e) => e.code === 2 && /^a bug's title is a few words, at most/.test(e.message));
-  newBug({ ws: w.ws, id: BUG, title: 'Stale tiles' });
+  newBug({ ws: w.ws, id: BUG, title: 'Stale tiles', quadDamage: 'no' });
   assert.throws(nu(BUG), (e) => e.code === 1 && e.message === `${BUG} is already a bug: ${bugFile(w)}`);
   put(draftFile(w, 'wind'), '---\nid: hub/wind\n---\n');
   assert.throws(nu('hub/wind', { dryRun: true }), (e) => e.code === 1 && e.message === `hub/wind is already a draft: ${draftFile(w, 'wind')}; \`k bug from hub/wind\` moves it into kirunak/bugs/`);
@@ -124,7 +125,7 @@ test('k bug new refuses an unknown repo, a bad id, a title missing or long, and 
 
 test('AC-10, E-1, E-2: --bug-of names an accepted task or is refused; --fix-repo names a repo of the workspace or kirunak', async () => {
   const w = await bugWorkspace({ accepted: false });
-  const nu = (more) => () => newBug({ ws: w.ws, id: BUG, title: 'Stale tiles', ...more });
+  const nu = (more) => () => newBug({ ws: w.ws, id: BUG, title: 'Stale tiles', quadDamage: 'yes', ...more });
   const open = `${TASK} is not accepted yet: a bug found while a task is open goes into that task, through its review or an amendment (k amend new ${TASK} --title "...")`;
   const gone = join(rootOf(w), 'kirunak', 'tasks', 'gone', 'task.md');
   for (const dryRun of [false, true]) {
@@ -137,7 +138,7 @@ test('AC-10, E-1, E-2: --bug-of names an accepted task or is refused; --fix-repo
   }
   assert.equal(existsSync(bugFile(w)), false);
   // With no bug-of it needs no task at all (AC-10), and a dry run writes nothing.
-  assert.equal(newBug({ ws: w.ws, id: BUG, title: 'Stale tiles', dryRun: true }).path, bugFile(w));
+  assert.equal(newBug({ ws: w.ws, id: BUG, title: 'Stale tiles', quadDamage: 'yes', dryRun: true }).path, bugFile(w));
   assert.equal(existsSync(bugFile(w)), false);
 });
 
@@ -214,7 +215,7 @@ test('k bugs: every repo\'s bugs, a ready fix first, then by date; fix ready fro
   const rows = list(w.ws);
   assert.deepEqual(rows.map((r) => [r.id, r.fixReady]), [['hub/b', true], ['hub/e', true], ['weather/d', false], ['hub/a', false], ['weather/c', false]]);
   const at = (id) => rows.find((r) => r.id === id);
-  assert.deepEqual(Object.keys(at('hub/b')), ['id', 'repo', 'slug', 'title', 'written', 'bugOf', 'fixRepo', 'branch', 'head', 'ahead', 'fixReady', 'reviewing', 'review', 'path']);
+  assert.deepEqual(Object.keys(at('hub/b')), ['id', 'repo', 'slug', 'title', 'written', 'bugOf', 'fixRepo', 'quadDamage', 'branch', 'head', 'ahead', 'fixReady', 'reviewing', 'review', 'path']);
   assert.deepEqual([at('hub/b').branch, at('hub/b').head, at('hub/b').ahead, at('hub/b').fixRepo, at('hub/b').review], ['bug/b', b, 1, 'hub', null]);
   assert.deepEqual([at('hub/e').fixRepo, at('hub/e').written, at('hub/e').reviewing], ['kirunak', null, { pid: process.pid, started: '2026-10-27T10:00:00Z' }]);
   assert.deepEqual(at('hub/e').review, { file: 'review-1.md', verdict: 'findings', head: old, atHead: false });
@@ -279,7 +280,7 @@ const MOVED = ['M\tkirunak/drafts-order.md', 'R\tkirunak/drafts/stale-tiles.md\t
 async function draftedBug() {
   const w = await bugWorkspace();
   const sha = fixBranch(w.self, 'draft/stale-tiles');
-  put(draftFile(w), filled({ fix: `- the cache expires [commit ${sha.slice(0, 10)}]\n` }).replace('\n## Questions', '\n## Questions'));
+  put(draftFile(w), filled({ mark: '', fix: `- the cache expires [commit ${sha.slice(0, 10)}]\n` }));
   put(w.ws.draftOrder, `# the order\n${BUG}\nweather/wind-alerts\n`);
   gitCommitAll(w.hub, 'the draft');
   return { w, sha };
@@ -289,15 +290,15 @@ test('AC-3, E-4: k bug from moves a draft with its history, renames draft/<slug>
   const { w, sha } = await draftedBug();
   put(join(w.hub, 'README.md'), 'staged, not the move\n');
   git(w.hub, 'add', 'README.md');
-  const dry = from({ ws: w.ws, id: BUG, dryRun: true });
-  assert.deepEqual([dry.kind, dry.moves, dry.renames, dry.fixRepo], ['draft', [{ from: 'kirunak/drafts/stale-tiles.md', to: 'kirunak/bugs/stale-tiles.md' }], [{ repo: 'kirunak', from: 'draft/stale-tiles', to: 'bug/stale-tiles' }], 'kirunak']);
+  const dry = from({ ws: w.ws, id: BUG, quadDamage: 'yes', dryRun: true });
+  assert.deepEqual([dry.kind, dry.moves, dry.renames, dry.fixRepo, dry.quadDamage], ['draft', [{ from: 'kirunak/drafts/stale-tiles.md', to: 'kirunak/bugs/stale-tiles.md' }], [{ repo: 'kirunak', from: 'draft/stale-tiles', to: 'bug/stale-tiles' }], 'kirunak', 'yes']);
   assert.ok(existsSync(draftFile(w)));
   assert.equal(git(w.self, 'branch', '--list', 'bug/*'), '');
 
-  const r = from({ ws: w.ws, id: BUG });
+  const r = from({ ws: w.ws, id: BUG, quadDamage: 'yes' });
   assert.equal(existsSync(draftFile(w)), false);
   const text = readFileSync(bugFile(w), 'utf8');
-  assert.match(text, /^---\nid: hub\/stale-tiles\ntitle: Stale map tiles\nwritten: 2026-10-22\nbug-of: weather\/offline-forecast\nfix-repo: kirunak\n---\n/);
+  assert.match(text, /^---\nid: hub\/stale-tiles\ntitle: Stale map tiles\nwritten: 2026-10-22\nbug-of: weather\/offline-forecast\nfix-repo: kirunak\nquad-damage: yes\n---\n/);
   assert.equal(git(w.self, 'rev-parse', 'bug/stale-tiles'), sha);
   assert.equal(git(w.self, 'branch', '--list', 'draft/*'), '');
   assert.deepEqual(checkBug(w.ws, BUG), []);
@@ -308,22 +309,22 @@ test('AC-3, E-4: k bug from moves a draft with its history, renames draft/<slug>
   assert.equal(readFileSync(w.ws.draftOrder, 'utf8'), '# the order\nweather/wind-alerts\n');
   assert.equal(git(w.hub, 'diff', '--cached', '--name-only'), 'README.md');
   assert.deepEqual(list(w.ws).map((x) => [x.id, x.fixReady, x.fixRepo]), [[BUG, true, 'kirunak']]);
-  assert.throws(() => from({ ws: w.ws, id: BUG }), (e) => e.code === 1 && e.message === `${BUG} is already a bug: ${bugFile(w)}`);
+  assert.throws(() => from({ ws: w.ws, id: BUG, quadDamage: 'no' }), (e) => e.code === 1 && e.message === `${BUG} is already a bug: ${bugFile(w)}`);
 });
 
 test('k bug from --no-commit only stages; a bug/<slug> anywhere already, or no draft or intake, refuses before anything moves', async () => {
   const { w } = await draftedBug();
   const head = git(w.hub, 'rev-parse', 'HEAD');
   git(w.weather, 'branch', 'bug/stale-tiles');
-  assert.throws(() => from({ ws: w.ws, id: BUG }), (e) => e.code === 1 && /^bug\/stale-tiles exists already in weather: a bug's fix branch is its own/.test(e.message));
+  assert.throws(() => from({ ws: w.ws, id: BUG, quadDamage: 'yes' }), (e) => e.code === 1 && /^bug\/stale-tiles exists already in weather: a bug's fix branch is its own/.test(e.message));
   assert.ok(existsSync(draftFile(w)));
   assert.equal(git(w.self, 'branch', '--list', 'draft/stale-tiles'), 'draft/stale-tiles');
   git(w.weather, 'branch', '-D', 'bug/stale-tiles');
-  assert.throws(() => from({ ws: w.ws, id: 'hub/none' }), (e) => e.code === 1 && /^no draft or intake hub\/none: /.test(e.message));
+  assert.throws(() => from({ ws: w.ws, id: 'hub/none', quadDamage: 'yes' }), (e) => e.code === 1 && /^no draft or intake hub\/none: /.test(e.message));
   put(draftFile(w, 'offline-forecast', 'weather'), '---\nid: weather/offline-forecast\n---\n');
-  assert.throws(() => from({ ws: w.ws, id: TASK }), (e) => e.code === 1 && /is an approved task \(kirunak\/approvals\/offline-forecast\.json\)/.test(e.message));
+  assert.throws(() => from({ ws: w.ws, id: TASK, quadDamage: 'yes' }), (e) => e.code === 1 && /is an approved task \(kirunak\/approvals\/offline-forecast\.json\)/.test(e.message));
 
-  const r = from({ ws: w.ws, id: BUG, noCommit: true });
+  const r = from({ ws: w.ws, id: BUG, quadDamage: 'yes', noCommit: true });
   assert.equal(r.commits[0].commit, null);
   assert.equal(git(w.hub, 'rev-parse', 'HEAD'), head);
   assert.deepEqual(moved(git(w.hub, 'diff', '--cached', '--name-status', '-M')), MOVED);
@@ -334,26 +335,28 @@ test('AC-3: k bug from moves a task whose intake is not approved, its folder who
   const w = await bugWorkspace({ accepted: false });
   const dir = join(rootOf(w), 'kirunak', 'tasks', 'offline-forecast');
   const intake = readFileSync(join(dir, 'intake.md'));
-  const r = from({ ws: w.ws, id: TASK });
+  const r = from({ ws: w.ws, id: TASK, quadDamage: 'no' });
   assert.deepEqual([r.kind, r.skeleton, r.moves], ['intake', true, [{ from: 'kirunak/tasks/offline-forecast', to: 'kirunak/bugs/offline-forecast' }]]);
   assert.equal(existsSync(dir), false);
   assert.deepEqual(readFileSync(join(w.weather, 'kirunak', 'bugs', 'offline-forecast', 'intake.md')), intake);
   assert.match(git(w.weather, 'log', '-1', '--format=%s'), /^kirunak: weather\/offline-forecast is a bug: its intake, never approved, moved/);
   assert.equal(git(w.weather, 'status', '--porcelain'), '?? kirunak/bugs/offline-forecast.md');
-  assert.match(readFileSync(bugFile(w, 'offline-forecast', 'weather'), 'utf8'), /^---\nid: weather\/offline-forecast\ntitle: The last forecast stays readable offline\nwritten: \d{4}-\d\d-\d\d\n---\n\n## Who raised it\n<!-- fill in/);
+  assert.match(readFileSync(bugFile(w, 'offline-forecast', 'weather'), 'utf8'), /^---\nid: weather\/offline-forecast\ntitle: The last forecast stays readable offline\nwritten: \d{4}-\d\d-\d\d\nquad-damage: no\n---\n\n## Who raised it\n<!-- fill in/);
 
   // With a draft.md the intake took, that draft is the bug, its history kept.
   const v = await bugWorkspace({ accepted: false });
   const vdir = join(rootOf(v), 'kirunak', 'tasks', 'offline-forecast');
-  put(join(vdir, 'draft.md'), filled({ id: TASK, front: '', fix: null }));
+  put(join(vdir, 'draft.md'), filled({ id: TASK, front: '', mark: '', fix: null }));
   gitCommitAll(v.weather, 'the intake took a draft');
-  from({ ws: v.ws, id: TASK });
+  from({ ws: v.ws, id: TASK, quadDamage: 'no' });
   assert.equal(git(v.weather, 'status', '--porcelain'), '');
-  assert.equal(git(v.weather, 'show', '--name-status', '--format=', '-M', 'HEAD'), [
-    'R100\tkirunak/tasks/offline-forecast/draft.md\tkirunak/bugs/offline-forecast.md',
+  // The draft is marked as it moves, so its rename carries the one line of the mark.
+  assert.match(git(v.weather, 'show', '--name-status', '--format=', '-M', 'HEAD'), new RegExp(`^${[
+    'R09\\d\tkirunak/tasks/offline-forecast/draft.md\tkirunak/bugs/offline-forecast.md',
     'R100\tkirunak/tasks/offline-forecast/intake.md\tkirunak/bugs/offline-forecast/intake.md',
     'R100\tkirunak/tasks/offline-forecast/task.md\tkirunak/bugs/offline-forecast/task.md',
-  ].join('\n'));
+  ].join('\n')}$`));
+  assert.match(readFileSync(bugFile(v, 'offline-forecast', 'weather'), 'utf8'), /\nwritten: 2026-10-22\nquad-damage: no\n---\n/);
   assert.deepEqual(checkBug(v.ws, TASK), []);
 });
 
@@ -361,7 +364,7 @@ test('k bug from refuses an approved task, naming its review, an amendment or a 
   const w = await bugWorkspace({ accepted: false });
   await approve({ ws: w.ws, id: TASK });
   for (const dryRun of [false, true]) {
-    assert.throws(() => from({ ws: w.ws, id: TASK, dryRun }), (e) => e.code === 1 && e.message ===
+    assert.throws(() => from({ ws: w.ws, id: TASK, quadDamage: 'yes', dryRun }), (e) => e.code === 1 && e.message ===
       `${TASK} is an approved task (kirunak/approvals/offline-forecast.json): only a draft or a task whose intake is not approved moves into kirunak/bugs/; ` +
       `a fault in an approved task goes into it, through its review or an amendment (k amend new ${TASK} --title "..."), and once it is accepted, into a bug of it (k bug new <repo>/<slug> --bug-of ${TASK})`);
   }
@@ -369,14 +372,54 @@ test('k bug from refuses an approved task, naming its review, an amendment or a 
   assert.equal(verify(w.ws, TASK), 'ok');
 });
 
+test('AC-2, AC-3: every bug carries its mark, quad-damage yes or no; new and from refuse one without it, the check one with neither, k bugs reads it', async () => {
+  const hint = 'yes when Quad Damage may take the bug (the k-bug skill says when), else no';
+  const problems = (mark) => checkBugText(filled({ mark }), BUG);
+  assert.deepEqual(problems('quad-damage: no\n'), []);
+  assert.deepEqual(problems(''), [{ line: 1, problem: `front matter has no quad-damage: write quad-damage: ${hint}` }]);
+  const at = lineOf(filled(), 'quad-damage:');
+  assert.deepEqual(problems('quad-damage:\n'), [{ line: at, problem: `quad-damage is empty: ${hint}` }]);
+  assert.deepEqual(problems('quad-damage: maybe\n'), [{ line: at, problem: `quad-damage maybe is neither yes nor no: ${hint}` }]);
+  assert.deepEqual(problems('quad-damage: Yes\n').map((p) => p.problem), [`quad-damage Yes is neither yes nor no: ${hint}`]);
+
+  // k bug new and k bug from refuse before anything is written or moved, a dry run too.
+  const { w } = await draftedBug();
+  const refused = (given) => (e) => e.code === 2 && e.message === `${given}: ${hint}`;
+  const none = 'a bug needs its mark, --quad-damage yes or --quad-damage no';
+  for (const dryRun of [false, true]) {
+    assert.throws(() => newBug({ ws: w.ws, id: 'weather/slow-start', title: 'Slow start', dryRun }), refused(none));
+    assert.throws(() => newBug({ ws: w.ws, id: 'weather/slow-start', title: 'Slow start', quadDamage: 'maybe', dryRun }), refused('--quad-damage maybe is neither yes nor no'));
+    assert.throws(() => from({ ws: w.ws, id: BUG, dryRun }), refused(none));
+    assert.throws(() => from({ ws: w.ws, id: BUG, quadDamage: ' ', dryRun }), refused(none));
+  }
+  assert.equal(existsSync(bugFile(w, 'slow-start', 'weather')), false);
+  assert.equal(existsSync(draftFile(w)), true);
+
+  // The draft is marked as it moves; k bugs carries the mark, false when it is no or missing.
+  from({ ws: w.ws, id: BUG, quadDamage: 'no' });
+  assert.equal(parseDraft(readFileSync(bugFile(w), 'utf8')).front['quad-damage'], 'no');
+  put(bugFile(w, 'a'), filled({ id: 'hub/a', fix: null }));
+  put(bugFile(w, 'b'), filled({ id: 'hub/b', mark: '', fix: null }));
+  assert.deepEqual(list(w.ws).map((r) => [r.id, r.quadDamage]), [[BUG, false], ['hub/a', true], ['hub/b', false]]);
+
+  // The CLI: the option is needed and takes a value.
+  const run = (...args) => k(w.home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  const nu = (...more) => run('bug', 'new', 'weather/slow-start', '--title', 'Slow start', ...more);
+  for (const r of [nu(), nu('--quad-damage', 'maybe'), nu('--quad-damage'), run('bug', 'from', 'weather/wind-alerts')]) {
+    assert.equal(r.status, 2, r.stdout);
+    assert.match(r.stderr, /--quad-damage/);
+  }
+  assert.equal(existsSync(bugFile(w, 'slow-start', 'weather')), false);
+});
+
 test('the verbs: k bug new, check, drop and from, and k bugs, with --json and --dry-run, in the help', async () => {
   const { w } = await draftedBug();
   const run = (...args) => k(w.home, args, { CLAUDE_CODE_SESSION_ID: '' });
   const help = run('help').stdout;
-  assert.match(help, /k bug new <repo>\/<slug> --title "\.\.\." \[--bug-of <task>\] \[--fix-repo <repo>\]/);
-  assert.match(help, /k bug from <id> \[--no-commit\]/);
+  assert.match(help, /k bug new <repo>\/<slug> --title "\.\.\." --quad-damage yes\|no \[--bug-of <task>\] \[--fix-repo <repo>\]/);
+  assert.match(help, /k bug from <id> --quad-damage yes\|no \[--no-commit\]/);
   assert.doesNotMatch(help, /--bug-of <task>: a bug of that accepted task/);
-  const nu = (...more) => run('bug', 'new', 'weather/slow-start', '--title', 'Slow start', ...more);
+  const nu = (...more) => run('bug', 'new', 'weather/slow-start', '--title', 'Slow start', '--quad-damage', 'no', ...more);
   assert.equal(nu('--bug-of', TASK, '--dry-run').stdout, `would write ${bugFile(w, 'slow-start', 'weather')}, a bug of ${TASK}\n`);
   assert.equal(nu('--bug-of').status, 2);
   assert.equal(nu('--fix-repo', 'radio').status, 1);
@@ -384,8 +427,8 @@ test('the verbs: k bug new, check, drop and from, and k bugs, with --json and --
   assert.equal(made.status, 0, made.stderr);
   assert.match(made.stdout, /, its fix in kirunak: fill in every section \(name the fix on bug\/slow-start under Fix written, or delete that section when no fix exists\), then `k bug check weather\/slow-start`, and commit it\n$/);
   assert.equal(run('bug', 'check', 'weather/slow-start').status, 1);
-  assert.match(run('bug', 'from', BUG, '--dry-run').stdout, /^would move the draft hub\/stale-tiles into kirunak\/bugs\/:\n  kirunak\/drafts\/stale-tiles\.md -> kirunak\/bugs\/stale-tiles\.md\n  kirunak: branch draft\/stale-tiles -> bug\/stale-tiles\n/);
-  const moved = run('bug', 'from', BUG, '--json');
+  assert.match(run('bug', 'from', BUG, '--quad-damage', 'yes', '--dry-run').stdout, /^would move the draft hub\/stale-tiles into kirunak\/bugs\/:\n  kirunak\/drafts\/stale-tiles\.md -> kirunak\/bugs\/stale-tiles\.md\n  kirunak: branch draft\/stale-tiles -> bug\/stale-tiles\n/);
+  const moved = run('bug', 'from', BUG, '--quad-damage', 'yes', '--json');
   assert.equal(moved.status, 0, moved.stderr);
   assert.equal(JSON.parse(moved.stdout).kind, 'draft');
   assert.equal(run('bug', 'check', BUG).stdout, `${BUG}: check passes\n`);
