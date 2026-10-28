@@ -11,7 +11,7 @@ import { KIRUNAK, makeWorkspace } from './helpers.mjs';
 
 // The SessionStart notice of the bugs (gulnya/kirunak-bugs AC-7, E-7): what a session the owner starts is told.
 const START = { session_id: 'abc123', transcript_path: '/tmp/abc123.jsonl', cwd: '/work/weather', hook_event_name: 'SessionStart', source: 'startup' };
-const { KIRUNAK_TASK, KIRUNAK_STEP, KIRUNAK_BUG_REVIEW, ...outside } = process.env;
+const { KIRUNAK_TASK, KIRUNAK_STEP, KIRUNAK_BUG_REVIEW, KIRUNAK_BUG_FIX, ...outside } = process.env;
 const hook = (home, input, env = {}) =>
   spawnSync(process.execPath, [join(KIRUNAK, 'hooks', 'kirunak-bugs.mjs')], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8', env: { ...outside, KIRUNAK_HOME: home, ...env } });
 const LINE = '2 bugs wait, 1 with a fix ready: /k-bugs';
@@ -33,7 +33,7 @@ test('no line when no bug waits, nor for a k run step\'s session or a bug\'s rev
   assert.deepEqual([hook(w.home, START).status, hook(w.home, START).stdout], [0, ''], 'nothing when no bug waits');
   bugsAt(w);
   assert.notEqual(hook(w.home, START).stdout, '');
-  for (const env of [{ KIRUNAK_STEP: 'S-1', KIRUNAK_TASK: 'weather/offline-forecast' }, { KIRUNAK_BUG_REVIEW: 'hub/queue-stuck' }]) {
+  for (const env of [{ KIRUNAK_STEP: 'S-1', KIRUNAK_TASK: 'weather/offline-forecast' }, { KIRUNAK_BUG_REVIEW: 'hub/queue-stuck' }, { KIRUNAK_BUG_FIX: 'hub/queue-stuck' }]) {
     const r = hook(w.home, START, env);
     assert.deepEqual([r.status, r.stdout], [0, ''], Object.keys(env).join(' '));
   }

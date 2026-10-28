@@ -159,3 +159,26 @@ test('limits(): the runner spawns the reading in the temporary folder and reads 
   const hung = runnerClaude({}, { bin: fakeBin('setInterval(() => {}, 1000);') }).provides.runner;
   assert.deepEqual(await hung.limits({ timeoutMs: 300 }), { error: 'no reading in 0.3 s: the session was stopped' });
 });
+
+// gulnya/quad-damage AC-11: a session read as it goes streams, and each message reaches onMessage whole, however its
+// lines are cut; what onMessage throws does not end the session.
+test('start with onMessage: stream-json with --verbose, each line handed over as it comes, the result still parsed', async () => {
+  assert.deepEqual(claudeArgs({ ...BASE, stream: true }).slice(0, 4), ['-p', '--output-format', 'stream-json', '--verbose']);
+  const use = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } };
+  const res = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }] } };
+  const end = { type: 'result', subtype: 'success', is_error: false, num_turns: 2, result: 'done', session_id: 's' };
+  const text = [use, res, end].map((x) => JSON.stringify(x)).join('\n');
+  const bin = fakeBin(`const t = ${JSON.stringify(text)};
+process.stdout.write('not json\\n' + t.slice(0, 30));
+setTimeout(() => process.stdout.write(t.slice(30)), 50);`);
+  const seen = [];
+  const runner = runnerClaude({}, { bin }).provides.runner;
+  const run = runner.start({ prompt: 'p', cwd: tmpdir(), maxTurns: 150, onMessage: (m) => {
+    seen.push(m.type);
+    if (m.type === 'user') throw new Error('a reader fault');
+  } });
+  const done = await run.done;
+  assert.deepEqual(seen, ['assistant', 'user', 'result']);
+  assert.equal(done.exitCode, 0);
+  assert.equal(done.result.num_turns, 2);
+});
