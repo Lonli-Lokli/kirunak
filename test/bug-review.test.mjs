@@ -81,7 +81,8 @@ const answer = (verdict, head, base, findings = verdict === 'clean' ? 'none' : '
 
 // A runner whose session writes what `write({ head, base, step })` returns into the file the brief names (nothing for
 // null), after a short sleep; `calls` holds each step it was given, `errors` what `write` threw (the session still ends).
-function fakeRunner(write) {
+// `first`, when given, is the usage its first call streams to the step's onMessage.
+function fakeRunner(write, { first = null } = {}) {
   const calls = [];
   const errors = [];
   return {
@@ -100,6 +101,7 @@ function fakeRunner(write) {
         } catch (e) {
           errors.push(e);
         }
+        if (first) step.onMessage?.({ type: 'assistant', message: { content: [{ type: 'text', text: 'reading' }], usage: first } });
         resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });
       }));
       return { pid: child.pid, sessionId: step.sessionId, done };
@@ -137,6 +139,22 @@ export default {
 };
 `;
 
+test('a review starts without the workspace\'s denied tools, Agent always among them, and says what it spent (gulnya/headless-tools AC-1, AC-3)', async () => {
+  const w = await bugWorkspace();
+  w.ws.bugs = { ...w.ws.bugs, disallowedTools: ['Skill'] };
+  const first = { input_tokens: 4, cache_read_input_tokens: 0, cache_creation_input_tokens: 12000, output_tokens: 9 };
+  const runner = fakeRunner(({ head, base }) => answer('findings', head, base), { first });
+  w.ws.seams.runner = runner;
+  const r = await review({ ws: w.ws, id: BUG, via: 'mod', processes: NOBODY });
+  assert.equal(r.outcome, 'findings');
+  assert.deepEqual(runner.calls[0].disallowedTools, ['Agent', 'Skill']);
+  assert.equal(typeof runner.calls[0].onMessage, 'function', 'the review streams, so its first call is read');
+  assert.equal(r.spent, '$0.10, first call 12,004 tokens (input 4, cache read 0, cache write 12,000)');
+  const saved = JSON.parse(readFileSync(join(w.home, 'bugs', 'hub', 'stale-tiles', 'review-1', 'result.json'), 'utf8'));
+  assert.deepEqual(saved.firstCall, { input: 4, cacheRead: 0, cacheWrite: 12000 });
+  assert.equal(saved.result.total_cost_usd, 0.1);
+});
+
 const parents = (root, rev) => git(root, 'rev-list', '--parents', '-n', '1', rev).split(' ').slice(1);
 const fileAt = (root, rev, path) => git(root, 'show', `${rev}:${path}`);
 
@@ -152,8 +170,8 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   const [step] = runner.calls;
   assert.equal(step.model, 'opus');
   assert.equal(step.env.KIRUNAK_BUG_REVIEW, BUG);
-  assert.deepEqual(step.disallowedTools, ['Agent']);
-  assert.deepEqual(step.tools, ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Monitor', 'TaskStop']);
+  assert.deepEqual(step.disallowedTools, ['Agent', 'Artifact', 'Workflow', 'AskUserQuestion', 'Skill', 'ScheduleWakeup', 'SendFeedback', 'ReportFindings', 'ListAgents', 'ReadNotifications'], 'gulnya/headless-tools AC-1');
+  assert.equal('tools' in step, false, 'no --tools: every deferred tool stays loadable through ToolSearch (E-1)');
   assert.ok(step.deny.includes(`Write(/${step.cwd}/**)`) && step.deny.includes('Read(~/.claude/projects/**)'), step.deny.join(' '));
   assert.match(step.brief, /git diff master\.\.\.bug\/stale-tiles/);
   assert.match(step.brief, /cache: one hour/);
@@ -379,7 +397,7 @@ test('k bug review: no fix, a dry run, --json, and --detach returning at once wi
   for (let i = 0; i < 300 && existsSync(reviewLockPath(w.home, BUG)); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(!existsSync(reviewLockPath(w.home, BUG)), 'the detached review ends and lets its lock go');
   assert.equal(readFileSync(calls, 'utf8'), `${BUG}\n`);
-  assert.match(readFileSync(started.log, 'utf8'), /review-1\.md found 1 thing; nothing merged/);
+  assert.match(readFileSync(started.log, 'utf8'), /review-1\.md found 1 thing; nothing merged.*\n {2}the review's session: \$0\.00\n/, 'gulnya/headless-tools AC-3');
   assert.match(readFileSync(review1(w), 'utf8'), /^verdict: findings$/m);
   assert.equal(events(w.home).find((x) => x.kind === 'bug-review').via, 'mod');
 

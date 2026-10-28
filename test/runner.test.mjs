@@ -21,9 +21,8 @@ test('the command of orchestrator.md §3: no --model or --effort when none is na
   ]);
 });
 
-test('a step that names its tools starts with only those, as --tools; none named keeps every tool', () => {
-  const args = claudeArgs({ ...BASE, tools: ['Bash', 'Read', 'Write'] });
-  assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2), ['--tools', 'Bash,Read,Write']);
+test('a step never gets --tools, even one that names tools: every deferred tool stays loadable (gulnya/headless-tools AC-2)', () => {
+  assert.equal(claudeArgs({ ...BASE, tools: ['Bash', 'Read', 'Write'] }).includes('--tools'), false);
   assert.equal(claudeArgs(BASE).includes('--tools'), false);
 });
 
