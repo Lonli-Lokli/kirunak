@@ -157,4 +157,57 @@ describe("Quad Damage's lines as rows (gulnya/mobile-dialogs S-4)", () => {
     }
   })
 
+  test("/k-bugs with a live run: the run's line a row of the list's head, in each form k prints, the question unchanged, within 48 rows (AC-12, AC-19)", async ($, on) => {
+    const at = (run: QuadDamageStatus['run'], line: string): QuadDamageStatus => ({ run, line })
+    const lives = [
+      [at({ pid: 5150, bug: 'hub/stale-tiles' }, 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41'), 'fixing'],
+      [at({ pid: 5150, bug: 'hub/stale-tiles', phase: 'reviewing' }, 'Quad Damage runs: hub/stale-tiles, reviewing since 23:58'), 'reviewing'],
+      [at({ pid: 5150, bug: 'hub/stale-tiles', phase: 'merging' }, 'Quad Damage runs: hub/stale-tiles, merging since 23:59'), 'reviewing'],
+      [at({ pid: 5150, bug: null }, 'Quad Damage runs, between bugs, since 23:40'), 'started'],
+      [at({ pid: 5150, bug: 'hub/stale-tiles', phase: 'waiting', waitUntil: '2026-11-08T01:15:00+00:00' }, 'Quad Damage waits for the 5-hour window until 01:15'), 'paused'],
+    ] as const
+    const drawn: unknown[] = []
+    const look: Tap = async questions => {
+      const ui = await $.ui.mount({ plugin: 'kirunak', surface: 'desktop', component: 'AskUserQuestion', props: { tool: 'AskUserQuestion', questions } })
+      drawn.push(await ui.drawn())
+      await ui.unmount()
+      return null
+    }
+    const w = world(on, { quadDamage: lives.map(l => l[0]), taps: lives.map(() => look) })
+    engineBelow(on)
+    for (let i = 0; i < lives.length; i++) await run($)
+
+    expect(drawn.length).toBe(lives.length)
+    lives.forEach(([live, stage], i) => {
+      const tree = drawn[i]
+      const [head] = kids(tree)
+      const row = kids(head).find(n => n.props?.key === 'run')
+      expect(row && drawnRow(row)).toEqual({ texts: [stage, live.line], alt: stage })
+      // The head's chip paused, orange, while the run waits for the window, as its row is (AC-8); else running.
+      const chip = kids(head).find(n => n.props?.key === 'chip')
+      expect(chip && drawnRow(chip)).toEqual(stage === 'paused' ? { texts: ['Quad Damage waits'], alt: 'paused' } : { texts: ['Quad Damage runs'], alt: 'started' })
+      // The line is the row alone, never again as the first line; the question as k asked it.
+      expect(every(tree).filter(n => n.type === 'Text' && textOf(n).startsWith(live.line)).map(textOf)).toEqual([live.line])
+      expect(w.asked[i]?.question).toBe(`${live.line}.\nBugs, a fix ready first, then the oldest: Stop Quad Damage, or which bug?`)
+      expect(treeRows(tree)).toBeLessThanOrEqual(DIALOG_ROWS)
+    })
+    expect(runRowOf('Quad Damage is not running')).toBeNull()
+  })
+
+  test("/k-bugs with a run line of no form k prints: no row, the line its first line as written (E-2)", async ($, on) => {
+    let tree: unknown = null
+    const look: Tap = async questions => {
+      const ui = await $.ui.mount({ plugin: 'kirunak', surface: 'desktop', component: 'AskUserQuestion', props: { tool: 'AskUserQuestion', questions } })
+      tree = await ui.drawn()
+      await ui.unmount()
+      return null
+    }
+    const odd = 'Quad Damage runs: hub/stale-tiles, null since 23:41'
+    world(on, { quadDamage: [{ run: { pid: 5150, bug: 'hub/stale-tiles' }, line: odd }], taps: [look] })
+    engineBelow(on)
+    await run($)
+    expect(every(tree).some(n => n.props?.key === 'run')).toBe(false)
+    expect(every(tree).filter(n => n.type === 'Text').map(textOf)).toContain(`${odd}.`)
+    expect(treeRows(tree)).toBeLessThanOrEqual(DIALOG_ROWS)
+  })
 })
