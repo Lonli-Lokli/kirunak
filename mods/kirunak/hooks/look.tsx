@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
-import type { Elements, On } from 'claude-code'
+import type { Elements, EngineInterface, On } from 'claude-code'
 
 import type { KirunakChip, KirunakDialog, KirunakSection } from '../types'
-import { DIALOG_ROWS, foldLines, iconOf, messageParts, parts, rowsOf, STATES, stateOf, treeRows } from './looks'
+import { BACK, NEXT } from './drafts'
+import { DIALOG_ROWS, foldLines, FREE, iconOf, messageParts, parts, rowsOf, STATES, stateOf, treeRows } from './looks'
 import type { FoldLine, ProgressRow } from './looks'
 
 // The mod's look on the phone and the desktop app (gulnya/mobile-dialogs D-1, D-2): its dialogs drawn as a head, a
@@ -21,11 +22,19 @@ import type { FoldLine, ProgressRow } from './looks'
 // The dialog open now, as talk() wrote it (owner.ts), and the part of its look unfolded; both declared where read.
 const dialogState = atom({ plugin: 'kirunak', key: 'dialog' } as const, null)
 const foldState = atom({ plugin: 'kirunak', key: 'fold' } as const, null)
+// A draft's first question, its parts as Start intake wrote them (owner.ts's showIntake), which the model asks in a
+// turn of its own (gulnya/mobile-dialogs AC-15, E-3).
+const intakeState = atom({ plugin: 'kirunak', key: 'intake' } as const, null)
 
-// The rows the unfolded look keeps free besides its head and its part (AC-19, counted as looks.ts's treeRows counts
-// them): the "n of m" line, Back or Show less and Next with their gap, the head chip's gap, the gap above each of the
-// look's four parts (the head, the part, the buttons, the engine's node), and one to spare.
-const FREE = 1 + 2 + 2 + 2 + 4 + 1
+// The mod's dialog a question is: the one talk() has open, else a part of a draft's first question, asked exactly as
+// written; `part` for the latter. Any other question is none of the mod's.
+async function dialogOf($: EngineInterface, question: string): Promise<{ dialog: KirunakDialog; part: boolean } | null> {
+  const open: KirunakDialog | null = await read($, dialogState)
+  if (open !== null && open.question === question) return { dialog: open, part: false }
+  const parts: KirunakDialog[] | null = await read($, intakeState)
+  const found = parts?.find(p => p.question === question)
+  return found === undefined ? null : { dialog: found, part: true }
+}
 
 // A Quad Damage line as a row (AC-11 to AC-13), in a message and in /k-bugs' head (AC-12) alike: its time dim, its
 // stage's chip (the icon, its alt the stage, and the word), its bug's id in bold, its words as written. A line with no
@@ -55,18 +64,33 @@ type Question = { question: string; header?: string; multiSelect?: boolean; opti
 export function looks(on: On): void {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const [q, ...others] = e.questions as Question[]
-    const dialog: KirunakDialog | null = await read($, dialogState)
-    if (q === undefined || dialog === null || q.question !== dialog.question) return next(e)
+    const found = q === undefined ? null : await dialogOf($, q.question)
+    if (q === undefined || found === null) return next(e)
+    const { dialog, part } = found
     const options = q.options.map(o => ({ ...o, description: dialog.described[o.label] ?? o.description ?? '' }))
-    return next({ ...e, questions: [{ ...q, options }, ...others] } as typeof e)
+    // A part of a draft's first question stays while the owner moves between its parts with Next and Back; any other
+    // answer, a refusal or a dismissal, takes the whole question away, so a question asked later in the same words is
+    // the engine's to draw (E-3).
+    let answer: unknown = null
+    try {
+      const out = await next({ ...e, questions: [{ ...q, options }, ...others] } as typeof e)
+      answer = (out.result as { answers?: Record<string, unknown> } | undefined)?.answers?.[q.question] ?? null
+      return out
+    } finally {
+      if (part && answer !== NEXT && answer !== BACK) {
+        await update($, intakeState, () => null).catch(() => {
+          // The question stays drawn until another dialog of the mod's opens.
+        })
+      }
+    }
   })
 
   on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
     const [q, ...others] = e.props.questions as Question[]
-    const dialog: KirunakDialog | null = await read($, dialogState)
+    const dialog = q === undefined ? null : ((await dialogOf($, q.question))?.dialog ?? null)
     // The terminal and VS Code draw the whole question as the engine does, the lines under the choices the call hook
     // wrote (AC-14, AC-18); a dialog with no look draws so everywhere.
-    if (q === undefined || dialog === null || q.question !== dialog.question || dialog.look === null) return next(e)
+    if (q === undefined || dialog === null || dialog.look === null) return next(e)
     if (e.surface === 'terminal' || e.surface === 'vscode') return next(e)
     // The phone and the desktop app ask its last line, the look above it showing the rest (AC-1), the choices and
     // their lines as they came.

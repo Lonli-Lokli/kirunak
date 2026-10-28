@@ -120,13 +120,32 @@ const dialogState = atom({ plugin: 'kirunak', key: 'dialog' } as const, null)
 // A new id each dialog shown, so a fold left open in one is closed in the next (look.tsx).
 let shownId = 0
 
+// The parts of a draft's first question that Start intake wrote, for the model to ask in a turn of its own (drafts.ts,
+// gulnya/mobile-dialogs AC-15, E-3); the look's hooks read them as they read the dialog open now.
+const intakeState = atom({ plugin: 'kirunak', key: 'intake' } as const, null)
+
 // Every choice's line and the dialog's look, its page's rows, written before it is asked and taken away once it is
 // answered or dismissed; a write that fails leaves the dialog unstyled, never unasked (gulnya/mobile-dialogs D-1).
+// A dialog of the mod's own takes away a draft's first question too: once another dialog opens, the intake it was for
+// has gone on, or was set aside, so the model's ask of it later draws as the engine draws it.
 async function showLook($: EngineInterface, look: KirunakDialog | null): Promise<void> {
   try {
     await update($, dialogState, () => look)
+    if (look !== null) await update($, intakeState, () => null)
   } catch {
     // The dialog is asked as it is.
+  }
+}
+
+// A draft's first question, written before Start intake's prompt is submitted (AC-15, E-3): a dialog a part, each with
+// its question as the prompt gives it, its choices' lines and its look, until the call of one is answered with
+// anything but Next or Back (look.tsx) or another dialog of the mod's opens (showLook). None for a draft that
+// proposes nothing; a write that fails leaves the question to be asked as the model writes it.
+export async function showIntake($: EngineInterface, asks: readonly { question: string; ask: string; described: Record<string, string>; look: KirunakLook }[]): Promise<void> {
+  try {
+    await update($, intakeState, () => (asks.length ? asks.map(a => ({ id: ++shownId, question: a.question, ask: a.ask, described: { ...a.described }, look: a.look })) : null))
+  } catch {
+    // The model asks it as the prompt says.
   }
 }
 

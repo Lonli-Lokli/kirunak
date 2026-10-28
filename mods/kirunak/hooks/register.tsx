@@ -6,10 +6,10 @@ import { bugsScreen, bugsText, fixOf, fixPrompt } from './bugs'
 import type { BugRow, QuadDamageStatus } from './bugs'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
-import { draftsScreen, draftsText, intakePrompt } from './drafts'
+import { draftsScreen, draftsText, firstQuestion, intakePrompt, questionsOf } from './drafts'
 import type { DraftRow } from './drafts'
 import { amendmentsText, amendmentText, briefText, listText } from './lists'
-import { nothingRan, owners } from './owner'
+import { nothingRan, owners, showIntake } from './owner'
 import type { Outcome, Turn } from './owner'
 import { acceptScreen, amendmentsScreen, approveScreen, boardScreen, holdScreen, queueScreen, resumeScreen, startScreen } from './picks'
 import type { Brief } from './picks'
@@ -216,13 +216,22 @@ async function draftsDialog($: EngineInterface, turn: Turn): Promise<string | Ou
 // starts the intake with the k-intake skill (drafts.ts, intakePrompt). It runs no verb. The engine refuses a submit
 // from inside a command.run hook (it would wait on the turn the hook holds: measured under `claude plugin test`), so
 // a timer of the clock's submits it once the hook has answered (turns.ts, submitLater); the prompt then waits for the
-// session to be idle, and one the engine refuses toasts why.
+// session to be idle, and one the engine refuses toasts why. The draft's file is read again for its first question
+// (gulnya/mobile-dialogs AC-15, E-3), whose parts are written as dialogs of the mod's before the prompt is submitted,
+// so the model's ask of them in its own turn gets their lines and their look (owner.ts's showIntake, look.tsx).
 async function startIntake($: EngineInterface, k: string, id: string): Promise<string> {
   const r = await $.process.run(['node', k, 'drafts', '--json'])
   if (r.exitCode !== 0) return `Nothing ran: k drafts did not answer, so ${id} could not be found again: ${firstLine(r)}`
   const d = (JSON.parse(r.stdout) as DraftRow[]).find(x => x.id === id)
   if (d === undefined) return `Nothing ran: ${id} is no longer a draft. It was dropped, or its intake started, since the list was shown.`
-  submitLater($, intakePrompt(d), `The intake from ${id} did not start`)
+  let file: string | null = null
+  try {
+    file = await $.fs.read(d.path)
+  } catch {
+    // The prompt goes without the first question's text; the skill says how to write it.
+  }
+  await showIntake($, firstQuestion(d, file === null ? [] : questionsOf(file)))
+  submitLater($, intakePrompt(d, file), `The intake from ${id} did not start`)
   return `The intake from ${id} starts next in this session, with the k-intake skill.`
 }
 
