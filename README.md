@@ -43,7 +43,8 @@ is done.
   when the run ends. While a run lives, **Stop Quad Damage** is the first row of `/k-bugs` (or `k bugs quad-damage
   --stop` at your own prompt), with one confirm: it stops the run at once, a wait for the 5-hour window included. The
   session it is in is ended, a merge already under way is let finish, the bug it was on waits with what its branch
-  holds, the bugs left are not reached, and the summary says you stopped it.
+  holds, the bugs left are not reached, and the summary says you stopped it. Its row in `/k-bugs` says how many bugs
+  it takes: "Quad Damage (2 bugs)".
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -154,7 +155,7 @@ You need Node 22 or later, git and Claude Code.
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
    | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), a choice each; the one picked shows whole, with Start intake (the session starts the intake from it, its first question every proposed answer of the draft, agreed in one tap or each asked alone), Drop (you type the reason, then confirm) and Back; bugs are not among them |
-   | `/k-bugs` | the bugs, a fix ready first, then the oldest, a choice each; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back; while a bug marked `quad-damage: yes` waits, Quad Damage comes first, and while its run lives, its line heads the list and the bug it is on has none of these |
+   | `/k-bugs` | the bugs, a fix ready first, then the oldest, a choice each; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back; while a bug marked `quad-damage: yes` waits, Quad Damage comes first, with how many it takes ("Quad Damage (2 bugs)"), and while its run lives, its line heads the list and the bug it is on has none of these |
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |

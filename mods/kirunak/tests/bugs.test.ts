@@ -170,7 +170,8 @@ const STARTED = 'Quad Damage runs as pid 5150\nlog: /h/bugs/quad-damage/2026-11-
 const FIXING = { phase: 'fixing' as const, try: 1, since: '2026-11-07T23:41:00+00:00', waitUntil: null }
 const ON_READY: BugRow[] = [{ ...MARKED[0] as BugRow, reviewing: { pid: 5150, started: '2026-11-07T23:41:00+00:00' }, quadDamageRun: FIXING }, MARKED[1] as BugRow, NO_FIX]
 const LIVE: QuadDamageStatus = { run: { pid: 5150, bug: 'hub/stale-tiles' }, line: 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41' }
-const QD_LINE = 'fixes and reviews the 2 marked bugs one at a time, unattended; nothing is pushed'
+const QD = 'Quad Damage (2 bugs)'
+const QD_LINE = 'fixes and reviews the marked bugs one at a time, unattended; nothing is pushed'
 
 const STOP_LINE = 'ends the run now, the bug it is on left waiting'
 const STOPPED = 'Quad Damage stopped: the owner stopped it; its summary: /h/bugs/quad-damage/2026-11-07-2340/summary.md\n'
@@ -179,15 +180,24 @@ describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, AC-17, E-3, E-
   test('while a marked bug waits and no run lives, Quad Damage is the list\'s first row; with none marked, or a k whose status fails with none marked, it is not', async ($, on) => {
     const w = world(on, { bugs: [MARKED, BUGS], quadDamage: [null], taps: [SKIP, SKIP] })
     await run($)
-    expect(w.asked[0]).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: Quad Damage, or which bug?', labels: ['Quad Damage', ...LABELS] })
-    expect(w.lines[0]).toEqual({ 'Quad Damage': QD_LINE, ...DESC })
+    expect(w.asked[0]).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: Quad Damage, or which bug?', labels: [QD, ...LABELS] })
+    expect(w.lines[0]).toEqual({ [QD]: QD_LINE, ...DESC })
     await run($)
     expect(w.asked[1]).toEqual({ header: 'Bugs', question: LIST, labels: LABELS })
     expect([w.quadReads, w.runs]).toEqual([2, []])
   })
 
+  test('its label says how many marked bugs it takes, the line the phone draws bold, and its line under it does not say it again (gulnya/mobile-dialogs AC-24)', async ($, on) => {
+    const w = world(on, { bugs: [[{ ...READY, quadDamage: true }, FOUND], MARKED], quadDamage: [null, null], taps: [SKIP, SKIP] })
+    await run($)
+    await run($)
+    expect([w.asked[0]?.labels[0], w.lines[0]?.['Quad Damage (1 bug)']]).toEqual(['Quad Damage (1 bug)', 'fixes and reviews the marked bug, unattended; nothing is pushed'])
+    expect(w.asked[1]?.labels[0]).toBe(QD)
+    for (const [i, label] of [[0, 'Quad Damage (1 bug)'], [1, QD]] as const) expect(w.lines[i]?.[label]).not.toMatch(/\d/)
+  })
+
   test('its tap runs k bugs quad-damage --via mod, the owner\'s verb, and answers that the run started and how many marked bugs wait; then a turn waits for its progress lines and writes them, then prints and pushes its summary (AC-1, AC-13, AC-16)', async ($, on) => {
-    const w = world(on, { bugs: [MARKED], taps: ['Quad Damage'], verb: { exitCode: 0, stdout: STARTED, stderr: '' } })
+    const w = world(on, { bugs: [MARKED], taps: [QD], verb: { exitCode: 0, stdout: STARTED, stderr: '' } })
     expect(await run($)).toBe(`Quad Damage started with 2 marked bugs waiting: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.\n/k-bugs, \`k waiting\` and the board show the bug it is on; each step it takes is written here as a short line, and when it ends, its summary is written here and sent to your phone.\n\n${STARTED.trim()}`)
     expect(verbs(w.runs)).toEqual([['bugs', 'quad-damage', '--via', 'mod']])
     expect(w.submitted).toEqual([])
@@ -204,7 +214,7 @@ describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, AC-17, E-3, E-
 
   test('a second Quad Damage while one runs is refused in k\'s own words, and gets no turn (E-3)', async ($, on) => {
     const why = 'k: Quad Damage runs already: pid 5150, started 2026-11-07 23:40, on hub/stale-tiles (fixing, try 1); a second one waits until it ends, and k bugs quad-damage --status shows it'
-    const w = world(on, { bugs: [MARKED], quadDamage: [null], taps: ['Quad Damage'], verb: { exitCode: 1, stdout: '', stderr: `${why}\n` } })
+    const w = world(on, { bugs: [MARKED], quadDamage: [null], taps: [QD], verb: { exitCode: 1, stdout: '', stderr: `${why}\n` } })
     expect(await run($)).toBe(`/k-bugs refused:\n${why}`)
     await w.clock.advance(10)
     expect([verbs(w.runs), w.submitted]).toEqual([[['bugs', 'quad-damage', '--via', 'mod']], []])

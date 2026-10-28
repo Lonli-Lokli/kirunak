@@ -32,7 +32,7 @@ const ENGINE = { type: 'engine', ref: 0 }
 const PICTURES = /\p{Extended_Pictographic}/u
 // The choices a dialog adds after its own; the mod's own choices that are no row of a list.
 const LAST = new Set(['More', 'Back', 'Cancel'])
-const OWN = new Set([...LAST, 'Earlier', 'Later', 'End of the queue', 'Quad Damage', 'Stop Quad Damage'])
+const OWN = new Set([...LAST, 'Earlier', 'Later', 'End of the queue', 'Stop Quad Damage'])
 const REASON = 'Type the reason in the free-text row'
 // How deep the walk goes: the longest walk of any command (k-queue's Move, a page, a place) is five taps.
 const DEEPEST = 8
