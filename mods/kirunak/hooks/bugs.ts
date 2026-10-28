@@ -10,11 +10,17 @@ import type { Screen } from './owner'
 // dialog, and the command hands the bug to the model in a prompt of its own (fixPrompt). Drop takes the reason typed in
 // the free-text row, then "Drop <id>" runs `k bug drop <id> --why`. Each by id, so a bug gone since ends in k's
 // refusal, never on another.
+// Quad Damage (gulnya/quad-damage AC-1, AC-12, E-4, D-1): the list's first row while a bug marked `quad-damage: yes`
+// waits and no run lives runs `k bugs quad-damage --via mod`, the owner's verb, which fixes and reviews the marked bugs
+// one at a time, unattended; while a run lives, its line (`k bugs quad-damage --status`) instead, and the bug it is on
+// says so, with no Review & merge, Start fix or Drop until the run moves on.
 
 // A bug as `k bugs --json` gives it (lib/bugs.mjs): `written` null when no date is written, `bugOf` the accepted task
 // it was found in, `fixRepo` the repo its fix branch is in, `branch` null when that branch does not exist, `ahead` the
 // commits it holds that master does not, `reviewing` the Review & merge running now, `review` the last review beside
-// the bug (`atHead` when it reviewed the branch's head), `path` absolute.
+// the bug (`atHead` when it reviewed the branch's head), `path` absolute; `quadDamage` its mark, and `quadDamageRun`
+// where Quad Damage's run is with it while the run is on it (`try` its fixing session's, times as the run file writes
+// them, in this machine's zone with its offset).
 export type BugRow = {
   id: string
   repo: string
@@ -29,8 +35,13 @@ export type BugRow = {
   fixReady: boolean
   reviewing: { pid: number; started: string } | null
   review: { file: string; verdict: string | null; head: string | null; atHead: boolean } | null
+  quadDamage: boolean
+  quadDamageRun: QuadDamagePhase | null
   path: string
 }
+export type QuadDamagePhase = { phase: 'fixing' | 'reviewing' | 'waiting' | null; try: number | null; since: string | null; waitUntil: string | null }
+// What `k bugs quad-damage --status --json` gives: the live run's file, null when none lives, and its line.
+export type QuadDamageStatus = { run: { pid: number; bug: string | null } | null; line: string }
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
@@ -46,8 +57,19 @@ const stamp = (iso: string): string => {
 const found = (verdict: string | null): string =>
   verdict === 'conflict' ? 'found a conflict with master' : verdict === 'findings' ? 'found things to fix' : verdict ? `says ${verdict}` : 'has no verdict'
 
-// Its fix in a few words: in review, ready, what a review at its head found, or none yet (as k bugs' fixLine).
+// Where the run is with the bug: fixing and its try, reviewing, or waiting for the 5-hour window and until when (as k
+// bugs' runPhase). The run file's times carry this machine's zone, so their clock time is as written.
+const hhmm = (iso: string): string => iso.slice(11, 16)
+function phaseOf(q: QuadDamagePhase): string {
+  if (q.phase === 'waiting') return `waiting for the 5-hour window${q.waitUntil ? ` until ${hhmm(q.waitUntil)}` : ''}`
+  if (q.phase === 'fixing') return q.try ? `fixing, try ${q.try}` : 'fixing'
+  return q.phase ?? 'working'
+}
+
+// Its fix in a few words: Quad Damage on it, in review, ready, what a review at its head found, or none yet (as k
+// bugs' fixLine). The run holds the bug's review lock while it fixes too, so its phase comes first.
 export function fixOf(b: BugRow): string {
+  if (b.quadDamageRun) return `Quad Damage is on it (${phaseOf(b.quadDamageRun)})`
   if (b.reviewing) return `in review since ${stamp(b.reviewing.started)}`
   if (b.fixReady) return 'fix ready'
   if (b.review?.atHead && b.review.verdict !== 'clean') return `fix not ready: ${b.review.file} ${found(b.review.verdict)}`
@@ -61,11 +83,13 @@ const tailOf = (b: BugRow): string => (b.bugOf ? `bug of ${oneLine(b.bugOf)}, ${
 // A bug as the list names it: its id, title, its fix and the date written.
 export const bugItem = (b: BugRow): Item => ({ lead: '', name: b.id, text: `: ${oneLine(b.title)}, ${fixOf(b)}, ${tailOf(b)}` })
 
-// `/k-bugs` when there is none, or when the dialog ran nothing: the bugs as a numbered list.
-export function bugsText(rows: readonly BugRow[]): string {
-  if (!rows.length) return 'No bugs: no repo holds one.'
+// `/k-bugs` when there is none, or when the dialog ran nothing: the bugs as a numbered list, under Quad Damage's line
+// while a run lives (`run`).
+export function bugsText(rows: readonly BugRow[], run: QuadDamageStatus | null = null): string {
+  const above = run?.run ? [sentence(run.line), ''] : []
+  if (!rows.length) return [...above, 'No bugs: no repo holds one.'].join('\n')
   const head = `${rows.length} ${rows.length === 1 ? 'bug' : 'bugs'}, a fix ready first, then the oldest:`
-  return [head, '', ...numbered(rows.map(bugItem)), '', '/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.'].join('\n')
+  return [...above, head, '', ...numbered(rows.map(bugItem)), '', '/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.'].join('\n')
 }
 
 // The review file beside the bug: kirunak/bugs/<slug>/<file>.
@@ -75,6 +99,8 @@ const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 
 // Its fix as the one picked says it, with where the branch is and, for a review that refused it, the review's file.
 function fixLines(b: BugRow): string[] {
   const where = b.branch ? `${b.branch} in ${b.fixRepo}` : null
+  const q = b.quadDamageRun
+  if (q) return [`Quad Damage is on it: ${phaseOf(q)}${q.phase !== 'waiting' && q.since ? `, since ${hhmm(q.since)}` : ''}${where ? `, on ${where}` : ''}.`]
   if (b.reviewing) return [`In Review & merge since ${stamp(b.reviewing.started)}${where ? `: ${where}` : ''}.`]
   if (b.fixReady) return [`Fix ready: ${where}, ${plural(b.ahead, 'commit')} ahead of master.`]
   if (b.review?.atHead && b.review.verdict !== 'clean') return [`Fix not ready: ${b.review.file} ${found(b.review.verdict)}${where ? ` on ${where}` : ''}.`, `The review: ${reviewPath(b, b.review.file)}`]
@@ -100,15 +126,23 @@ export function bugLines(b: BugRow, file: string | null): string[] {
   return [...headLines(b), '', ...body]
 }
 
-// Review & merge is offered while the fix is ready and no review of it runs (D-1).
-const mergeable = (b: BugRow): boolean => b.fixReady && !b.reviewing
+// Review & merge is offered while the fix is ready and no review of it runs (D-1), nor Quad Damage on it (E-4).
+const mergeable = (b: BugRow): boolean => b.fixReady && !b.reviewing && !b.quadDamageRun
+
+// Quad Damage as the list's first row: what it does with the marked bugs, and the verb its tap runs.
+const quadDamageRow = (marked: number) => ({
+  item: { lead: '', name: 'Quad Damage', text: `: fix and review the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed` },
+  label: 'Quad Damage',
+  verb: ['bugs', 'quad-damage', '--via', 'mod'],
+})
 
 // The dialog: the bugs, three a page with More; the one picked whole, with Review & merge (a verb, the last tap) when
 // its fix is ready, Start fix (which ends the dialog with its id) and Drop; Drop's reason, then "Drop <id>" under it.
 // What the owner reads to choose is in the dialog's own text, since on the phone the dialog covers the text above it:
 // under a ready fix's bug, what Review & merge does. `files` holds each bug's file by path; one missing could not be
-// read.
-export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>): Screen {
+// read. `run`, Quad Damage's status: while a run lives, its line above the list and, on the bug it is on, no choice
+// but Back and Cancel (E-4); while none lives, its row first when a marked bug waits.
+export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>, run: QuadDamageStatus | null = null): Screen {
   const confirm = (b: BugRow, why: string): Screen => ({
     kind: 'item',
     header: 'Bugs',
@@ -123,7 +157,14 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     question: 'Type the reason in the free-text row: why drop it?',
     given: why => confirm(b, why),
   })
-  const item = (b: BugRow): Screen => ({
+  const held = (b: BugRow): Screen => ({
+    kind: 'item',
+    header: 'Bugs',
+    text: bugLines(b, files.get(b.path) ?? null),
+    choices: [],
+    question: 'Review & merge, Start fix and Drop wait until Quad Damage moves on. Back to the list?',
+  })
+  const item = (b: BugRow): Screen => b.quadDamageRun ? held(b) : ({
     kind: 'item',
     header: 'Bugs',
     text: [
@@ -137,7 +178,28 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     ],
     question: mergeable(b) ? 'Review and merge its fix, start a task to fix it, or drop it?' : 'Start a task to fix it, or drop it?',
   })
-  return { kind: 'list', header: 'Bugs', head: 'Bugs, a fix ready first, then the oldest:', question: 'Which bug?', rows: rows.map(b => ({ item: bugItem(b), label: b.id, open: () => item(b) })) }
+  const live = run?.run ? run : null
+  const marked = rows.filter(b => b.quadDamage).length
+  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, open: () => item(b) }))
+  return {
+    kind: 'list',
+    header: 'Bugs',
+    ...(live ? { text: [sentence(live.line)] } : {}),
+    head: 'Bugs, a fix ready first, then the oldest:',
+    question: !live && marked ? 'Quad Damage, or which bug?' : 'Which bug?',
+    rows: !live && marked ? [quadDamageRow(marked), ...bugRows] : bugRows,
+  }
+}
+
+// The answer once k took Quad Damage: that the run started, how many marked bugs wait, what it does and where it
+// shows; then k's own lines, with its pid, log, folder and the bugs marked.
+export function quadDamageStarted(said: string): string {
+  const marked = /^bugs marked: (.+)$/m.exec(said)?.[1]?.split(', ').filter(Boolean).length ?? 0
+  return [
+    `Quad Damage started${marked ? ` with ${plural(marked, 'marked bug')} waiting` : ''}: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.`,
+    '/k-bugs, `k waiting` and the board show the bug it is on; when it ends, its summary is written here and sent to your phone.',
+    ...(said.trim() ? ['', said.trim()] : []),
+  ].join('\n')
 }
 
 // The answer once k took Review & merge: what runs now, what comes of it, and where the result shows; then k's own
