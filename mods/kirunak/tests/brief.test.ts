@@ -59,30 +59,30 @@ const BRIEF11 = briefOf(
 )
 const card11 = (id: string): string => cardOf(ELEVEN.find(r => r.id === id) as KirunakRow).trimEnd()
 
-// The first dialog for the eleven, word for word.
+// The first dialog for the eleven, word for word: each group's count is its choice's line (gulnya/mobile-dialogs AC-23).
 const GROUPS11 = {
   header: 'Board',
-  question: [
-    'Made at 2026-11-07 12:00.',
-    '',
-    'Working on now: 5',
-    'Queued: 4',
-    'Done this week: 2',
-    '',
-    'No lock, no heavy jobs waiting, 2 of 2 steps running, no device claims.',
-    'Which group?',
-  ].join('\n'),
+  question: ['Made at 2026-11-07 12:00.', '', 'No lock, no heavy jobs waiting, 2 of 2 steps running, no device claims.', 'Which group?'].join('\n'),
   labels: ['Working on now', 'Queued', 'Done this week'],
 }
+const GROUP_LINES11 = { 'Working on now': '5 tasks', Queued: '4 tasks', 'Done this week': '2 tasks' }
 
-// A group's paragraph of the brief board, which its dialog shows above the question.
-const paragraph = (brief: Brief, name: string): string => brief.text.split('\n\n').find(p => p.startsWith(`${name} (`)) as string
+// A group's entries of the brief board, each its choice's line by its id, and the one line its dialog asks: the
+// group's name and count, then the question (AC-23).
+const group = (brief: Brief, name: string): { head: string; lines: Record<string, string> } => {
+  const g = brief.groups.find(x => x.name === name) as Brief['groups'][number]
+  return { head: `${name} (${g.count})`, lines: Object.fromEntries(g.ids.map(id => [id, (g.lines.find(l => l.startsWith(`${id}: `)) as string).slice(id.length + 2)])) }
+}
+// The lines of the choices offered, by label, as the dialog gave them.
+const pick = (lines: Record<string, string> | undefined, labels: readonly string[]): Record<string, string | undefined> => Object.fromEntries(labels.map(l => [l, lines?.[l]]))
+const OWN = { More: 'the next ones', Back: 'the dialog before', Cancel: 'nothing runs' }
 
 describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-9, AC-5)', () => {
   test('the first dialog says when the board was made, each group with its count and the machine\'s line; its choices are the groups', async ($, on) => {
     const w = world(on, { rows: ELEVEN, brief: json(BRIEF11), taps: [SKIP] })
     await run($, 'k-board')
     expect(w.asked).toEqual([GROUPS11])
+    expect(w.lines).toEqual([GROUP_LINES11])
   })
 
   test('a group picked shows its tasks, one entry each, its paragraph of the brief board; a task tapped answers with its card, and no verb runs', async ($, on) => {
@@ -90,9 +90,9 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     expect(await run($, 'k-board')).toBe(card11('hub/d2'))
     expect(w.asked).toEqual([
       GROUPS11,
-      { header: 'Board', question: 'Done this week (2)\nhub/d1: done, 2 of 2 met\nhub/d2: done, 2 of 2 met\nWhich task\'s card?', labels: ['hub/d1', 'hub/d2', 'Back'] },
+      { header: 'Board', question: 'Done this week (2): Which task\'s card?', labels: ['hub/d1', 'hub/d2', 'Back'] },
     ])
-    expect(w.asked[1]?.question).toBe(`${paragraph(BRIEF11, 'Done this week')}\nWhich task's card?`)
+    expect(w.lines[1]).toEqual({ 'hub/d1': 'done, 2 of 2 met', 'hub/d2': 'done, 2 of 2 met', Back: OWN.Back })
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/d2']])
     expect(w.runs).toEqual([])
   })
@@ -103,8 +103,11 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     const w = world(on, { brief: json(brief), taps: ['Drafts', 'hub/offline-maps', 'Queued', SKIP] })
     expect(await run($, 'k-board')).toBe(draftCardOf(DRAFTS[0] as DraftRow).trimEnd())
     await run($, 'k-board')
-    expect(w.asked[1]).toEqual({ header: 'Board', question: `Drafts (2)\n${lines.join('\n')}\nWhich draft?`, labels: ['hub/offline-maps', 'weather/rain-alerts', 'Back'] })
-    expect(w.asked[3]?.question).toBe('Queued (1)\nhub/sync-notes: queued, queue 2\nWhich task\'s card?')
+    expect(w.asked[1]).toEqual({ header: 'Board', question: 'Drafts (2): Which draft?', labels: ['hub/offline-maps', 'weather/rain-alerts', 'Back'] })
+    expect(w.lines[1]).toEqual({ ...Object.fromEntries(DRAFTS.slice(0, 2).map(d => [d.id, `${d.title}, written ${d.written}`])), Back: OWN.Back })
+    expect(w.lines[0]).toEqual({ Queued: '1 task', Drafts: '2 drafts' })
+    expect(w.asked[3]?.question).toBe('Queued (1): Which task\'s card?')
+    expect(w.lines[3]).toEqual({ 'hub/sync-notes': 'queued, queue 2', Back: OWN.Back })
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/offline-maps'], ['board', '--brief', '--json']])
     expect(w.runs).toEqual([])
   })
@@ -117,7 +120,10 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     const brief = { ...made, groups: made.groups.map(g => (g.name === 'Bugs' ? { ...g, lines } : g)) }
     const w = world(on, { brief: json(brief), taps: ['Bugs', 'hub/stale-tiles'] })
     expect(await run($, 'k-board')).toBe(bugCardOf(READY).trimEnd())
-    expect(w.asked[1]).toEqual({ header: 'Board', question: `Bugs (2)\n${lines.join('\n')}\nWhich bug?`, labels: ['hub/stale-tiles', 'hub/no-fix', 'Back'] })
+    // k waiting's line names no choice, so it stays above the question; each bug's entry is its choice's line.
+    expect(w.asked[1]).toEqual({ header: 'Board', question: `${lines[0]}\nBugs (2): Which bug?`, labels: ['hub/stale-tiles', 'hub/no-fix', 'Back'] })
+    expect(w.lines[1]).toEqual({ [READY.id]: `${READY.title}, fix ready`, [NO_FIX.id]: `${NO_FIX.title}, no fix yet`, Back: OWN.Back })
+    expect(w.lines[0]).toEqual({ Queued: '1 task', Bugs: '2 bugs' })
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/stale-tiles']])
     expect(w.runs).toEqual([])
   })
@@ -135,21 +141,30 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     expect(await run($, 'k-board')).toBe(card11('hub/w4'))
     expect(await run($, 'k-board')).toBe(card11('hub/q3'))
     const pages = (name: string, n: number, all: readonly (readonly [string, readonly string[]])[]) =>
-      all.map(([range, labels]) => ({ header: 'Board', question: `${paragraph(BRIEF11, name)}\nWhich task's card (${range} of ${n})?`, labels }))
+      all.map(([range, labels]) => ({ header: 'Board', question: `${group(BRIEF11, name).head}: Which task's card (${range} of ${n})?`, labels }))
     const [w1, w2] = pages('Working on now', 5, [['1 to 2', ['hub/w1', 'hub/w2', 'More', 'Back']], ['3 to 5', ['hub/w3', 'hub/w4', 'hub/w5', 'Back']]])
     const [q1, q2] = pages('Queued', 4, [['1 to 2', ['hub/q1', 'hub/q2', 'More', 'Back']], ['3 to 4', ['hub/q3', 'hub/q4', 'Back']]])
     expect(w.asked).toEqual([GROUPS11, w1, w2, w1, w2, GROUPS11, q1, q2])
+    // Each page's tasks have their entries as their lines, page by page.
+    const own = { ...group(BRIEF11, 'Working on now').lines, ...group(BRIEF11, 'Queued').lines, ...OWN }
+    expect(w.lines).toEqual(w.asked.map((a, i) => (i === 0 || i === 5 ? GROUP_LINES11 : pick(own, a.labels))))
+    expect(w.lines[1]?.['hub/w1']).toBe('in progress, queue 1, S-1 running, 0 of 2 met')
     expect(args(w.boards)).toEqual([['board', '--brief', '--json'], ['board', '--card', 'hub/w4'], ['board', '--brief', '--json'], ['board', '--card', 'hub/q3']])
   })
 
   test('more than four groups: three and More, the rest under Back; a group on the later page opens as any other', async ($, on) => {
     const w = world(on, { taps: ['More', 'Awaiting owner', 'weather/asks-owner'] })
     expect(await run($, 'k-board')).toBe(cardOf(row('weather/asks-owner')).trimEnd())
-    const head = ['Made at 2026-11-07 12:00.', '', 'Working on now: 1', 'Proposed: 1', 'Queued: 1', 'Reviewed: 1', 'Awaiting owner: 1', 'Done this week: 1', '', BRIEF.machine].join('\n')
+    const head = ['Made at 2026-11-07 12:00.', '', BRIEF.machine].join('\n')
     expect(w.asked).toEqual([
       { header: 'Board', question: `${head}\nWhich group (1 to 3 of 6)?`, labels: ['Working on now', 'Proposed', 'Queued', 'More'] },
       { header: 'Board', question: `${head}\nWhich group (4 to 6 of 6)?`, labels: ['Reviewed', 'Awaiting owner', 'Done this week', 'Back'] },
-      { header: 'Board', question: 'Awaiting owner (1)\nweather/asks-owner: awaiting owner\nWhich task\'s card?', labels: ['weather/asks-owner', 'Back'] },
+      { header: 'Board', question: 'Awaiting owner (1): Which task\'s card?', labels: ['weather/asks-owner', 'Back'] },
+    ])
+    expect(w.lines).toEqual([
+      { 'Working on now': '1 task', Proposed: '1 task', Queued: '1 task', More: OWN.More },
+      { Reviewed: '1 task', 'Awaiting owner': '1 task', 'Done this week': '1 task', Back: OWN.Back },
+      { 'weather/asks-owner': 'awaiting owner', Back: OWN.Back },
     ])
   })
 
@@ -168,8 +183,10 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     const w = world(on, { brief: json(brief), taps: ['Cancel', 'Queued', 'hub/sync-notes'] })
     expect(await run($, 'k-board')).toBe('Made at 2026-11-07 12:00.\n\nWorking on now (0)\n\nQueued (1)  \nhub/sync-notes: queued, queue 2\n\nNo lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.')
     expect(await run($, 'k-board')).toBe(cardOf(row('hub/sync-notes')).trimEnd())
-    const first = { header: 'Board', question: 'Made at 2026-11-07 12:00.\n\nWorking on now: 0\nQueued: 1\n\nNo lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.\nWhich group?', labels: ['Queued', 'Cancel'] }
-    expect(w.asked).toEqual([first, first, { header: 'Board', question: 'Queued (1)\nhub/sync-notes: queued, queue 2\nWhich task\'s card?', labels: ['hub/sync-notes', 'Back'] }])
+    // The empty group, no choice, is counted above the question; Queued's count is its choice's line.
+    const first = { header: 'Board', question: 'Made at 2026-11-07 12:00.\n\nWorking on now: 0\n\nNo lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.\nWhich group?', labels: ['Queued', 'Cancel'] }
+    expect(w.asked).toEqual([first, first, { header: 'Board', question: 'Queued (1): Which task\'s card?', labels: ['hub/sync-notes', 'Back'] }])
+    expect(w.lines).toEqual([{ Queued: '1 task', Cancel: OWN.Cancel }, { Queued: '1 task', Cancel: OWN.Cancel }, { 'hub/sync-notes': 'queued, queue 2', Back: OWN.Back }])
   })
 
   test('/k-board <id> answers that card at once, with no dialog; an id k does not know answers its refusal; one word only, and never a flag', async ($, on) => {
@@ -194,14 +211,15 @@ describe('/k-board in steps: the groups, then a group\'s tasks (kirunak-phone A-
     const brief = briefOf([{ name: 'Working on now', lines: ['hub/sync-notes: Sync `k list` **now**.'] }])
     const w = world(on, { brief: json(brief), taps: ['Working on now', SKIP] })
     expect(await run($, 'k-board')).toBe('Made at 2026-11-07 12:00.\n\nWorking on now (1)  \nhub/sync-notes: Sync \\`k list\\` \\*\\*now\\*\\*.\n\nNo lock, no heavy jobs waiting, 0 of 2 steps running, no device claims.')
-    expect(w.asked[1]?.question).toBe('Working on now (1)\nhub/sync-notes: Sync k list now.\nWhich task\'s card?')
+    expect(w.asked[1]?.question).toBe('Working on now (1): Which task\'s card?')
+    expect(w.lines[1]?.['hub/sync-notes']).toBe('Sync k list now.')
   })
 
   test('no dialog or answer of /k-board names kirunak: the engine does, before its first line (AC-12)', async ($, on) => {
     const w = world(on, { taps: ['More', 'Reviewed', SKIP, 'Queued', 'hub/sync-notes'] })
     const answers = [await run($, 'k-board', '', BRIDGE), await run($, 'k-board'), await run($, 'k-board', 'hub/old'), await run($, 'k-board', 'hub/nope')]
     expect(w.asked.length).toBe(5)
-    for (const a of w.asked) expect([a.header, a.question, ...a.labels].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
+    for (const [i, a] of w.asked.entries()) expect([a.header, a.question, ...a.labels, ...Object.values(w.lines[i] ?? {})].join('\n').replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
     for (const text of answers) expect(text.replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
   })
 })
