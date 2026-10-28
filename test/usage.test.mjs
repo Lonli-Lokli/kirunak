@@ -78,6 +78,103 @@ test('the workspace\'s usage block: kirunak\'s defaults, the limits log from bug
 
 // Invented transcripts: a main session and its agent in the weather repo's project folder, one cut short, one whose
 // first line is not JSON, one that is a folder, and (when this user cannot read past it) one nobody may read.
+const call = (ts, id, model = 'claude-opus-5-5', extra = {}) => JSON.stringify({
+  type: 'assistant', timestamp: ts, requestId: `r-${id}`, entrypoint: 'cli', ...extra,
+  message: { id, model, role: 'assistant', content: [{ type: 'text', text: 'ok' }],
+    usage: { input_tokens: 10, cache_creation_input_tokens: 2000, cache_read_input_tokens: 50000, output_tokens: 300, cache_creation: { ephemeral_5m_input_tokens: 2000, ephemeral_1h_input_tokens: 0 } } },
+});
+const user = (ts, text) => JSON.stringify({ type: 'user', timestamp: ts, entrypoint: 'cli', message: { role: 'user', content: text } });
+
+function transcripts(root) {
+  const config = mkdtempSync(join(tmpdir(), 'kirunak-claude-'));
+  // Claude Code names the folder after the session's cwd, a real path (/private/var/..., not /var/...).
+  const proj = join(config, 'projects', `${realpathSync(root).replace(/[^a-zA-Z0-9]/g, '-')}-weather`);
+  mkdirSync(proj, { recursive: true });
+  const A = 'aaaaaaaa-0000-0000-0000-000000000001';
+  writeFileSync(join(proj, `${A}.jsonl`), [
+    user('2026-10-18T13:00:00.000Z', 'before the week'),
+    call('2026-10-18T13:59:00.000Z', 'm0'), // an hour before 15:00 BST: outside
+    user('2026-10-18T14:00:00.000Z', 'go'),
+    call('2026-10-18T14:30:00.000Z', 'm1'),
+    call('2026-10-18T14:30:00.000Z', 'm1'), // the same message again counts once
+    call('2026-10-25T14:59:00.000Z', 'm2'),
+    call('2026-10-25T15:00:00.000Z', 'm3'), // the next week
+  ].join('\n') + '\n');
+  mkdirSync(join(proj, A, 'subagents'), { recursive: true });
+  writeFileSync(join(proj, A, 'subagents', 'agent-x1.jsonl'), [user('2026-10-20T10:00:00.000Z', 'find it'), call('2026-10-20T10:01:00.000Z', 's1', 'claude-sonnet-5')].join('\n') + '\n');
+  writeFileSync(join(proj, A, 'subagents', 'agent-x1.meta.json'), JSON.stringify({ agentType: 'scout', description: 'find the code' }));
+  // Cut short: its last line stops mid-object, as a transcript does while it is written or after a crash.
+  writeFileSync(join(proj, 'bbbbbbbb-0000-0000-0000-000000000002.jsonl'), `${user('2026-10-21T09:00:00.000Z', 'x')}\n${call('2026-10-21T09:01:00.000Z', 'c1')}\n{"type":"assistant","timestamp":"2026-10-21T09:02`);
+  writeFileSync(join(proj, 'cccccccc-0000-0000-0000-000000000003.jsonl'), `not json at all\n${call('2026-10-22T09:01:00.000Z', 'u1')}\n`);
+  mkdirSync(join(proj, 'dddddddd-0000-0000-0000-000000000004.jsonl'));
+  let refused = 0;
+  if (process.getuid?.() !== 0) {
+    const f = join(proj, 'eeeeeeee-0000-0000-0000-000000000005.jsonl');
+    writeFileSync(f, `${call('2026-10-22T10:00:00.000Z', 'u2')}\n`);
+    chmodSync(f, 0o000);
+    refused = 1;
+  }
+  return { config, projects: join(config, 'projects'), proj, refused };
+}
+
+test('a transcript cut short or unreadable is skipped whole and counted, never a failure (E-1)', async (t) => {
+  const w = await makeWorkspace();
+  const fx = transcripts(w.root);
+  const { lines, skipped } = await scanCalls(fx.projects, Date.parse('2026-10-18T14:00:00Z'), { prefixes: [`${realpathSync(w.root).replace(/[^a-zA-Z0-9]/g, '-')}-`] });
+  assert.equal(skipped.cut, 1);
+  assert.equal(skipped.unreadable, 2 + fx.refused);
+  assert.equal(skipped.files.size, 3 + fx.refused);
+  const rows = lines.map((l) => JSON.parse(l));
+  // Since the week's start, the next week's too (k usage keeps [from, to) of them); the repeated message once.
+  assert.deepEqual(rows.map((r) => r.ts).sort(), ['2026-10-18T14:30:00.000Z', '2026-10-20T10:01:00.000Z', '2026-10-25T14:59:00.000Z', '2026-10-25T15:00:00.000Z']);
+  assert.ok(rows.every((r) => r.proj === 'weather'));
+  assert.deepEqual(rows.filter((r) => r.sub).map((r) => [r.agentType, r.desc, r.model]), [['scout', 'find the code', 'claude-sonnet-5']]);
+});
+
+test('k usage --to: the London week from the workspace, every file written, the summary printed and kept', async (t) => {
+  const w = await withUsage(t, { weekStart: LONDON });
+  const fx = transcripts(w.root);
+  const r = k(w.home, ['usage', '--to', '2026-10-25T15:00:00Z'], { CLAUDE_CONFIG_DIR: fx.config });
+  assert.equal(r.status, 0, r.stderr);
+  const out = join(w.home, 'usage', '2026-10-25');
+  for (const f of ['calls.jsonl', 'report.txt', 'ttl.txt', 'carry.txt', 'writes.txt', 'escalations.txt', 'quality.txt', 'quality.tsv', 'compact.txt', 'replay.txt', 'summary.txt']) {
+    assert.ok(existsSync(join(out, f)), `${f} written`);
+  }
+  const calls = readFileSync(join(out, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(calls.map((c) => c.ts).sort(), ['2026-10-18T14:30:00.000Z', '2026-10-20T10:01:00.000Z', '2026-10-25T14:59:00.000Z']);
+  const summary = readFileSync(join(out, 'summary.txt'), 'utf8');
+  assert.equal(r.stdout, summary);
+  const lines = summary.trim().split('\n');
+  assert.equal(lines[0], `limit week 2026-10-18T14:00:00.000Z .. 2026-10-25T15:00:00.000Z  →  ${out}`);
+  assert.match(lines[1], /^calls 3 \(main 2, agents 1\), weight \d+M Opus-input tokens$/);
+  assert.match(lines[2], /^cache read : output \d+:1, avg context per call main 52k, agents 52k$/);
+  assert.equal(lines[3], `transcripts skipped: ${3 + fx.refused} (cut short 1, unreadable ${2 + fx.refused})`);
+  assert.match(lines[4], /^weekly limit: no .*rate-limits\.log yet \(the statusline writes it\)$/);
+  assert.ok(lines.some((l) => /^main actual /.test(l)), 'ttl\'s actual lines');
+  assert.ok(lines.some((l) => /^escalations: /.test(l)) && lines.some((l) => /^kirunak: /.test(l)) && lines.some((l) => /^compact\.log: /.test(l)));
+  assert.match(readFileSync(join(out, 'report.txt'), 'utf8'), /^== days covered 2026-10-18 2026-10-20 2026-10-25\n/);
+  assert.match(readFileSync(join(out, 'report.txt'), 'utf8'), /\nsub claude-sonnet-5\t[\d.]+%\t1 calls\n/);
+});
+
+test('k usage: the default week, --out, and a window that is not one refused', async (t) => {
+  const w = await withUsage(t, { weekStart: LONDON });
+  const fx = transcripts(w.root);
+  const out = join(w.root, 'review');
+  const r = k(w.home, ['usage', '--out', out], { CLAUDE_CONFIG_DIR: fx.config });
+  assert.equal(r.status, 0, r.stderr);
+  const last = lastWeek(LONDON);
+  assert.equal(r.stdout.split('\n')[0], `limit week ${last.from} .. ${last.to}  →  ${out}`);
+  assert.ok(existsSync(join(out, 'summary.txt')));
+  // A week with no calls at all is still a review (weekly.mjs's ttl.mjs failed on a week without agents).
+  const empty = k(w.home, ['usage', '--to', '2026-10-11T14:00:00Z', '--out', join(w.root, 'empty')], { CLAUDE_CONFIG_DIR: fx.config });
+  assert.equal(empty.status, 0, empty.stderr);
+  assert.match(empty.stdout, /\ncalls 0 \(main 0, agents 0\)/);
+  const bad = k(w.home, ['usage', '--from', 'yesterday'], { CLAUDE_CONFIG_DIR: fx.config });
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--from must be an instant/);
+});
+
+// Moved from gulnya's kirunak/tools/usage/quality.test.mjs.
 test('findings: a task review\'s verdicts and Findings bullets, a Fable review\'s B, S and N', () => {
   const text = ['| id | verdict | evidence |', '| AC-1 | met | x |', '| AC-2 | not met | y |', '| E-3 | needs owner | z |',
     '## Findings', '- AC-2: one', '- E-3: two', '## Notes for later', '- not a finding',
