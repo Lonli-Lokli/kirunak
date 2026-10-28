@@ -43,19 +43,26 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   nothing and cost the owner nothing until the owner starts it.
 - A **bug** (R29, gulnya/kirunak-bugs) is a fault in something that exists, with a way to see it, in a list of its
   own: `kirunak/bugs/<slug>.md` in the repo its id `<repo>/<slug>` names, beside `drafts/`, never in it. Its shape is
-  a groomed draft's (`templates/bug.md`): front matter `id`, `title`, `written`, and two optional keys, `bug-of:
-  <task id>`, the accepted task it came from (a folder with `done.json`, in any repo of the workspace, only read), and
+  a groomed draft's (`templates/bug.md`): front matter `id`, `title`, `written`, and two optional keys, `bug-of: <task
+  id>`, the accepted task it came from (a folder with `done.json`, in any repo of the workspace, only read), and
   `fix-repo: <repo>`, the repo its fix branch is in when that is not its own: a workspace repo by name, or `kirunak`
   for kirunak's own checkout (`ws.kirunakRoot`, else the folder above `lib/`), where every fix to kirunak is made;
-  then Who raised it, Why, What was found, `## Fix written` when a fix exists (a `- ` line each ending with
-  `[commit <sha>]` or `[file <patch path>]`; deleted, heading and all, when none does), and Questions, each with an
-  indented `Proposed:` line. `k bug new <id> --title "..." [--bug-of <task>] [--fix-repo <repo>]` writes the skeleton
-  and commits nothing; it refuses an id that is already a bug, a draft (naming `k bug from`) or a task, an unknown
-  repo or fix repo, and a task that does not exist or is not accepted. `k bug check <id>` holds the shape, the task
-  accepted, the fix repo known, and every Fix written commit found by `git cat-file -e` in the fix repo, the bug's or
-  the task's. No bug has a `state` field. Judgement: a bug and a draft wait for different things, a bug for a fix
-  and its review, a draft for the owner's choices, so they wait in different lists, and a draft that names `bug-of`
-  or holds Fix written is refused by `k draft check`, naming `k bug from`.
+  then Who raised it, Why, What was found, `## Fix written` when a fix exists (a `- ` line each ending with `[commit
+  <sha>]` or `[file <patch path>]`; deleted, heading and all, when none does), and Questions, each with an indented
+  `Proposed:` line. `k bug new <id> --title "..." --quad-damage yes|no [--bug-of <task>] [--fix-repo <repo>]` writes
+  the skeleton and commits nothing; it refuses an id that is already a bug, a draft (naming `k bug from`) or a task,
+  an unknown repo or fix repo, and a task that does not exist or is not accepted. `k bug check <id>` holds the shape,
+  the task accepted, the fix repo known, and every Fix written commit found by `git cat-file -e` in the fix repo, the
+  bug's or the task's. No bug has a `state` field. Judgement: a bug and a draft wait for different things, a bug for a
+  fix and its review, a draft for the owner's choices, so they wait in different lists, and a draft that names
+  `bug-of` or holds Fix written is refused by `k draft check`, naming `k bug from`.
+- **The mark** (R33, gulnya/quad-damage AC-3): a third key, required, `quad-damage: yes` or `quad-damage: no`, in the
+  skeleton as `k bug new` writes it (`lib/bugs.mjs`'s `MARK`). `k bug new` and `k bug from` refuse a mark missing,
+  empty or other than yes or no as a usage error (exit 2) before writing anything, dry runs included; `k bug from`
+  writes it into the moved bug's front matter, in place of one it held, else last, or into the skeleton it writes.
+  `k bug check` refuses a front matter with no `quad-damage`, an empty one or another value, naming the rule. Yes
+  when no question waits on the owner's choice, the fix is in one repo, and it is no music-engine or real-time audio
+  work, else no; the owner sets no to keep a bug out of Quad Damage, and Quad Damage sets it to no on a bug it skips.
 - **A bug's fix** is the branch `bug/<slug>` in its fix repo. **Fix ready** is worked out each time, never stored:
   the branch holds commits master (else main) does not, and no review beside the bug carries `head:` equal to the
   branch's head (a prefix of 7 or more) with a verdict other than `clean`. So a new commit on a refused fix makes it
@@ -63,6 +70,9 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   first, an undated one last), then by id; a row `{ id, repo, slug, title, written, bugOf, fixRepo, branch, head,
   ahead, fixReady, reviewing, review, path }`, `reviewing` the `{ pid, started }` of a Review & merge that runs, and
   `review` the latest review beside it. Only the `<slug>.md` files are bugs; the folder beside one holds its records.
+  A row also carries `quadDamage`, true only for `quad-damage: yes`, so a bug with no mark stays out of a run, and
+  `quadDamageRun`, `{ phase, try, since, waitUntil }` on the bug a live Quad Damage run is on, else null; `reviewing`
+  is that run's pid too while it holds the bug's lock (gulnya/quad-damage AC-2, AC-12).
 - **Review & merge** (`k bug review <id>`, the owner's verb, `approval.md` §2) holds the lock
   `$KIRUNAK_HOME/bugs/<repo>/<slug>.review.json`, `{ pid, started }`, a second run refused while that pid lives;
   writes `kirunak/bugs/<slug>/review-<n>.md` (front matter `verdict: clean | findings | conflict`, `head:`, `base:`,
@@ -70,6 +80,48 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   with `--no-ff` into its repo's master, never pushed, and the bug and its folder go in one commit of those paths in
   the bug's own repo, naming the merge and the review. The review session's brief, diff, log and session file are
   machine state, under `$KIRUNAK_HOME/bugs/<repo>/<slug>/`.
+- **Quad Damage** (`k bugs quad-damage`, the owner's verb, `approval.md` §2; R34, gulnya/quad-damage;
+  `lib/quad-damage.mjs`) is one unattended run over the bugs marked yes. Its run file,
+  `$KIRUNAK_HOME/bugs/quad-damage.json`, `{ pid, started, by, via, folder, bug, phase, try, since, waitUntil }`, is
+  made with O_EXCL: a second start is refused while its pid lives, naming that pid, its start and its bug (E-3), and a
+  dead pid's file is taken over. The start takes the file, is refused when no bug is marked yes, and hands the file to
+  a detached `k bugs quad-damage` in its own process group, printing its pid, its log and its folder
+  `$KIRUNAK_HOME/bugs/quad-damage/<started>/` (`run.log`, `state.json`, `summary.md`, and a folder a bug with each
+  fixing session's `fix-<n>.brief.md`, `fix-<n>.md` report and `fix-<n>.json` result); `--dry-run` names the bugs it
+  would take; `--via` records who started it (the mod passes `mod`, else `shell`). The run keeps the Mac awake with
+  `caffeinate -i -w <pid>` on macOS (E-2), then before each bug reads the list again and takes the first marked bug it
+  has not tried, in `k bugs`' order, so a bug marked during the run joins it and one whose lock another live pid holds
+  is passed over as "waits: being reviewed". It holds the bug's review lock with its own pid for the whole bug, so
+  Review & merge, Start fix and Drop on it are refused, naming Quad Damage (E-4). Nothing of a run goes into a repo
+  but what a bug's own work commits.
+- **One bug's work** (`workBug`; AC-4 to AC-8, AC-11, AC-14, E-1, E-5 to E-7): a fix ready goes straight to its review
+  (E-1), and a head a findings review refused takes its retry first. Otherwise a fresh fixing session runs through the
+  runner on `ws.bugs.fixModel` (default `opus`) with `ws.bugs.fixEffort` when set, the Agent tool off, no dollar cap,
+  `--max-turns 150`, its cwd the fix repo with the bug's repo and the run's folder added, `KIRUNAK_BUG_FIX=<id>` in its
+  environment (kirunak's session-start notice and its escalation stay quiet in it; the owner's verbs and the frozen
+  files are still refused). Its brief is `templates/quad-damage-brief.md`: the triage first (a choice of the owner's,
+  anything off the machine, more than a small fix or one repo, another fix repo, music-engine or real-time audio work:
+  SKIPPED), then the k-bug skill's steps 4 to 7 on `bug/<slug>` in the worktree `<fix root>-quad-<slug>`, heavy jobs
+  through `bugs.heavyLock` with its own session id, never a merge or a push. Its stream is read as it comes: the 150th
+  tool result or 150 minutes kills its process tree and the bug waits (AC-11). Its report's first line decides:
+  FIXED with commits ahead of master goes to Review & merge's review, run through the run's runner; findings take one
+  retry briefed from that review, then a second review, and findings twice (counted over every findings review beside
+  the bug, the owner's too) wait naming both (AC-7); a conflict or a refused merge waits as the review writes it
+  (E-5). SKIPPED: the run sets `quad-damage: no`, writes the reason under What was found and commits the bug file
+  alone (AC-4, E-6). FAILED, an empty FIXED or a session ended at its limit waits. A fixing session with no tool call,
+  a login gone, extra usage, or a review session that failed before working stops the run (E-7).
+- **The run's limits** (AC-9, AC-10): before every session the run reads the plan's windows through the runner's
+  `limits()` (`orchestrator.md` §3) and appends the reading to `ws.bugs.limitsLog`, labelled `quad-damage`. The 5-hour
+  window at 90% or more sets the phase waiting with `waitUntil` and sleeps until its reset and a minute, then reads
+  again; the week at 98% or more, extra usage, or a reading that fails (a runner with no `limits()` included) stops the
+  run, every marked bug not tried "not reached".
+- **The run's end** (AC-13): `summary.md` is `Quad Damage, HH:MM to HH:MM: n merged, m wait, k not reached[; stopped:
+  why]`, then a line a bug, `- <id>: merged <sha7> into <repo>'s master`, `- <id>: waits: <why>` or `- <id>: not
+  reached`, and the run file goes. `k bugs quad-damage --summary [<folder>]` prints the latest run's summary (or the
+  folder's, a path or a run folder's name) and a `kirunak-push:` line, the summary cut to 200 characters for the
+  owner's phone; `k bugs quad-damage --status` prints the run in one line (AC-12): its bug and phase and since when,
+  between bugs, or waiting for the 5-hour window until when. A run killed leaves its run file to the next run's
+  dead-pid takeover.
 - `k bug drop <id> --why "..."` removes the bug and its folder in a commit of those paths alone, the reason in its
   message, other staged files left staged and out; a fix branch is kept and named with its head. `k bug from <id>
   [--no-commit]` moves a draft (`git mv` to `kirunak/bugs/<slug>.md`) or a task whose intake is not approved (its
@@ -308,5 +360,5 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 
 ## 7. Requirements this file satisfies
 
-R24 to R27 (§1: drafts), R29 (§1: a bug, its fix, Review & merge, drop and move), R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
+R24 to R27 (§1: drafts), R29 (§1: a bug, its fix, Review & merge, drop and move), R33 and R34 (§1: the mark, Quad Damage's run, one bug's work, its limits and its end), R4 (§2 rule 1, §3 `intake.md`), R5 (§2), R6 (§1, §3), R7 (§5), R16 (§1, §2, §4), R20 (`from:` and `[from ...]`),
 R32 (§3 `repos.md`), D4 (§6), D6 (§2 rule 1).
