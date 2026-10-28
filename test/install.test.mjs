@@ -51,7 +51,7 @@ test('the block is written with the absolute path, and every other hook and key 
   }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
-  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-bug', 'k-go-on']);
+  assert.deepEqual(SKILLS, ['k-intake', 'k-done', 'k-board-page', 'k-draft', 'k-bug', 'k-go-on', 'usage-review']);
   for (const s of SKILLS) {
     const link = join(h.skillsDir, s);
     assert.ok(lstatSync(link).isSymbolicLink());
