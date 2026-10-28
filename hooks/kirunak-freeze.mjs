@@ -431,10 +431,11 @@ export function decide(input) {
 /**
  * The deny reason of the escalation block in force in the session (approval.md §7, E-10), or null: read from the
  * session's state file, which a subagent's edit shares with its caller (E-13), while `block.lifted` is null,
- * config.json has the hook and `hook.block` on, and no k run step runs (E-12). One existsSync when there is no file.
+ * config.json has the hook and `hook.block` on, and no k run step (E-12) or Quad Damage fixing session (KIRUNAK_BUG_FIX)
+ * runs. One existsSync when there is no file.
  */
 function blockOf(input) {
-  if (process.env.KIRUNAK_STEP) return null;
+  if (process.env.KIRUNAK_STEP || process.env.KIRUNAK_BUG_FIX) return null;
   const home = kirunakHome();
   const file = escalationFile({ session_id: input?.session_id }, home);
   if (!file || !existsSync(file)) return null;
@@ -509,9 +510,10 @@ function untracked(file) {
 // An edit marks the failures the escalation hook counts as edited since, so the next one is a fix that failed; a
 // counted build or a k run started in the background is noted, so its end can be counted or its push handed on
 // (approval.md §7). Done in this process, so the hot path gets no second one; never in a
-// k run step or without the hook's config.json, and the rules load only when there is something to write.
+// k run step, a Quad Damage fixing session (KIRUNAK_BUG_FIX) or without the hook's config.json, and the rules load only
+// when there is something to write.
 async function forEscalation(input) {
-  if (process.env.KIRUNAK_STEP) return;
+  if (process.env.KIRUNAK_STEP || process.env.KIRUNAK_BUG_FIX) return;
   const edit = EDIT_TOOLS.has(input.tool_name);
   if (!edit && !(input.tool_name === 'Bash' && input.tool_input?.run_in_background === true)) return;
   const home = kirunakHome();
