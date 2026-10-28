@@ -9,17 +9,21 @@ import { constants, tmpdir } from 'node:os';
 export const KEEP_ALIVE_PROMPT = 'keep-alive: reply with the word ok';
 export const LIMITS_PROMPT = 'reply with the word ok';
 const LIMITS_TIMEOUT_MS = 120000;
+// The words of a session whose login is gone; an assistant message's `error` says it too, `authentication_failed`.
+export const LOGIN_GONE = /\/login\b|not logged in|invalid api key|oauth token/i;
 const OUTPUT_CAP = 10 * 1024 * 1024;
 
 // The argv after `claude`. step: { prompt, model, effort, permissionMode, maxTurns, maxBudgetUsd, allowedTools,
-// disallowedTools, deny, sessionId, resume, addDirs }. No --model or --effort when none is named, so Claude Code's own
+// disallowedTools, deny, sessionId, resume, addDirs, stream }. `stream` asks for stream-json (which needs --verbose), a
+// message a line as it comes, in place of the one JSON result. No --model or --effort when none is named, so Claude Code's own
 // default applies. `deny` (permission rules, a review's) goes as --settings' permissions.deny, with auto memory off (the repo's memory is shared with the implementing
 // sessions and loads before any rule applies); the deny list adds to the
 // other settings' rules. A new run reads its brief on stdin; a resumed one takes its prompt as the argument after -p.
 export function claudeArgs(step) {
   const args = ['-p'];
   if (step.resume && step.prompt) args.push(step.prompt);
-  args.push('--output-format', 'json');
+  args.push('--output-format', step.stream ? 'stream-json' : 'json');
+  if (step.stream) args.push('--verbose');
   if (step.model) args.push('--model', step.model);
   if (step.effort) args.push('--effort', step.effort);
   args.push('--permission-mode', step.permissionMode || 'auto');
@@ -82,7 +86,7 @@ export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
   const words = (x) => (x?.message?.content || []).filter((c) => c?.type === 'text').map((c) => c.text);
   const parts = [...assistant.flatMap(words), result?.result, stderr].filter((t) => typeof t === 'string' && t.trim()).map((t) => t.replace(/\s+/g, ' ').trim());
   const said = [...new Set(parts)].join(' ').slice(0, 200);
-  if (assistant.some((x) => x.error === 'authentication_failed') || /\/login\b|not logged in|invalid api key|oauth token/i.test(said)) {
+  if (assistant.some((x) => x.error === 'authentication_failed') || LOGIN_GONE.test(said)) {
     return { error: `the login is gone: ${said || 'authentication failed'}` };
   }
   if (exitCode !== 0 || result?.is_error) return { error: `the session failed (exit ${exitCode})${said ? `: ${said}` : ''}` };
@@ -90,9 +94,22 @@ export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
   return { error: 'the session gave no rate_limit_event' };
 }
 
-function spawnClaude(bin, args, { cwd, env, stdin, raw = false }) {
+// onMessage(message), when given, gets each line of stdout that parses as a JSON object, as it comes; what it throws
+// is ignored, so a reader's fault never ends the session.
+function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null }) {
   let out = '';
   let err = '';
+  let part = '';
+  const read = (b) => {
+    const lines = (part + b).split('\n');
+    part = lines.pop();
+    for (const line of lines) {
+      try {
+        const x = JSON.parse(line);
+        if (x && typeof x === 'object') onMessage(x);
+      } catch {}
+    }
+  };
   const cap = (s, b) => (s.length + b.length > OUTPUT_CAP ? (s + b).slice(-OUTPUT_CAP) : s + b);
   let child;
   try {
@@ -100,7 +117,10 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false }) {
   } catch (e) {
     return { pid: undefined, done: Promise.resolve({ exitCode: 127, result: null, usage: null, stderr: e.message, ...(raw ? { stdout: '' } : {}) }) };
   }
-  child.stdout.on('data', (b) => (out = cap(out, String(b))));
+  child.stdout.on('data', (b) => {
+    out = cap(out, String(b));
+    if (onMessage) read(String(b));
+  });
   child.stderr.on('data', (b) => (err = cap(err, String(b))));
   child.stdin.on('error', () => {});
   child.stdin.end(stdin ?? '');
@@ -109,6 +129,7 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false }) {
     child.on('error', (e) => resolve({ exitCode: 127, result: null, usage: null, stderr: err + e.message, ...(raw ? { stdout: out } : {}) }));
     child.on('exit', async (code, signal) => {
       await Promise.race([closed, new Promise((r) => setTimeout(r, 1000))]);
+      if (onMessage && part) read('\n');
       const result = parseResult(out);
       resolve({ exitCode: code ?? 128 + (constants.signals[signal] || 0), result, usage: result?.usage ?? null, stderr: err, ...(raw ? { stdout: out } : {}) });
     });
@@ -126,11 +147,14 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
       runner: {
         // start(step) → { pid, sessionId, done: Promise<{ exitCode, result, usage, stderr }> }. step adds to the
         // seam's fields: prompt (the brief's text, or the resume prompt), sessionId, maxBudgetUsd, permissionMode,
-        // addDirs, deny (a review's) and env (KIRUNAK_TASK, KIRUNAK_STEP).
+        // addDirs, deny (a review's) and env (KIRUNAK_TASK, KIRUNAK_STEP); and onMessage(message), when the caller
+        // reads the session as it goes (gulnya/quad-damage AC-11): the session then streams, each message handed to it.
+        // The caller ends a session by killing the group of its pid.
         start(step) {
           const sessionId = step.resume || step.sessionId || randomUUID();
-          const args = claudeArgs({ ...step, prompt: step.prompt ?? step.brief, sessionId, permissionMode: step.permissionMode || mode() });
-          const run = spawnClaude(bin, args, { cwd: step.cwd, env: step.env, stdin: step.resume ? '' : step.prompt ?? step.brief });
+          const onMessage = typeof step.onMessage === 'function' ? step.onMessage : null;
+          const args = claudeArgs({ ...step, prompt: step.prompt ?? step.brief, sessionId, permissionMode: step.permissionMode || mode(), stream: !!onMessage });
+          const run = spawnClaude(bin, args, { cwd: step.cwd, env: step.env, stdin: step.resume ? '' : step.prompt ?? step.brief, onMessage });
           return { pid: run.pid, sessionId, done: run.done };
         },
 
