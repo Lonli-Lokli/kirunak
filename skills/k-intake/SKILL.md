@@ -108,7 +108,7 @@ move staged in git, and the task takes its title. Read `draft.md` as background,
 ruling, and the owner's words quoted there are still asked. Its questions come among the first, after the goal, each
 through `k intake question`, its `Proposed:` answer offered as the proposal (the k-draft skill grooms drafts so). Every line of the task is still asked and sourced from the owner's answer;
 `[from kirunak/tasks/<slug>/draft.md]` may sit beside that source, never alone. A draft naming `bug-of:` is refused:
-`k bug from <id>` moves it into `kirunak/bugs/`.
+`k bug from <id> --quad-damage yes|no` moves it into `kirunak/bugs/`.
 
 ## Starting from a bug (Start fix)
 

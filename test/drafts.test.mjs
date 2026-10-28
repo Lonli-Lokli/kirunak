@@ -414,12 +414,12 @@ test('a draft refuses bug-of and Fix written, each naming k bug from, and has no
   const ofTask = bugText(null);
   assert.deepEqual(checkDraft(ofTask, BUG), [{
     line: lineOf(ofTask, 'bug-of:'),
-    problem: "bug-of is a bug's: a fault in something that exists is a bug in kirunak/bugs/, never a draft; `k bug from hub/stale-tiles` moves this one there",
+    problem: "bug-of is a bug's: a fault in something that exists is a bug in kirunak/bugs/, never a draft; `k bug from hub/stale-tiles --quad-damage yes|no` moves this one there",
   }]);
   const fixed = FILLED.replace('## Questions', '## Fix written\n- the cache [commit 1a2b3c4]\n\n## Questions');
   assert.deepEqual(checkDraft(fixed, ID), [{
     line: lineOf(fixed, '## Fix written'),
-    problem: "## Fix written is a bug's: a draft holds no fix; `k bug from weather/wind-alerts` moves this one into kirunak/bugs/",
+    problem: "## Fix written is a bug's: a draft holds no fix; `k bug from weather/wind-alerts --quad-damage yes|no` moves this one into kirunak/bugs/",
   }]);
   assert.deepEqual(problemsOf(bugText(), BUG).length, 2);
   assert.deepEqual(problemsOf(FILLED), []);
@@ -459,5 +459,5 @@ test('the verbs: k draft new --bug-of refused naming k bug new, and k draft chec
   writeFileSync(bugFile(w), bugText());
   const r = run('draft', 'check', BUG);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /`k bug from hub\/stale-tiles` moves this one there/);
+  assert.match(r.stderr, /`k bug from hub\/stale-tiles --quad-damage yes\|no` moves this one there/);
 });

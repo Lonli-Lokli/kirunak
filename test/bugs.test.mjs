@@ -116,7 +116,7 @@ test('k bug new refuses an unknown repo, a bad id, a title missing or long, and 
   newBug({ ws: w.ws, id: BUG, title: 'Stale tiles', quadDamage: 'no' });
   assert.throws(nu(BUG), (e) => e.code === 1 && e.message === `${BUG} is already a bug: ${bugFile(w)}`);
   put(draftFile(w, 'wind'), '---\nid: hub/wind\n---\n');
-  assert.throws(nu('hub/wind', { dryRun: true }), (e) => e.code === 1 && e.message === `hub/wind is already a draft: ${draftFile(w, 'wind')}; \`k bug from hub/wind\` moves it into kirunak/bugs/`);
+  assert.throws(nu('hub/wind', { dryRun: true }), (e) => e.code === 1 && e.message === `hub/wind is already a draft: ${draftFile(w, 'wind')}; \`k bug from hub/wind --quad-damage yes|no\` moves it into kirunak/bugs/`);
   assert.throws(nu(TASK), (e) => e.code === 1 && /^weather\/offline-forecast is already a task: /.test(e.message));
   put(join(w.hub, 'kirunak', 'approvals', 'gone.json'), '{}\n');
   assert.throws(nu('hub/gone'), /hub\/gone is already a task: .*approvals\/gone\.json$/);

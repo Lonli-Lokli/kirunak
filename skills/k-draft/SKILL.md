@@ -54,8 +54,8 @@ the draft (the k-intake skill says how).
 
 A fault in something that exists, a fault in the work of a task the owner has accepted included, goes into
 `kirunak/bugs/` through `k bug new` (the k-bug skill). `k draft new --bug-of` is refused, naming `k bug new`, and
-`k draft check` refuses a draft with `bug-of:` or Fix written, naming `k bug from <id>`, which moves it into the bugs
-with its history and renames its `draft/<slug>` branch `bug/<slug>`.
+`k draft check` refuses a draft with `bug-of:` or Fix written, naming `k bug from <id> --quad-damage yes|no`, which
+moves it into the bugs with its history and renames its `draft/<slug>` branch `bug/<slug>`.
 
 ## Dropping one
 
