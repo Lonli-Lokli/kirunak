@@ -106,6 +106,9 @@ export default {
   kirunakRoot: '~/code/kirunak',      // kirunak's own checkout; optional
   bugs: { reviewModel: 'opus', reviewEffort: 'high', heavyLock: 'lock run --',  // optional
     fixModel: 'opus', fixEffort: 'high', limitsLog: './rate-limits.log' },
+  usage: { weekStart: { day: 'sunday', time: '00:00', zone: 'UTC' }, reviews: null, baseline: null,
+    limitsLog: '<KIRUNAK_HOME>/rate-limits.log', stale: { minutes: 60, context: 150000 } },
+  cache: { promptCacheTtl: '1h', subagentPromptCacheTtl: null, syncClaudeAiSkills: false },  // optional; none by default
 };
 ```
 
@@ -183,6 +186,20 @@ export default {
   the real paths whose local file the window is in, so the hook reads one file. `k doctor` names each value, the limit
   with its window (`167000 (a 200000 window)`), and the user's own window, and fails a user window not above the
   handover size when `midStepLimit` is `'user'` (R7.2).
+- **`usage`** sets the weekly usage review (gulnya/k-usage D-2, D-8): `weekStart` (the plan's limit week, a day, an
+  `HH:MM` and a time zone; default Sunday 00:00 UTC), which `k usage` reads for its default window; `reviews`, the
+  folder the usage-review skill reads the last review and `standing.md` from and writes the new review to (`k usage`
+  prints it last); `baseline`, a `quality.tsv` of an earlier week `quality.txt` compares with; `limitsLog`, the
+  rate-limit log the status line tracker appends to and the summary reads (else `bugs.limitsLog`, its older name, else
+  `<KIRUNAK_HOME>/rate-limits.log`); and `stale`, the stale-session hook's `minutes` since the last call and
+  `context` in tokens, both past which it says once to hand over or start fresh. Paths resolve against the module or
+  `~/...`. A bad day, time, zone, path or number is refused at load. `k install` copies `stale` and `limitsLog` into
+  `escalate/config.json`, so a change needs `k install` again.
+- **`cache`** names the prompt-cache settings `~/.claude/settings.json` should hold (D-6): `promptCacheTtl`,
+  `subagentPromptCacheTtl` (strings) and `syncClaudeAiSkills` (a boolean), each a value or `null` for a key that must
+  be absent. `k doctor` prints one line for each key named, ok or a failure naming both values; a key not named, and
+  a workspace with no `cache` (the default), get no line (E-2). kirunak never writes them. Any other key, or a value
+  of another type, is refused at load.
 - A plugin module default-exports `{ name, version, provides: { <seam>: implementation } }`. The core loads the
   workspace, then each plugin in order, validates every `provides` entry against the seam's contract (each named
   function present and a function; unknown seam names refused), applies the policy, and only then runs a verb.

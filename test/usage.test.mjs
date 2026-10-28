@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { k, makeWorkspace } from './helpers.mjs';
 import { loadWorkspace } from '../lib/workspace.mjs';
 import { DEFAULT_USAGE, lastWeek, weekTo, windowOf, zoned } from '../lib/usage/week.mjs';
@@ -132,7 +132,7 @@ test('a transcript cut short or unreadable is skipped whole and counted, never a
 });
 
 test('k usage --to: the London week from the workspace, every file written, the summary and the tasks printed and kept', async (t) => {
-  const w = await withUsage(t, { weekStart: LONDON });
+  const w = await withUsage(t, { weekStart: LONDON, reviews: './usage-reviews' });
   const fx = transcripts(w.root);
   const r = k(w.home, ['usage', '--to', '2026-10-25T15:00:00Z'], { CLAUDE_CONFIG_DIR: fx.config });
   assert.equal(r.status, 0, r.stderr);
@@ -143,7 +143,9 @@ test('k usage --to: the London week from the workspace, every file written, the 
   const calls = readFileSync(join(out, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(calls.map((c) => c.ts).sort(), ['2026-10-18T14:30:00.000Z', '2026-10-20T10:01:00.000Z', '2026-10-25T14:59:00.000Z']);
   const summary = readFileSync(join(out, 'summary.txt'), 'utf8');
-  assert.equal(r.stdout, `${summary}\n${readFileSync(join(out, 'tasks.txt'), 'utf8')}`); // then each task's weight (AC-2)
+  // then each task's weight (AC-2), then the reviews' folder the usage-review skill reads (AC-6)
+  assert.equal(r.stdout, `${summary}\n${readFileSync(join(out, 'tasks.txt'), 'utf8')}\nreviews: ${join(dirname(w.module), 'usage-reviews')}\n`);
+  assert.match(readFileSync(join(out, 'ttl.txt'), 'utf8'), /\nthe week: 1h vs 5m for everything: -?\d+\.\d%\n$/);
   const lines = summary.trim().split('\n');
   assert.equal(lines[0], `limit week 2026-10-18T14:00:00.000Z .. 2026-10-25T15:00:00.000Z  →  ${out}`);
   assert.match(lines[1], /^calls 3 \(main 2, agents 1\), weight \d+M Opus-input tokens$/);

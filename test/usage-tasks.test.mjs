@@ -68,7 +68,8 @@ test('k usage weighs the week per task and step, heaviest first, no task last, t
   const { out, r } = await week();
   assert.equal(r.status, 0, r.stderr);
   const summary = readFileSync(join(out, 'summary.txt'), 'utf8'), tasks = readFileSync(join(out, 'tasks.txt'), 'utf8');
-  assert.equal(r.stdout, `${summary}\n${tasks}`, 'the summary printed, then the tasks');
+  assert.match(r.stdout, /\n\nreviews: none named \(usage\.reviews in .*\)\n$/, 'the reviews folder last, none named here');
+  assert.equal(r.stdout.replace(/\nreviews: .*\n$/, ''), `${summary}\n${tasks}`, 'the summary printed, then the tasks');
   assert.match(summary, /^calls 15 \(main 13, agents 2\)/m);
 
   const rows = tasks.trim().split('\n').slice(1).map((l) => /^(\s*)(\S.*?)\s+([\d.]+)M\s+([\d.]+)%\s+(\d+) calls$/.exec(l))

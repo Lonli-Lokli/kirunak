@@ -96,10 +96,14 @@ You need Node 22 or later, git and Claude Code.
    ```
 
    `k install` adds a PreToolUse hook and two SessionStart hooks to `~/.claude/settings.json` (keeping yours; one
-   says, as a session you start begins, how many bugs wait) and links the `k-intake`, `k-draft`, `k-bug`, `k-done` and
-   `k-board-page` skills into `~/.claude/skills/` (`k-board-page` publishes the board as a page, below). It also
-   prints one line to add to your status line command, so the cache keeper sees each session's context and cache and `k cost` its money; it never
-   edits your status line itself, and `k doctor` warns until the status line, or a script it names, runs that line.
+   says, as a session you start begins, how many bugs wait) and links the `k-intake`, `k-draft`, `k-bug`, `k-done`,
+   `k-board-page` and `usage-review` skills into `~/.claude/skills/` (`k-board-page` publishes the board as a page,
+   below). It also prints one line to add to your status line command, so the cache keeper sees each session's
+   context and cache and `k cost` its money, and the rate-limit log gets a line (time, week %, 5-hour %, the session's
+   name) whenever the two figures change; it never edits your status line itself, and `k doctor` warns until the
+   status line, or a script it names, runs that line. A **stale-session hook** on UserPromptSubmit says once, when a
+   prompt comes over 60 minutes after the last call with over 150,000 tokens of context (the cache has expired, and
+   the next call writes all of it again), to write the handoff (`k handoff <id>`) or start fresh; it never blocks.
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
    ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
    `k-go-on` skill.
@@ -127,6 +131,12 @@ You need Node 22 or later, git and Claude Code.
    workspace repo keeps your own window, and the hook never holds its compaction. `k run`'s steps keep your own
    window too, through the variable. `compact: { enabled: false }` turns it off, and the
    next `k install` takes its window back out (`design/plugins.md` §3).
+
+   Optional `usage` and `cache` settings (`design/plugins.md` §3): `usage.weekStart` your plan's limit week (default
+   Sunday 00:00 UTC), `usage.reviews` the folder your weekly reviews live in, `usage.limitsLog` the rate-limit log,
+   `usage.stale` the stale hook's minutes and context; `cache` the values of `promptCacheTtl`,
+   `subagentPromptCacheTtl` and `syncClaudeAiSkills` you want in `~/.claude/settings.json` (`null`: absent), one
+   `k doctor` line each, failing a difference. kirunak never sets them for you.
 
    `--print` shows what it would do and writes nothing. A repo that already
    has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
@@ -329,5 +339,16 @@ whose model or effort disagrees with the ladder; a Fable entry with any effort; 
 `escalate/config.json`; and a push that is off. The push is best effort: the session sends it with Claude Code's
 PushNotification tool when `agentPushNotifEnabled` is true in `settings.json`, whether it reaches the phone and what a
 tap opens are Claude Code's, and every stop shows in `k waiting` and `k board --brief` regardless.
+
+### Where the week's usage went
+
+`k usage` measures the last finished limit week (`usage.weekStart`; `--from`, `--to` and `--out` for another window)
+from every Claude Code transcript on this machine and writes it to `<KIRUNAK_HOME>/usage/<date>/`: `calls.jsonl`
+(every call), `report.txt`, `ttl.txt` (the week under a 5-minute and a 1-hour cache), `carry.txt`, `writes.txt`,
+`escalations.txt`, `quality.txt` and `.tsv`, `compact.txt`, `replay.txt` and `.tsv` (the handover replayed),
+`summary.txt`, and `tasks.txt` and `.tsv` (each task's and step's weight, heaviest first, "no task" last). It prints
+the summary, the tasks and the review folder. A transcript cut short or unreadable is skipped and counted. The
+`usage-review` skill (`/usage-review`) runs it once a week, compares with the last review in `usage.reviews`, answers
+that folder's `standing.md` and writes the new review there.
 
 MIT licence: `LICENSE`.
