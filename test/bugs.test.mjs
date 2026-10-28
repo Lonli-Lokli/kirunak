@@ -215,7 +215,7 @@ test('k bugs: every repo\'s bugs, a ready fix first, then by date; fix ready fro
   const rows = list(w.ws);
   assert.deepEqual(rows.map((r) => [r.id, r.fixReady]), [['hub/b', true], ['hub/e', true], ['weather/d', false], ['hub/a', false], ['weather/c', false]]);
   const at = (id) => rows.find((r) => r.id === id);
-  assert.deepEqual(Object.keys(at('hub/b')), ['id', 'repo', 'slug', 'title', 'written', 'bugOf', 'fixRepo', 'quadDamage', 'branch', 'head', 'ahead', 'fixReady', 'reviewing', 'review', 'path']);
+  assert.deepEqual(Object.keys(at('hub/b')), ['id', 'repo', 'slug', 'title', 'written', 'bugOf', 'fixRepo', 'quadDamage', 'branch', 'head', 'ahead', 'fixReady', 'reviewing', 'quadDamageRun', 'review', 'path']);
   assert.deepEqual([at('hub/b').branch, at('hub/b').head, at('hub/b').ahead, at('hub/b').fixRepo, at('hub/b').review], ['bug/b', b, 1, 'hub', null]);
   assert.deepEqual([at('hub/e').fixRepo, at('hub/e').written, at('hub/e').reviewing], ['kirunak', null, { pid: process.pid, started: '2026-10-27T10:00:00Z' }]);
   assert.deepEqual(at('hub/e').review, { file: 'review-1.md', verdict: 'findings', head: old, atHead: false });

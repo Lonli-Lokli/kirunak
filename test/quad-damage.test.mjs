@@ -186,3 +186,177 @@ test('run: the work\'s stop ends the run; its outcome is kept; a work that throw
   assert.equal(reviewing(w.home, 'hub/a'), null);
 });
 
+test('run: a bug marked during the run joins it; a bug another live pid holds is passed over, being reviewed', async () => {
+  const w = await qdWorkspace();
+  writeLock(w.home, 'hub/a', OTHER);
+  const taken = [];
+  const work = async (ctx) => {
+    taken.push(ctx.bug.id);
+    if (ctx.bug.id === 'hub/c') put(join(w.hub, 'kirunak', 'bugs', 'd.md'), bugText('hub/d', '2026-10-23', 'yes'));
+    // relock() takes the bug's lock again after a review let it go.
+    writeFileSync(reviewLockPath(w.home, ctx.bug.id), JSON.stringify({ pid: DEAD }));
+    ctx.relock();
+    assert.equal(reviewing(w.home, ctx.bug.id).pid, process.pid);
+    return { outcome: 'waits', why: 'not ready' };
+  };
+  const r = await run({ ws: w.ws, ...seams(), work });
+  assert.deepEqual(taken, ['hub/c', 'hub/d']);
+  assert.equal(summaryFile(r), 'Quad Damage, 23:40 to 23:40: 0 merged, 3 wait, 0 not reached\n- hub/a: waits: being reviewed\n' +
+    '- hub/c: waits: not ready\n- hub/d: waits: not ready\n');
+  assert.equal(reviewing(w.home, 'hub/a').pid, OTHER);
+});
+
+test('claim: a second run while the first lives is refused, naming it; a dead one is taken over (E-3)', async () => {
+  const w = await qdWorkspace();
+  writeRun(w.home, { pid: OTHER, started: '2026-10-27T21:00:00+00:00', by: 'owner', via: 'mod', bug: 'hub/a', phase: 'fixing', try: 2 });
+  const refused = (e) => e.code === 1 && e.message === `Quad Damage runs already: pid ${OTHER}, started 2026-10-27T21:00:00+00:00, on hub/a ` +
+    '(fixing, try 2); a second one waits until it ends, and k bugs quad-damage --status shows it';
+  assert.throws(() => claim(w.home), refused);
+  await assert.rejects(run({ ws: w.ws, ...seams() }), refused);
+  assert.throws(() => start({ ws: w.ws }), refused);
+  assert.throws(() => preview({ ws: w.ws }), refused);
+  assert.equal(state(w.home).pid, OTHER);
+  const cli = k(w.home, ['bugs', 'quad-damage']);
+  assert.equal(cli.status, 1);
+  assert.match(cli.stderr, new RegExp(`Quad Damage runs already: pid ${OTHER}`));
+  writeRun(w.home, { pid: OTHER, started: '2026-10-27T21:00:00+00:00' });
+  assert.throws(() => claim(w.home), /pid \d+, started 2026-10-27T21:00:00\+00:00, between bugs; a second one waits/);
+
+  // Its own pid, or the pid that hands it on, is the run's.
+  writeRun(w.home, { pid: OTHER, started: 'S', folder: '/f' });
+  assert.deepEqual(claim(w.home, { pid: 77, from: OTHER }), { pid: 77, started: 'S', folder: '/f' });
+  release(w.home, 78);
+  assert.equal(existsSync(quadDamagePath(w.home)), true);
+  release(w.home, 77);
+  assert.equal(existsSync(quadDamagePath(w.home)), false);
+
+  writeRun(w.home, { pid: DEAD, started: '2026-10-27T21:00:00+00:00', bug: 'hub/a', phase: 'fixing', try: 1 });
+  const r = await run({ ws: w.ws, ...seams() });
+  assert.equal(r.bugs.length, 2);
+  writeFileSync(quadDamagePath(w.home), 'not json');
+  assert.equal(claim(w.home, { now: T0 }).started.slice(0, 16), '2026-10-27T23:40');
+});
+
+test('drop, intake and Review & merge refuse a bug the run holds, naming the run (E-4)', async () => {
+  const w = await qdWorkspace();
+  writeRun(w.home, { pid: OTHER, started: '2026-10-27T23:40:05+00:00', bug: 'hub/a', phase: 'fixing', try: 1 });
+  writeLock(w.home, 'hub/a', OTHER);
+  assert.throws(() => drop({ ws: w.ws, id: 'hub/a', why: 'no longer seen' }),
+    (e) => e.code === 1 && e.message === `the bug hub/a cannot be dropped: Quad Damage is on it (pid ${OTHER}, started ` +
+      '2026-10-27T22:00:00.000Z) and may merge its fix and close it; it is free once the run moves on, and k bugs quad-damage --status shows the run');
+  assert.throws(() => drop({ ws: w.ws, id: 'hub/a', why: 'no longer seen', dryRun: true }), /Quad Damage is on it/);
+  assert.throws(() => lock(w.home, 'hub/a'), (e) => e.code === 1 && e.message === `hub/a is in Quad Damage's run: pid ${OTHER}, started ` +
+    "2026-10-27T22:00:00.000Z; Review & merge waits until the run moves on, and k bugs quad-damage --status shows it");
+  assert.equal(existsSync(join(w.hub, 'kirunak', 'bugs', 'a.md')), true);
+
+  put(join(w.weather, 'kirunak', 'bugs', 'wind-alerts.md'), bugText('weather/wind-alerts', '2026-10-20', 'yes'));
+  writeLock(w.home, 'weather/wind-alerts', OTHER);
+  await assert.rejects(intakeStart({ ws: w.ws, id: 'weather/wind-alerts', from: 'kirunak/bugs/wind-alerts.md' }),
+    (e) => e.code === 1 && e.message === `the bug weather/wind-alerts cannot start its intake: Quad Damage is on it (pid ${OTHER}, ` +
+      'started 2026-10-27T22:00:00.000Z) and may merge its fix and close it; it is free once the run moves on, and k bugs quad-damage ' +
+      '--status shows the run');
+  assert.equal(existsSync(join(w.weather, 'kirunak', 'tasks', 'wind-alerts')), false);
+
+  // Held by a Review & merge, not the run: the review is named, as before.
+  writeRun(w.home, { pid: DEAD, started: 'S' });
+  assert.throws(() => drop({ ws: w.ws, id: 'hub/a', why: 'no longer seen' }),
+    (e) => e.message === `the bug hub/a cannot be dropped: its Review & merge runs (pid ${OTHER}, started 2026-10-27T22:00:00.000Z) and ` +
+      'may merge its fix and close it; k bugs shows its result once it ends');
+});
+
+test('status: the run, its bug and phase, or its wait; and the rows (AC-12)', async () => {
+  const w = await qdWorkspace();
+  assert.equal(statusLine(null), 'Quad Damage is not running');
+  const base = { pid: OTHER, started: '2026-10-27T23:40:05+00:00', by: 'owner', via: 'shell', folder: '/f' };
+  assert.equal(statusLine({ ...base, bug: 'hub/a', phase: 'fixing', try: 1, since: '2026-10-27T23:41:00+00:00' }),
+    'Quad Damage runs: hub/a, fixing (try 1) since 23:41');
+  assert.equal(statusLine({ ...base, bug: 'hub/a', phase: 'reviewing', try: 2, since: '2026-10-28T00:52:00+00:00' }),
+    'Quad Damage runs: hub/a, reviewing since 00:52');
+  assert.equal(statusLine({ ...base, bug: 'hub/a', phase: 'waiting', try: 1, waitUntil: '2026-10-28T01:15:00+00:00' }),
+    'Quad Damage waits for the 5-hour window until 01:15');
+  assert.equal(statusLine({ ...base, bug: null }), 'Quad Damage runs, between bugs, since 23:40');
+
+  assert.equal(k(w.home, ['bugs', 'quad-damage', '--status']).stdout, 'Quad Damage is not running\n');
+  writeRun(w.home, { ...base, bug: 'hub/c', phase: 'fixing', try: 2, since: '2026-10-27T23:41:00+00:00' });
+  assert.equal(k(w.home, ['bugs', 'quad-damage', '--status']).stdout, 'Quad Damage runs: hub/c, fixing (try 2) since 23:41\n');
+  const json = JSON.parse(k(w.home, ['bugs', 'quad-damage', '--status', '--json']).stdout);
+  assert.equal(json.run.bug, 'hub/c');
+  assert.equal(json.line, 'Quad Damage runs: hub/c, fixing (try 2) since 23:41');
+  assert.deepEqual(list(w.ws).map((r) => [r.id, r.quadDamageRun]), [['hub/a', null], ['hub/b', null], ['hub/c', { phase: 'fixing', try: 2 }]]);
+  writeRun(w.home, { ...base, pid: DEAD, bug: 'hub/c', phase: 'fixing', try: 2 });
+  assert.equal(list(w.ws).find((r) => r.id === 'hub/c').quadDamageRun, null);
+  assert.equal(k(w.home, ['bugs', 'quad-damage', '--status']).stdout, 'Quad Damage is not running\n');
+  assert.equal(k(w.home, ['bugs', 'quad-damage', 'x', '--status']).status, 2);
+});
+
+test('summary: its shapes, the push line, and --summary of the latest run or a folder (AC-13)', async () => {
+  const bugs = [
+    { id: 'hub/a', outcome: 'merged', sha: '0123456789abcdef', repo: 'kirunak' },
+    { id: 'hub/b', outcome: 'waits', why: 'the review found two things twice' },
+    { id: 'hub/c', outcome: 'not-reached' },
+  ];
+  const text = summaryText({ started: '2026-10-27T23:40:05+00:00', ended: '2026-10-28T03:02:00+00:00', bugs, stopped: "the week's limit is at 98%" });
+  assert.equal(text, "Quad Damage, 23:40 to 03:02: 1 merged, 1 wait, 1 not reached; stopped: the week's limit is at 98%\n" +
+    "- hub/a: merged 0123456 into kirunak's master\n- hub/b: waits: the review found two things twice\n- hub/c: not reached\n");
+  assert.equal(pushLine(text), "Quad Damage, 23:40 to 03:02: 1 merged, 1 wait, 1 not reached; stopped: the week's limit is at 98%. " +
+    'hub/a merged; hub/b waits: the review found two things twice; hub/c not reached');
+  const many = summaryText({ started: 'T', ended: 'T', bugs: Array.from({ length: 20 }, (_, i) => ({ id: `hub/bug-${i}`, outcome: 'waits', why: 'a reason long enough to be cut in the push line' })) });
+  const push = pushLine(many);
+  assert.equal(push.length, 200);
+  assert.equal(push.endsWith('…'), true);
+  assert.match(push, /hub\/bug-0 waits: a reason long enough to be cut in the p…; hub\/bug-1/);
+
+  const w = await qdWorkspace();
+  const none = k(w.home, ['bugs', 'quad-damage', '--summary']);
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /no Quad Damage run yet/);
+  const first = await run({ ws: w.ws, ...seams() });
+  const later = await run({ ws: w.ws, ...seams(), now: () => new Date(2026, 9, 28, 9, 0, 0), work: async () => ({ stop: 'enough' }) });
+  const out = k(w.home, ['bugs', 'quad-damage', '--summary']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.stdout, `${summaryFile(later)}kirunak-push: ${pushLine(summaryFile(later))}\n`);
+  assert.equal(out.stdout.split('\n').at(-2), 'kirunak-push: Quad Damage, 09:00 to 09:00: 0 merged, 0 wait, 2 not reached; stopped: enough. ' +
+    'hub/a not reached; hub/c not reached');
+  for (const folder of ['2026-10-27T23-40-05', first.folder]) {
+    assert.equal(k(w.home, ['bugs', 'quad-damage', '--summary', folder]).stdout, `${summaryFile(first)}kirunak-push: ${pushLine(summaryFile(first))}\n`);
+  }
+  assert.equal(summaryOf(w.home).folder, later.folder);
+  mkdirSync(join(runsDir(w.home), '2026-10-29T08-00-00'));
+  writeRun(w.home, { pid: OTHER, started: 'S', folder: join(runsDir(w.home), '2026-10-29T08-00-00') });
+  assert.throws(() => summaryOf(w.home), /no Quad Damage summary in .*2026-10-29T08-00-00: its run goes on \(pid \d+\), and k bugs quad-damage --status shows it/);
+});
+
+test('k bugs quad-damage: refused with no marked bug; else a detached run, its pid, log and folder', async () => {
+  const w = await qdWorkspace();
+  for (const slug of ['a', 'c']) writeFileSync(join(w.hub, 'kirunak', 'bugs', `${slug}.md`), bugText(`hub/${slug}`, '2026-10-20', 'no'));
+  const none = k(w.home, ['bugs', 'quad-damage']);
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /no bug is marked quad-damage: yes, so a run would take none/);
+  assert.equal(existsSync(quadDamagePath(w.home)), false);
+  assert.equal(k(w.home, ['bugs', 'quad-damage', '--dry-run']).status, 1);
+
+  writeFileSync(join(w.hub, 'kirunak', 'bugs', 'c.md'), bugText('hub/c', '2026-10-22', 'yes'));
+  assert.equal(k(w.home, ['bugs', 'quad-damage', '--dry-run']).stdout, 'would start Quad Damage on 1 marked bug: hub/c\n');
+  assert.equal(existsSync(runsDir(w.home)), false);
+  const r = k(w.home, ['bugs', 'quad-damage', '--json', '--via', 'mod']);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.bugs, ['hub/c']);
+  assert.equal(out.log, join(out.folder, 'run.log'));
+  assert.equal(dirname(out.folder), runsDir(w.home));
+  for (let i = 0; i < 200 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
+  for (let i = 0; i < 100 && existsSync(quadDamagePath(w.home)); i++) await new Promise((done) => setTimeout(done, 50));
+  assert.match(readFileSync(join(out.folder, 'summary.md'), 'utf8'), /^Quad Damage, \d\d:\d\d to \d\d:\d\d: 0 merged, 1 wait, 0 not reached\n- hub\/c: waits: not built yet\n$/);
+  assert.equal(existsSync(quadDamagePath(w.home)), false);
+  const log = readFileSync(out.log, 'utf8');
+  assert.match(log, /^--- Quad Damage, \S+ \(via mod\)\n/);
+  assert.match(log, new RegExp(`Quad Damage runs: pid ${out.pid}, via mod`));
+  assert.deepEqual(readdirSync(runsDir(w.home)), [out.folder.split('/').pop()]);
+  assert.equal(k(w.home, ['bugs', 'quad-damage', 'x']).status, 2);
+});
+
+test('keepAwake: caffeinate -i -w on macOS, nothing elsewhere (E-2)', () => {
+  assert.equal(keepAwake(123, { platform: 'linux' }), null);
+  const c = keepAwake(123, { platform: 'darwin', bin: '/usr/bin/true' });
+  assert.deepEqual(c.spawnargs, ['/usr/bin/true', '-i', '-w', '123']);
+});

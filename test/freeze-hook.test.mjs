@@ -366,6 +366,11 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['k bug review weather/stale-tiles', 'bug review'],
     ['k bug review weather/stale-tiles --detach --json', 'bug review'],
     ['node bin/k.mjs bug review weather/stale-tiles --via mod', 'bug review'],
+    ['k bugs quad-damage', 'bugs quad-damage'],
+    ['k bugs quad-damage --json', 'bugs quad-damage'],
+    ['node bin/k.mjs bugs quad-damage --via mod', 'bugs quad-damage'],
+    ['KIRUNAK_QUAD_DAMAGE=1 k bugs quad-damage', 'bugs quad-damage'],
+    ['k bugs quad-damage --status=no', 'bugs quad-damage'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -375,6 +380,13 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'k approve x --dry-run',
     'k amend decline x A-1 --dry-run',
     'k bug review weather/stale-tiles --dry-run',
+    'k bugs',
+    'k bugs --json',
+    'k bugs quad-damage --status',
+    'k bugs quad-damage --status --json',
+    'k bugs quad-damage --summary',
+    'k bugs quad-damage --summary 2026-10-27T23-40-05',
+    'k bugs quad-damage --dry-run',
     'k queue add x --dry-run',
     'k queue show',
     'k amend new weather/offline-forecast',
