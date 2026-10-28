@@ -131,19 +131,19 @@ test('a transcript cut short or unreadable is skipped whole and counted, never a
   assert.deepEqual(rows.filter((r) => r.sub).map((r) => [r.agentType, r.desc, r.model]), [['scout', 'find the code', 'claude-sonnet-5']]);
 });
 
-test('k usage --to: the London week from the workspace, every file written, the summary printed and kept', async (t) => {
+test('k usage --to: the London week from the workspace, every file written, the summary and the tasks printed and kept', async (t) => {
   const w = await withUsage(t, { weekStart: LONDON });
   const fx = transcripts(w.root);
   const r = k(w.home, ['usage', '--to', '2026-10-25T15:00:00Z'], { CLAUDE_CONFIG_DIR: fx.config });
   assert.equal(r.status, 0, r.stderr);
   const out = join(w.home, 'usage', '2026-10-25');
-  for (const f of ['calls.jsonl', 'report.txt', 'ttl.txt', 'carry.txt', 'writes.txt', 'escalations.txt', 'quality.txt', 'quality.tsv', 'compact.txt', 'replay.txt', 'summary.txt']) {
+  for (const f of ['calls.jsonl', 'report.txt', 'ttl.txt', 'carry.txt', 'writes.txt', 'escalations.txt', 'quality.txt', 'quality.tsv', 'compact.txt', 'replay.txt', 'summary.txt', 'tasks.txt', 'tasks.tsv']) {
     assert.ok(existsSync(join(out, f)), `${f} written`);
   }
   const calls = readFileSync(join(out, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(calls.map((c) => c.ts).sort(), ['2026-10-18T14:30:00.000Z', '2026-10-20T10:01:00.000Z', '2026-10-25T14:59:00.000Z']);
   const summary = readFileSync(join(out, 'summary.txt'), 'utf8');
-  assert.equal(r.stdout, summary);
+  assert.equal(r.stdout, `${summary}\n${readFileSync(join(out, 'tasks.txt'), 'utf8')}`); // then each task's weight (AC-2)
   const lines = summary.trim().split('\n');
   assert.equal(lines[0], `limit week 2026-10-18T14:00:00.000Z .. 2026-10-25T15:00:00.000Z  →  ${out}`);
   assert.match(lines[1], /^calls 3 \(main 2, agents 1\), weight \d+M Opus-input tokens$/);
