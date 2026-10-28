@@ -1,17 +1,27 @@
 import type { KirunakBoard, KirunakRow } from '../types'
+import { STATES, stateOf, taskChip } from './looks'
+import type { State } from './looks'
 
-// What the pane, the band and the toasts say, from the last read (boards.md §4). Plain text with a tone each, so the
-// render hooks only map a tone onto Text's props, and the words are the same on every surface.
+// What the pane, the band and the toasts say, from the last read (boards.md §4). Plain text with a tone each, and the
+// state of a line that has one, so the render hooks only map them onto Text's props, and the words are the same on
+// every surface.
 
-export type Tone = 'plain' | 'dim' | 'bold' | 'success' | 'error' | 'warning'
-export type Line = { text: string; tone: Tone }
+export type Tone = 'plain' | 'dim' | 'bold'
+export type Line = { text: string; tone: Tone; state?: State }
+
+// The five states on the terminal (gulnya/mobile-dialogs AC-8, O-2): the theme's own key where it has one, so the
+// colour follows the person's theme, and the dialogs' orange for waits, which no key names.
+export const PANE_COLORS: Record<State, string> = { done: 'success', running: 'warning', na: 'inactive', waits: STATES.waits.fill, failed: 'error' }
 
 // A progress line as k list's row carries it, less its date and a review's hash, as `k list` prints it.
 export const stepOf = (step: string | null): string | null =>
   step === null ? null : step.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} /, '').replace(/ sha256:[0-9a-f]{64}/, '')
 
-const toneOf = (verdict: string | null): Tone =>
-  verdict === null ? 'dim' : verdict === 'met' ? 'success' : verdict.startsWith('not met') ? 'error' : 'warning'
+// A verdict's state, as the board's page has it: met done, not met failed, needs device or owner waits, none n/a. A
+// task's, as its chip in the dialogs (looks.ts TASK_STAGES).
+const verdictState = (verdict: string | null): State =>
+  verdict === null ? 'na' : verdict === 'met' ? 'done' : verdict.startsWith('not met') ? 'failed' : 'waits'
+const taskState = (state: string): State => stateOf(taskChip(state).stage)
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 const clock = (ms: number): string => {
@@ -25,19 +35,20 @@ const taskOf = (board: KirunakBoard): KirunakRow | undefined =>
 export function paneLines(board: KirunakBoard | null): Line[] {
   if (board === null) return [{ text: 'Reading kirunak...', tone: 'dim' }]
   const out: Line[] = []
-  if (board.error !== null) out.push({ text: `k did not answer: ${board.error}`, tone: 'error' })
+  if (board.error !== null) out.push({ text: `k did not answer: ${board.error}`, tone: 'plain', state: 'failed' })
   const st = board.status
   const current = st?.session?.task ?? null
   const task = taskOf(board)
   if (current === null) {
     out.push({ text: 'No task in this session: /k-start <id> names one.', tone: 'dim' })
   } else if (task === undefined) {
-    out.push({ text: `${current}: k list does not have it`, tone: 'warning' })
+    // A task k list does not have is a failed read, red as k's own failure is (AC-8), no longer yellow, which runs.
+    out.push({ text: `${current}: k list does not have it`, tone: 'plain', state: 'failed' })
   } else {
-    out.push({ text: `${task.id}  ${task.state}${task.queue !== null ? `, queue place ${task.queue}` : ''}`, tone: 'bold' })
+    out.push({ text: `${task.id}  ${task.state}${task.queue !== null ? `, queue place ${task.queue}` : ''}`, tone: 'bold', state: taskState(task.state) })
     out.push({ text: task.title, tone: 'plain' })
     for (const item of [...task.ac, ...task.e]) {
-      out.push({ text: `${item.id} ${item.verdict ?? 'no verdict'}: ${item.text}`, tone: toneOf(item.verdict) })
+      out.push({ text: `${item.id} ${item.verdict ?? 'no verdict'}: ${item.text}`, tone: 'plain', state: verdictState(item.verdict) })
     }
     const step = stepOf(task.step)
     if (step !== null) out.push({ text: `step: ${step}`, tone: 'dim' })
@@ -46,7 +57,7 @@ export function paneLines(board: KirunakBoard | null): Line[] {
   }
   const queued = board.rows.filter(r => r.queue !== null).sort((a, b) => (a.queue ?? 0) - (b.queue ?? 0))
   out.push({ text: '', tone: 'plain' }, { text: queued.length ? 'Queue' : 'The queue is empty', tone: 'bold' })
-  for (const r of queued) out.push({ text: `${String(r.queue).padStart(2)}  ${r.state}  ${r.id}`, tone: r.id === current ? 'bold' : 'plain' })
+  for (const r of queued) out.push({ text: `${String(r.queue).padStart(2)}  ${r.state}  ${r.id}`, tone: r.id === current ? 'bold' : 'plain', state: taskState(r.state) })
   if (st !== null) {
     const waiting = st.queue.length ? `, ${st.queue.length} waiting` : ''
     const lock = st.lock ? `lock: ${st.lock.what ?? 'a job'}${st.lock.session ? ` (session ${st.lock.session})` : ''}${waiting}` : `no lock${waiting}`

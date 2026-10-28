@@ -1,12 +1,12 @@
-import type { KirunakChip, KirunakSection } from '../types'
+import type { KirunakChip, KirunakLook, KirunakProgressRow, KirunakSection } from '../types'
 
-// The parts of the mod's look on the phone and the desktop app (gulnya/mobile-dialogs D-1, D-2), plain data, so the
+// The parts of the mod's look in the desktop app (gulnya/mobile-dialogs D-1, D-2), plain data, so the
 // render hooks (look.tsx) only lay them out and the tests reach every one without a surface: the five states, each
 // stage's state and icon, the rows a tree takes, the date words, a long text's parts, and the progress lines drawn as
 // rows.
 
 // The five states (AC-8): a fill and the ink on it. The chip carries its own ground, so the pair reads the same in
-// the phone's light and dark themes; each holds 4.5:1 or more (AC-7, AC-20; the test computes WCAG's ratio).
+// the desktop app's light and dark themes; each holds 4.5:1 or more (AC-7, AC-20; the test computes WCAG's ratio).
 export type State = 'done' | 'running' | 'na' | 'waits' | 'failed'
 export const STATES: Record<State, { fill: string; ink: string }> = {
   done: { fill: '#1b7a3a', ink: '#ffffff' },
@@ -35,6 +35,27 @@ export const STAGES = {
 export type Stage = keyof typeof STAGES
 
 export const stateOf = (stage: string): State => (STAGES as Record<string, State>)[stage] ?? 'na'
+
+// A task's state as k names it (lib/state.mjs) as a chip (AC-8): the stage nearest it, the state itself the word.
+// Running while a session works on it or reviews it; done once done; waits for the owner while it is proposed,
+// reviewed or awaits the owner, and while it is parked or on hold, which the owner lifts; failed when it is blocked or
+// stale; not reached while it is a draft or queued, waiting its turn and no one's choice. A state of no known name is
+// not reached.
+const TASK_STAGES: Readonly<Record<string, Stage>> = {
+  draft: 'not reached',
+  proposed: 'waits',
+  queued: 'not reached',
+  parked: 'paused',
+  blocked: 'stopped',
+  'in progress': 'started',
+  'in review': 'reviewing',
+  reviewed: 'waits',
+  'awaiting owner': 'waits',
+  done: 'done',
+  'on hold': 'paused',
+  stale: 'failed',
+}
+export const taskChip = (state: string): KirunakChip => ({ stage: TASK_STAGES[state] ?? 'not reached', word: state })
 
 // Each stage's glyph on a 16 by 16 disc, drawn in the ink: lines, and a shape filled where it says so.
 const GLYPHS: Record<Stage, string> = {
@@ -65,11 +86,16 @@ export function iconOf(stage: string): string {
   )
 }
 
-// The rows a dialog's tree may take (AC-19): 48 on the phone, the desktop app and VS Code, counted at 40 columns, as
+// The rows a dialog's tree may take (AC-19): 48 in the desktop app and VS Code, counted at 40 columns, as
 // the engine counts them: a row a line, and one more for each 40 characters of it. Counted the same way here.
 export const COLUMNS = 40
 export const DIALOG_ROWS = 48
 export const rowsOf = (text: string): number => text.split('\n').reduce((n, line) => n + 1 + Math.floor([...line].length / COLUMNS), 0)
+// The rows an unfolded look keeps free besides its head and its part (AC-19, counted as treeRows counts them): the
+// "n of m" line, Back or Show less and Next with their gap, the head chip's gap, the gap above each of the look's four
+// parts (the head, the part, the buttons, the engine's node), and one to spare. A draft's first question keeps the
+// same room in each of its parts (drafts.ts, E-3).
+export const FREE = 1 + 2 + 2 + 2 + 4 + 1
 
 // The rows a tree as drawn takes (the test kit's plain data): a Text's words, a Button's label, an Svg's alt, a
 // Markdown's text, each by rowsOf, and a Box's gap a row for each of its children, in a row or a column: the test kit
@@ -100,6 +126,22 @@ export function dateWord(date: string | null, now: number): string | null {
   if (days === 0) return 'today'
   if (days === 1) return 'yesterday'
   return `${MONTHS[mo - 1] ?? mo} ${d}${y === today.getFullYear() ? '' : `, ${y}`}`
+}
+
+// A text as a look's first lines say it (AC-3, AC-10): whole up to `most` characters, else cut at the last sentence's
+// end before them, or at `most`, and " ..." after it; Show all shows it whole.
+export function clipped(text: string, most = 400): string {
+  if (text.length <= most) return text
+  const end = text.slice(0, most).search(/[.!?](?=[^.!?]*$)/)
+  return end > 0 ? `${text.slice(0, end + 1)} ...` : `${text.slice(0, most)} ...`
+}
+
+// A confirm's look after a reason was typed (AC-1): the item's head, then the reason under its heading, as the question
+// asked under it says "for that reason"; a long one cut, whole behind Show all, after `fold`, what else the confirm says.
+export function reasonLook(head: KirunakLook, why: string, fold: readonly KirunakSection[] = []): KirunakLook {
+  const short = clipped(why)
+  const rest = [...(short !== why ? [{ heading: 'Reason', lines: [why] }] : []), ...fold]
+  return { ...head, first: [{ heading: 'Reason', lines: [short] }], rows: [], fold: rest.length ? rest : null }
 }
 
 // A line of an unfolded text as drawn: a heading, a line of its words, or the blank line between two sections.
@@ -151,35 +193,109 @@ export function parts(lines: readonly FoldLine[], budget: number): FoldLine[][] 
   return out.filter(p => p.length)
 }
 
-// A Quad Damage progress line drawn as a row (gulnya/quad-damage AC-16, this task's AC-11): `HH:MM <id>: started`, as
-// k writes it once a bug's first session passes the limits, with `, fix ready, to review` or `, try N from its
-// review's findings` (design/task-files.md). Its words stay as written; its stage gives its chip. S-1 reads this one
-// form (D-3's spike); the others come in S-2, and a line of none stays as the text it is (E-2).
-export type ProgressRow = { time: string; id: string; words: string; chip: KirunakChip }
-const STARTED = /^(\d\d:\d\d) (\S+): (started(?:, fix ready, to review|, try \d+ from its review's findings)?)$/
+// Quad Damage's lines drawn as rows (gulnya/quad-damage AC-12, AC-13, AC-16; this task's AC-11, AC-12, AC-13), in
+// the forms of design/task-files.md ("The run's progress", "The run's end"): each its time dim, its stage's chip, its
+// bug's id in bold and its words as written. A line of the run itself has no id, and the summary's lines and the
+// run's status line no time; a line of no form stays the text it is (E-2), never guessed at.
+export type ProgressRow = KirunakProgressRow
+const TIME = '(?:[01]\\d|2[0-3]):[0-5]\\d'
+// A bug's id as k names it, <repo>/<slug>; a sha as the lines cut it, seven hex digits; a repo by its name.
+const ID = '[\\w.-]+/[\\w.-]+'
+const SHA = '[0-9a-f]{7}'
+const REPO = '[\\w.-]+'
+const TALLY = '\\d+ merged, \\d+ wait, \\d+ not reached'
+const form = (re: string): RegExp => new RegExp(`^${re}$`)
 
+// A bug's progress, `HH:MM <id>: <words>`, and the stage each form is at (AC-8): started, committed and a review
+// that found something (fixing again) run; a clean review's merge is done; a skip is n/a; a failure failed; a wait
+// waits for the owner.
+const BUG_LINE = form(`(${TIME}) (${ID}): (.+)`)
+const BUG_FORMS: readonly [RegExp, Stage][] = [
+  [form("started(?:, fix ready, to review|, try \\d+ from its review's findings)?"), 'started'],
+  [form(`fix committed ${SHA}`), 'committed'],
+  [form('skipped: .+'), 'skipped'],
+  [form('failed: .+'), 'failed'],
+  [form(`review clean, merged ${SHA} into ${REPO}`), 'merged'],
+  [form('review found something, try \\d+'), 'fixing'],
+  [form('waits: .+'), 'waits'],
+]
+// The run's own progress, `HH:MM <words>`: paused for the 5-hour window waits, going on again runs, a stop is
+// stopped, the end done.
+const RUN_LINE = form(`(${TIME}) (Quad Damage .+)`)
+const RUN_FORMS: readonly [RegExp, Stage][] = [
+  [form(`Quad Damage paused for the 5-hour window until ${TIME}`), 'paused'],
+  [form('Quad Damage goes on'), 'started'],
+  [form('Quad Damage stopped: .+'), 'stopped'],
+  [form(`Quad Damage done: ${TALLY}`), 'done'],
+]
+// The summary's head, done or stopped, and the line a bug under it: merged, waits or not reached.
+const HEAD = form(`Quad Damage, ${TIME} to ${TIME}: ${TALLY}(; stopped: .+)?`)
+const SUMMED = form(`- (${ID}): (merged ${SHA} into ${REPO}'s master|waits: .+|not reached)`)
+
+const rowOf = (time: string | null, id: string | null, words: string, stage: Stage): ProgressRow => ({ time, id, words, chip: { stage, word: stage } })
+const stageIn = (forms: readonly [RegExp, Stage][], words: string): Stage | null => forms.find(([re]) => re.test(words))?.[1] ?? null
+
+// A progress line or the summary's head as a row, null for a line of neither.
 export function progressOf(line: string): ProgressRow | null {
-  const m = STARTED.exec(line.trim())
-  return m ? { time: m[1] as string, id: m[2] as string, words: m[3] as string, chip: { stage: 'started', word: 'started' } } : null
+  const l = line.trim()
+  const bug = BUG_LINE.exec(l)
+  const bugStage = bug ? stageIn(BUG_FORMS, bug[3] as string) : null
+  if (bug && bugStage) return rowOf(bug[1] as string, bug[2] as string, bug[3] as string, bugStage)
+  const run = RUN_LINE.exec(l)
+  const runStage = run ? stageIn(RUN_FORMS, run[2] as string) : null
+  if (run && runStage) return rowOf(run[1] as string, null, run[2] as string, runStage)
+  const head = HEAD.exec(l)
+  return head ? rowOf(null, null, l, head[1] ? 'stopped' : 'done') : null
+}
+
+// A line a bug of the summary as a row, read only under its head (a list line elsewhere is the message's own).
+export function summedOf(line: string): ProgressRow | null {
+  const m = SUMMED.exec(line.trim())
+  if (!m) return null
+  const words = m[2] as string
+  return rowOf(null, m[1] as string, words, words.startsWith('merged') ? 'merged' : words === 'not reached' ? 'not reached' : 'waits')
+}
+
+// The run's line at the top of /k-bugs as a row of its head (AC-12), in the forms `k bugs quad-damage --status`
+// prints (lib/quad-damage.mjs statusLine): waiting for the 5-hour window waits; between bugs, or on a bug fixing,
+// reviewing or merging it, runs. Its words whole; a time k did not record is "?". Null for a line of none.
+const AT = `(?:${TIME}|\\?)`
+const STATUS_FORMS: readonly [RegExp, Stage][] = [
+  [form(`Quad Damage waits for the 5-hour window until ${AT}`), 'paused'],
+  [form(`Quad Damage runs, between bugs, since ${AT}`), 'started'],
+  [form(`Quad Damage runs: ${ID}, fixing(?: \\(try \\d+\\))? since ${AT}`), 'fixing'],
+  [form(`Quad Damage runs: ${ID}, (?:reviewing|merging) since ${AT}`), 'reviewing'],
+]
+export function runRowOf(line: string): ProgressRow | null {
+  const stage = stageIn(STATUS_FORMS, line.trim())
+  return stage ? rowOf(null, null, line.trim(), stage) : null
 }
 
 // A message's text as rows and the text between them, in order; null when no line of it is a progress line, so the
-// message draws as it is.
+// message draws as it is. The summary's bug lines are rows while they follow its head, blank lines between them; a
+// line inside a code fence stays the fence's.
 export type MessagePart = { row: ProgressRow } | { text: string }
 export function messageParts(text: string): MessagePart[] | null {
   const out: MessagePart[] = []
   let between: string[] = []
+  let fenced = false
+  let summary = false
   const flush = () => {
     const t = between.join('\n').trim()
     if (t) out.push({ text: t })
     between = []
   }
   for (const line of text.split('\n')) {
-    const row = progressOf(line)
-    if (row === null) between.push(line)
-    else {
+    const fence = /^\s*(```|~~~)/.test(line)
+    if (fence) fenced = !fenced
+    const row: ProgressRow | null = fence || fenced ? null : ((summary ? summedOf(line) : null) ?? progressOf(line))
+    if (row === null) {
+      between.push(line)
+      if (line.trim()) summary = false
+    } else {
       flush()
       out.push({ row })
+      summary = row.time === null && (summary || row.id === null)
     }
   }
   flush()

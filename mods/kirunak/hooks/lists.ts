@@ -6,11 +6,11 @@ import type { AmendmentRow } from './waiting'
 // line per entry, never broken inside it (the phone wraps a line itself; a line the mod broke at 70 characters landed
 // mid-sentence there, S-10), and text from the task files escaped so it shows as written. A list is built in two
 // halves: what a row says, as an Item of plain words (taskItem, amendmentItem), and how rows are drawn (`numbered` for
-// an answer; `plainLines` and the labels for a choice dialog, whose question shows plain lines and whose choices are
-// short names, kirunak-phone S-6).
+// an answer; for a choice dialog, short names for the choices, kirunak-phone S-6, each with the row's words as its
+// line, owner.ts's draw(), gulnya/mobile-dialogs AC-23).
 
 // A row as plain words: `lead`, then `name` (the row's id, bold in an answer), then `text`; `under`, lines a dialog's
-// list shows below it (/k-accept's blocking files, kirunak-accept-shared-repo E-2).
+// list shows after it (/k-accept's blocking files, kirunak-accept-shared-repo E-2).
 export type Item = { lead: string; name: string; text: string; under?: readonly string[] }
 
 // lib/board-md.mjs's escape and line starts, so an answer reads as the board does.
@@ -31,16 +31,6 @@ const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
 export function numbered(items: readonly Item[], from = 1): string[] {
   return items.map((x, i) => entry(`${md(x.lead)}**${md(x.name)}**${md(x.text)}`, `${from + i}. `))
 }
-
-// The rows as numbered plain lines, one each and its `under` lines indented below it, for a dialog's question, which
-// draws no markdown.
-export const plainLines = (items: readonly Item[], from = 1): string[] =>
-  items.flatMap((x, i) => [`${from + i}. ${x.lead}${x.name}${x.text}`, ...(x.under ?? []).map(l => `   ${l}`)])
-
-// The rows as plain lines, each numbered by its own number, a row without one unnumbered (/k-queue's places,
-// kirunak-phone A-11).
-export const placeLines = (items: readonly Item[], places: readonly (number | null)[]): string[] =>
-  items.map((x, i) => `${places[i] != null ? `${places[i]}. ` : ''}${x.lead}${x.name}${x.text}`)
 
 // A dialog's question with the markdown marks left out: the dialog draws no markdown, so a mark shows as typed (the
 // owner's phone at S-1 and S-10: the backticks around `/k-queue` in /k-amendments). Backticks and ** go wherever they
@@ -148,9 +138,9 @@ export function amendmentParts(text: string): { front: Record<string, string>; w
 // changes), the paragraphs of its Why, its Changes as written, and its last word: the stamp of one applied or declined
 // since the list was read, else what `k approve --amendment` would refuse, null when nothing. With no file (it could
 // not be read), the Why is k waiting's first sentence and there are no Changes.
-type Whole = { head: string; why: string[]; changes: string[]; stamp: string | null; refuse: string | null }
+export type Whole = { head: string; why: string[]; changes: string[]; stamp: string | null; refuse: string | null }
 
-function whole(x: AmendmentRow, file: string | null): Whole {
+export function whole(x: AmendmentRow, file: string | null): Whole {
   const { front, why, changes } = file === null ? { front: {} as Record<string, string>, why: [x.why ?? ''], changes: [] } : amendmentParts(file)
   const ops = changes.map(l => l.trim()).filter(Boolean)
   const by = front.by ?? x.by

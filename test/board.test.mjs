@@ -3,12 +3,13 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { BUG_PAIRS, DRAFT_PAIRS, renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
+import { BUG_PAIRS, bugState, DRAFT_PAIRS, DRAFT_STATE, FIVE, renderHtml, snapshot, STATE_CLASSES, STATE_PAIRS, taskState, TEXT_PAIRS, verdictState, write } from '../lib/board.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { model } from '../lib/board-model.mjs';
 import { renderMarkdown } from '../lib/board-md.mjs';
-import { quadDamagePath } from '../lib/bugs.mjs';
+import { fixLine, quadDamagePath } from '../lib/bugs.mjs';
 import { rows } from '../lib/list.mjs';
+import { STATES } from '../lib/state.mjs';
 import { bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
@@ -85,6 +86,78 @@ test('both themes in the CSS, every text pair at 4.5:1 or more in each', async (
   assert.ok(ratio('#777777', '#ffffff') < 4.5, 'the check fails a pair under 4.5:1');
 });
 
+// The five states as the mod's dialogs have them (gulnya/mobile-dialogs AC-8): looks.ts read as text, since the page
+// cannot import TypeScript, so a change there that the page does not follow fails here.
+const LOOKS = readFileSync(new URL('../mods/kirunak/hooks/looks.ts', import.meta.url), 'utf8');
+const looksMap = (name) => {
+  const block = new RegExp(`\\bconst ${name}\\b[^=]*= \\{([^}]*)\\}`).exec(LOOKS)?.[1] ?? '';
+  return Object.fromEntries([...block.matchAll(/^\s*'?([a-z ]+?)'?: '([a-z ]+)',?$/gm)].map((m) => [m[1], m[2]]));
+};
+const themeTokens = (html) => [
+  ['light', tokens(/:root \{([^}]*)\}/.exec(html)[1])],
+  ['dark', tokens(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)[1])],
+];
+
+test('the five states: a token each in the light and the dark theme, each at 4.5:1 or more on every ground of the page (gulnya/mobile-dialogs AC-7, AC-8, AC-20)', async () => {
+  const html = await page(await fixture());
+  assert.deepEqual(FIVE, /export type State = ([^\n]*)/.exec(LOOKS)[1].match(/'[a-z]+'/g).map((x) => x.slice(1, -1)), 'the dialogs\' five');
+  for (const [name, t] of themeTokens(html)) {
+    for (const s of FIVE) {
+      assert.match(t[s] ?? '', /^#[0-9a-f]{6}$/i, `${name} defines --${s}`);
+      for (const g of ['bg', 'card', 'work']) {
+        assert.ok(STATE_PAIRS.some(([f, b]) => f === s && b === g) && TEXT_PAIRS.some(([f, b]) => f === s && b === g), `--${s} on --${g} is in the page's contrast test`);
+        const r = ratio(t[s], t[g]);
+        assert.ok(r >= 4.5, `${name}: --${s} on --${g} is ${r.toFixed(2)}:1`);
+      }
+    }
+  }
+});
+
+test('every state the page draws is one of the five, mapped as the dialogs map it, its word beside its colour (gulnya/mobile-dialogs AC-8, AC-9)', async () => {
+  const [stages, taskStages] = [looksMap('STAGES'), looksMap('TASK_STAGES')];
+  for (const state of STATES) {
+    assert.ok(taskStages[state] && stages[taskStages[state]], `looks.ts draws ${state}`);
+    assert.equal(taskState(state), stages[taskStages[state]], `${state} as the dialogs draw it`);
+  }
+  assert.equal(taskState('no such state'), 'na', 'a state of no known name is not reached, as taskChip has it');
+  for (const [v, s] of [['met', 'done'], ['not met', 'failed'], ['needs device', 'waits'], ['needs owner', 'waits'], ['none', 'na']]) assert.equal(verdictState(v), s, v);
+  const fixes = [
+    [{ quadDamageRun: { phase: 'fixing', try: 1 } }, 'running'], [{ quadDamageRun: { phase: 'waiting' } }, 'running'], [{ reviewing: true }, 'running'],
+    [{ fixReady: true }, 'waits'], [{ review: { atHead: true, verdict: 'findings', file: 'review.md' } }, 'waits'], [{ branch: 'bug/x', ahead: 2 }, 'waits'], [{}, 'na'],
+  ];
+  for (const [b, s] of fixes) assert.equal(bugState(fixLine(b)), s, fixLine(b));
+  assert.equal(DRAFT_STATE, 'waits');
+
+  const w = await fixture();
+  sessionsAt(w);
+  queuedAndParked(w);
+  bugsAt(w);
+  draftsAt(w);
+  const html = await page(w);
+  const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
+  for (const [c, s] of Object.entries(STATE_CLASSES)) {
+    assert.ok(FIVE.includes(s), `${c} is one of the five`);
+    assert.ok(style.includes(`.${c} { color: var(--${s}); }`), `.${c} in --${s}`);
+  }
+  for (const [, token] of style.matchAll(/(?:^|[;{\s])color: var\(--([\w-]+)\)/g)) assert.ok([...FIVE, 'text', 'muted', 'link'].includes(token), `--${token} is the text's or a state's`);
+  assert.match(style, /\.drafts li \{[^}]*border-left: 4px solid var\(--waits\);/, 'a draft\'s edge in the colour of waits');
+  const body = html.slice(html.indexOf('<body>'));
+  const drawn = [...body.matchAll(/<span class="(?:v )?([sv]-[a-z]+)">([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.ok(drawn.length > 0);
+  for (const t of tasks(body)) {
+    const [, c, word] = /<span class="(s-[a-z]+)">([^<]+)<\/span>/.exec(t.raw) ?? [];
+    assert.equal(c, `s-${taskState(word)}`, `${t.id}: ${word}`);
+  }
+  for (const [c, word] of drawn) {
+    assert.ok(word.trim(), `${c} on a word`);
+    if (c.startsWith('v-')) assert.equal(STATE_CLASSES[c], verdictState(word), word);
+  }
+  const bugRows = body.slice(body.indexOf('<section class="bugs">'), body.indexOf('<section class="drafts">'));
+  for (const [, c, word] of bugRows.matchAll(/<span class="(s-[a-z]+)">([^<]+)<\/span>/g)) assert.equal(c, `s-${bugState(word)}`, word);
+  const seen = new Set(drawn.map(([c]) => STATE_CLASSES[c]));
+  for (const s of ['done', 'running', 'na', 'waits', 'failed']) assert.ok(seen.has(s), `the fixture draws ${s}`);
+});
+
 test('file:// links to the four files of every card', async () => {
   const w = await fixture();
   const html = await page(w);
@@ -152,7 +225,7 @@ test('read in order by a screen reader: one h1, the time it was made, an h2 per 
   assert.match(body, /<h1>kirunak board<\/h1>\n<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
   assert.equal(tasks(body).length, body.split('<details').length - 1, 'every task a row');
   for (const t of tasks(body)) {
-    assert.match(t.raw, /^<details class="task">\n<summary><b>[a-z]+\/[a-z-]+<\/b>: [a-z ]+[,<]/, 'the id, then the state, as text');
+    assert.match(t.raw, /^<details class="task">\n<summary><b>[a-z]+\/[a-z-]+<\/b>: <span class="s-[a-z]+">[a-z ]+<\/span>[,<]/, 'the id, then the state, as text in its colour');
     assert.match(t.card, /^<p>[^<]+<\/p>\n<p class="meta">state: [a-z ]+/, 'the title, then the state as text');
     assert.match(t.card, /<ul class="items">\n(<li><b>(AC|E)-\d+<\/b> <span class="v [a-z-]+">(met|not met|needs device|needs owner|none)<\/span>: [^\n]*<\/li>\n)+<\/ul>/);
   }
@@ -246,7 +319,7 @@ test('the drafts\' text pairs are the page\'s, held at 4.5:1 in the light and th
   const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
   assert.match(style, /\.drafts li \{ background: var\(--card\);/, 'a draft row on the card ground');
   assert.match(style, /\.meta \{ color: var\(--muted\);/, 'its date muted');
-  assert.doesNotMatch(style, /\.drafts[^{]*\{[^}]*\bcolor:/, 'no colour of its own: text, and muted for the date');
+  assert.doesNotMatch(style, /\.drafts[^{]*\{[^}]*\bcolor:/, 'no text colour of its own: text, and muted for the date; its edge is the colour of waits (gulnya/mobile-dialogs AC-8)');
   const light = tokens(/:root \{([^}]*)\}/.exec(html)[1]);
   const dark = tokens(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)[1]);
   for (const [fg, bg] of DRAFT_PAIRS) {
@@ -272,8 +345,8 @@ test('the bugs read in order before the drafts: a heading, k waiting\'s line and
     '<h2>Bugs <span class="n">\\(2\\)</span></h2>',
     '<p>2 bugs wait, 1 with a fix ready: /k-bugs</p>',
     '<ul>',
-    '<li><b>hub/queue-stuck</b>: The queue keeps a finished job, fix ready, bug of weather/recent, <span class="meta">written <time datetime="2026-11-06">2026-11-06</time></span></li>',
-    '<li><b>weather/rain-icon</b>: The rain icon shows &lt;sun&gt;, no fix, <span class="meta">written <time datetime="2026-11-04">2026-11-04</time></span></li>',
+    '<li><b>hub/queue-stuck</b>: The queue keeps a finished job, <span class="s-waits">fix ready</span>, bug of weather/recent, <span class="meta">written <time datetime="2026-11-06">2026-11-06</time></span></li>',
+    '<li><b>weather/rain-icon</b>: The rain icon shows &lt;sun&gt;, <span class="s-na">no fix</span>, <span class="meta">written <time datetime="2026-11-04">2026-11-04</time></span></li>',
     '</ul>',
     '</section>',
   ].join('\n')));
@@ -290,7 +363,7 @@ test('the bugs\' text pairs are the page\'s, held at 4.5:1 in the light and the 
   const html = await page(w);
   const style = /<style>([\s\S]*)<\/style>/.exec(html)[1];
   assert.match(style, /\.bugs li \{ background: var\(--card\);/, 'a bug row on the card ground');
-  assert.doesNotMatch(style, /\.bugs[^{]*\{[^}]*\bcolor:/, 'no colour of its own: text, the line on the page\'s ground, muted for the date');
+  assert.doesNotMatch(style, /\.bugs[^{]*\{[^}]*\bcolor:/, 'no colour of the group\'s own: text, the line on the page\'s ground, muted for the date, the fix its state\'s (gulnya/mobile-dialogs AC-8)');
   const light = tokens(/:root \{([^}]*)\}/.exec(html)[1]);
   const dark = tokens(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{([^}]*)\} \}/.exec(html)[1]);
   assert.deepEqual(BUG_PAIRS, [['text', 'bg'], ['text', 'card'], ['muted', 'card']]);
@@ -323,7 +396,7 @@ test('Quad Damage\'s run in the Bugs group, as k waiting says it, first, on the 
   assert.deepEqual(Object.keys(b.m).slice(Object.keys(b.m).indexOf('quadDamageLine'), Object.keys(b.m).indexOf('quadDamageLine') + 3), ['quadDamageLine', 'bugs', 'bugsLine']);
   assert.deepEqual(b.m.bugs.map((x) => [x.id, x.fix]), [['hub/queue-stuck', 'Quad Damage: fixing, try 1'], ['weather/rain-icon', 'no fix']]);
   assert.match(b.html, new RegExp(`<h2>Bugs <span class="n">\\(2\\)</span></h2>\n<p>${line.replace(/[()]/g, '\\$&')}</p>\n<p>2 bugs wait, 1 with a fix ready: /k-bugs</p>\n<ul>`));
-  assert.match(b.html, /<li><b>hub\/queue-stuck<\/b>: The queue keeps a finished job, Quad Damage: fixing, try 1, bug of weather\/recent,/);
+  assert.match(b.html, /<li><b>hub\/queue-stuck<\/b>: The queue keeps a finished job, <span class="s-running">Quad Damage: fixing, try 1<\/span>, bug of weather\/recent,/);
   assert.ok(b.text.includes(`## Bugs (2)\n\n${line}\n\n2 bugs wait, 1 with a fix ready: /k-bugs\n\n- hub/queue-stuck`), b.text);
   const group = b.brief.groups.find((g) => g.name === 'Bugs');
   assert.deepEqual(group.lines.slice(0, 2), [line, '2 bugs wait, 1 with a fix ready: /k-bugs']);

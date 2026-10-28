@@ -14,25 +14,29 @@ const SKIP = '[No preference]'
 const FORECAST = 'The last forecast stays readable offline'
 const REFUSED = { id: 'hub/refused', title: 'Refused for now', why: 'hub/refused: task.md fails k check: AC-1 has no source' }
 
-// The owner's ask (A-8, Q-38): "their names and specific amendment inside when I select it". Each picking list's text
-// is its rows' names alone (/k-queue's with each task's title too, A-10); the row picked shows its details in the next
-// dialog's text.
+// The owner's ask (A-8, Q-38): "their names and specific amendment inside when I select it". Each picking list's
+// choices are its rows' names, each with its state as its line (/k-queue's with each task's place and title too, A-10,
+// A-11), under a one-line question (gulnya/mobile-dialogs AC-23); the row picked shows its details in the next dialog's
+// text.
 describe('names in the list, details once picked (A-8)', () => {
-  const cases: { command: string; rows?: typeof QUEUE; pick: string; list: string; title: string; inside: string[]; titled?: true }[] = [
-    { command: 'k-approve', pick: REFUSED.id, list: 'Waiting for you to approve:\n1. hub/proposed: proposed\n2. hub/refused: proposed\nWhich task?', title: 'Refused for now', inside: ['State: proposed.', 'Not yet:', 'task.md fails k check: AC-1 has no source'] },
-    { command: 'k-accept', pick: ID, list: `Waiting for you to accept:\n1. weather/was-reviewed: reviewed\n2. ${ID}: awaiting owner\nWhich task?`, title: FORECAST, inside: ['State: awaiting owner.', 'Review: review.md, needs owner (E-1).', 'checklist.md has 1 unticked item(s):', '- [ ] E-1 On the oldest phone. (review.md)'] },
-    { command: 'k-hold', pick: 'hub/sync-notes', list: `Tasks you can put on hold:\n1. ${ID}: in review\n2. hub/sync-notes: queued\nWhich task?`, title: 'Sync notes', inside: ['State: queued.'] },
-    { command: 'k-start', pick: 'hub/sync-notes', list: `Tasks this session can work on: (1 to 3 of 5)\n1. ${ID}: in review\n2. hub/sync-notes: queued\n3. weather/was-reviewed: reviewed\nWhich task?`, title: 'Sync notes', inside: ['State: queued.'] },
-    { command: 'k-queue', rows: QUEUE, pick: 'hub/next', titled: true, list: `The queue in order, then the parked tasks: (1 to 3 of 5)\n1. ${ID}: in review. ${FORECAST}.\n2. hub/sync-notes: queued. Sync notes.\n3. hub/next: queued. Next up.\nWhich task?`, title: 'Next up', inside: ['Queued, place 3 of 4 in the queue.'] },
+  const MORE = { More: 'the next ones' }
+  const cases: { command: string; rows?: typeof QUEUE; pick: string; list: string; lines: Record<string, string>; title: string; inside: string[]; titled?: true }[] = [
+    { command: 'k-approve', pick: REFUSED.id, list: 'Waiting for you to approve: Which task?', lines: { 'hub/proposed': 'proposed', 'hub/refused': 'proposed' }, title: 'Refused for now', inside: ['State: proposed.', 'Not yet:', 'task.md fails k check: AC-1 has no source'] },
+    { command: 'k-accept', pick: ID, list: 'Waiting for you to accept: Which task?', lines: { 'weather/was-reviewed': 'reviewed', [ID]: 'awaiting owner' }, title: FORECAST, inside: ['State: awaiting owner.', 'Review: review.md, needs owner (E-1).', 'checklist.md has 1 unticked item(s):', '- [ ] E-1 On the oldest phone. (review.md)'] },
+    { command: 'k-hold', pick: 'hub/sync-notes', list: 'Tasks you can put on hold: Which task?', lines: { [ID]: 'in review', 'hub/sync-notes': 'queued' }, title: 'Sync notes', inside: ['State: queued.'] },
+    { command: 'k-start', pick: 'hub/sync-notes', list: 'Tasks this session can work on (1 to 3 of 5): Which task?', lines: { [ID]: 'in review', 'hub/sync-notes': 'queued', 'weather/was-reviewed': 'reviewed', ...MORE }, title: 'Sync notes', inside: ['State: queued.'] },
+    { command: 'k-queue', rows: QUEUE, pick: 'hub/next', titled: true, list: 'The queue in order, then the parked tasks (1 to 3 of 5): Which task?', lines: { [ID]: `place 1, in review. ${FORECAST}.`, 'hub/sync-notes': 'place 2, queued. Sync notes.', 'hub/next': 'place 3, queued. Next up.', ...MORE }, title: 'Next up', inside: ['Queued, place 3 of 4 in the queue.'] },
   ]
   for (const c of cases) {
-    test(`/${c.command}: the list is each row's id and state${c.titled ? ', numbered by its place, its title too (A-10, A-11)' : ''}, one line each; the task picked shows its title and the rest`, async ($, on) => {
+    test(`/${c.command}: the list is each row's id, its state as its line${c.titled ? ', its place and title too (A-10, A-11)' : ''}, under a one-line question; the task picked shows its title and the rest`, async ($, on) => {
       const w = world(on, { rows: c.rows, waiting: [{ ...WAITING, approve: [...WAITING.approve, REFUSED] }], taps: [c.pick, SKIP] })
       await run($, c.command)
       const [list, item] = w.asked
       expect(list?.question).toBe(c.list)
-      if (c.titled) expect(list?.question).toContain(c.title)
-      else expect(list?.question).not.toContain(c.title)
+      expect(w.lines[0]).toEqual(c.lines)
+      const said = [list?.question ?? '', ...Object.values(w.lines[0] ?? {})].join('\n')
+      if (c.titled) expect(said).toContain(c.title)
+      else expect(said).not.toContain(c.title)
       expect(list?.labels).toContain(c.pick)
       expect(item?.question).toMatch(new RegExp(`^${c.pick}: ${c.title}\\.\\n`))
       for (const line of c.inside) expect(item?.question.split('\n')).toContain(line)
@@ -45,27 +49,23 @@ describe('names in the list, details once picked (A-8)', () => {
   test('/k-queue\'s lines carry each task\'s title, in the queue, among the parked and under Move; /k-hold\'s lines do not (A-10)', async ($, on) => {
     const w = world(on, { rows: QUEUE, taps: [SKIP, 'More', SKIP, 'hub/next', 'Move', 'More', 'More', SKIP] })
     for (const command of ['k-hold', 'k-queue', 'k-queue']) await run($, command)
-    // A dialog's rows: its lines under the head (ending in a colon, or in the page's range), above its question.
-    const lines = (...at: number[]): string[] =>
-      at.flatMap(i => {
-        const all = (w.asked[i]?.question ?? '').split('\n')
-        return all.slice(all.findIndex(l => /:( \(\d+ to \d+ of \d+\))?$/.test(l)) + 1, -1)
-      })
-    // A line's task, its number (a place, A-11) left out; a line of no task names none.
-    const task = (l: string) => QUEUE.find(x => l.replace(/^\d+\. /, '').startsWith(`${x.id}: `))
-    const titled = (l: string): boolean => {
-      const r = task(l)
-      return r !== undefined && l.endsWith(`. ${r.title}.`)
+    // A dialog's rows: each choice but More and Back, with its line.
+    const rows = (...at: number[]): [string, string][] => at.flatMap(i => Object.entries(w.lines[i] ?? {}).filter(([label]) => label !== 'More' && label !== 'Back'))
+    // A row's task by its label; a row of no task names none.
+    const task = (label: string) => QUEUE.find(x => x.id === label)
+    const titled = ([label, line]: [string, string]): boolean => {
+      const r = task(label)
+      return r !== undefined && line.endsWith(`. ${r.title}.`)
     }
-    const queue = lines(1, 2)
-    const move = lines(5, 6, 7)
-    expect(queue.map(l => task(l)?.id)).toEqual([ID, 'hub/sync-notes', 'hub/next', 'hub/later', 'hub/parked'])
+    const queue = rows(1, 2)
+    const move = rows(5, 6, 7)
+    expect(queue.map(([label]) => task(label)?.id)).toEqual([ID, 'hub/sync-notes', 'hub/next', 'hub/later', 'hub/parked'])
     expect(queue.every(titled)).toBe(true)
     // Under Move: Earlier, Later, the three other tasks, titled, and the end.
-    expect(move.filter(l => task(l) !== undefined).every(titled)).toBe(true)
-    expect(move.map(l => task(l)?.id ?? l.split(':')[0])).toEqual(['Earlier', 'Later', ID, 'hub/sync-notes', 'hub/later', 'End of the queue'])
-    expect(lines(0)).toEqual([`1. ${ID}: in review`, '2. hub/sync-notes: queued'])
-    for (const r of WAITING.hold) expect(w.asked[0]?.question).not.toContain(r.title)
+    expect(move.filter(([label]) => task(label) !== undefined).every(titled)).toBe(true)
+    expect(move.map(([label]) => label)).toEqual(['Earlier', 'Later', ID, 'hub/sync-notes', 'hub/later', 'End of the queue'])
+    expect(rows(0)).toEqual([[ID, 'in review'], ['hub/sync-notes', 'queued']])
+    for (const r of WAITING.hold) expect([w.asked[0]?.question, ...Object.values(w.lines[0] ?? {})].join('\n')).not.toContain(r.title)
     expect(w.runs).toEqual([])
   })
 
@@ -73,8 +73,9 @@ describe('names in the list, details once picked (A-8)', () => {
     const w = world(on, { taps: [`${ID} A-3`, SKIP] })
     await run($, 'k-amendments')
     const [list, item] = w.asked
-    expect(list?.question).toBe(`Waiting for your approval:\n1. ${ID} A-3: Age line in words\n2. ${ID} A-4: replaces E-1\nWhich amendment?`)
-    for (const words of ['2026-11-06', 'The age line needs its words', 'E-1 is covered by AC-1', 'Changes', 'Not yet', 'fails k check', FORECAST]) expect(list?.question).not.toContain(words)
+    expect(list?.question).toBe('Waiting for your approval: Which amendment?')
+    expect(w.lines[0]).toEqual({ [`${ID} A-3`]: 'Age line in words', [`${ID} A-4`]: 'replaces E-1' })
+    for (const words of ['2026-11-06', 'The age line needs its words', 'E-1 is covered by AC-1', 'Changes', 'Not yet', 'fails k check', FORECAST]) expect([list?.question, ...Object.values(w.lines[0] ?? {})].join('\n')).not.toContain(words)
     expect(item?.question).toBe([
       `${ID} A-3: Age line in words. Proposed 2026-11-06 by session s1, changes 2 lines.`,
       `Task: ${FORECAST}.`,

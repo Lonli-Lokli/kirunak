@@ -144,8 +144,8 @@ You need Node 22 or later, git and Claude Code.
    `"CLAUDE_CODE_PLUGIN_DIRS": "~/code/kirunak/mods/kirunak"`.)
 
    **From the phone**, in Remote Control, the mod gives you these (a command that takes an id opens a dialog of
-   touch choices when you type it without one; its list names each task or amendment and nothing more, and the one
-   you pick shows its details in the next dialog):
+   touch choices when you type it without one; its list asks one short question, each task or amendment a choice
+   with its line under it, and the one you pick shows its details in the next dialog):
 
    | Type | You get |
    | --- | --- |
@@ -153,8 +153,8 @@ You need Node 22 or later, git and Claude Code.
    | `/k-board` | the board's groups (working on now, queued, done this week and the rest) and how many tasks each holds, at once and without a model turn; tap a group for its tasks, a line each, then a task for its card, or Skip for the brief board as text |
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
-   | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), as numbered entries; the one picked shows whole, with Start intake (the session starts the intake from it), Drop (you type the reason, then confirm) and Back; bugs are not among them |
-   | `/k-bugs` | the bugs, a fix ready first, then the oldest, as numbered entries; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back; while a bug marked `quad-damage: yes` waits, Quad Damage comes first, and while its run lives, its line heads the list and the bug it is on has none of these |
+   | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), a choice each; the one picked shows whole, with Start intake (the session starts the intake from it, its first question every proposed answer of the draft, agreed in one tap or each asked alone), Drop (you type the reason, then confirm) and Back; bugs are not among them |
+   | `/k-bugs` | the bugs, a fix ready first, then the oldest, a choice each; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back; while a bug marked `quad-damage: yes` waits, Quad Damage comes first, and while its run lives, its line heads the list and the bug it is on has none of these |
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |
@@ -163,6 +163,9 @@ You need Node 22 or later, git and Claude Code.
 
    A tap in these dialogs is your own gesture, like a typed command; `/k-board-page` is the only one of these that
    uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
+   On the phone each choice has its line under it. In the Desktop app the same dialogs are drawn with a head (the
+   title, a coloured state chip with its icon and word, the repo and dates), and long parts fold behind Show all;
+   Quad Damage's progress lines are drawn there as rows of the same chips (`design/boards.md` §4, "The look").
    After a verb on the task this session works on, or ran the intake of, the session takes a turn of its own: it
    says what you did, or what failed with kirunak's reason, and goes on; after `/k-start` it starts the work, and
    after Review & merge it watches the review and tells you how it ended; after Quad Damage it writes the run's

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { amendmentItem, amendmentLabel, amendmentsText, amendmentText, entry, listText, plainLines, queueNow, taskItem, taskLabel, unmarked } from '../hooks/lists'
+import { amendmentLabel, amendmentsText, amendmentText, entry, listText, queueNow, taskLabel, unmarked } from '../hooks/lists'
 import type { AmendmentRow } from '../hooks/waiting'
 
 import { AMENDMENTS, ID, ROWS } from './world'
@@ -98,12 +98,8 @@ describe('the lists the commands answer with', () => {
     expect(unbroken(amendmentText(1, { ...A3, id: 'a-repository-with-a-long-name/a-forty-character-slug-for-the-test' }, FILE.replace('session s1', 'session 1d4ef848 (asked by session gulnya-83 for the owner)')))).toBe(true)
   })
 
-  test('the same rows as a dialog shows them: numbered plain lines, and short names for the choices', () => {
-    expect(plainLines([A3, A4].map(amendmentItem), 4)).toEqual([
-      '4. weather/offline-forecast A-3: Age line in words',
-      '5. weather/offline-forecast A-4: replaces E-1',
-    ])
-    expect(plainLines([taskItem(ROWS[1] as (typeof ROWS)[number])])).toEqual(['1. queued, queue place 2, hub/sync-notes: Sync notes.'])
+  // The rows' words, which a dialog shows as each choice's line (gulnya/mobile-dialogs AC-23), are names.test.ts's.
+  test('the same rows as a dialog offers them: short names for the choices', () => {
     expect([amendmentLabel(A3), taskLabel(ROWS[1] as (typeof ROWS)[number])]).toEqual(['weather/offline-forecast A-3', 'hub/sync-notes'])
   })
 

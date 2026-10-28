@@ -2,7 +2,7 @@ import type { KirunakChip, KirunakLookRow, KirunakSection } from '../types'
 
 import { numbered, unmarked } from './lists'
 import type { Item } from './lists'
-import { dateWord } from './looks'
+import { clipped, dateWord, reasonLook, runRowOf } from './looks'
 import type { Look, Screen } from './owner'
 
 // /k-bugs (gulnya/kirunak-bugs AC-6, D-1): the bugs, faults in something that exists, as `k bugs --json` gives them,
@@ -116,7 +116,7 @@ function fixLines(b: BugRow): string[] {
 const headLines = (b: BugRow): string[] => [`${b.id}: ${sentence(oneLine(b.title))}`, sentence(capital(tailOf(b))), ...fixLines(b)]
 
 // The bug's file as written below the front matter (which the head says), blank lines at either end left out.
-function bodyOf(file: string): string[] {
+export function bodyOf(file: string): string[] {
   const lines = file.replace(/\r/g, '').split('\n')
   let i = 0
   if (lines[0] === '---') {
@@ -154,7 +154,7 @@ const writtenWord = (b: BugRow, now: number): string => (b.written ? `written ${
 // an entry of a list, a question and its Proposed answer each a line of their own. Ids, paths and commits stay, as
 // short shas (AC-3), since this is what Show all unfolds.
 const STARTS = /^(?:[-*] |\d+\. |> |Proposed:)/
-const shortShas = (s: string): string => s.replace(/\b([0-9a-f]{7})[0-9a-f]{5,57}\b/g, '$1')
+export const shortShas = (s: string): string => s.replace(/\b([0-9a-f]{7})[0-9a-f]{5,57}\b/g, '$1')
 export function sectionsOf(body: readonly string[]): KirunakSection[] {
   const out: KirunakSection[] = []
   let at: KirunakSection | null = null
@@ -186,15 +186,11 @@ export function sectionsOf(body: readonly string[]): KirunakSection[] {
 
 // The first lines under a bug's head (AC-10): its Why's first paragraph, else its first section's first line, in
 // plain words (AC-3): no file or commit marks, cut at a sentence past 400 characters, which Show all shows whole.
-const FIRST = 400
-function firstOf(sections: readonly KirunakSection[]): string | null {
+export function firstOf(sections: readonly KirunakSection[]): string | null {
   const s = sections.find(x => x.heading?.toLowerCase() === 'why') ?? sections[0]
   const line = s?.lines[0]
   if (line === undefined) return null
-  const plain = line.replace(/\s*\[(?:file|commit)[^\]]*\]/g, '').replace(/^[-*] /, '')
-  if (plain.length <= FIRST) return plain
-  const end = plain.slice(0, FIRST).search(/[.!?](?=[^.!?]*$)/)
-  return end > 0 ? `${plain.slice(0, end + 1)} ...` : `${plain.slice(0, FIRST)} ...`
+  return clipped(line.replace(/\s*\[(?:file|commit)[^\]]*\]/g, '').replace(/^[-*] /, ''))
 }
 
 // A bug's look: its title large, its chip, the repo and the date written; its first lines; then what Show all
@@ -215,11 +211,15 @@ function itemLook(b: BugRow, file: string | null, now: number): Look {
 
 // The list's look: "Bugs", how many and in which repos, the newest date; its chip, Quad Damage's run while one lives,
 // else the fixes ready, else what is in review, else none ready; a row a bug, its chip, its id and its title (AC-1).
+// The run's line is a row of the head, drawn as a progress row (AC-12); a line of no form k prints stays the first
+// line, as written (E-2).
 function listLook(rows: readonly BugRow[], live: QuadDamageStatus | null, now: number): Look {
   const ready = rows.filter(b => b.fixReady).length
   const reviewing = rows.filter(b => b.reviewing).length
+  const run = live ? runRowOf(live.line) : null
+  // A run that waits for the 5-hour window is paused, orange, as its row says (AC-8); else it runs.
   const chip: KirunakChip = live
-    ? { stage: 'started', word: 'Quad Damage runs' }
+    ? run?.chip.stage === 'paused' ? { stage: 'paused', word: 'Quad Damage waits' } : { stage: 'started', word: 'Quad Damage runs' }
     : ready
       ? { stage: 'waits', word: `${ready} ${ready === 1 ? 'fix' : 'fixes'} ready` }
       : reviewing
@@ -232,7 +232,8 @@ function listLook(rows: readonly BugRow[], live: QuadDamageStatus | null, now: n
     title: 'Bugs',
     chip,
     line: `${plural(rows.length, 'bug')} in ${repos.join(', ')}${newest ? `, the newest written ${dateWord(newest, now)}` : ''}`,
-    first: live ? [{ heading: null, lines: [sentence(live.line)] }] : [],
+    run,
+    first: live && run === null ? [{ heading: null, lines: [sentence(live.line)] }] : [],
     rows: look,
     fold: null,
   }
@@ -245,7 +246,7 @@ const mergeable = (b: BugRow): boolean => b.fixReady && !b.reviewing && !b.quadD
 const quadDamageRow = (marked: number) => ({
   item: { lead: '', name: 'Quad Damage', text: `: fix and review the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed` },
   label: 'Quad Damage',
-  description: `fixes and reviews the ${plural(marked, 'marked bug')} one at a time, unattended`,
+  description: `fixes and reviews the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed`,
   verb: ['bugs', 'quad-damage', '--via', 'mod'],
 })
 
@@ -297,7 +298,7 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     text: [...headLines(b), ...(b.branch ? [`Its fix branch ${b.branch} stays in ${b.fixRepo}.`] : []), `Reason: ${why}`],
     choices: [{ label: `Drop ${b.id}`, description: 'drops it in a commit that carries the reason', verb: ['bug', 'drop', b.id, '--why', why] }],
     question: 'Drop it, in a commit that carries that reason?',
-    look: headOf(b),
+    look: reasonLook(headOf(b), why, b.branch ? [{ heading: 'Its fix', lines: [`Its fix branch ${b.branch} stays in ${b.fixRepo}.`] }] : []),
   })
   const reason = (b: BugRow): Screen => ({
     kind: 'reason',
@@ -332,7 +333,9 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
   })
   const live = run?.run ? run : null
   const marked = rows.filter(b => b.quadDamage).length
-  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, description: `${chipOf(b).word}, ${writtenWord(b, now)}`, open: () => item(b) }))
+  // Each bug's line under its choice, its words as the list said them with the date in words (AC-14, AC-23).
+  const lineOf = (b: BugRow): string => `${oneLine(b.title)}, ${fixOf(b)}, ${b.bugOf ? `bug of ${oneLine(b.bugOf)}, ` : ''}${writtenWord(b, now)}`
+  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, description: lineOf(b), open: () => item(b) }))
   return {
     kind: 'list',
     header: 'Bugs',

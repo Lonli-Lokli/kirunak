@@ -1,16 +1,15 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { bandLine, paneLines } from './board'
-import type { Tone } from './board'
+import { bandLine, PANE_COLORS, paneLines } from './board'
 import { bugsScreen, bugsText, fixOf, fixPrompt } from './bugs'
 import type { BugRow, QuadDamageStatus } from './bugs'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
-import { draftsScreen, draftsText, intakePrompt } from './drafts'
+import { draftsScreen, draftsText, firstQuestion, intakePrompt, questionsOf } from './drafts'
 import type { DraftRow } from './drafts'
 import { amendmentsText, amendmentText, briefText, listText } from './lists'
-import { nothingRan, owners } from './owner'
+import { nothingRan, owners, showIntake } from './owner'
 import type { Outcome, Turn } from './owner'
 import { acceptScreen, amendmentsScreen, approveScreen, boardScreen, holdScreen, queueScreen, resumeScreen, startScreen } from './picks'
 import type { Brief } from './picks'
@@ -29,8 +28,6 @@ const FAILED = (name: string): string => `/${name} failed in the mod (the debug 
 const READ_FAILED = (name: string): string => `/${name} failed in the mod; the debug log says why.`
 // The read's value, which reads.ts writes; the scan wants the reference written in the file that reads it.
 const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
-
-const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success: 'success', error: 'error', warning: 'warning' }
 
 // The owner's verbs (boards.md §4, approval.md §5): run only on the owner's own gesture, as `node k <verb> <id>
 // --via mod`, with no model turn; the state line k prints is the command's output, and a turn of the session's own
@@ -109,6 +106,15 @@ async function list($: EngineInterface, { k, args }: Turn): Promise<string> {
   return r.exitCode !== 0 ? refused('k-list', r) : listText(JSON.parse(r.stdout).rows, all === 'all')
 }
 
+// The looks' dates by this machine's clock, else the process's (gulnya/mobile-dialogs AC-1).
+async function nowOf($: EngineInterface): Promise<number> {
+  try {
+    return await $.clock.now()
+  } catch {
+    return Date.now()
+  }
+}
+
 // `/k-board` (A-9's AC-5): the dialog in steps, the board's groups and then a group's tasks; the task tapped answers
 // with its card, and Skip, a dismissal or any other answer, at any step, with the brief board itself. It reads, and
 // runs no verb. `/k-board <id>`: that task's card at once, with no dialog.
@@ -118,7 +124,7 @@ async function boardAnswer($: EngineInterface, turn: Turn): Promise<string> {
   const r = await $.process.run(['node', turn.k, 'board', '--brief', '--json'])
   if (r.exitCode !== 0) return refused('k-board', r)
   const brief = JSON.parse(r.stdout) as Brief
-  const picked = brief.ids.length ? await turn.pick(boardScreen(brief)) : null
+  const picked = brief.ids.length ? await turn.pick(boardScreen(brief, await nowOf($))) : null
   return picked === null ? briefText(brief.text) : card($, turn.k, picked)
 }
 
@@ -155,7 +161,7 @@ async function amendments($: EngineInterface, turn: Turn): Promise<string | Outc
         // amendmentLines says so.
       }
     }
-    const out = await turn.dialog(amendmentsScreen(rows, files))
+    const out = await turn.dialog(amendmentsScreen(rows, files, await nowOf($)))
     return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${amendmentsText(rows)}`
   }
   const picked = nth(args, offered.amendments, '/k-amendments')
@@ -200,7 +206,7 @@ async function draftsDialog($: EngineInterface, turn: Turn): Promise<string | Ou
       // draftLines says so.
     }
   }
-  const out = await turn.dialog(draftsScreen(rows, files))
+  const out = await turn.dialog(draftsScreen(rows, files, await nowOf($)))
   if (out.ended !== undefined) return startIntake($, turn.k, out.ended)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${draftsText(rows)}`
 }
@@ -210,13 +216,22 @@ async function draftsDialog($: EngineInterface, turn: Turn): Promise<string | Ou
 // starts the intake with the k-intake skill (drafts.ts, intakePrompt). It runs no verb. The engine refuses a submit
 // from inside a command.run hook (it would wait on the turn the hook holds: measured under `claude plugin test`), so
 // a timer of the clock's submits it once the hook has answered (turns.ts, submitLater); the prompt then waits for the
-// session to be idle, and one the engine refuses toasts why.
+// session to be idle, and one the engine refuses toasts why. The draft's file is read again for its first question
+// (gulnya/mobile-dialogs AC-15, E-3), whose parts are written as dialogs of the mod's before the prompt is submitted,
+// so the model's ask of them in its own turn gets their lines and their look (owner.ts's showIntake, look.tsx).
 async function startIntake($: EngineInterface, k: string, id: string): Promise<string> {
   const r = await $.process.run(['node', k, 'drafts', '--json'])
   if (r.exitCode !== 0) return `Nothing ran: k drafts did not answer, so ${id} could not be found again: ${firstLine(r)}`
   const d = (JSON.parse(r.stdout) as DraftRow[]).find(x => x.id === id)
   if (d === undefined) return `Nothing ran: ${id} is no longer a draft. It was dropped, or its intake started, since the list was shown.`
-  submitLater($, intakePrompt(d), `The intake from ${id} did not start`)
+  let file: string | null = null
+  try {
+    file = await $.fs.read(d.path)
+  } catch {
+    // The prompt goes without the first question's text; the skill says how to write it.
+  }
+  await showIntake($, firstQuestion(d, file === null ? [] : questionsOf(file)))
+  submitLater($, intakePrompt(d, file), `The intake from ${id} did not start`)
   return `The intake from ${id} starts next in this session, with the k-intake skill.`
 }
 
@@ -239,14 +254,7 @@ async function bugsDialog($: EngineInterface, turn: Turn): Promise<string | Outc
     }
   }
   const run = await quadDamageStatus($, turn.k)
-  // The look's dates by this machine's clock (gulnya/mobile-dialogs AC-1).
-  let now = Date.now()
-  try {
-    now = await $.clock.now()
-  } catch {
-    // The process's clock, then.
-  }
-  const out = await turn.dialog(bugsScreen(rows, files, run, now))
+  const out = await turn.dialog(bugsScreen(rows, files, run, await nowOf($)))
   if (out.ended !== undefined) return startFix($, turn.k, out.ended)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows, run)}`
 }
@@ -387,7 +395,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {lines.map(line => (
-          <Text dimColor={line.tone === 'dim'} bold={line.tone === 'bold'} color={COLORS[line.tone] ?? 'text'} wrap="truncate-end">
+          <Text dimColor={line.tone === 'dim'} bold={line.tone === 'bold'} color={line.state ? PANE_COLORS[line.state] : 'text'} wrap="truncate-end">
             {line.text || ' '}
           </Text>
         ))}
