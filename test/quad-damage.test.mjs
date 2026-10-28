@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { lock } from '../lib/bug-review.mjs';
-import { drop, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
+import { checkBugText, drop, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { start as intakeStart } from '../lib/intake.mjs';
 import {
-  claim, keepAwake, preview, pushLine, release, run, runsDir, start, state, statusLine, summaryOf, summaryText, workBug,
+  claim, FIX_ENV, keepAwake, preview, pushLine, release, run, runsDir, start, state, statusLine, summaryOf, summaryText, workBug,
 } from '../lib/quad-damage.mjs';
-import { events, k, makeWorkspace } from './helpers.mjs';
+import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
 
 // gulnya/quad-damage S-3: Quad Damage's run, its run file, its limits gate, its summary and its status.
 
@@ -80,16 +81,17 @@ const writeRun = (home, run) => put(quadDamagePath(home), JSON.stringify(run) + 
 const writeLock = (home, id, pid) => put(reviewLockPath(home, id), JSON.stringify({ pid, started: '2026-10-27T22:00:00.000Z' }) + '\n');
 const summaryFile = (r) => readFileSync(join(r.folder, 'summary.md'), 'utf8');
 
-test('run: the marked bugs in the list\'s order, the stub\'s outcome, the lock and the run file let go', async () => {
+test('run: the marked bugs in the list\'s order, the work\'s outcome, the lock and the run file let go', async () => {
   const w = await qdWorkspace();
   const s = seams();
   const awake = [];
-  const r = await run({ ws: w.ws, ...s, caffeinate: (pid) => awake.push(pid) });
+  const work = async () => ({ outcome: 'waits', why: 'a stub' });
+  const r = await run({ ws: w.ws, ...s, work, caffeinate: (pid) => awake.push(pid) });
   assert.deepEqual(awake, [process.pid]);
   assert.equal(r.folder, join(runsDir(w.home), '2026-10-27T23-40-05'));
   assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome]), [['hub/a', 'waits'], ['hub/c', 'waits']]);
   assert.equal(summaryFile(r), 'Quad Damage, 23:40 to 23:40: 0 merged, 2 wait, 0 not reached\n' +
-    '- hub/a: waits: not built yet\n- hub/c: waits: not built yet\n');
+    '- hub/a: waits: a stub\n- hub/c: waits: a stub\n');
   assert.equal(existsSync(quadDamagePath(w.home)), false);
   assert.equal(state(w.home), null);
   assert.equal(reviewing(w.home, 'hub/a'), null);
@@ -98,7 +100,6 @@ test('run: the marked bugs in the list\'s order, the stub\'s outcome, the lock a
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'state.json'), 'utf8')).bugs.length, 2);
   const e = events(w.home).at(-1);
   assert.deepEqual({ ...e, time: null }, { time: null, kind: 'quad-damage', via: 'shell', folder: r.folder, merged: 0, waits: 2, notReached: 0, stopped: null });
-  assert.deepEqual(await workBug({}), { outcome: 'waits', why: 'not built yet' });
 
   // A second run in the same minute gets a folder of its own.
   const again = await run({ ws: w.ws, ...seams() });
@@ -326,27 +327,32 @@ test('summary: its shapes, the push line, and --summary of the latest run or a f
   assert.throws(() => summaryOf(w.home), /no Quad Damage summary in .*2026-10-29T08-00-00: its run goes on \(pid \d+\), and k bugs quad-damage --status shows it/);
 });
 
-test('k bugs quad-damage: refused with no marked bug; else a detached run, its pid, log and folder', async () => {
-  const w = await qdWorkspace();
-  for (const slug of ['a', 'c']) writeFileSync(join(w.hub, 'kirunak', 'bugs', `${slug}.md`), bugText(`hub/${slug}`, '2026-10-20', 'no'));
+test('k bugs quad-damage: refused with no marked bug; else a detached run that really works its bug, its pid, log and folder', async () => {
+  const w = await fixWorkspace([['c', '2026-10-22', '']]);
+  const marked = readFileSync(join(w.hub, 'kirunak', 'bugs', 'c.md'), 'utf8');
+  writeFileSync(join(w.hub, 'kirunak', 'bugs', 'c.md'), marked.replace('quad-damage: yes', 'quad-damage: no'));
   const none = k(w.home, ['bugs', 'quad-damage']);
   assert.equal(none.status, 1);
   assert.match(none.stderr, /no bug is marked quad-damage: yes, so a run would take none/);
   assert.equal(existsSync(quadDamagePath(w.home)), false);
   assert.equal(k(w.home, ['bugs', 'quad-damage', '--dry-run']).status, 1);
 
-  writeFileSync(join(w.hub, 'kirunak', 'bugs', 'c.md'), bugText('hub/c', '2026-10-22', 'yes'));
+  writeFileSync(join(w.hub, 'kirunak', 'bugs', 'c.md'), marked);
   assert.equal(k(w.home, ['bugs', 'quad-damage', '--dry-run']).stdout, 'would start Quad Damage on 1 marked bug: hub/c\n');
   assert.equal(existsSync(runsDir(w.home)), false);
-  const r = k(w.home, ['bugs', 'quad-damage', '--json', '--via', 'mod']);
+  const script = join(w.root, 'script.json');
+  writeFileSync(script, JSON.stringify({ fixes: [fixed()], verdicts: ['clean'] }));
+  const r = k(w.home, ['bugs', 'quad-damage', '--json', '--via', 'mod'], { FAKE_SCRIPT: script });
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.deepEqual(out.bugs, ['hub/c']);
   assert.equal(out.log, join(out.folder, 'run.log'));
   assert.equal(dirname(out.folder), runsDir(w.home));
-  for (let i = 0; i < 200 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
+  for (let i = 0; i < 400 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
   for (let i = 0; i < 100 && existsSync(quadDamagePath(w.home)); i++) await new Promise((done) => setTimeout(done, 50));
-  assert.match(readFileSync(join(out.folder, 'summary.md'), 'utf8'), /^Quad Damage, \d\d:\d\d to \d\d:\d\d: 0 merged, 1 wait, 0 not reached\n- hub\/c: waits: not built yet\n$/);
+  assert.match(readFileSync(join(out.folder, 'summary.md'), 'utf8'), /^Quad Damage, \d\d:\d\d to \d\d:\d\d: 1 merged, 0 waits?, 0 not reached\n- hub\/c: merged [0-9a-f]{7} into hub's master\n/);
+  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n', 'the fake fix merged');
+  assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'c.md')), false, 'the bug closed');
   assert.equal(existsSync(quadDamagePath(w.home)), false);
   const log = readFileSync(out.log, 'utf8');
   assert.match(log, /^--- Quad Damage, \S+ \(via mod\)\n/);
@@ -360,3 +366,146 @@ test('keepAwake: caffeinate -i -w on macOS, nothing elsewhere (E-2)', () => {
   const c = keepAwake(123, { platform: 'darwin', bin: '/usr/bin/true' });
   assert.deepEqual(c.spawnargs, ['/usr/bin/true', '-i', '-w', '123']);
 });
+
+// --- gulnya/quad-damage S-4: one bug's work, with the fake runner of fixtures/quad-damage (no claude anywhere) ---
+
+const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'quad-damage', 'fake-runner.mjs');
+const NOBODY = () => [];
+const FIXED = 'FIXED\nWhy: the cache expires hourly\n- bug/a: the fix\n';
+const fixed = (text = 'cache: one hour\n') => ({ commit: { file: 'tiles.txt', text }, report: FIXED });
+
+// A workspace whose hub holds tiles.txt and the bugs [slug, written, front lines], all marked yes and committed; kirunak's
+// own checkout a scratch repo holding tiles.txt too; the fake runner its plugin (the CLI's) and `w.runner` (a test's,
+// playing `script`); the heavy lock named with <session>.
+async function fixWorkspace(bugs = [['a', '2026-10-20', '']], script = {}) {
+  const w = await makeWorkspace();
+  const self = join(w.root, 'kirunak-self');
+  mkdirSync(self);
+  gitInit(self);
+  writeFileSync(join(self, 'tiles.txt'), 'cache: forever\n');
+  gitCommitAll(self);
+  writeFileSync(w.modulePath, readFileSync(w.modulePath, 'utf8')
+    .replace("queue: './queue.md',", `queue: './queue.md',\n  kirunakRoot: ${JSON.stringify(self)},`)
+    .replace("plugins: ['./plugins/checklist.mjs']", "plugins: ['./plugins/checklist.mjs', './plugins/fake-runner.mjs']"));
+  const plugin = join(w.hub, 'kirunak', 'plugins', 'fake-runner.mjs');
+  copyFileSync(FAKE, plugin);
+  writeFileSync(join(w.hub, 'tiles.txt'), 'cache: forever\n');
+  for (const [slug, written, front] of bugs) {
+    put(join(w.hub, 'kirunak', 'bugs', `${slug}.md`), bugText(`hub/${slug}`, written, 'yes').replace('quad-damage: yes', `${front}quad-damage: yes`));
+  }
+  gitCommitAll(w.hub, 'the bugs');
+  w.self = realpathSync(self);
+  w.ws.kirunakRoot = w.self;
+  w.ws.bugs = { ...w.ws.bugs, heavyLock: 'heavy run --session <session> --' };
+  w.hubRoot = w.ws.repos.find((r) => r.name === 'hub').root;
+  w.runner = (await import(pathToFileURL(plugin).href)).fake(script);
+  return w;
+}
+
+const fixRun = (w, more = {}) => run({ ws: w.ws, ...seams(), runner: w.runner, work: (ctx) => workBug({ ...ctx, processes: NOBODY, ...more }) });
+const fixes = (w) => w.runner.steps.filter((s) => s.env[FIX_ENV]);
+const reviewsRun = (w) => w.runner.steps.filter((s) => s.env.KIRUNAK_BUG_REVIEW);
+const gitIn = (root, ...args) => sh(root, 'git', args).trim();
+
+test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges and closes the bug', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', '']], { fixes: [fixed()], verdicts: ['clean'] });
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome, b.repo]), [['hub/a', 'merged', 'hub']]);
+  assert.equal(r.stopped, null);
+  const [fix] = fixes(w);
+  assert.equal(fix.cwd, w.hubRoot);
+  assert.deepEqual(fix.addDirs, [r.folder]);
+  assert.equal(fix.model, 'opus');
+  assert.deepEqual(fix.disallowedTools, ['Agent']);
+  assert.equal(fix.maxTurns, 150);
+  assert.equal('maxBudgetUsd' in fix, false);
+  assert.equal(fix.env[FIX_ENV], 'hub/a');
+  assert.equal(typeof fix.onMessage, 'function');
+  assert.match(fix.brief, /^# Quad Damage: the bug hub\/a, try 1$/m);
+  assert.ok(fix.brief.includes(`never bare: \`heavy run --session ${fix.sessionId} --\``), 'AC-14: its own session id in the heavy lock');
+  assert.ok(fix.brief.includes(`Your report goes to ${join(r.folder, 'hub', 'a', 'fix-1.md')}.\n\n1. Read the bug`));
+  assert.ok(!/\{\{\w+\}\}/.test(fix.brief), 'every placeholder filled');
+  assert.ok(!fix.brief.includes('This is the retry'));
+  const [rv] = reviewsRun(w);
+  assert.ok(rv.brief.includes(`\`heavy run --session ${rv.sessionId} --\``), 'AC-14: the review\'s own session id too');
+  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false);
+  assert.equal(existsSync(`${w.hubRoot}-quad-a`), false, 'its worktree removed');
+  assert.match(gitIn(w.hubRoot, 'log', '-1', '--format=%s'), /^kirunak: close the bug hub\/a: bug\/a merged into hub's master/);
+  assert.equal(summaryFile(r).split('\n')[1], `- hub/a: merged ${r.bugs[0].sha.slice(0, 7)} into hub's master`);
+  const log = readFileSync(join(r.folder, 'run.log'), 'utf8');
+  assert.match(log, /hub\/a: fixing, try 1: session \S+ in /);
+  assert.match(log, /hub\/a: fixing, try 1: 3 tool calls, exit 0\n/);
+  assert.match(log, /hub\/a: review: merged, kirunak\/bugs\/a\/review-1\.md\n/);
+  assert.deepEqual(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).calls, 3);
+  assert.equal(existsSync(reviewLockPath(w.home, 'hub/a')), false);
+});
+
+test('skipped: the mark set to no, the reason under What was found, the bug file committed alone; FAILED and an empty FIXED wait', async () => {
+  const skip = { calls: 2, report: 'SKIPPED\nWhy: the fix needs the owner\'s choice [of the hour]\n' };
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['b', '2026-10-21', ''], ['c', '2026-10-22', '']], {
+    fixes: [skip, { calls: 4, report: 'FAILED\nWhy: the test cannot see the cache\n' }, { calls: 4, report: FIXED }],
+  });
+  writeFileSync(join(w.hubRoot, 'notes.txt'), 'the owner\'s work in progress\n');
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs, [
+    { id: 'hub/a', outcome: 'waits', why: 'skipped, quad-damage now no: the fix needs the owner\'s choice (of the hour)' },
+    { id: 'hub/b', outcome: 'waits', why: 'its fixing session failed: the test cannot see the cache; what holds is on bug/b in hub' },
+    { id: 'hub/c', outcome: 'waits', why: 'its report says FIXED, but bug/c in hub has no commit ahead of master at a head no review refused' },
+  ]);
+  const text = readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8');
+  assert.match(text, /^quad-damage: no$/m);
+  assert.ok(text.includes(`- the tile cache never expires [file src/Tiles.kt]\n- Quad Damage skipped it on 2026-10-27: the fix needs the owner's choice (of the hour) [file ${join(r.folder, 'hub', 'a', 'fix-1.md')}]\n\n## Questions`));
+  assert.deepEqual(checkBugText(text, 'hub/a'), []);
+  assert.equal(gitIn(w.hubRoot, 'log', '-1', '--format=%s'), 'kirunak: bug hub/a: Quad Damage skipped it, quad-damage: no');
+  assert.equal(gitIn(w.hubRoot, 'show', '--name-only', '--format=', 'HEAD'), 'kirunak/bugs/a.md');
+  assert.equal(gitIn(w.hubRoot, 'status', '--porcelain'), '?? notes.txt');
+  assert.equal(list(w.ws).find((b) => b.id === 'hub/a').quadDamage, false);
+  assert.equal(reviewsRun(w).length, 0, 'no review after SKIPPED, FAILED or FIXED with nothing ahead');
+});
+
+test('findings, then the retry from them, then clean: merged; the retry\'s brief names the review and its head (AC-7)', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', '']], { fixes: [fixed(), fixed('cache: as the forecast\n')], verdicts: ['findings', 'clean'] });
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome]), [['hub/a', 'merged']]);
+  const [, retry] = fixes(w);
+  const head1 = /^head: (\S+)$/m.exec(reviewsRun(w)[0].brief)[1];
+  assert.match(retry.brief, /^# Quad Damage: the bug hub\/a, try 2$/m);
+  assert.ok(retry.brief.includes(`This is the retry after a review: kirunak/bugs/a/review-1.md (${join(w.hubRoot, 'kirunak', 'bugs', 'a', 'review-1.md')}) judged the head ${head1} of bug/a`), retry.brief);
+  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: as the forecast\n');
+  assert.equal(reviewsRun(w).length, 2);
+  assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a')), false, 'closed with its reviews');
+});
+
+test('findings twice: the bug waits with both reviews and the run goes on; a conflict merges nothing (E-5)', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], {
+    fixes: [fixed(), fixed('cache: as the forecast\n'), { ...fixed(), master: { file: 'tiles.txt', text: 'cache: a day\n' } }],
+    verdicts: ['findings', 'findings'],
+  });
+  const master = gitIn(w.hubRoot, 'rev-parse', 'master');
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs, [
+    { id: 'hub/a', outcome: 'waits', why: 'refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md' },
+    { id: 'hub/c', outcome: 'waits', why: 'bug/c no longer merges onto master (tiles.txt): kirunak/bugs/c/review-1.md' },
+  ]);
+  assert.equal(r.stopped, null);
+  for (const n of [1, 2]) assert.match(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a', `review-${n}.md`), 'utf8'), /^verdict: findings$/m);
+  assert.match(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md'), 'utf8'), /^verdict: conflict$/m);
+  assert.equal(reviewsRun(w).length, 2, 'a conflict runs no review session');
+  assert.equal(fixes(w).length, 3);
+  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: a day\n', 'nothing merged');
+  assert.deepEqual(gitIn(w.hubRoot, 'log', '--format=%s', `${master}..master`).split('\n'), [
+    'kirunak: the bug hub/c: bug/c no longer merges onto master, review-1.md', 'master moves on',
+    'kirunak: review-2.md of the bug hub/a: findings', 'kirunak: review-1.md of the bug hub/a: findings',
+  ]);
+  for (const id of ['hub/a', 'hub/c']) assert.equal(existsSync(reviewLockPath(w.home, id)), false);
+
+  // Taken again, a bug refused twice waits at once, and a conflict at its head is no retry either.
+  const again = await fixRun(w);
+  assert.deepEqual(again.bugs.map((b) => b.why), [
+    'refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md',
+    `its review kirunak/bugs/c/review-1.md refused the head ${gitIn(w.hubRoot, 'rev-parse', 'bug/c').slice(0, 12)} (conflict)`,
+  ]);
+  assert.equal(w.runner.steps.length, 5, 'no session for either');
+});
+
