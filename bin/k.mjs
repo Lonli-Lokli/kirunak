@@ -63,7 +63,7 @@ Cache     k keep --session <id>: in the background, ends when the session's wake
           k keeper report: keep-alives, misses, hits and skips per task and per week
 Usage     k usage [--from <ISO>] [--to <ISO>] [--out <dir>]: the weekly usage review's files for one limit week (the
             last finished one by default, its start the workspace's usage.weekStart) from this Mac's transcripts, into
-            <KIRUNAK_HOME>/usage/<to's date>/ unless --out; prints the summary
+            <KIRUNAK_HOME>/usage/<to's date>/ unless --out; prints the summary, then each task's and step's weight
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"]: then removes the merged worktrees, printing each removed and kept
           k hold <id> --why "..." | k resume <id>
