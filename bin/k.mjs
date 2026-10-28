@@ -686,8 +686,10 @@ const VERBS = {
   // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
   // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15). First of all, the bugs
   // that wait, in one line with how many have a fix ready, and first in --json: a count, that count and their ids; no
-  // line at all when none waits (gulnya/kirunak-bugs AC-7).
+  // line at all when none waits (gulnya/kirunak-bugs AC-7). Before them, Quad Damage's run while one lives: its one
+  // line, and in --json its run file and that line, null when none lives (gulnya/quad-damage AC-12).
   async waiting({ ws }) {
+    const quadDamage = waiting.waitingRun(ws);
     const bugs = waiting.waitingBugs(ws);
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
@@ -709,6 +711,7 @@ const VERBS = {
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
+      ...(quadDamage ? [quadDamage.line] : []),
       ...(bugs.count ? [waiting.bugsLine(bugs)] : []),
       ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
@@ -717,7 +720,7 @@ const VERBS = {
       accept.length ? ['to accept:', ...accept.flatMap((x) => [line('accept')(x), ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
-    return { bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
+    return { quadDamage, bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the
