@@ -164,9 +164,10 @@ export default {
   and `bugs.fixEffort` (default none) set its fixing sessions, whose brief names `bugs.heavyLock` with the session's
   own id (AC-14); `bugs.limitsLog` is the log the plan's readings are appended to before each session (AC-9),
   relative to the workspace module or `~/...`, one tab-separated line a reading as a status line writes it (the time
-  in UTC to the second, the week's use and the 5-hour window's in whole percent, the label `quad-damage`), every
-  reading appended (`lib/limits.mjs`). With no `limitsLog` nothing is logged and the run reads the windows all the
-  same. Judgement: a workspace whose status line keeps such a log names it, so one file holds every reading.
+  in UTC to the second, the week's use and the 5-hour window's in whole percent, the label `quad-damage`, then when
+  each window resets, `-` when not known), every reading appended (`lib/limits.mjs`). With no `limitsLog` nothing is
+  logged and the run reads the windows all the same. Judgement: a workspace whose status line keeps such a log names
+  it, so one file holds every reading.
 - **`compact`** sets the handover, the compaction a session working a task makes at a step boundary (`orchestrator.md`
   §5): `enabled` (default true; false makes the compact hook allow every compaction and `k install` take its window
   back out of each repo's file), `handoverSize` (default 150000, the context a session hands over at; `k install`

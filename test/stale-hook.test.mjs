@@ -1,7 +1,8 @@
 // The stale-session hook and the rate-limit line (gulnya/k-usage S-3: AC-3, AC-4, D-4, D-5, D-8): the hook speaks once,
 // past both the gap and the context, naming `k handoff <id>` with a task and "start fresh" without; it never blocks and
 // lets every prompt it cannot read through silent; k install wires it once on UserPromptSubmit; the status line's
-// tracker appends the limits log's line on a change only; Quad Damage still finds its log under bugs.limitsLog.
+// tracker appends the limits log's line on a change only, and only forward within a window (gulnya/limits-log-flaps);
+// Quad Damage still finds its log under bugs.limitsLog.
 // Fixtures only, never this machine's transcripts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -160,15 +161,57 @@ test('the tracker appends the rate-limit line on a change and not on a repeat, i
   track(STATUS(53.2, 1.9, 'another'), home, new Date('2026-10-27T23:19:21Z'));
   track(STATUS(54, 1.5), home, new Date('2026-10-27T23:25:00Z'));
   track({ session_id: SID }, home, new Date('2026-10-27T23:26:00Z'));
-  assert.equal(readFileSync(log, 'utf8'), '2026-10-27T23:18:51Z\t53\t1\tk-usage S-3\n2026-10-27T23:25:00Z\t54\t1\t-\n');
-  assert.deepEqual(limitsOf({ rate_limits: { seven_day: { used_percentage: 7 } } }).reading, { week: { used: 7 }, fiveHour: { used: -1 } });
+  const resets = '2026-11-01T15:00:00Z\t2026-10-27T23:10:00Z';
+  assert.equal(readFileSync(log, 'utf8'), `2026-10-27T23:18:51Z\t53\t1\tk-usage S-3\t${resets}\n2026-10-27T23:25:00Z\t54\t1\t-\t${resets}\n`);
+  assert.deepEqual(limitsOf({ rate_limits: { seven_day: { used_percentage: 7 } } }).reading, { week: { used: 7, resetsAt: null }, fiveHour: { used: -1, resetsAt: null } });
   assert.equal(limitsOf({ rate_limits: {} }), null);
   // The workspace's log, through config.json.
   mkdirSync(join(home, 'escalate'));
   const own = join(home, 'state', 'limits.log');
   writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify({ usage: { limitsLog: own } }));
   track(STATUS(60, 3, 'x'), home, new Date('2026-10-28T01:00:00Z'));
-  assert.equal(readFileSync(own, 'utf8'), '2026-10-28T01:00:00Z\t60\t3\tx\n');
+  assert.equal(readFileSync(own, 'utf8'), `2026-10-28T01:00:00Z\t60\t3\tx\t${resets}\n`);
+});
+
+// A session's status line with the week's reading and its reset (null: none), and the 5-hour window's when given.
+const LIMITS = (name, week, weekReset, fiveHour, fiveReset = null) => ({
+  session_id: SID, session_name: name,
+  rate_limits: {
+    seven_day: { used_percentage: week, resets_at: weekReset },
+    ...(fiveHour === undefined ? {} : { five_hour: { used_percentage: fiveHour, resets_at: fiveReset } }),
+  },
+});
+
+test('the tracker over sessions holding different readings: one behind writes nothing, a new window still logs (gulnya/limits-log-flaps AC-1, AC-2, E-1 to E-3)', () => {
+  const home = tmp(), log = join(home, 'rate-limits.log');
+  const iso = (s) => new Date(s * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const W1 = 1793545200, W2 = W1 + 7 * 86400, F1 = 1793142600, F0 = F1 - 5 * 3600, F2 = F1 + 5 * 3600;
+  const at = (m) => new Date(Date.parse('2026-10-27T22:00:00Z') + m * MIN);
+  // E-3: a line from before the reset columns, an idle session's.
+  writeFileSync(log, '2026-10-27T22:00:00Z\t92\t-1\tidle\n');
+  track(LIMITS('busy', 93.4, W1, 1, F1), home, at(1)); // ahead of it: written, with both resets
+  track(LIMITS('idle', 92, W1), home, at(2)); // AC-1: behind, with no 5-hour figure (E-2): nothing
+  track(LIMITS('busy', 93.9, W1, 1.5, F1), home, at(3)); // the same whole percents: nothing
+  track(LIMITS('old', 93, W1, 40, F0), home, at(4)); // E-1: a 5-hour window already over: nothing
+  track(LIMITS('busy', 93, W1, 4, F1), home, at(5)); // the 5-hour window rose: written
+  track(LIMITS('idle', 92, W1, 2, F1), home, at(6)); // behind in both: nothing
+  track(LIMITS('busy', 94, W1, 1, F2), home, at(7)); // E-1: a new 5-hour window, lower: written
+  track(LIMITS('idle', 94, W1, 4, F1), home, at(8)); // the window before it: nothing
+  track(LIMITS('busy', 1, W2, 2, F2), home, at(9)); // AC-2: the week reset, its reset moved on: written
+  track(LIMITS('idle', 94, W1, 1, F2), home, at(10)); // last week's reading: nothing
+  assert.equal(readFileSync(log, 'utf8'), [
+    '2026-10-27T22:00:00Z\t92\t-1\tidle',
+    `2026-10-27T22:01:00Z\t93\t1\tbusy\t${iso(W1)}\t${iso(F1)}`,
+    `2026-10-27T22:05:00Z\t93\t4\tbusy\t${iso(W1)}\t${iso(F1)}`,
+    `2026-10-27T22:07:00Z\t94\t1\tbusy\t${iso(W1)}\t${iso(F2)}`,
+    `2026-10-27T22:09:00Z\t1\t2\tbusy\t${iso(W2)}\t${iso(F2)}`,
+  ].join('\n') + '\n');
+  // AC-2 with no reset time: a fall by more than half is a new window, a smaller one a session behind.
+  const bare = tmp(), bareLog = join(bare, 'rate-limits.log');
+  writeFileSync(bareLog, '2026-10-27T22:00:00Z\t92\t12\tidle\n');
+  track(LIMITS('behind', 90, null, 11), bare, at(1));
+  track(LIMITS('new', 3, null, 1), bare, at(2));
+  assert.equal(readFileSync(bareLog, 'utf8'), '2026-10-27T22:00:00Z\t92\t12\tidle\n2026-10-27T22:02:00Z\t3\t1\tnew\t-\t-\n');
 });
 
 test('a failed write of the tracker is silent, and the hook still exits 0 and prints nothing', () => {
@@ -195,6 +238,6 @@ test('Quad Damage\'s log is still found under bugs.limitsLog, the older name, on
   writeFileSync(join(w.home, 'workspace'), `${module}\n`);
   const ws = await loadWorkspace(join(w.home, 'workspace'));
   const reading = { week: { used: 41.7 }, fiveHour: { used: 12.2 } };
-  assert.equal(logLimits(ws, reading, { label: 'quad-damage', now: new Date('2026-10-28T02:00:00Z') }), '2026-10-28T02:00:00Z\t41\t12\tquad-damage');
-  assert.equal(readFileSync(join(w.hub, 'kirunak', 'state', 'limits.log'), 'utf8'), '2026-10-28T02:00:00Z\t41\t12\tquad-damage\n');
+  assert.equal(logLimits(ws, reading, { label: 'quad-damage', now: new Date('2026-10-28T02:00:00Z') }), '2026-10-28T02:00:00Z\t41\t12\tquad-damage\t-\t-');
+  assert.equal(readFileSync(join(w.hub, 'kirunak', 'state', 'limits.log'), 'utf8'), '2026-10-28T02:00:00Z\t41\t12\tquad-damage\t-\t-\n');
 });
