@@ -1,10 +1,13 @@
 import { strict as assert } from 'node:assert';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { BUG_PAIRS, DRAFT_PAIRS, renderHtml, snapshot, TEXT_PAIRS, write } from '../lib/board.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
+import { model } from '../lib/board-model.mjs';
+import { renderMarkdown } from '../lib/board-md.mjs';
+import { quadDamagePath } from '../lib/bugs.mjs';
 import { rows } from '../lib/list.mjs';
 import { bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
@@ -295,4 +298,41 @@ test('the bugs\' text pairs are the page\'s, held at 4.5:1 in the light and the 
     assert.ok(TEXT_PAIRS.some(([f, b]) => f === fg && b === bg), `--${fg} on --${bg} is in the page's contrast test`);
     for (const [name, t] of [['light', light], ['dark', dark]]) assert.ok(ratio(t[fg], t[bg]) >= 4.5, `${name}: --${fg} on --${bg} is ${ratio(t[fg], t[bg]).toFixed(2)}:1`);
   }
+});
+
+test('Quad Damage\'s run in the Bugs group, as k waiting says it, first, on the page, in the markdown and in the brief; each bug it is on with the run\'s phase; nothing while none lives (gulnya/quad-damage AC-12)', async () => {
+  const w = await fixture();
+  bugsAt(w);
+  const run = (fields) => {
+    mkdirSync(dirname(quadDamagePath(w.home)), { recursive: true });
+    writeFileSync(quadDamagePath(w.home), JSON.stringify({ pid: process.pid, started: '2026-11-07T11:40:05+00:00', by: 'owner', via: 'mod', folder: '/f', bug: 'hub/queue-stuck', ...fields }) + '\n');
+  };
+  const all = async () => {
+    const list = await rows(w.ws, { all: true });
+    const st = snapshot(w.ws);
+    return { m: model(list, st, NOW), html: renderHtml(list, st, NOW), text: renderMarkdown(list, st, NOW), brief: renderBrief(list, st, NOW) };
+  };
+  let b = await all();
+  assert.equal(b.m.quadDamageLine, '');
+  assert.doesNotMatch(b.html + b.text + b.brief.text, /Quad Damage/);
+
+  run({ phase: 'fixing', try: 1, since: '2026-11-07T11:41:00+00:00' });
+  b = await all();
+  const line = 'Quad Damage runs: hub/queue-stuck, fixing (try 1) since 11:41';
+  assert.equal(b.m.quadDamageLine, line);
+  assert.deepEqual(Object.keys(b.m).slice(Object.keys(b.m).indexOf('quadDamageLine'), Object.keys(b.m).indexOf('quadDamageLine') + 3), ['quadDamageLine', 'bugs', 'bugsLine']);
+  assert.deepEqual(b.m.bugs.map((x) => [x.id, x.fix]), [['hub/queue-stuck', 'Quad Damage: fixing, try 1'], ['weather/rain-icon', 'no fix']]);
+  assert.match(b.html, new RegExp(`<h2>Bugs <span class="n">\\(2\\)</span></h2>\n<p>${line.replace(/[()]/g, '\\$&')}</p>\n<p>2 bugs wait, 1 with a fix ready: /k-bugs</p>\n<ul>`));
+  assert.match(b.html, /<li><b>hub\/queue-stuck<\/b>: The queue keeps a finished job, Quad Damage: fixing, try 1, bug of weather\/recent,/);
+  assert.ok(b.text.includes(`## Bugs (2)\n\n${line}\n\n2 bugs wait, 1 with a fix ready: /k-bugs\n\n- hub/queue-stuck`), b.text);
+  const group = b.brief.groups.find((g) => g.name === 'Bugs');
+  assert.deepEqual(group.lines.slice(0, 2), [line, '2 bugs wait, 1 with a fix ready: /k-bugs']);
+  assert.deepEqual(group.ids, ['hub/queue-stuck', 'weather/rain-icon'], 'the ids as they were: the line is not a bug');
+
+  run({ phase: 'waiting', try: 1, waitUntil: '2026-11-07T13:15:00+00:00' });
+  b = await all();
+  assert.equal(b.m.quadDamageLine, 'Quad Damage waits for the 5-hour window until 13:15');
+  assert.equal(b.m.bugs[0].fix, 'Quad Damage: waiting for the 5-hour window until 13:15');
+  const style = /<style>([\s\S]*)<\/style>/.exec(b.html)[1];
+  assert.doesNotMatch(style, /\.bugs[^{]*\{[^}]*\bcolor:/, 'the line is text on the page\'s ground, a pair BUG_PAIRS holds at 4.5:1');
 });

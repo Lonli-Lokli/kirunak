@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { lock } from '../lib/bug-review.mjs';
-import { checkBugText, drop, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
+import { checkBugText, drop, fixLine, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { start as intakeStart } from '../lib/intake.mjs';
 import {
   claim, FIX_ENV, keepAwake, preview, pushLine, release, run, runsDir, start, state, statusLine, summaryOf, summaryText, workBug,
@@ -114,7 +114,9 @@ test('run: the 5-hour window at 90% pauses until its reset and a minute, then th
     assert.equal(ctx.folder.startsWith(runsDir(w.home)), true);
     assert.equal(existsSync(ctx.dir), true);
     assert.equal(reviewing(w.home, ctx.bug.id).pid, process.pid);
-    assert.deepEqual(list(w.ws).find((x) => x.id === ctx.bug.id).quadDamageRun, { phase: 'fixing', try: 1 });
+    const held = list(w.ws).find((x) => x.id === ctx.bug.id);
+    assert.deepEqual({ ...held.quadDamageRun, since: null }, { phase: 'fixing', try: 1, since: null, waitUntil: null });
+    assert.equal(fixLine(held), 'Quad Damage: fixing, try 1', 'the run\'s phase, not the lock\'s "reviewing" (S-5)');
     assert.equal(list(w.ws).find((x) => x.id === 'hub/b').quadDamageRun, null);
     const r = await ctx.beforeSession();
     seen.push(r.fiveHour.used);
@@ -283,7 +285,13 @@ test('status: the run, its bug and phase, or its wait; and the rows (AC-12)', as
   const json = JSON.parse(k(w.home, ['bugs', 'quad-damage', '--status', '--json']).stdout);
   assert.equal(json.run.bug, 'hub/c');
   assert.equal(json.line, 'Quad Damage runs: hub/c, fixing (try 2) since 23:41');
-  assert.deepEqual(list(w.ws).map((r) => [r.id, r.quadDamageRun]), [['hub/a', null], ['hub/b', null], ['hub/c', { phase: 'fixing', try: 2 }]]);
+  assert.deepEqual(list(w.ws).map((r) => [r.id, r.quadDamageRun]), [['hub/a', null], ['hub/b', null], ['hub/c', { phase: 'fixing', try: 2, since: '2026-10-27T23:41:00+00:00', waitUntil: null }]]);
+  assert.match(k(w.home, ['bugs']).stdout, /hub\/c .* Quad Damage: fixing, try 2/);
+  const row = { reviewing: { pid: OTHER }, fixReady: true };
+  assert.equal(fixLine({ ...row, quadDamageRun: { phase: 'reviewing', try: 1 } }), 'Quad Damage: reviewing');
+  assert.equal(fixLine({ ...row, quadDamageRun: { phase: 'waiting', try: 1, waitUntil: '2026-10-28T01:15:00+00:00' } }),
+    'Quad Damage: waiting for the 5-hour window until 01:15');
+  assert.equal(fixLine({ ...row, quadDamageRun: null }), 'reviewing', 'the owner\'s review, as before');
   writeRun(w.home, { ...base, pid: DEAD, bug: 'hub/c', phase: 'fixing', try: 2 });
   assert.equal(list(w.ws).find((r) => r.id === 'hub/c').quadDamageRun, null);
   assert.equal(k(w.home, ['bugs', 'quad-damage', '--status']).stdout, 'Quad Damage is not running\n');
