@@ -1,8 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { bandLine, paneLines } from './board'
-import type { Tone } from './board'
+import { bandLine, PANE_COLORS, paneLines } from './board'
 import { bugsScreen, bugsText, fixOf, fixPrompt } from './bugs'
 import type { BugRow, QuadDamageStatus } from './bugs'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
@@ -29,8 +28,6 @@ const FAILED = (name: string): string => `/${name} failed in the mod (the debug 
 const READ_FAILED = (name: string): string => `/${name} failed in the mod; the debug log says why.`
 // The read's value, which reads.ts writes; the scan wants the reference written in the file that reads it.
 const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
-
-const COLORS: Partial<Record<Tone, 'success' | 'error' | 'warning'>> = { success: 'success', error: 'error', warning: 'warning' }
 
 // The owner's verbs (boards.md §4, approval.md §5): run only on the owner's own gesture, as `node k <verb> <id>
 // --via mod`, with no model turn; the state line k prints is the command's output, and a turn of the session's own
@@ -389,7 +386,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {lines.map(line => (
-          <Text dimColor={line.tone === 'dim'} bold={line.tone === 'bold'} color={COLORS[line.tone] ?? 'text'} wrap="truncate-end">
+          <Text dimColor={line.tone === 'dim'} bold={line.tone === 'bold'} color={line.state ? PANE_COLORS[line.state] : 'text'} wrap="truncate-end">
             {line.text || ' '}
           </Text>
         ))}

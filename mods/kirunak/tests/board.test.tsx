@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { ID, world } from './world'
+import { PANE_COLORS, paneLines } from '../hooks/board'
+import type { KirunakRow } from '../types'
+import { ID, ROWS, status, world } from './world'
 
 const SCROLL = { offset: 0, bodyRows: 40 }
 const PANE = {
@@ -47,10 +49,44 @@ describe('the working view', () => {
         'running steps: 1 of 2',
         expect.stringMatching(/^read at \d\d:\d\d$/),
       ])
-      expect((await ui.find({ type: 'Text', text: 'AC-2 not met' }))?.props.color).toBe('error')
-      expect((await ui.find({ type: 'Text', text: 'AC-1 met' }))?.props.color).toBe('success')
+      const props = async (text: string) => (await ui.find({ type: 'Text', text }))?.props
+      expect((await props('AC-2 not met'))?.color).toBe('error')
+      expect((await props('AC-1 met'))?.color).toBe('success')
+      // The five states (gulnya/mobile-dialogs AC-8, O-2): the task in review is running, its line bold as before; a
+      // verdict that needs the device waits for the owner, in looks.ts's orange; a queued task is not reached.
+      expect(await props(`${ID}  in review`)).toMatchObject({ color: 'warning', bold: true })
+      expect((await props('E-1 needs device'))?.color).toBe('#e8710a')
+      expect(await props(' 1  in review')).toMatchObject({ color: 'warning', bold: true })
+      expect((await props(' 2  queued'))?.color).toBe('inactive')
+      expect(await props('step: S-2')).toMatchObject({ color: 'text', dimColor: true })
       await ui.unmount()
     }
+  })
+
+  test('each line\'s state takes one of the five colours, as the dialogs map it, and its words stay as they were (gulnya/mobile-dialogs AC-8, O-2)', async () => {
+    expect(PANE_COLORS).toEqual({ done: 'success', running: 'warning', na: 'inactive', waits: '#e8710a', failed: 'error' })
+    const colors: Record<string, string> = {
+      draft: 'inactive', proposed: '#e8710a', queued: 'inactive', parked: '#e8710a', blocked: 'error', 'in progress': 'warning',
+      'in review': 'warning', reviewed: '#e8710a', 'awaiting owner': '#e8710a', done: 'success', 'on hold': '#e8710a', stale: 'error',
+      'no such state': 'inactive',
+    }
+    const base = ROWS[0] as KirunakRow
+    for (const [state, color] of Object.entries(colors)) {
+      const task: KirunakRow = { ...base, state, queue: 1, ac: [{ id: 'AC-1', text: 'A check.', verdict: null }], e: [] }
+      const lines = paneLines({ rows: [task], status: status(ID), at: 0, error: null })
+      const head = lines.find(l => l.text === `${ID}  ${state}, queue place 1`)
+      const queued = lines.find(l => l.text === ` 1  ${state}  ${ID}`)
+      expect([head?.tone, head?.state && PANE_COLORS[head.state]]).toEqual(['bold', color])
+      expect([queued?.tone, queued?.state && PANE_COLORS[queued.state]]).toEqual(['bold', color])
+      const none = lines.find(l => l.text === 'AC-1 no verdict: A check.')
+      expect(none?.state && PANE_COLORS[none.state]).toBe('inactive')
+    }
+    const missing = paneLines({ rows: [], status: status(ID), at: 0, error: 'exit 1' })
+    expect(missing.slice(0, 2).map(l => [l.text, l.state && PANE_COLORS[l.state]])).toEqual([
+      ['k did not answer: exit 1', 'error'],
+      [`${ID}: k list does not have it`, 'error'],
+    ])
+    for (const l of missing.slice(2)) expect(l.state).toBeUndefined()
   })
 
   test('the line above the prompt: task, step, lock holder, queue place', async ($, on) => {
