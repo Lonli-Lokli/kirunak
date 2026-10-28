@@ -457,6 +457,35 @@ tap, and it is named before the drafts everywhere the owner looks.
 - Not yet measured: the merge to master, `k install` and the move of the drafts that are bugs (S-7); Review &
   merge, Start fix and the new session's line from the owner's phone (S-8).
 
+## Quad Damage: the bugs' unattended run. Closes R33, R34
+
+Built 2026-10-28 (gulnya/quad-damage S-2 to S-6, on the branch `bugs/quad-damage`), on the bugs above: a bug carries
+the mark `quad-damage: yes|no`, and the owner's one tap in `/k-bugs` fixes and reviews the bugs marked yes one at a
+time, unattended, reading the plan's limits before each session, merging a fix with no finding, never pushed.
+
+- Files: `lib/bugs.mjs` (the mark, required by `new`, `from` and `check`; `quadDamage`, `quadDamageRun`, the lock
+  naming the run), `templates/bug.md` (the mark); `lib/quad-damage.mjs` (new: the run file, the run, one bug's work,
+  the pause and the stops, the summary and the status line) and `templates/quad-damage-brief.md` (new: the fixing
+  session's brief, its triage and its report); `lib/limits.mjs` (new: the limits log); `plugins/runner-claude.mjs`
+  (`limits()`, a step's stream through `onMessage`); `bin/k.mjs` (`k bugs quad-damage`, `--quad-damage`, the run's
+  line first in `k waiting`); `lib/waiting.mjs`, the board model, page, markdown and brief (the run's line);
+  `lib/bug-review.mjs` (the review a run makes, its lock held); `lib/intake.mjs`; `hooks/kirunak-freeze.mjs` (`k bugs
+  quad-damage` the owner's; quiet in a fixing session), `hooks/kirunak-bugs.mjs` and `hooks/kirunak-escalate.mjs`
+  (quiet in a fixing session); `mods/kirunak/hooks/bugs.ts` (the Quad Damage row, the run's line, the bug it is on
+  held), `owner.ts`, `turns.ts` (the summary waited for and pushed) and `register.tsx`; `skills/k-bug/SKILL.md` (the
+  mark, Quad Damage the owner's). `REQUIREMENTS.md` R33 and R34, `design/task-files.md` §1, `orchestrator.md` §3,
+  `plugins.md` §2 to §4, `boards.md` §2 and §4 and `approval.md` §2 and §7 say how it works.
+- Tests: `quad-damage.test.mjs` with `fixtures/quad-damage/fake-runner.mjs` (one run at a time, a dead run taken over,
+  the pause and the stops, the order and the list read again, the bug's lock, fixed, skipped, a retry, findings twice,
+  a conflict, a fix ready, a fix in another repo, a fixing session's limits, E-7, the summary, the status, the
+  command), `runner.test.mjs` and `limits.test.mjs` (the limits reading over a recorded stream, `fixtures/run/
+  limits.jsonl`, and the log), `bugs.test.mjs` (the mark and its refusals), `freeze-hook`, `escalate-hook`,
+  `bugs-hook`, `approval`, `waiting` and `board`; the mod's `bugs.test.ts` and `turns.test.ts` (the row, the held bug,
+  a second tap, the turn after it).
+- Numbers: `npm test` 811 tests, 809 pass, 2 skipped; `claude plugin test` 174 pass (S-5).
+- Not yet measured: the merge to master and `k install` (S-7); a real run's tap, its summary and its push from the
+  owner's phone, and a logged-out session's limits stream.
+
 ## Slice 7, later and not detailed here: R17, R18
 
 Trackers (Linear, It's a Plan, GitHub Issues) and cloud sync as plugins on the `tracker` and `sync` seams, with

@@ -27,7 +27,7 @@ own implementations live in the workspace's repo, beside its config (D2).
 | `storage` | one | `repos() → [{ name, root }]`, `queuePath() → path`, `read(path)`, `write(path, text)`, `exists(path)`, `hash(path) → "sha256:…"`, `commit(root, paths, message, env?) → sha`, `head(root) → sha`, `diff(root, base, head, exclude?) → patch` (leaving out the paths in `exclude`), `changedSince(root, sha, exclude?) → [path]` (likewise) | `storage-git.mjs`: files on disk, git for commit, hash, diff | none needed; the config names the repos (§3) |
 | `resourceGuard` | one | `run(job: { session, what, maxMinutes, command: [argv], cwd, say? }) → { exitCode, log }`, `status() → { held: {session, what, since, orphan?} \| null, queued: [...] , estimateMinutes }`, `claim(resource, by, why, hours?)`, `release(resource, by)`, `resources() → [{ id, name, state }]` | `resource-guard-local.mjs`: one job at a time, a lock in the state folder (§4) | a plugin over a lock and device claims it already has |
 | `machineGuard` | one | `limits() → { maxAgents, maxHeavy }`, `running() → [{ pid, task, step, session, since }]` (session and since name a step's run; `since` is its process's start, within seconds) | `machine-guard-pids.mjs`: pid files under the state folder (§4); limits from the config, default `{ maxAgents: 2, maxHeavy: 1 }` | the default, with its own limits |
-| `runner` | one | `start(step: { brief, prompt, cwd, sessionId, resume?, model, effort, maxTurns, maxBudgetUsd, permissionMode, allowedTools, disallowedTools, deny?, addDirs, env }) → { pid, sessionId, done: Promise<{ exitCode, result, usage }> }`, `keepAlive(sessionId, cwd, step) → { pid, done: Promise<{ exitCode, result, usage }> }`; `deny` (a review step's, `review.md` §1) is a list of permission deny rules in Claude Code's syntax that the run, and a keep-alive given the same step, may not break, and a run given `deny` starts with auto memory off; `pid` leads its own process group, since the orchestrator ends a run by killing `-pid` (past its time, on a stop, and a dead `k run`'s left-over claude), and `start` returns it as soon as the process exists, since its start is recorded beside it | `runner-claude.mjs`: headless `claude -p` (`orchestrator.md` §3) | the default |
+| `runner` | one | `start(step: { brief, prompt, cwd, sessionId, resume?, model, effort, maxTurns, maxBudgetUsd, permissionMode, allowedTools, disallowedTools, deny?, addDirs, env }) → { pid, sessionId, done: Promise<{ exitCode, result, usage }> }`, `keepAlive(sessionId, cwd, step) → { pid, done: Promise<{ exitCode, result, usage }> }`; `deny` (a review step's, `review.md` §1) is a list of permission deny rules in Claude Code's syntax that the run, and a keep-alive given the same step, may not break, and a run given `deny` starts with auto memory off; `pid` leads its own process group, since the orchestrator ends a run by killing `-pid` (past its time, on a stop, and a dead `k run`'s left-over claude), and `start` returns it as soon as the process exists, since its start is recorded beside it; `onMessage` in a step, when given, gets each message of the run's stream as it comes (Quad Damage's fixing sessions count their tool calls by it); and, outside the seam and optional, `limits({ cwd, env, timeoutMs }) → { fiveHour: { used, resetsAt }, week: { used, resetsAt }, overage }` or `{ error }`, the plan's windows in percent and epoch seconds, which Quad Damage reads before every session (gulnya/quad-damage AC-9, AC-10): a runner without it gives no reading, and a run stops at its first session | `runner-claude.mjs`: headless `claude -p` (`orchestrator.md` §3) | the default |
 | `handoff` | many, merged in load order | `targets({ task, session, cwd }) → [{ where, what }]`, `release({ task, session, cwd }) → [{ resource, line }]` | `handoff-notes.mjs`: the handoff goes to the task's `handoff.md`; releases the session's own kirunak state (its `sessions/` file, the default guard's claims and queue line) | where its sessions keep handoffs, and what else a session holds that must be let go |
 | `frontend` | many | `onChange(event)`, `render?(tasks, status) → text` | `board-html.mjs` (D10), `list.mjs` | the phone artifact (a step, D13) and the mod (D14) ship with kirunak (`boards.md`); a workspace may add its own |
 | `tracker` | many | `push(task, state)`, `pull() → [{ id, state }]` | none | later: Linear, It's a Plan, GitHub Issues (R18) |
@@ -104,7 +104,8 @@ export default {
   hook: { enabled: true, block: true, repeats: 2, commands: [] },
   compact: { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] },
   kirunakRoot: '~/code/kirunak',      // kirunak's own checkout; optional
-  bugs: { reviewModel: 'opus', reviewEffort: 'high', heavyLock: 'lock run --' },  // optional
+  bugs: { reviewModel: 'opus', reviewEffort: 'high', heavyLock: 'lock run --',  // optional
+    fixModel: 'opus', fixEffort: 'high', limitsLog: './rate-limits.log' },
 };
 ```
 
@@ -146,6 +147,13 @@ export default {
   the fresh session `k bug review` runs on a fix's diff; `bugs.heavyLock` is the command its brief and the k-bug skill
   name for a heavy test, the job's command after it, and with none they name the heavy lock the machine's CLAUDE.md
   names. Judgement: the machine's resource guard is the workspace's, so kirunak names no path of its own.
+  Quad Damage (R34, gulnya/quad-damage, `task-files.md` §1) reads three more: `bugs.fixModel` (default `opus`, AC-8)
+  and `bugs.fixEffort` (default none) set its fixing sessions, whose brief names `bugs.heavyLock` with the session's
+  own id (AC-14); `bugs.limitsLog` is the log the plan's readings are appended to before each session (AC-9),
+  relative to the workspace module or `~/...`, one tab-separated line a reading as a status line writes it (the time
+  in UTC to the second, the week's use and the 5-hour window's in whole percent, the label `quad-damage`), every
+  reading appended (`lib/limits.mjs`). With no `limitsLog` nothing is logged and the run reads the windows all the
+  same. Judgement: a workspace whose status line keeps such a log names it, so one file holds every reading.
 - **`compact`** sets the handover, the compaction a session working a task makes at a step boundary (`orchestrator.md`
   §5): `enabled` (default true; false makes the compact hook allow every compaction and `k install` take its window
   back out of each repo's file), `handoverSize` (default 150000, the context a session hands over at; `k install`
@@ -200,6 +208,9 @@ slapignore.json        the repos with the git hooks and the owner's approval of 
 guard/                 the default resource guard: lock, queue, claims.json, log.jsonl (§2)
 board.html             the generated board (boards.md §2)
 board-artifact.json    the phone board's URL (boards.md §3)
+bugs/                  Review & merge's locks and sessions (<repo>/<slug>.review.json, <repo>/<slug>/), and
+                       Quad Damage's run file quad-damage.json and its runs, quad-damage/<started>/ (task-files.md
+                       §1, R29, R34)
 ```
 
 Judgement: nothing here is a record of a task (those are in git); losing the folder loses nothing but a toast, the
@@ -211,4 +222,4 @@ approve --all`) before a commit that carries a `.slapignore` passes.
 D1 (§1, §2: a small core, seams, no framework), D2 (§1, §3: a workspace's parts in its own repo, nothing of one in
 the core), D3 (§2: a seam at every place a later Linear replacement differs), R2 (`checklist`), R10
 (`resourceGuard` with its default, `machineGuard`), R12 (`prices`, `baseline`), R15 (`handoff`), R17 (`storage`,
-`sync`), R18 (`tracker`), R19 (§1).
+`sync`), R18 (`tracker`), R19 (§1), R34 (§2 the runner's `limits()`, §3 `bugs`, §4 `bugs/`).

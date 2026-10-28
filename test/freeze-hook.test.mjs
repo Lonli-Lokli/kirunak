@@ -144,6 +144,14 @@ test('an amendment\'s applied:/declined: stamp is denied; a new amendment withou
   assert.equal(run(edit(a1, '## Why\nx', '## Why\nx, and y'), r.home).stdout, '');
 });
 
+test('a Quad Damage fixing session (KIRUNAK_BUG_FIX) is refused the owner\'s verbs and frozen files all the same', () => {
+  const r = makeRepo();
+  const env = { KIRUNAK_BUG_FIX: 'hub/a' };
+  assert.match(run(bash('k approve x', r.repo), r.home, env).reason, /^kirunak: `k approve` is the owner's: it runs only from the owner's own prompt/);
+  assert.match(run(bash(`echo '{}' >> kirunak/approvals/${DRAFT}.json`, r.repo), r.home, env).reason, /only the owner's own command/);
+  assert.match(run(bash(`sed -i '' 's/something/other/' kirunak/tasks/${FROZEN}/task.md`, r.repo), r.home, env).reason, /frozen since 2026-11-05/);
+});
+
 test('Bash: the owner\'s verbs and writes into protected files are denied', () => {
   const r = makeRepo();
   assert.match(run(bash('k approve weather/offline-forecast', r.repo), r.home).reason,
@@ -366,6 +374,11 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['k bug review weather/stale-tiles', 'bug review'],
     ['k bug review weather/stale-tiles --detach --json', 'bug review'],
     ['node bin/k.mjs bug review weather/stale-tiles --via mod', 'bug review'],
+    ['k bugs quad-damage', 'bugs quad-damage'],
+    ['k bugs quad-damage --json', 'bugs quad-damage'],
+    ['node bin/k.mjs bugs quad-damage --via mod', 'bugs quad-damage'],
+    ['KIRUNAK_QUAD_DAMAGE=1 k bugs quad-damage', 'bugs quad-damage'],
+    ['k bugs quad-damage --status=no', 'bugs quad-damage'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -375,6 +388,13 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'k approve x --dry-run',
     'k amend decline x A-1 --dry-run',
     'k bug review weather/stale-tiles --dry-run',
+    'k bugs',
+    'k bugs --json',
+    'k bugs quad-damage --status',
+    'k bugs quad-damage --status --json',
+    'k bugs quad-damage --summary',
+    'k bugs quad-damage --summary 2026-10-27T23-40-05',
+    'k bugs quad-damage --dry-run',
     'k queue add x --dry-run',
     'k queue show',
     'k amend new weather/offline-forecast',
@@ -475,12 +495,13 @@ test('a block in force denies Edit, Write, MultiEdit and NotebookEdit with three
   assert.match(run({ ...write('/tmp/a.mjs', 'x'), agent_id: 'a1', agent_type: 'opus-step' }, home).reason, /\nStop and return to your caller marked NEEDS-FABLE; the owner can type \/k-go-on\.$/);
 });
 
-test('no deny when the block is lifted or off, the hook is off, config.json is gone, another session edits, or a k run step runs', () => {
+test('no deny when the block is lifted or off, the hook is off, config.json is gone, another session edits, a k run step or a Quad Damage fixing session runs', () => {
   const cases = [
     [blockedHome({ lifted: { by: 'override', at: '2026-10-25T21:05:00.000Z' } }), {}],
     [blockedHome({ hook: { block: false } }), {}],
     [blockedHome({ hook: { enabled: false } }), {}],
     [blockedHome(), { KIRUNAK_STEP: 'S-3' }],
+    [blockedHome(), { KIRUNAK_BUG_FIX: 'hub/a' }],
   ];
   for (const [home, env] of cases) assert.equal(run(write('/tmp/a.mjs', 'x'), home, env).stdout, '', JSON.stringify(env));
   const other = blockedHome();
@@ -580,6 +601,7 @@ test('a background k run is noted under its description, however k is invoked; o
   const bg = (command, description) => ({ session_id: 's1', tool_name: 'Bash', tool_input: { command, description, run_in_background: true }, cwd: '/tmp' });
   for (const input of [bg('k list', 'List the tasks'), bash('k run weather/offline-forecast --watch', '/tmp')]) assert.equal(run(input, home).stdout, '');
   assert.equal(run(bg('k run weather/offline-forecast --watch', 'Run the task in a step'), home, { KIRUNAK_STEP: 'S-1' }).stdout, '');
+  assert.equal(run(bg('k run weather/offline-forecast --watch', 'Run the task in a fix'), home, { KIRUNAK_BUG_FIX: 'hub/a' }).stdout, '');
   assert.deepEqual(state(), {}, 'nothing noted');
   assert.equal(run(bg('cd ~/sources/weather && k run weather/offline-forecast --watch 2>&1', 'Run the weather task'), home).stdout, '');
   assert.equal(run(bg('node ~/sources/kirunak/bin/k.mjs run weather/radar-tiles', 'Run the radar task'), home).stdout, '');

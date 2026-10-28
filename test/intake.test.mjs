@@ -355,12 +355,12 @@ test('start --from a draft naming bug-of is refused, naming k bug from, the draf
   const text = DRAFT.replace('written: 2026-10-22\n', 'written: 2026-10-22\nbug-of: hub/older-task\n');
   writeDraft(weather, text);
   gitCommitAll(weather, 'kirunak: a bug left among the drafts');
-  const why = `--from ${DRAFT_REL} is a bug, not a draft: it names bug-of. \`k bug from ${ID}\` moves it into kirunak/bugs/, ` +
+  const why = `--from ${DRAFT_REL} is a bug, not a draft: it names bug-of. \`k bug from ${ID} --quad-damage yes|no\` moves it into kirunak/bugs/, ` +
     `then k intake start ${ID} --from kirunak/bugs/offline-forecast.md`;
   await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }), (e) => e.code === 1 && e.message === why);
   const cli = k(home, ['intake', 'start', ID, '--from', DRAFT_REL]);
   assert.equal(cli.status, 1);
-  assert.match(cli.stderr, /is a bug, not a draft: it names bug-of\. `k bug from weather\/offline-forecast` moves it/);
+  assert.match(cli.stderr, /is a bug, not a draft: it names bug-of\. `k bug from weather\/offline-forecast --quad-damage yes\|no` moves it/);
   assert.equal(readFileSync(join(weather, DRAFT_REL), 'utf8'), text);
   assert.equal(existsSync(dirOf(weather)), false);
   assert.equal(sh(weather, 'git', ['status', '--porcelain']), '');

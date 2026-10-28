@@ -2,7 +2,7 @@ import type { PromptOrigin } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import type { BugRow } from '../hooks/bugs'
+import type { BugRow, QuadDamageStatus } from '../hooks/bugs'
 
 import { bug, BUGS, FOUND, NO_FIX, READY, world } from './world'
 
@@ -148,5 +148,70 @@ describe('/k-bugs (kirunak-bugs AC-6, D-1)', () => {
     expect(answers[4]).toBe('No bugs: no repo holds one.')
     // A path or an id may hold the word; the mod's own words never do.
     for (const text of answers) expect(text.replace(/\S*kirunak\/\S*/g, '')).not.toMatch(/kirunak/i)
+  })
+})
+
+// Quad Damage (gulnya/quad-damage S-5): two bugs marked `quad-damage: yes`, k's answer once it started the run, and the
+// run's status while it lives, on the bug with its fix ready, fixing its first try since 23:41, or waiting for the
+// 5-hour window until 01:15.
+const MARKED: BugRow[] = [{ ...READY, quadDamage: true }, { ...FOUND, quadDamage: true }, NO_FIX]
+const STARTED = 'Quad Damage runs as pid 5150\nlog: /h/bugs/quad-damage/2026-11-07-2340/run.log\nfolder: /h/bugs/quad-damage/2026-11-07-2340\nbugs marked: hub/stale-tiles, weather/rain-gap\n'
+const FIXING = { phase: 'fixing' as const, try: 1, since: '2026-11-07T23:41:00+00:00', waitUntil: null }
+const ON_READY: BugRow[] = [{ ...MARKED[0] as BugRow, reviewing: { pid: 5150, started: '2026-11-07T23:41:00+00:00' }, quadDamageRun: FIXING }, MARKED[1] as BugRow, NO_FIX]
+const LIVE: QuadDamageStatus = { run: { pid: 5150, bug: 'hub/stale-tiles' }, line: 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41' }
+const QD_LINE = '1. Quad Damage: fix and review the 2 marked bugs one at a time, unattended; nothing is pushed'
+
+describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, E-3, E-4, D-1)', () => {
+  test('while a marked bug waits and no run lives, Quad Damage is the list\'s first row; with none marked, or a k whose status fails with none marked, it is not', async ($, on) => {
+    const w = world(on, { bugs: [MARKED, BUGS], quadDamage: [null], taps: [SKIP, SKIP] })
+    await run($)
+    expect(w.asked[0]).toEqual({ header: 'Bugs', question: `Bugs, a fix ready first, then the oldest:\n${QD_LINE}\n${LINES.map((l, i) => `${i + 2}. ${l}`).join('\n')}\nQuad Damage, or which bug?`, labels: ['Quad Damage', ...LABELS] })
+    await run($)
+    expect(w.asked[1]).toEqual({ header: 'Bugs', question: LIST, labels: LABELS })
+    expect([w.quadReads, w.runs]).toEqual([2, []])
+  })
+
+  test('its tap runs k bugs quad-damage --via mod, the owner\'s verb, and answers that the run started and how many marked bugs wait; then a turn waits for its pid and prints and pushes its summary (AC-1, AC-13)', async ($, on) => {
+    const w = world(on, { bugs: [MARKED], taps: ['Quad Damage'], verb: { exitCode: 0, stdout: STARTED, stderr: '' } })
+    expect(await run($)).toBe(`Quad Damage started with 2 marked bugs waiting: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.\n/k-bugs, \`k waiting\` and the board show the bug it is on; when it ends, its summary is written here and sent to your phone.\n\n${STARTED.trim()}`)
+    expect(verbs(w.runs)).toEqual([['bugs', 'quad-damage', '--via', 'mod']])
+    expect(w.submitted).toEqual([])
+    await w.clock.advance(10)
+    expect(w.submitted.map(x => x.origin)).toEqual([{ kind: 'plugin', name: 'kirunak' }])
+    const turn = w.submitted[0]?.text ?? ''
+    expect(turn).toContain('`while kill -0 5150 2>/dev/null; do sleep 60; done; k bugs quad-damage --summary /h/bugs/quad-damage/2026-11-07-2340`')
+    expect(turn).toContain('send the text after `kirunak-push:` with PushNotification, exactly as written')
+    expect(turn).not.toContain('k run stopped for the owner')
+  })
+
+  test('a second Quad Damage while one runs is refused in k\'s own words, and gets no turn (E-3)', async ($, on) => {
+    const why = 'k: Quad Damage runs already: pid 5150, started 2026-11-07 23:40, on hub/stale-tiles (fixing, try 1); a second one waits until it ends, and k bugs quad-damage --status shows it'
+    const w = world(on, { bugs: [MARKED], quadDamage: [null], taps: ['Quad Damage'], verb: { exitCode: 1, stdout: '', stderr: `${why}\n` } })
+    expect(await run($)).toBe(`/k-bugs refused:\n${why}`)
+    await w.clock.advance(10)
+    expect([verbs(w.runs), w.submitted]).toEqual([[['bugs', 'quad-damage', '--via', 'mod']], []])
+  })
+
+  test('while a run lives: its line above the list and no Quad Damage row; the bug it is on says so, its phase or its wait, and offers no Review & merge, Start fix or Drop (AC-12, E-4)', async ($, on) => {
+    const waiting: QuadDamageStatus = { ...LIVE, line: 'Quad Damage waits for the 5-hour window until 01:15' }
+    const onWait: BugRow[] = [{ ...ON_READY[0] as BugRow, quadDamageRun: { phase: 'waiting', try: 1, since: null, waitUntil: '2026-11-08T01:15:00+00:00' } }, MARKED[1] as BugRow]
+    const w = world(on, { bugs: [ON_READY, onWait], quadDamage: [LIVE, waiting], taps: ['hub/stale-tiles', 'Back', SKIP, SKIP] })
+    expect(await run($)).toBe(`Nothing ran: skipped.\n\n${LIVE.line}.\n\n3 bugs, a fix ready first, then the oldest:\n\n1. **hub/stale-tiles**: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07\n2. **${LINES[1]?.replace(': ', '**: ')}\n3. **${LINES[2]?.replace(': ', '**: ')}\n\n/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.`)
+    expect(w.asked[0]?.question.split('\n').slice(0, 3)).toEqual([`${LIVE.line}.`, 'Bugs, a fix ready first, then the oldest:', '1. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07'])
+    expect(w.asked[0]?.labels).toEqual(LABELS)
+    expect(w.asked[1]?.labels).toEqual(['Cancel', 'Back'])
+    expect(w.asked[1]?.question.split('\n')[2]).toBe('Quad Damage is on it: fixing, try 1, since 23:41, on bug/stale-tiles in hub.')
+    expect(w.asked[1]?.question.split('\n').slice(-1)).toEqual(['Review & merge, Start fix and Drop wait until Quad Damage moves on. Back to the list?'])
+    expect(w.asked[1]?.question).not.toContain('Review & merge: a fresh Opus session')
+    await run($)
+    expect(w.asked[3]?.question.split('\n').slice(0, 3)).toEqual(['Quad Damage waits for the 5-hour window until 01:15.', 'Bugs, a fix ready first, then the oldest:', '1. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (waiting for the 5-hour window until 01:15), bug of weather/offline-forecast, written 2026-11-07'])
+    expect(w.runs).toEqual([])
+  })
+
+  test('Start fix on a bug the run took since the list was shown runs nothing and says the run is on it (E-4)', async ($, on) => {
+    const w = world(on, { bugs: [MARKED, ON_READY], taps: ['hub/stale-tiles', 'Start fix'] })
+    expect(await run($)).toBe('Nothing ran: Quad Damage is on hub/stale-tiles (fixing, try 1); its fix can be started once the run moves on.')
+    await w.clock.advance(10)
+    expect([w.submitted, w.runs]).toEqual([[], []])
   })
 })

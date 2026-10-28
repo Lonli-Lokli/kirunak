@@ -6,7 +6,8 @@ import { approve } from '../lib/approval.mjs';
 import { amendmentName, decline, newAmendment } from '../lib/amend.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { newDraft } from '../lib/drafts.mjs';
-import { bugsLine, draftsLine, stoppedFor, stoppedText } from '../lib/waiting.mjs';
+import { quadDamagePath } from '../lib/bugs.mjs';
+import { bugsLine, draftsLine, stoppedFor, stoppedText, waitingRun } from '../lib/waiting.mjs';
 import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 // What k waiting gives the mod's pick lists (kirunak-phone S-4): the amendments waiting, the tasks k hold and k start
@@ -194,7 +195,7 @@ test('an accept row counts its open checklist items, and onlyChecklist says when
 
 test("k waiting says in one line how many drafts wait for the owner's intake and names /k-drafts; --json gains drafts, every other field kept (kirunak-drafts AC-8)", async () => {
   const { ws, home } = await makeWorkspace();
-  const keys = ['bugs', 'approve', 'accept', 'amendments', 'hold', 'start', 'drafts', 'stopped'];
+  const keys = ['quadDamage', 'bugs', 'approve', 'accept', 'amendments', 'hold', 'start', 'drafts', 'stopped'];
   let w = waiting(home);
   assert.deepEqual(Object.keys(w), keys);
   assert.deepEqual(w.drafts, { count: 0, ids: [] });
@@ -230,7 +231,7 @@ test('k waiting names the bugs first, in one line with how many have a fix ready
   bugAt(hub, 'queue-stuck', 'The queue keeps a finished job', '2026-11-06', { fix: true });
   newDraft({ ws, id: 'weather/wind-alerts', title: 'Wind alerts', now: NOV5 });
   w = waiting(home);
-  assert.deepEqual(Object.keys(w)[0], 'bugs');
+  assert.deepEqual(Object.keys(w).slice(0, 2), ['quadDamage', 'bugs'], 'first after Quad Damage\'s run (gulnya/quad-damage AC-12)');
   assert.deepEqual(w.bugs, { count: 2, ready: 1, ids: ['hub/queue-stuck', 'weather/rain-icon'] });
   const text = run(home, ['waiting']).stdout.split('\n');
   assert.equal(text[0], '2 bugs wait, 1 with a fix ready: /k-bugs');
@@ -275,4 +276,30 @@ test("k waiting's line for a question of a step started by hand sends the owner 
     '  answer in the session that started it, or in notes.md',
   ]);
   assert.ok(text.every((l) => l.length <= 80));
+});
+
+test('k waiting names Quad Damage\'s run first while one lives, its bug and phase or its wait, before the bugs; --json gains it first, null when none lives (gulnya/quad-damage AC-12)', async () => {
+  const { hub, home } = await makeWorkspace();
+  bugAt(hub, 'queue-stuck', 'The queue keeps a finished job', '2026-11-06');
+  const quiet = run(home, ['waiting']).stdout;
+  assert.equal(waiting(home).quadDamage, null);
+  assert.equal(quiet.split('\n')[0], '1 bug waits, 0 with a fix ready: /k-bugs');
+  assert.doesNotMatch(quiet, /Quad Damage/);
+
+  const base = { pid: process.pid, started: '2026-11-06T23:40:05+00:00', by: 'owner', via: 'mod', folder: '/f' };
+  mkdirSync(join(home, 'bugs'), { recursive: true });
+  writeFileSync(quadDamagePath(home), JSON.stringify({ ...base, bug: 'hub/queue-stuck', phase: 'fixing', try: 2, since: '2026-11-06T23:41:00+00:00' }) + '\n');
+  let w = waiting(home);
+  assert.deepEqual(Object.keys(w).slice(0, 2), ['quadDamage', 'bugs']);
+  assert.equal(w.quadDamage.run.bug, 'hub/queue-stuck');
+  assert.equal(w.quadDamage.line, 'Quad Damage runs: hub/queue-stuck, fixing (try 2) since 23:41');
+  assert.equal(waitingRun({ home }).line, w.quadDamage.line);
+  const text = run(home, ['waiting']).stdout;
+  assert.equal(text, `${w.quadDamage.line}\n${quiet}`, 'its line first, every other line as it was');
+
+  writeFileSync(quadDamagePath(home), JSON.stringify({ ...base, bug: 'hub/queue-stuck', phase: 'waiting', try: 1, waitUntil: '2026-11-07T01:15:00+00:00' }) + '\n');
+  assert.equal(run(home, ['waiting']).stdout.split('\n')[0], 'Quad Damage waits for the 5-hour window until 01:15');
+  writeFileSync(quadDamagePath(home), JSON.stringify({ ...base, pid: 2 ** 22 + 7, bug: 'hub/queue-stuck', phase: 'fixing', try: 1 }) + '\n');
+  assert.equal(waiting(home).quadDamage, null, 'a dead run is no run');
+  assert.equal(run(home, ['waiting']).stdout, quiet);
 });

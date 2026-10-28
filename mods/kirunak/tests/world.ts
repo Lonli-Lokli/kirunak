@@ -1,7 +1,7 @@
 import type { On, PromptOrigin } from 'claude-code'
 import { mock } from 'claude-code/testing'
 
-import type { BugRow } from '../hooks/bugs'
+import type { BugRow, QuadDamageStatus } from '../hooks/bugs'
 import type { DraftRow } from '../hooks/drafts'
 import type { Brief } from '../hooks/picks'
 import type { AmendmentRow, Waiting } from '../hooks/waiting'
@@ -68,13 +68,16 @@ export const BUG: DraftRow = { id: 'hub/stale-tiles', repo: 'hub', slug: 'stale-
 // fix; one with no fix and no date, whose file cannot be read.
 const bug = (id: string, more: Partial<BugRow>): BugRow => {
   const [repo, slug] = id.split('/') as [string, string]
-  return { id, repo, slug, title: slug, written: null, bugOf: null, fixRepo: repo, branch: null, head: null, ahead: 0, fixReady: false, reviewing: null, review: null, path: `/w/${repo}/kirunak/bugs/${slug}.md`, ...more }
+  return { id, repo, slug, title: slug, written: null, bugOf: null, fixRepo: repo, branch: null, head: null, ahead: 0, fixReady: false, reviewing: null, review: null, quadDamage: false, quadDamageRun: null, path: `/w/${repo}/kirunak/bugs/${slug}.md`, ...more }
 }
 export const READY: BugRow = bug('hub/stale-tiles', { title: 'Old tiles stay after an update', written: '2026-11-07', bugOf: ID, branch: 'bug/stale-tiles', head: '3f2a9c1d00', ahead: 2, fixReady: true })
 export const FOUND: BugRow = bug('weather/rain-gap', { title: 'Rain alerts skip a gap', written: '2026-11-02', branch: 'bug/rain-gap', head: '7c1e0ab200', ahead: 1, review: { file: 'review-1.md', verdict: 'findings', head: '7c1e0ab200', atHead: true } })
 export const NO_FIX: BugRow = bug('hub/no-fix', {})
 export const BUGS: BugRow[] = [READY, FOUND, NO_FIX]
 export { bug }
+
+// `k bugs quad-damage --status --json` with no run living (gulnya/quad-damage S-5).
+export const NO_RUN: QuadDamageStatus = { run: null, line: 'Quad Damage is not running' }
 
 // What `k board --card <id>` prints for a bug (gulnya/kirunak-bugs S-3): its card, markdown.
 export const bugCardOf = (b: BugRow): string => `### ${b.id}\n\n${b.title}.\n\n- Bug, ${b.fixReady ? 'fix ready' : 'no fix'}.\n`
@@ -154,14 +157,15 @@ export type Asked = { question: string; labels: string[]; header: string }
 // `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` or a draft (any
 // other id refused) (each owner verb with `verb`), the amendment files,
 // `k drafts --json` from `drafts` and `k bugs --json` from `bugs` (each read takes the next, the last again once they
-// run out; null is a k that failed), `k board --card <id>` a bug's card too,
+// run out; null is a k that failed), `k bugs quad-damage --status --json` from `quadDamage` (`quadReads` counts them,
+// taken as `bugs` are), `k bugs quad-damage` itself an owner verb, `k board --card <id>` a bug's card too,
 // the prompts the mod submitted (`submitted`), events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
 // dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
 // left dismisses it; the environment (`env`: KIRUNAK_HOME unset, HOME /home/dev unless a test gives its own) and the
 // files the mod wrote (`files`, read back by fs.read; `unwritable` refuses every write).
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[] } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
-  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, bugReads: 0, described: {} as Record<string, string>, submitted: [] as { text: string; origin: PromptOrigin }[] }
+  const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, bugReads: 0, quadReads: 0, described: {} as Record<string, string>, submitted: [] as { text: string; origin: PromptOrigin }[] }
   on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
     const q = e.questions[0]
     if (q === undefined) return { deny: 'no question' }
@@ -217,7 +221,11 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       w.draftReads++
       const next = drafts.length > 1 ? drafts.shift() : drafts[0]
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
-    } else if (what === 'bugs') {
+    } else if (what === 'bugs' && e.argv[3] === 'quad-damage' && e.argv.includes('--status')) {
+      w.quadReads++
+      const next = quadDamage.length > 1 ? quadDamage.shift() : quadDamage[0]
+      answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
+    } else if (what === 'bugs' && e.argv[3] !== 'quad-damage') {
       w.bugReads++
       const next = bugs.length > 1 ? bugs.shift() : bugs[0]
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }

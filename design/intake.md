@@ -27,7 +27,8 @@ Two parts, one in Claude Code and one in `k`:
   is a ruling, and the interview starts from its questions and still asks every line again (R1, R4). The `k-intake`
   skill does this only when the owner asks, never on its own.
 - **A draft naming a bug** (R29, gulnya/kirunak-bugs): a draft with `bug-of` in its front matter is refused as
-  `--from`, naming `k bug from <id>`, which moves it into `kirunak/bugs/` first. A bug starts only from its own list.
+  `--from`, naming `k bug from <id> --quad-damage yes|no`, which moves it into `kirunak/bugs/` first. A bug starts
+  only from its own list.
 - **A bug as `--from`, Start fix** (R29): `k intake start <id> --from kirunak/bugs/<slug>.md` takes only the bug of
   that same id, its place and its front-matter `id` both. Refused, before anything moves or is written: a bug of
   another id, a path under `kirunak/bugs/` that is not `<slug>.md`, a bug gone (saying where, when its intake started

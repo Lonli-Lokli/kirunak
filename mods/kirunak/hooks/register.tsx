@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { bandLine, paneLines } from './board'
 import type { Tone } from './board'
 import { bugsScreen, bugsText, fixOf, fixPrompt } from './bugs'
-import type { BugRow } from './bugs'
+import type { BugRow, QuadDamageStatus } from './bugs'
 import { argvFor, firstLine, HINTS, reason, refused } from './commands'
 import type { Verb } from './commands'
 import { draftsScreen, draftsText, intakePrompt } from './drafts'
@@ -237,20 +237,33 @@ async function bugsDialog($: EngineInterface, turn: Turn): Promise<string | Outc
       // bugLines says so.
     }
   }
-  const out = await turn.dialog(bugsScreen(rows, files))
+  const run = await quadDamageStatus($, turn.k)
+  const out = await turn.dialog(bugsScreen(rows, files, run))
   if (out.ended !== undefined) return startFix($, turn.k, out.ended)
-  return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows)}`
+  return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows, run)}`
+}
+
+// Quad Damage's run as `k bugs quad-damage --status --json` gives it (gulnya/quad-damage AC-12); null when k does not
+// answer, so the list offers Quad Damage and k refuses a second run by its own reason (E-3).
+async function quadDamageStatus($: EngineInterface, k: string): Promise<QuadDamageStatus | null> {
+  try {
+    const r = await $.process.run(['node', k, 'bugs', 'quad-damage', '--status', '--json'])
+    return r.exitCode === 0 ? (JSON.parse(r.stdout) as QuadDamageStatus) : null
+  } catch {
+    return null
+  }
 }
 
 // Start fix (AC-6, AC-8): k bugs read again, and the bug found by its id, so one dropped, merged or taken by an intake
-// since the list was shown is refused by name, never another, and one whose Review & merge started since waits for it
-// (k intake start would refuse it); then a prompt of its own, once this answer shows, as Start intake's, that starts
-// the intake from the bug with the k-intake skill (bugs.ts, fixPrompt). It runs no verb.
+// since the list was shown is refused by name, never another, and one whose Review & merge started since, or that Quad
+// Damage is on, waits for it (k intake start would refuse it, E-4); then a prompt of its own, once this answer shows,
+// as Start intake's, that starts the intake from the bug with the k-intake skill (bugs.ts, fixPrompt). It runs no verb.
 async function startFix($: EngineInterface, k: string, id: string): Promise<string> {
   const r = await $.process.run(['node', k, 'bugs', '--json'])
   if (r.exitCode !== 0) return `Nothing ran: k bugs did not answer, so ${id} could not be found again: ${firstLine(r)}`
   const b = (JSON.parse(r.stdout) as BugRow[]).find(x => x.id === id)
   if (b === undefined) return `Nothing ran: ${id} is no longer a bug. It was dropped, merged, or its intake started, since the list was shown.`
+  if (b.quadDamageRun) return `Nothing ran: ${fixOf(b).replace(/^Quad Damage is on it/, `Quad Damage is on ${id}`)}; its fix can be started once the run moves on.`
   if (b.reviewing) return `Nothing ran: ${id} is ${fixOf(b)}; its fix can be started once that review ends.`
   submitLater($, fixPrompt(b), `The intake from ${id} did not start`)
   return `The intake from ${id} starts next in this session, with the k-intake skill.`

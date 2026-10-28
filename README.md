@@ -22,15 +22,23 @@ is done.
   draft is not a task and nothing in it is a ruling. Start the intake from one (`/k-drafts`, or `k intake start <id>
   --from kirunak/drafts/<slug>.md`): it moves into the task's folder as background and the intake asks every line
   again. A fault in something that exists is a bug, never a draft.
-- **Bugs.** A fault with a way to see it, the work of a task already accepted included, is a bug in
-  `kirunak/bugs/`: `k bug new <id> --title "..."` writes the skeleton (`--bug-of <task>` names the accepted task,
-  `--fix-repo <repo>` where its fix is made), `k bug check <id>` holds its shape, and `k bugs` lists them, a fix
-  ready first. The agent that writes one tries its fix on `bug/<slug>`, with a test that fails without it, and never
-  merges it. In `/k-bugs` you pick one: **Review & merge** has a fresh session review the fix and merges it into
-  master only with no finding (never pushed), closing the bug; **Start fix** starts an intake from it, every proposed
-  answer in the first question; **Drop** removes it, the fix branch kept (`k bug drop <id> --why "..."`). A draft that
-  is really a bug moves with `k bug from <id>`. `k waiting`, the board and each new session you start name the bugs
-  before the drafts.
+- **Bugs.** A fault with a way to see it, the work of a task already accepted included, is a bug in `kirunak/bugs/`:
+  `k bug new <id> --title "..." --quad-damage yes|no` writes the skeleton (`--bug-of <task>` names the accepted task,
+  `--fix-repo <repo>` where its fix is made), `k bug check <id>` holds its shape, and `k bugs` lists them, a fix ready
+  first. The agent that writes one tries its fix on `bug/<slug>`, with a test that fails without it, and never merges
+  it. In `/k-bugs` you pick one: **Review & merge** has a fresh session review the fix and merges it into master only
+  with no finding (never pushed), closing the bug; **Start fix** starts an intake from it, every proposed answer in
+  the first question; **Drop** removes it, the fix branch kept (`k bug drop <id> --why "..."`). A draft that is really
+  a bug moves with `k bug from <id> --quad-damage yes|no`. `k waiting`, the board and each new session you start name
+  the bugs before the drafts.
+- **Quad Damage.** Every bug carries the mark `quad-damage: yes|no`, required: yes when no question waits on your
+  choice, the fix is in one repo, and it is no music-engine or real-time audio work; set it to no to keep a bug out.
+  Quad Damage, the first row of `/k-bugs` while a marked bug waits (or `k bugs quad-damage` at your own prompt),
+  works the bugs marked yes one at a time, unattended: a fresh session fixes each on its branch, a second reviews it,
+  and a fix with no finding merges into master, never pushed. It reads your plan's limits before every session,
+  waits for the 5-hour window at 90% and stops at 98% of the week or on extra usage. `k bugs quad-damage --status`
+  says where it is, `--summary` what it did, `--dry-run` which bugs it would take; from the mod the session pushes
+  the summary to your phone when the run ends.
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -62,6 +70,11 @@ You need Node 22 or later, git and Claude Code.
    ```
 
    Commit it with the queue file (one comment line is enough to start).
+
+   Optional `bugs` settings (`design/plugins.md` §3): `reviewModel` and `reviewEffort` for Review & merge,
+   `fixModel` (default `opus`) and `fixEffort` for Quad Damage's fixing sessions, `heavyLock` the command a heavy
+   test runs behind, and `limitsLog` a file, relative to the module, where Quad Damage appends each limits reading
+   (time, week %, 5-hour %, `quad-damage`), beside what your status line writes.
 
 3. Point kirunak at it, wire the hooks and skills, and add the git hook to each repo that will hold tasks:
 
@@ -136,7 +149,7 @@ You need Node 22 or later, git and Claude Code.
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
    | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), as numbered entries; the one picked shows whole, with Start intake (the session starts the intake from it), Drop (you type the reason, then confirm) and Back; bugs are not among them |
-   | `/k-bugs` | the bugs, a fix ready first, then the oldest, as numbered entries; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back |
+   | `/k-bugs` | the bugs, a fix ready first, then the oldest, as numbered entries; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back; while a bug marked `quad-damage: yes` waits, Quad Damage comes first, and while its run lives, its line heads the list and the bug it is on has none of these |
    | `/k-approve`, `/k-accept` | what waits for you, each task's id and state, to pick by touch; the one picked shows its title, state and what still blocks it, above a last choice that names the task ("Approve <id>") |
    | `/k-amendments` | the amendments waiting, each one's task, A-n and name, to pick by touch; the one picked shows in full (date, Why, Changes, what blocks it), to approve or decline; `/k-amendments <n>` shows one in full, `/k-approve-amendment <n>` approves it |
    | `/k-hold`, `/k-start` | the tasks you can put on hold or work on, each task's id and state, by touch; the one picked shows its title |
@@ -147,7 +160,8 @@ You need Node 22 or later, git and Claude Code.
    uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
    After a verb on the task this session works on, or ran the intake of, the session takes a turn of its own: it
    says what you did, or what failed with kirunak's reason, and goes on; after `/k-start` it starts the work, and
-   after Review & merge it watches the review and tells you how it ended.
+   after Review & merge it watches the review and tells you how it ended; after Quad Damage it waits for the run's
+   end, writes its summary and pushes it to your phone.
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
    model included, gets a line saying so and nothing runs (`design/approval.md` §5). That rule is a file of this

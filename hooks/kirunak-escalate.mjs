@@ -473,7 +473,9 @@ function main() {
   } catch {
     return;
   }
-  if (process.env.KIRUNAK_STEP || !input || typeof input !== 'object') return;
+  // A k run step (E-12) and a Quad Damage fixing session (KIRUNAK_BUG_FIX: on Opus already, its limits its own) are
+  // out of the escalation.
+  if (process.env.KIRUNAK_STEP || process.env.KIRUNAK_BUG_FIX || !input || typeof input !== 'object') return;
   const event = input.hook_event_name;
   // The cheap answers first, so most calls end before reading a file.
   if (event === 'PostToolUseFailure' && !(input.tool_name === 'Bash' ? input.is_interrupt !== true : EDITS.has(input.tool_name))) return;

@@ -37,9 +37,10 @@ import * as waiting from '../lib/waiting.mjs';
 import * as drafts from '../lib/drafts.mjs';
 import * as bugs from '../lib/bugs.mjs';
 import * as bugReview from '../lib/bug-review.mjs';
+import * as quadDamage from '../lib/quad-damage.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach', 'status', 'summary']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -74,18 +75,24 @@ Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
-Bugs      k bug new <repo>/<slug> --title "..." [--bug-of <task>] [--fix-repo <repo>]: a bug's skeleton,
-            kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo (a repo of
-            the workspace, or kirunak for kirunak's own checkout; its own when none is named)
+Bugs      k bug new <repo>/<slug> --title "..." --quad-damage yes|no [--bug-of <task>] [--fix-repo <repo>]: a bug's
+            skeleton, kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo
+            (a repo of the workspace, or kirunak for kirunak's own checkout; its own when none is named); its mark yes
+            when Quad Damage may take it (the k-bug skill says when), else no
           k bug check <id>: the bug's shape, its task and its fix's commits | k bug drop <id> --why "...": removes it
             and its folder in a commit of their own, a fix branch kept and named in it
-          k bug from <id> [--no-commit]: a draft, or a task whose intake is not approved, moved into kirunak/bugs/
-            with its history, draft/<slug> renamed bug/<slug>, each repo's paths committed alone
+          k bug from <id> --quad-damage yes|no [--no-commit]: a draft, or a task whose intake is not approved, moved
+            into kirunak/bugs/ with its history and its mark, draft/<slug> renamed bug/<slug>, each repo's paths
+            committed alone
           k bug review <id> [--detach] [--dry-run] (the owner's): Review & merge, a fresh Opus session reviews the fix's
             diff and kirunak reads its verdict; clean, bug/<slug> is merged into its fix repo's master (never pushed)
             and the bug closes; a finding or a conflict merges nothing, written in kirunak/bugs/<slug>/review-<n>.md
           k bugs: every bug in every repo, one line each (id, title, date written, its fix, bug of <task>), those with a
             fix ready first, then the oldest first
+          k bugs quad-damage [--dry-run] (the owner's): Quad Damage, one detached run that fixes and reviews the bugs
+            marked quad-damage: yes, one at a time while the plan's windows allow; prints its pid, log and folder
+          k bugs quad-damage --status: the run and the bug it is on | k bugs quad-damage --summary [<folder>]: the
+            latest run's summary (or the folder's), and its kirunak-push line
           k intake start <id> --from kirunak/bugs/<slug>.md: Start fix, the intake takes the bug, moved to the task's
             bug.md, its records to bug/
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
@@ -155,6 +162,38 @@ async function approvalProblems(ws, id, amendmentId) {
     for (const x of checkTaskDir(p.dir, aspectIds, id).problems) out.push(`line ${x.line}: ${x.problem}`);
   }
   return out;
+}
+
+// `k bugs quad-damage`: its status, a run's summary, the run itself in the detached process its start hands the run
+// file to, or the start.
+async function quadDamaged(ws, pos, flags) {
+  if (flags.status) {
+    if (pos.length) throw usage('k bugs quad-damage --status takes no argument');
+    const run = quadDamage.state(ws.home);
+    const line = quadDamage.statusLine(run);
+    return { json: { run, line }, text: line };
+  }
+  if (flags.summary) {
+    if (pos.length > 1) throw usage('k bugs quad-damage --summary [<folder>]: one folder at most');
+    const r = quadDamage.summaryOf(ws.home, pos[0] ?? null);
+    return { ...r, text: `${r.summary.trimEnd()}\nkirunak-push: ${r.push}` };
+  }
+  if (pos.length) throw usage(`k bugs quad-damage takes no argument but --summary's folder: ${pos[0]}`);
+  const via = typeof flags.via === 'string' ? flags.via : 'shell';
+  const from = Number(process.env[quadDamage.RUN_ENV]) || null;
+  if (from) {
+    // The detached run: what it starts never sees the hand-over.
+    delete process.env[quadDamage.RUN_ENV];
+    const r = await quadDamage.run({ ws, via, from });
+    return { ...r, text: r.summary.trimEnd() };
+  }
+  if (flags['dry-run']) {
+    const r = quadDamage.preview({ ws });
+    return { ...r, text: `would start Quad Damage on ${r.bugs.length} marked bug${r.bugs.length === 1 ? '' : 's'}: ${r.bugs.join(', ')}` };
+  }
+  const r = quadDamage.start({ ws, via });
+  return { ...r, text: [`Quad Damage runs as pid ${r.pid}`, `log: ${r.log}`, `folder: ${r.folder}`,
+    `bugs marked: ${r.bugs.join(', ')}`].join('\n') };
 }
 
 // `k bug review <id>`: Review & merge, here or (--detach) in a process of its own whose log it names.
@@ -569,11 +608,13 @@ const VERBS = {
       if (v !== null && typeof v !== 'string') throw usage(`--${name} names ${what}`);
       return v;
     };
+    // The mark (gulnya/quad-damage AC-3): `new` and `from` refuse a bug without it, naming the option.
+    const mark = () => one(bugs.MARK, 'the mark, yes or no: --quad-damage yes|no') ?? '';
     if (sub === 'new') {
       const bugOf = one('bug-of', 'one accepted task: --bug-of <repo>/<slug>');
       const fixRepo = one('fix-repo', 'the repo of the fix branch: --fix-repo <repo>');
       const title = typeof flags.title === 'string' ? flags.title : '';
-      const r = bugs.newBug({ ws, id, title, bugOf, fixRepo, session: session(flags), dryRun });
+      const r = bugs.newBug({ ws, id, title, quadDamage: mark(), bugOf, fixRepo, session: session(flags), dryRun });
       const of = [r.bugOf && `a bug of ${r.bugOf}`, r.fixRepo && `its fix in ${r.fixRepo}`].filter(Boolean).join(', ');
       const about = of ? `, ${of}` : '';
       if (dryRun) return { ...r, text: `would write ${r.path}${about}` };
@@ -588,12 +629,13 @@ const VERBS = {
       return { ...r, text: (r.commit ? `${id}: dropped in ${r.commit}` : `${id}: dropped; it was never committed, so no commit`) + kept };
     }
     if (sub === 'from') {
-      const r = bugs.from({ ws, id, dryRun, noCommit: !!flags['no-commit'] });
+      const r = bugs.from({ ws, id, quadDamage: mark(), dryRun, noCommit: !!flags['no-commit'] });
       const lines = [
         ...r.moves.map((m) => `${m.from} -> ${m.to}`),
         ...r.renames.map((b) => `${b.repo}: branch ${b.from} -> ${b.to}`),
         ...(r.skeleton ? [`${r.rel}: a bug's skeleton, to fill in from the intake and commit`] : []),
         ...(r.fixRepo ? [`fix-repo: ${r.fixRepo}`] : []),
+        `${bugs.MARK}: ${r.quadDamage}`,
         ...(r.order ? [`${r.order}: ${id} left the drafts' order`] : []),
       ];
       if (dryRun) return { ...r, text: [`would move the ${r.kind} ${id} into kirunak/bugs/:`, ...lines.map((l) => `  ${l}`)].join('\n') };
@@ -606,8 +648,11 @@ const VERBS = {
   },
 
   // Every bug in every repo, those with a fix ready first, then the oldest: for /k-bugs, as an array with --json.
-  async bugs({ ws, pos }) {
-    if (pos.length) throw usage(`unknown bugs verb ${pos[0]}: k bugs`);
+  // `quad-damage` starts Quad Damage, the owner's (kirunak-freeze refuses it from an agent's Bash tool but for
+  // --status and --summary, which only read).
+  async bugs({ ws, pos, flags }) {
+    if (pos[0] === 'quad-damage') return quadDamaged(ws, pos.slice(1), flags);
+    if (pos.length) throw usage(`unknown bugs verb ${pos[0]}: k bugs | k bugs quad-damage`);
     const rows = bugs.list(ws);
     return { json: rows, text: bugs.format(rows) };
   },
@@ -641,8 +686,10 @@ const VERBS = {
   // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
   // stopped at for the owner, each as its notice of at most 3 lines (orchestrator.md §2, E-15). First of all, the bugs
   // that wait, in one line with how many have a fix ready, and first in --json: a count, that count and their ids; no
-  // line at all when none waits (gulnya/kirunak-bugs AC-7).
+  // line at all when none waits (gulnya/kirunak-bugs AC-7). Before them, Quad Damage's run while one lives: its one
+  // line, and in --json its run file and that line, null when none lives (gulnya/quad-damage AC-12).
   async waiting({ ws }) {
+    const quadDamage = waiting.waitingRun(ws);
     const bugs = waiting.waitingBugs(ws);
     const rows = await list.rows(ws);
     const all = await list.rows(ws, { all: true });
@@ -664,6 +711,7 @@ const VERBS = {
     // Each row's word when the verb would pass is the verb's, never a task's state (kirunak-phone AC-15).
     const line = (verb) => (x) => `  ${x.id}  ${x.why ? `not yet: ${x.why.split('\n')[0]}` : `can ${verb}`}`;
     const text = [
+      ...(quadDamage ? [quadDamage.line] : []),
       ...(bugs.count ? [waiting.bugsLine(bugs)] : []),
       ...(stopped.length ? [waiting.stoppedText(stopped)] : []),
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
@@ -672,7 +720,7 @@ const VERBS = {
       accept.length ? ['to accept:', ...accept.flatMap((x) => [line('accept')(x), ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
-    return { bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
+    return { quadDamage, bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
   // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the

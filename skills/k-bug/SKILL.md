@@ -24,12 +24,14 @@ one in a single step: Review & merge when its fix is ready, Start fix when it ha
 
 1. **Check it is new.** `k bugs`, `k drafts` and `k list`: if a bug holds the fault already, add to that one. An id
    that is already a bug, a draft or a task is refused. A draft, or an intake never approved, that is really a bug
-   moves with `k bug from <id>`: its history kept, its `draft/<slug>` branch renamed `bug/<slug>`.
-2. **The skeleton**, in the repo the fault is in: `k bug new <repo>/<slug> --title "<a few words>" --session <session
-   id>`, with `--bug-of <task>` when the fault is in an accepted task's work (optional; a task open or unknown is
-   refused), and `--fix-repo <repo>` when the fix is made in another repo than the bug's own: a workspace repo by
-   name, or `kirunak` for kirunak's own code, which is no workspace repo, so its bugs take the id of a repo that is.
-   A repo the workspace does not know is refused: ask the owner to add it first.
+   moves with `k bug from <id> --quad-damage yes|no`, its history kept and `draft/<slug>` renamed `bug/<slug>`.
+2. **The skeleton**, in the repo the fault is in: `k bug new <repo>/<slug> --title "<a few words>" --quad-damage
+   yes|no --session <session id>`, with `--bug-of <task>` when the fault is in an accepted task's work (optional; a
+   task open or unknown is refused), and `--fix-repo <repo>` when the fix is made in another repo than the bug's own:
+   a workspace repo by name, or `kirunak` for kirunak's own code, which is no workspace repo, so its bugs take the id
+   of a repo that is. A repo the workspace does not know is refused: ask the owner to add it first. **The mark** is
+   required: `yes` when no question waits on the owner's choice, the fix is in one repo, and it is no music-engine or
+   real-time audio work, else `no`. Only a bug marked yes goes into the owner's Quad Damage (below).
 3. **Fill every section** of the bug, groomed as a draft is (the k-draft skill, step 3): Who raised it, Why (the fault
    and the way to see it), What was found (each line ending with its source), Fix written (step 4), and Questions,
    numbered, each with an indented `Proposed:` line. Propose the task whole, the goal, criteria, edge cases, aspects
@@ -69,3 +71,8 @@ findings, or a conflict, are written beside the bug in `kirunak/bugs/<slug>/revi
 branch that meets them makes the fix ready again. **Start fix** (an intake from the bug, the k-intake skill) and
 **Drop** are the owner's too: never start either on your own judgement. When the owner tells you to drop one,
 `k bug drop <id> --why "<why>"` removes it and its folder in a commit of their own, its fix branch kept and named.
+
+**Quad Damage** (`/k-bugs`) is the owner's too; your shell runs `k bugs quad-damage` only with `--status` or
+`--summary`. It fixes and reviews the bugs marked yes one at a time, unattended, merging a fix with no finding into
+master, never pushed; the owner sets `no` to keep a bug out. A fixing session in a run follows the run's brief and
+reports as it says, FIXED, SKIPPED or FAILED; on SKIPPED it changes nothing, and the run sets the mark to no.

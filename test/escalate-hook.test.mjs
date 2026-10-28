@@ -507,6 +507,22 @@ test('in a k run step neither hook writes anything (E-12), and hook.enabled: fal
   assert.deepEqual([offOut.map((r) => r.stdout).join(''), off.files(), off.log()], ['', [], []]);
 });
 
+test('in a Quad Damage fixing session (KIRUNAK_BUG_FIX) neither hook counts, writes or blocks: AC-7 and AC-11 are its limits', () => {
+  const env = { KIRUNAK_BUG_FIX: 'hub/a' };
+  const fix = makeHome();
+  const out = cycle(fix, 3, {}, env);
+  hook(start('claude-opus-5-5'), fix.home, env);
+  hook({ session_id: 's1', hook_event_name: 'PostModelSwitch', to_model: 'claude-fable-5' }, fix.home, env);
+  assert.deepEqual([out.map((r) => r.stdout).join(''), fix.files(), fix.log()], ['', [], []]);
+  hook(failure(), fix.home);
+  freeze(edit(), fix.home, env);
+  assert.equal(Object.values(fix.state().failures)[0].editedSince, false, 'the freeze hook\'s edit flag is skipped too');
+  const h = blocked('claude-opus-5-5');
+  assert.ok(h.state().block);
+  assert.equal(freeze(edit(), h.home, env).stdout, '', 'never blocked');
+  assert.match(freeze(edit(), h.home).stdout, /"permissionDecision":"deny"/, 'the same edit outside it is');
+});
+
 test('a subagent counts in its own file apart from its caller, and is told to return marked NEEDS-FABLE (E-13, E-14)', () => {
   const h = makeHome();
   hook(start('claude-sonnet-5'), h.home);
