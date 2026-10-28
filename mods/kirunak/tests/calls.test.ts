@@ -23,7 +23,7 @@ type Question = { question: string; header: string; multiSelect: boolean; option
 const modelAsks = ($: Engine, question: Question) => $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_model', questions: [question] })
 
 // The choices the mod adds to a list, not rows of it, and the rows that are no item's.
-const OWN = new Set(['More', 'Back', 'Cancel', 'Earlier', 'Later', 'End of the queue', 'Quad Damage', 'Stop Quad Damage'])
+const OWN = new Set(['More', 'Back', 'Cancel', 'Earlier', 'Later', 'End of the queue', 'Stop Quad Damage'])
 
 // Walks through every command's dialogs: the command, its taps, and which of its dialogs are lists (by their place in
 // the walk), each list its first page and a page after it where it has one.

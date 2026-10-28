@@ -242,11 +242,14 @@ function listLook(rows: readonly BugRow[], live: QuadDamageStatus | null, now: n
 // Review & merge is offered while the fix is ready and no review of it runs (D-1), nor Quad Damage on it (E-4).
 const mergeable = (b: BugRow): boolean => b.fixReady && !b.reviewing && !b.quadDamageRun
 
-// Quad Damage as the list's first row: what it does with the marked bugs, and the verb its tap runs.
+// Quad Damage as the list's first row: what it does with the marked bugs, and the verb its tap runs. Its label holds
+// how many it takes, "Quad Damage (2 bugs)", the line the phone draws bold, and its line under it does not say it
+// again (gulnya/mobile-dialogs AC-24).
+const quadDamageLabel = (marked: number): string => `Quad Damage (${plural(marked, 'bug')})`
 const quadDamageRow = (marked: number) => ({
-  item: { lead: '', name: 'Quad Damage', text: `: fix and review the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed` },
-  label: 'Quad Damage',
-  description: `fixes and reviews the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed`,
+  item: { lead: '', name: quadDamageLabel(marked), text: `: fix and review ${marked === 1 ? 'it' : 'them one at a time'}, unattended; nothing is pushed` },
+  label: quadDamageLabel(marked),
+  description: marked === 1 ? 'fixes and reviews the marked bug, unattended; nothing is pushed' : 'fixes and reviews the marked bugs one at a time, unattended; nothing is pushed',
   verb: ['bugs', 'quad-damage', '--via', 'mod'],
 })
 
