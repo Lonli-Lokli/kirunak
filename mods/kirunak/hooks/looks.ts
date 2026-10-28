@@ -91,6 +91,11 @@ export function iconOf(stage: string): string {
 export const COLUMNS = 40
 export const DIALOG_ROWS = 48
 export const rowsOf = (text: string): number => text.split('\n').reduce((n, line) => n + 1 + Math.floor([...line].length / COLUMNS), 0)
+// The rows an unfolded look keeps free besides its head and its part (AC-19, counted as treeRows counts them): the
+// "n of m" line, Back or Show less and Next with their gap, the head chip's gap, the gap above each of the look's four
+// parts (the head, the part, the buttons, the engine's node), and one to spare. A draft's first question keeps the
+// same room in each of its parts (drafts.ts, E-3).
+export const FREE = 1 + 2 + 2 + 2 + 4 + 1
 
 // The rows a tree as drawn takes (the test kit's plain data): a Text's words, a Button's label, an Svg's alt, a
 // Markdown's text, each by rowsOf, and a Box's gap a row for each of its children, in a row or a column: the test kit

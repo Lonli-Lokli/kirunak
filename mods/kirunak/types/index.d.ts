@@ -57,12 +57,15 @@ export type KirunakLook = {
 // choice's line by its label, which the `tool.call` hook writes into the call (AC-14); `look`, null for a dialog with
 // none, which every surface draws as the engine draws it.
 export type KirunakDialog = { id: number; question: string; ask: string; described: Record<string, string>; look: KirunakLook | null };
+// A draft's first question as Start intake wrote it for the model to ask (gulnya/mobile-dialogs AC-15, E-3), a dialog
+// a part, in order; null when none waits to be asked.
+export type KirunakIntake = KirunakDialog[] | null;
 // Where the fold is (E-1): the dialog's `id` it was opened in, and the part shown (0 the first); written by the fold's
 // buttons alone, never while drawing.
 export type KirunakFold = { dialog: number; part: number } | null;
 
 declare module 'claude-code' {
   interface PluginState {
-    kirunak: { board: KirunakBoard | null; dialog: KirunakDialog | null; fold: KirunakFold };
+    kirunak: { board: KirunakBoard | null; dialog: KirunakDialog | null; fold: KirunakFold; intake: KirunakIntake };
   }
 }
