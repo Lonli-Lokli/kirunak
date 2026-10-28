@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { list, reviewLockPath, reviewing } from '../lib/bugs.mjs';
-import { checkReview, lock, review } from '../lib/bug-review.mjs';
+import { checkReview, firstCall, lock, review, spent } from '../lib/bug-review.mjs';
 import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
 
 // gulnya/kirunak-bugs S-2: `k bug review <id>`, Review & merge, with a fake runner that writes the review file in
@@ -153,6 +153,16 @@ test('a review starts without the workspace\'s denied tools, Agent always among 
   const saved = JSON.parse(readFileSync(join(w.home, 'bugs', 'hub', 'stale-tiles', 'review-1', 'result.json'), 'utf8'));
   assert.deepEqual(saved.firstCall, { input: 4, cacheRead: 0, cacheWrite: 12000 });
   assert.equal(saved.result.total_cost_usd, 0.1);
+});
+
+test('a failed call\'s all-zero <synthetic> message is no first call: the first real call is kept (gulnya/headless-tools AC-3)', () => {
+  const zero = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 };
+  const real = { input_tokens: 5, cache_read_input_tokens: 11000, cache_creation_input_tokens: 300 };
+  let first = null;
+  for (const m of [{ type: 'system' }, { type: 'assistant', message: { model: '<synthetic>', usage: zero } },
+    { type: 'assistant', message: { usage: real } }]) first ??= firstCall(m);
+  assert.deepEqual(first, { input: 5, cacheRead: 11000, cacheWrite: 300 });
+  assert.equal(spent({ total_cost_usd: 0 }, firstCall({ type: 'assistant', message: { usage: zero } })), '$0.00');
 });
 
 const parents = (root, rev) => git(root, 'rev-list', '--parents', '-n', '1', rev).split(' ').slice(1);
