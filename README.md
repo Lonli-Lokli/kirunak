@@ -78,9 +78,13 @@ You need Node 22 or later, git and Claude Code.
    Commit it with the queue file (one comment line is enough to start).
 
    Optional `bugs` settings (`design/plugins.md` §3): `reviewModel` and `reviewEffort` for Review & merge,
-   `fixModel` (default `opus`) and `fixEffort` for Quad Damage's fixing sessions, `heavyLock` the command a heavy
-   test runs behind, and `limitsLog` a file, relative to the module, where Quad Damage appends each limits reading
-   (time, week %, 5-hour %, `quad-damage`), beside what your status line writes.
+   `fixModel` (default `opus`) and `fixEffort` for Quad Damage's fixing sessions, `disallowedTools` the tools a
+   fixing session and a review start without (default Agent, Artifact, Workflow, AskUserQuestion, Skill,
+   ScheduleWakeup, SendFeedback, ReportFindings, ListAgents and ReadNotifications, the ones Claude Code loads whole
+   that a session with no person there cannot use; Agent stays off whatever the list; any other tool loads through
+   ToolSearch when the session needs it), `heavyLock` the command a heavy test runs behind, and `limitsLog` a file,
+   relative to the module, where Quad Damage appends each limits reading (time, week %, 5-hour %, `quad-damage`),
+   beside what your status line writes.
 
 3. Point kirunak at it, wire the hooks and skills, and add the git hook to each repo that will hold tasks:
 

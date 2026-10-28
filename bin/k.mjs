@@ -215,7 +215,9 @@ async function reviewed(ws, id, flags) {
     'merge-refused': () => `${id}: ${r.review.rel} clean, but the merge was refused: ${r.why}`,
   }[r.outcome]();
   const problems = r.problems.map((p) => `  ${p}`);
-  return { ...r, code: r.outcome === 'merged' ? 0 : 1, text: [said, ...problems].join('\n') };
+  // What the review's session spent (gulnya/headless-tools AC-3), in the detached run's log too.
+  const cost = r.spent ? [`  the review's session: ${r.spent}`] : [];
+  return { ...r, code: r.outcome === 'merged' ? 0 : 1, text: [said, ...cost, ...problems].join('\n') };
 }
 
 const VERBS = {

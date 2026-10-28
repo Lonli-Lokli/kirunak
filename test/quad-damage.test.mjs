@@ -473,6 +473,8 @@ test('keepAwake: caffeinate -i -w on macOS, nothing elsewhere (E-2)', () => {
 
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'quad-damage', 'fake-runner.mjs');
 const NOBODY = () => [];
+// What a fixing session and a review start without (gulnya/headless-tools AC-1), kirunak's default.
+const DENIED = ['Agent', 'Artifact', 'Workflow', 'AskUserQuestion', 'Skill', 'ScheduleWakeup', 'SendFeedback', 'ReportFindings', 'ListAgents', 'ReadNotifications'];
 const FIXED = 'FIXED\nWhy: the cache expires hourly\n- bug/a: the fix\n';
 const fixed = (text = 'cache: one hour\n') => ({ commit: { file: 'tiles.txt', text }, report: FIXED });
 
@@ -518,7 +520,8 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.equal(fix.cwd, w.hubRoot);
   assert.deepEqual(fix.addDirs, [r.folder]);
   assert.equal(fix.model, 'opus');
-  assert.deepEqual(fix.disallowedTools, ['Agent']);
+  assert.deepEqual(fix.disallowedTools, DENIED, 'gulnya/headless-tools AC-1: the tools loaded whole it cannot use');
+  assert.equal('tools' in fix, false, 'no --tools: every deferred tool stays loadable through ToolSearch (E-1)');
   assert.equal(fix.maxTurns, 150);
   assert.equal('maxBudgetUsd' in fix, false);
   assert.equal(fix.env[FIX_ENV], 'hub/a');
@@ -545,6 +548,23 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.match(log, /hub\/a: review: merged, kirunak\/bugs\/a\/review-1\.md\n/);
   assert.deepEqual(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).calls, 3);
   assert.equal(existsSync(reviewLockPath(w.home, 'hub/a')), false);
+});
+
+test('the run\'s log has each session\'s cost and first call; the workspace\'s list of tools denied, Agent always in it (gulnya/headless-tools AC-1, AC-3)', async () => {
+  const usage = (input, read, write) => ({ input_tokens: input, cache_read_input_tokens: read, cache_creation_input_tokens: write, output_tokens: 40 });
+  const w = await fixWorkspace([['a', '2026-10-20', '']], {
+    fixes: [{ ...fixed(), first: usage(6, 0, 15306), cost: 0.704 }], verdicts: [{ verdict: 'clean', first: usage(3, 11000, 4321), cost: 1.1 }],
+  });
+  w.ws.bugs = { ...w.ws.bugs, disallowedTools: ['Skill', 'WebFetch'] };
+  const r = await fixRun(w);
+  assert.equal(r.bugs[0].outcome, 'merged');
+  assert.deepEqual(fixes(w)[0].disallowedTools, ['Agent', 'Skill', 'WebFetch']);
+  assert.deepEqual(reviewsRun(w)[0].disallowedTools, ['Agent', 'Skill', 'WebFetch']);
+  assert.equal('tools' in reviewsRun(w)[0], false);
+  const log = readFileSync(join(r.folder, 'run.log'), 'utf8');
+  assert.match(log, /hub\/a: fixing, try 1: 3 tool calls, exit 0, \$0\.70, first call 15,312 tokens \(input 6, cache read 0, cache write 15,306\); bug\/a at [0-9a-f]{12}, 1 ahead of master\n/);
+  assert.match(log, /hub\/a: review: merged, kirunak\/bugs\/a\/review-1\.md; \$1\.10, first call 15,324 tokens \(input 3, cache read 11,000, cache write 4,321\)\n/);
+  assert.deepEqual(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).firstCall, { input: 6, cacheRead: 0, cacheWrite: 15306 });
 });
 
 test('skipped: the mark set to no, the reason under What was found, the bug file committed alone; FAILED and an empty FIXED wait', async () => {

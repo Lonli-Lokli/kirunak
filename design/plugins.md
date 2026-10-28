@@ -147,6 +147,16 @@ export default {
   the fresh session `k bug review` runs on a fix's diff; `bugs.heavyLock` is the command its brief and the k-bug skill
   name for a heavy test, the job's command after it, and with none they name the heavy lock the machine's CLAUDE.md
   names. Judgement: the machine's resource guard is the workspace's, so kirunak names no path of its own.
+  `bugs.disallowedTools` is the tools a review and a fixing session start without, each a `--disallowedTools`, and
+  neither names `--tools`: by default the 10 that Claude Code loads whole and that a session with no person there
+  cannot use (Agent, Artifact, Workflow, AskUserQuestion, Skill, ScheduleWakeup, SendFeedback, ReportFindings,
+  ListAgents, ReadNotifications; `HEADLESS_DENIED` in `lib/bug-review.mjs`), Agent added to a workspace's list that
+  leaves it out. Every tool Claude Code defers, a new one too, stays loadable through ToolSearch, so a session that
+  needs one loads it and no list grows because one bug needed a tool. Judgement: measured on one turn
+  (gulnya/headless-tools, its probe of 2026-10-28), every tool made a 23.5k-token start, `--tools` with 8 named 15.4k
+  (a tool `--tools` names without ToolSearch loads whole), and these 10 denied 11.4k; the start is re-read on each
+  call after it. Each session's cost and first call go into the run's log (`task-files.md` §1), so a Claude Code
+  update that loads a new tool whole shows there.
   Quad Damage (R34, gulnya/quad-damage, `task-files.md` §1) reads three more: `bugs.fixModel` (default `opus`, AC-8)
   and `bugs.fixEffort` (default none) set its fixing sessions, whose brief names `bugs.heavyLock` with the session's
   own id (AC-14); `bugs.limitsLog` is the log the plan's readings are appended to before each session (AC-9),

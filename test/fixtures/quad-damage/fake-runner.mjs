@@ -5,10 +5,11 @@
 //
 // A verdict: 'clean' or 'findings' (the file written, 3 turns), or { text (the file's whole text, or null for none),
 // exitCode (0), result (the result message, 3 turns by default; null for none) } for a review session gone wrong, or
-// { verdict, sleep } for one that takes `sleep` seconds in a process of its own first (killed, it writes nothing).
+// { verdict, sleep } for one that takes `sleep` seconds in a process of its own first (killed, it writes nothing), or
+// { verdict, first, cost } for one whose first call's usage `first` streams and whose result costs `cost`.
 //
-// An act: { calls (tool calls streamed, 3), turns (the result's num_turns, calls + 1), messages (streamed after the
-// calls), sleep (the session's seconds, 0.05), commit: { file, text } (committed on the fix branch, in the worktree the
+// An act: { calls (tool calls streamed, 3), turns (the result's num_turns, calls + 1), first (a usage streamed before
+// the calls, as the first call's), cost (the result's total_cost_usd), messages (streamed after the calls), sleep (the session's seconds, 0.05), commit: { file, text } (committed on the fix branch, in the worktree the
 // brief names), master: { file, text } (committed on the fix repo's master after the fix, as the owner might), report
 // (its text, or null for none) }. A session killed before its sleep ends does none of it.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -19,6 +20,7 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
 const READING = { fiveHour: { used: 10, resetsAt: 1793142600 }, week: { used: 50, resetsAt: 1793545200 }, overage: false };
 const FINDING = "1. tiles.txt:1: the hour is not the forecast's refresh";
 const use = (n) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `t${n}`, name: 'Bash', input: { command: 'ls' } }] } });
+const call = (usage) => ({ type: 'assistant', message: { content: [{ type: 'text', text: 'looking' }], usage } });
 const answer = (n) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `t${n}`, content: 'ok' }] } });
 
 function review(step, script) {
@@ -35,14 +37,15 @@ function review(step, script) {
     }));
     return { pid: child.pid, sessionId: step.sessionId, done };
   }
-  const verdict = next;
-  const odd = typeof verdict === 'object' ? verdict : {};
+  const verdict = typeof next === 'object' && 'verdict' in next ? next.verdict : next;
+  const odd = typeof next === 'object' ? next : {};
+  if (odd.first && typeof step.onMessage === 'function') step.onMessage(call(odd.first));
   const text = typeof verdict === 'object' ? verdict.text : `---\nverdict: ${verdict}\nhead: ${head}\nbase: ${base}\n---\n\n## Findings\n${verdict === 'clean' ? 'none' : FINDING}\n`;
   if (text != null) {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, text);
   }
-  const result = 'result' in odd ? odd.result : { type: 'result', subtype: 'success', is_error: false, num_turns: 3 };
+  const result = 'result' in odd ? odd.result : { type: 'result', subtype: 'success', is_error: false, num_turns: 3, ...(odd.cost != null ? { total_cost_usd: odd.cost } : {}) };
   return { pid: null, sessionId: step.sessionId, done: Promise.resolve({ exitCode: odd.exitCode ?? 0, result }) };
 }
 
@@ -90,10 +93,12 @@ export function fake(script = {}) {
         } catch (e) {
           return resolve({ exitCode: 1, result: { type: 'result', subtype: 'error', is_error: true, num_turns: calls + 1, result: e.message }, stderr: '' });
         }
-        resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: act.turns ?? calls + 1, result: 'done' }, stderr: '' });
+        const cost = act.cost != null ? { total_cost_usd: act.cost } : {};
+        resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: act.turns ?? calls + 1, result: 'done', ...cost }, stderr: '' });
       }));
       setImmediate(() => {
         if (typeof step.onMessage !== 'function') return;
+        if (act.first) step.onMessage(call(act.first));
         for (let n = 1; n <= calls; n++) {
           step.onMessage(use(n));
           step.onMessage(answer(n));

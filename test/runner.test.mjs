@@ -21,6 +21,11 @@ test('the command of orchestrator.md §3: no --model or --effort when none is na
   ]);
 });
 
+test('a step never gets --tools, even one that names tools: every deferred tool stays loadable (gulnya/headless-tools AC-2)', () => {
+  assert.equal(claudeArgs({ ...BASE, tools: ['Bash', 'Read', 'Write'] }).includes('--tools'), false);
+  assert.equal(claudeArgs(BASE).includes('--tools'), false);
+});
+
 test('deny rules go as --settings with permissions.deny and auto memory off, and only when there are some', () => {
   const deny = ['Read(//w/weather/kirunak/tasks/offline-forecast/progress.md)', 'Read(~/.claude/projects/**)'];
   const args = claudeArgs({ ...BASE, deny });

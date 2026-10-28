@@ -80,8 +80,13 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   writes `kirunak/bugs/<slug>/review-<n>.md` (front matter `verdict: clean | findings | conflict`, `head:`, `base:`,
   then `## Findings` numbered, or `## Conflict` with its files) and commits that path alone. Clean: the fix is merged
   with `--no-ff` into its repo's master, never pushed, and the bug and its folder go in one commit of those paths in
-  the bug's own repo, naming the merge and the review. The review session's brief, diff, log and session file are
-  machine state, under `$KIRUNAK_HOME/bugs/<repo>/<slug>/`.
+  the bug's own repo, naming the merge and the review. The review session starts without `ws.bugs.disallowedTools`
+  (`plugins.md` §3: by default the 10 tools loaded whole that a session with no person there cannot use, Agent always
+  among them) and with no `--tools`, so any other tool loads through ToolSearch; its stream is read for its first
+  call, and `result.json` holds that call's `firstCall` (`{ input, cacheRead, cacheWrite }`) beside its result, and
+  `k bug review`'s output a line `the review's session: $<cost>, first call <n> tokens (input <n>, cache read <n>,
+  cache write <n>)` (gulnya/headless-tools AC-3). The review session's brief, diff, log and session file are machine
+  state, under `$KIRUNAK_HOME/bugs/<repo>/<slug>/`.
 - **Quad Damage** (`k bugs quad-damage`, the owner's verb, `approval.md` §2; R34, gulnya/quad-damage;
   `lib/quad-damage.mjs`) is one unattended run over the bugs marked yes. Its run file,
   `$KIRUNAK_HOME/bugs/quad-damage.json`, `{ pid, started, by, via, folder, bug, phase, try, since, waitUntil }`, is
@@ -99,7 +104,8 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   but what a bug's own work commits.
 - **One bug's work** (`workBug`; AC-4 to AC-8, AC-11, AC-14, E-1, E-5 to E-7): a fix ready goes straight to its review
   (E-1), and a head a findings review refused takes its retry first. Otherwise a fresh fixing session runs through the
-  runner on `ws.bugs.fixModel` (default `opus`) with `ws.bugs.fixEffort` when set, the Agent tool off, no dollar cap,
+  runner on `ws.bugs.fixModel` (default `opus`) with `ws.bugs.fixEffort` when set, without `ws.bugs.disallowedTools`
+  as a review (the Agent tool always off, every deferred tool loadable through ToolSearch), no dollar cap,
   `--max-turns 150`, its cwd the fix repo with the bug's repo and the run's folder added, `KIRUNAK_BUG_FIX=<id>` in its
   environment (kirunak's session-start notice and its escalation stay quiet in it; the owner's verbs and the frozen
   files are still refused). Its brief is `templates/quad-damage-brief.md`: the triage first (a choice of the owner's,
@@ -132,7 +138,10 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   found something, try 2`, `<id>: waits: <why>`, `Quad Damage paused for the 5-hour window until HH:MM`, `Quad Damage
   goes on`, then `Quad Damage stopped: <why>` or `Quad Damage done: n merged, m wait, k not reached`, written before
   `summary.md`; a reason is cut to 160 characters, and no reading of the limits goes in. `run.log` also names the
-  fixing session's branch head (`bug/<slug> at <sha>, n ahead of master`) and the merge's commit. `k bugs quad-damage
+  fixing session's branch head (`bug/<slug> at <sha>, n ahead of master`) and the merge's commit, and at each fixing
+  session's and review's end what it spent, `$<cost>, first call <n> tokens (input <n>, cache read <n>, cache write
+  <n>)`, either part left out when the session gave none (gulnya/headless-tools AC-3, E-2); `fix-<n>.json` holds the
+  first call as `firstCall`. `k bugs quad-damage
   --progress [<folder>] --after <n>` reads only: it waits, reading the file every 3 seconds, until it holds more than
   n whole lines or the run has ended (`summary.md` written, or the run file gone, its pid dead or naming another
   folder), then prints the new lines and `kirunak-next: <the command for the next wait>`; once the run has ended it
