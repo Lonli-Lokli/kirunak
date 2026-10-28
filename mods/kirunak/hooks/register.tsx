@@ -109,6 +109,15 @@ async function list($: EngineInterface, { k, args }: Turn): Promise<string> {
   return r.exitCode !== 0 ? refused('k-list', r) : listText(JSON.parse(r.stdout).rows, all === 'all')
 }
 
+// The looks' dates by this machine's clock, else the process's (gulnya/mobile-dialogs AC-1).
+async function nowOf($: EngineInterface): Promise<number> {
+  try {
+    return await $.clock.now()
+  } catch {
+    return Date.now()
+  }
+}
+
 // `/k-board` (A-9's AC-5): the dialog in steps, the board's groups and then a group's tasks; the task tapped answers
 // with its card, and Skip, a dismissal or any other answer, at any step, with the brief board itself. It reads, and
 // runs no verb. `/k-board <id>`: that task's card at once, with no dialog.
@@ -118,7 +127,7 @@ async function boardAnswer($: EngineInterface, turn: Turn): Promise<string> {
   const r = await $.process.run(['node', turn.k, 'board', '--brief', '--json'])
   if (r.exitCode !== 0) return refused('k-board', r)
   const brief = JSON.parse(r.stdout) as Brief
-  const picked = brief.ids.length ? await turn.pick(boardScreen(brief)) : null
+  const picked = brief.ids.length ? await turn.pick(boardScreen(brief, await nowOf($))) : null
   return picked === null ? briefText(brief.text) : card($, turn.k, picked)
 }
 
@@ -155,7 +164,7 @@ async function amendments($: EngineInterface, turn: Turn): Promise<string | Outc
         // amendmentLines says so.
       }
     }
-    const out = await turn.dialog(amendmentsScreen(rows, files))
+    const out = await turn.dialog(amendmentsScreen(rows, files, await nowOf($)))
     return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${amendmentsText(rows)}`
   }
   const picked = nth(args, offered.amendments, '/k-amendments')
@@ -200,7 +209,7 @@ async function draftsDialog($: EngineInterface, turn: Turn): Promise<string | Ou
       // draftLines says so.
     }
   }
-  const out = await turn.dialog(draftsScreen(rows, files))
+  const out = await turn.dialog(draftsScreen(rows, files, await nowOf($)))
   if (out.ended !== undefined) return startIntake($, turn.k, out.ended)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${draftsText(rows)}`
 }
@@ -239,14 +248,7 @@ async function bugsDialog($: EngineInterface, turn: Turn): Promise<string | Outc
     }
   }
   const run = await quadDamageStatus($, turn.k)
-  // The look's dates by this machine's clock (gulnya/mobile-dialogs AC-1).
-  let now = Date.now()
-  try {
-    now = await $.clock.now()
-  } catch {
-    // The process's clock, then.
-  }
-  const out = await turn.dialog(bugsScreen(rows, files, run, now))
+  const out = await turn.dialog(bugsScreen(rows, files, run, await nowOf($)))
   if (out.ended !== undefined) return startFix($, turn.k, out.ended)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows, run)}`
 }

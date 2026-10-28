@@ -1,6 +1,9 @@
+import type { KirunakChip } from '../types'
+import { bodyOf, firstOf, sectionsOf } from './bugs'
 import { numbered } from './lists'
 import type { Item } from './lists'
-import type { Screen } from './owner'
+import { dateWord, reasonLook } from './looks'
+import type { Look, Screen } from './owner'
 
 // /k-drafts (A-11's R27, R28; kirunak-drafts AC-2, AC-7, E-3): the drafts, prepared intakes for future tasks, as
 // `k drafts --json` gives them, every repo's, in the order they wait (k drafts move). The list names each by its id,
@@ -50,16 +53,56 @@ export function draftLines(d: DraftRow, file: string | null): string[] {
   return [...headLines(d), '', ...body]
 }
 
+// Its look on the phone and the desktop app (gulnya/mobile-dialogs AC-1, AC-8, AC-10), as a bug's: a draft waits for
+// the owner to start its intake or drop it, so its chip is orange, the word "draft"; its title large, the repo and the
+// date written; its Why's first paragraph, then what Show all unfolds in parts (E-1): its file's sections, then where
+// it is, with its id, the task an older draft names and its file (AC-3).
+const DRAFT: KirunakChip = { stage: 'waits', word: 'draft' }
+const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
+const writtenWord = (d: DraftRow, now: number): string => (d.written ? `written ${dateWord(d.written, now)}` : 'no date written')
+
+function itemLook(d: DraftRow, file: string | null, now: number): Look {
+  const sections = file === null ? [] : sectionsOf(bodyOf(file))
+  const first = firstOf(sections)
+  const where = [`Id: ${d.id}`, ...(d.bugOf ? [`A bug of ${oneLine(d.bugOf)}`] : []), `File: ${d.path}`]
+  return {
+    title: oneLine(d.title) || d.id,
+    chip: DRAFT,
+    line: `${d.repo}, ${writtenWord(d, now)}`,
+    first: first === null ? [] : [{ heading: null, lines: [first] }],
+    rows: [],
+    fold: [...sections, { heading: 'Where it is', lines: file === null ? [...where, 'Its file could not be read.'] : where }],
+  }
+}
+
+// The list's look: "Drafts", how many wait and in which repos, the newest date; a row a draft, its chip, id and title.
+function listLook(rows: readonly DraftRow[], now: number): Look {
+  const repos = [...new Set(rows.map(d => d.repo))]
+  const newest = rows.map(d => d.written).filter((w): w is string => w !== null && /^\d{4}-\d{2}-\d{2}/.test(w)).sort().pop() ?? null
+  return {
+    title: 'Drafts',
+    chip: { stage: 'waits', word: `${rows.length} ${rows.length === 1 ? 'waits' : 'wait'} to start` },
+    line: `${plural(rows.length, 'draft')} in ${repos.join(', ')}${newest ? `, the newest written ${dateWord(newest, now)}` : ''}`,
+    first: [],
+    rows: rows.map(d => ({ chip: DRAFT, id: d.id, words: oneLine(d.title) })),
+    fold: null,
+  }
+}
+
 // The dialog: the drafts, three a page with More; the one picked whole, with Start intake (which ends the dialog with
 // its id) and Drop; Drop's reason, then "Drop <id>" under it. `files` holds each draft's file by path; one missing
-// could not be read.
-export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<string, string>): Screen {
+// could not be read. On the phone and the desktop app each dialog draws its look above the choices, dates said from
+// `now`, this machine's clock (gulnya/mobile-dialogs AC-1).
+export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<string, string>, now = Date.now()): Screen {
+  // Drop's reason and its confirmation keep the draft's head alone, the confirm the reason under it.
+  const headOf = (d: DraftRow): Look => ({ ...itemLook(d, files.get(d.path) ?? null, now), first: [], fold: null })
   const confirm = (d: DraftRow, why: string): Screen => ({
     kind: 'item',
     header: 'Drafts',
     text: [...headLines(d), `Reason: ${why}`],
     choices: [{ label: `Drop ${d.id}`, description: 'drops it in a commit that carries the reason', verb: ['draft', 'drop', d.id, '--why', why] }],
     question: 'Drop it, in a commit that carries that reason?',
+    look: reasonLook(headOf(d), why),
   })
   const reason = (d: DraftRow): Screen => ({
     kind: 'reason',
@@ -67,6 +110,7 @@ export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<strin
     text: headLines(d),
     question: 'Type the reason in the free-text row: why drop it?',
     given: why => confirm(d, why),
+    look: headOf(d),
   })
   const item = (d: DraftRow): Screen => ({
     kind: 'item',
@@ -77,8 +121,9 @@ export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<strin
       { label: 'Drop', description: 'asks why, then drops it in a commit', open: () => reason(d) },
     ],
     question: 'Start the intake from it, or drop it?',
+    look: itemLook(d, files.get(d.path) ?? null, now),
   })
-  return { kind: 'list', header: 'Drafts', head: 'Drafts, in the order they wait:', question: 'Which draft?', rows: rows.map(d => ({ item: draftItem(d), label: d.id, open: () => item(d) })) }
+  return { kind: 'list', header: 'Drafts', head: 'Drafts, in the order they wait:', question: 'Which draft?', rows: rows.map(d => ({ item: draftItem(d), label: d.id, open: () => item(d) })), look: listLook(rows, now) }
 }
 
 // What Start intake submits, a turn of its own, which the model reads as the plugin's message: the owner's tap, the

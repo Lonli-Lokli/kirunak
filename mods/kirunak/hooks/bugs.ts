@@ -2,7 +2,7 @@ import type { KirunakChip, KirunakLookRow, KirunakSection } from '../types'
 
 import { numbered, unmarked } from './lists'
 import type { Item } from './lists'
-import { dateWord } from './looks'
+import { clipped, dateWord, reasonLook } from './looks'
 import type { Look, Screen } from './owner'
 
 // /k-bugs (gulnya/kirunak-bugs AC-6, D-1): the bugs, faults in something that exists, as `k bugs --json` gives them,
@@ -116,7 +116,7 @@ function fixLines(b: BugRow): string[] {
 const headLines = (b: BugRow): string[] => [`${b.id}: ${sentence(oneLine(b.title))}`, sentence(capital(tailOf(b))), ...fixLines(b)]
 
 // The bug's file as written below the front matter (which the head says), blank lines at either end left out.
-function bodyOf(file: string): string[] {
+export function bodyOf(file: string): string[] {
   const lines = file.replace(/\r/g, '').split('\n')
   let i = 0
   if (lines[0] === '---') {
@@ -154,7 +154,7 @@ const writtenWord = (b: BugRow, now: number): string => (b.written ? `written ${
 // an entry of a list, a question and its Proposed answer each a line of their own. Ids, paths and commits stay, as
 // short shas (AC-3), since this is what Show all unfolds.
 const STARTS = /^(?:[-*] |\d+\. |> |Proposed:)/
-const shortShas = (s: string): string => s.replace(/\b([0-9a-f]{7})[0-9a-f]{5,57}\b/g, '$1')
+export const shortShas = (s: string): string => s.replace(/\b([0-9a-f]{7})[0-9a-f]{5,57}\b/g, '$1')
 export function sectionsOf(body: readonly string[]): KirunakSection[] {
   const out: KirunakSection[] = []
   let at: KirunakSection | null = null
@@ -186,15 +186,11 @@ export function sectionsOf(body: readonly string[]): KirunakSection[] {
 
 // The first lines under a bug's head (AC-10): its Why's first paragraph, else its first section's first line, in
 // plain words (AC-3): no file or commit marks, cut at a sentence past 400 characters, which Show all shows whole.
-const FIRST = 400
-function firstOf(sections: readonly KirunakSection[]): string | null {
+export function firstOf(sections: readonly KirunakSection[]): string | null {
   const s = sections.find(x => x.heading?.toLowerCase() === 'why') ?? sections[0]
   const line = s?.lines[0]
   if (line === undefined) return null
-  const plain = line.replace(/\s*\[(?:file|commit)[^\]]*\]/g, '').replace(/^[-*] /, '')
-  if (plain.length <= FIRST) return plain
-  const end = plain.slice(0, FIRST).search(/[.!?](?=[^.!?]*$)/)
-  return end > 0 ? `${plain.slice(0, end + 1)} ...` : `${plain.slice(0, FIRST)} ...`
+  return clipped(line.replace(/\s*\[(?:file|commit)[^\]]*\]/g, '').replace(/^[-*] /, ''))
 }
 
 // A bug's look: its title large, its chip, the repo and the date written; its first lines; then what Show all
@@ -297,7 +293,7 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     text: [...headLines(b), ...(b.branch ? [`Its fix branch ${b.branch} stays in ${b.fixRepo}.`] : []), `Reason: ${why}`],
     choices: [{ label: `Drop ${b.id}`, description: 'drops it in a commit that carries the reason', verb: ['bug', 'drop', b.id, '--why', why] }],
     question: 'Drop it, in a commit that carries that reason?',
-    look: headOf(b),
+    look: reasonLook(headOf(b), why, b.branch ? [{ heading: 'Its fix', lines: [`Its fix branch ${b.branch} stays in ${b.fixRepo}.`] }] : []),
   })
   const reason = (b: BugRow): Screen => ({
     kind: 'reason',
