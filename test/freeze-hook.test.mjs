@@ -380,6 +380,11 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['KIRUNAK_QUAD_DAMAGE=1 k bugs quad-damage', 'bugs quad-damage'],
     ['k bugs quad-damage --status=no', 'bugs quad-damage'],
     ['k bugs quad-damage --progress=no', 'bugs quad-damage'],
+    // A valued flag before the verb: the CLI reads the next word as its value, so the verb comes after it.
+    ['k --via mod approve x', 'approve'],
+    ['k --session s1 accept x', 'accept'],
+    ['k --json --via mod bug review weather/stale-tiles', 'bug review'],
+    ['k --why later queue remove x', 'queue'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -400,6 +405,8 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'k bugs quad-damage --dry-run',
     'k queue add x --dry-run',
     'k queue show',
+    'k --via mod queue show',
+    'k --json approve x --dry-run',
     'k amend new weather/offline-forecast',
     'k amend check weather/offline-forecast A-1',
     'k intake question x data "which data?"',
