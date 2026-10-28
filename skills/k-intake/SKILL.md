@@ -102,13 +102,13 @@ record's folder.
 ## Starting from a kirunak draft
 
 A draft is an intake prepared ahead (`kirunak/drafts/<slug>.md`, the k-draft skill). Start from one only when the
-owner asks: Start intake in `/k-drafts`, or the owner naming it. Run step 1's command with the draft's own id,
-`k intake start <id> --from kirunak/drafts/<slug>.md`. It moves the draft to `kirunak/tasks/<slug>/draft.md`, the
-move staged in git, and the task takes its title. Read `draft.md` as background, never a source: nothing in it is a
-ruling, and the owner's words quoted there are still asked. Its questions come among the first, after the goal, each
-through `k intake question`, its `Proposed:` answer offered as the proposal (the k-draft skill grooms drafts so). Every line of the task is still asked and sourced from the owner's answer;
-`[from kirunak/tasks/<slug>/draft.md]` may sit beside that source, never alone. A draft naming `bug-of:` is refused:
-`k bug from <id> --quad-damage yes|no` moves it into `kirunak/bugs/`.
+owner asks: Start intake in `/k-drafts`, or the owner naming it. `k intake start <id> --from kirunak/drafts/<slug>.md`
+moves it to `kirunak/tasks/<slug>/draft.md`, staged, and the task takes its title. `draft.md` is background, never a
+source: the owner's words quoted there are still asked. **After the goal, the first question holds every `Proposed:`
+answer**, each under its question, recorded once (`k intake question`) and asked as Start intake's prompt writes it:
+past 48 rows in parts "n of m" with Next and Back, Agree first (on the last alone), Not second, each with its line.
+Agree sources each `[owner <date> Q-n]`, `[from kirunak/tasks/<slug>/draft.md]` beside; Not asks each alone, as is a
+question with no proposal or one saying only what is missing. A `bug-of:` draft is refused: k names `k bug from`.
 
 ## Starting from a bug (Start fix)
 
