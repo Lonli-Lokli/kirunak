@@ -163,6 +163,29 @@ describe("the bug's dialog", () => {
     expect(looked[looked.length - 1]?.texts).toEqual(looked[looked.length - 3]?.texts)
   })
 
+  test("Stop Quad Damage's confirm on the phone: its head, the run's chip, what a stop does, and its choice's line", async ($, on) => {
+    const seen: Question[][] = []
+    let confirm: Seen | null = null
+    const look: Tap = async questions => {
+      const ui = await $.ui.mount({ plugin: 'kirunak', surface: 'mobile', component: 'AskUserQuestion', props: { tool: 'AskUserQuestion', questions } })
+      confirm = await seenOf(ui)
+      await ui.unmount()
+      return 'Cancel'
+    }
+    const live = { run: { pid: 5150, bug: 'hub/stale-tiles' }, line: 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41' }
+    const w = world(on, { quadDamage: [live], taps: ['Stop Quad Damage', look] })
+    engineBelow(on, seen)
+    await run($)
+
+    const { tree, texts, buttons } = confirm ?? ({ tree: null, texts: [], buttons: [] } as Seen)
+    expect(texts.slice(0, 3)).toEqual(['Stop Quad Damage', 'Quad Damage runs', 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41.'])
+    expect(buttons).toEqual([])
+    expect(treeRows(tree)).toBeLessThanOrEqual(DIALOG_ROWS)
+    const asked = seen.find(qs => qs[0]?.question === 'Stop Quad Damage now?')?.[0]
+    expect(Object.fromEntries((asked?.options ?? []).map(o => [o.label, o.description]))).toEqual({ 'Stop Quad Damage': 'ends it at once; nothing is pushed', Cancel: 'nothing runs', Back: 'the dialog before' })
+    expect(w.runs.filter(r => r.includes('--stop'))).toEqual([])
+  })
+
   test('every state reads at 4.5:1 or more on its own ground (WCAG AA)', () => {
     for (const { fill, ink } of Object.values(STATES)) expect(contrast(fill, ink)).toBeGreaterThanOrEqual(4.5)
   })

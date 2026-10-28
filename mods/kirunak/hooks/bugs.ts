@@ -267,13 +267,16 @@ function stopLines(live: QuadDamageStatus): string[] {
 const stopRow = (live: QuadDamageStatus) => ({
   item: { lead: '', name: 'Stop Quad Damage', text: ': end the run now, the bug it is on left waiting' },
   label: 'Stop Quad Damage',
+  description: 'ends the run now, the bug it is on left waiting',
   open: (): Screen => ({
     kind: 'item',
     header: 'Bugs',
     text: stopLines(live),
-    choices: [{ label: 'Stop Quad Damage', verb: ['bugs', 'quad-damage', '--stop', '--via', 'mod'] }],
+    choices: [{ label: 'Stop Quad Damage', description: 'ends it at once; nothing is pushed', verb: ['bugs', 'quad-damage', '--stop', '--via', 'mod'] }],
     question: 'Stop Quad Damage now?',
     cancel: true,
+    // Its look (gulnya/mobile-dialogs AC-1): the run as the list's chip says it, then what stopping does.
+    look: { title: 'Stop Quad Damage', chip: { stage: 'started', word: 'Quad Damage runs' }, line: null, first: [{ heading: null, lines: stopLines(live) }], rows: [], fold: null },
   }),
 })
 
