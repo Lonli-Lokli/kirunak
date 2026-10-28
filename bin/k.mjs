@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { KError, refuse, usage } from '../lib/errors.mjs';
+import { parseArgs } from '../lib/args.mjs';
 import { expandHome, kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, allTaskIds, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
@@ -40,7 +41,6 @@ import * as bugReview from '../lib/bug-review.mjs';
 import * as quadDamage from '../lib/quad-damage.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach', 'status', 'summary', 'progress']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -106,31 +106,6 @@ Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/d
             place (no flag: last), in a commit of the order alone
           k intake start <id> --from kirunak/drafts/<slug>.md: the intake takes the draft, moved to the task's draft.md
 Every verb takes --json and --dry-run.`;
-
-export function parseArgs(argv) {
-  const pos = [];
-  const flags = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (!a.startsWith('--')) {
-      pos.push(a);
-      continue;
-    }
-    const eq = a.indexOf('=');
-    const name = eq > 0 ? a.slice(2, eq) : a.slice(2);
-    let value;
-    if (eq > 0) value = a.slice(eq + 1);
-    else if (BOOLEAN.has(name)) value = true;
-    else if (i + 1 < argv.length) value = argv[++i];
-    else throw usage(`--${name} needs a value`);
-    // A value is never a flag: `--checklist-open --dry-run` would otherwise run for real while the freeze hook, which
-    // lets any line with the word --dry-run through, took it for a dry run (review G24).
-    if (typeof value === 'string' && value.startsWith('--')) throw usage(`--${name} needs a value, not ${value}`);
-    // A repeated flag (`--git a --git b`) collects its values.
-    flags[name] = name in flags && value !== true ? [flags[name], value].flat() : value;
-  }
-  return { pos, flags };
-}
 
 const need = (v, what) => {
   if (!v) throw usage(`missing ${what}\n\n${HELP}`);

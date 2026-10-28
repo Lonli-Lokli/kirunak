@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from '../lib/args.mjs';
 import { kirunakHome } from '../lib/home.mjs';
 
 // PreToolUse (approval.md §2): refuses the model's write to what only the owner's commands write, and the owner's
@@ -286,9 +287,19 @@ function kArgs(words) {
   return ['k', 'k.mjs'].includes(base(w[0])) ? w.slice(1) : null;
 }
 
+/** k's verb and what follows it, read as the CLI reads them: a valued flag's value is no verb (`k --via mod approve x`
+ * runs approve, gulnya/freeze-flag-before-verb); a line the CLI refuses keeps every plain word, the stricter reading. */
+function verbWords(args) {
+  try {
+    return parseArgs(args).pos;
+  } catch {
+    return options(args);
+  }
+}
+
 function ownerVerbOf(args) {
   if (args.includes('--dry-run')) return null;
-  const [verb, sub] = options(args);
+  const [verb, sub] = verbWords(args);
   if (verb === 'queue' && sub === 'show') return null;
   if (OWNER_VERBS.has(verb)) return verb;
   if (verb === 'amend' && sub === 'decline') return 'amend decline';
