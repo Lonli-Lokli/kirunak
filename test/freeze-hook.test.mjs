@@ -379,6 +379,7 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['node bin/k.mjs bugs quad-damage --via mod', 'bugs quad-damage'],
     ['KIRUNAK_QUAD_DAMAGE=1 k bugs quad-damage', 'bugs quad-damage'],
     ['k bugs quad-damage --status=no', 'bugs quad-damage'],
+    ['k bugs quad-damage --progress=no', 'bugs quad-damage'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -394,6 +395,8 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'k bugs quad-damage --status --json',
     'k bugs quad-damage --summary',
     'k bugs quad-damage --summary 2026-10-27T23-40-05',
+    'k bugs quad-damage --progress /h/bugs/quad-damage/2026-10-27T23-40-05 --after 3',
+    "k bugs quad-damage --progress '/h/a folder' --after 0",
     'k bugs quad-damage --dry-run',
     'k queue add x --dry-run',
     'k queue show',
