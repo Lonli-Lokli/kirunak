@@ -41,14 +41,14 @@ describe('the turn after an owner\'s verb (kirunak-bugs AC-11 to AC-14)', () => 
     expect(w.toasts).toEqual([])
   })
 
-  test('Quad Damage k took: a turn says the run started with its marked bugs, waits in one background command for its progress lines and writes them as they are, then prints its summary and sends its push line, never as a k run stop (gulnya/quad-damage AC-13, AC-16)', async ($, on) => {
+  test('Quad Damage k took: a turn says the run started with its marked bugs, starts each background wait for its progress lines before it writes them as they are, so no turn ends on a tool call and no line is written twice, then pushes and prints its summary last, never as a k run stop (gulnya/quad-damage AC-13, AC-16, S-11)', async ($, on) => {
     const said = 'Quad Damage runs as pid 5150\nlog: /h/bugs/quad-damage/2026-11-07-2340/run.log\nfolder: /h/a folder\nbugs marked: hub/stale-tiles\n'
     const w = world(on, { bugs: [[{ ...READY, quadDamage: true }]], taps: ['Quad Damage', 'Quad Damage'], verb: { exitCode: 0, stdout: said, stderr: '' } })
     await run($, 'k-bugs')
     expect(await turns(w)).toEqual([[
       'The owner tapped Quad Damage in /k-bugs, and kirunak started the run as pid 5150, its log at /h/bugs/quad-damage/2026-11-07-2340/run.log: it fixes and reviews the marked bug (hub/stale-tiles) one at a time, unattended, and pushes nothing.',
-      'Say in one line that Quad Damage started, with 1 marked bug waiting. Then run `k bugs quad-damage --progress \'/h/a folder\' --after 0` with Bash in the background (run_in_background), and do not poll it or sleep.',
-      'Each time it ends, write to the owner the lines it printed exactly as they are, adding nothing, without its `kirunak-next:` line; then run the command after `kirunak-next:` the same way. When it prints no `kirunak-next:` line, the run has ended: write its summary lines as they are, without its `kirunak-push:` line, then send the text after `kirunak-push:` with PushNotification, exactly as written. Never run `k bugs quad-damage` yourself without --status, --summary or --progress, nor `k bug review`.',
+      'Run `k bugs quad-damage --progress \'/h/a folder\' --after 0` with Bash in the background (run_in_background), and do not poll it or sleep. Then say in one line that Quad Damage started, with 1 marked bug waiting, and nothing else: that line ends your turn.',
+      'Each time it ends, first run the command after its `kirunak-next:` line the same way, then write to the owner the lines it printed exactly as they are, adding nothing, without its `kirunak-next:` line: those lines end your turn, with nothing before or after them. When it prints no `kirunak-next:` line, the run has ended: send the text after `kirunak-push:` with PushNotification, exactly as written, then write its summary lines as they are, without its `kirunak-push:` line, and nothing after them. Never run `k bugs quad-damage` yourself without --status, --summary or --progress, nor `k bug review`.',
     ].join('\n')])
   })
 

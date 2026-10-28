@@ -123,10 +123,11 @@ function reviewPrompt(id: string, said: string): string {
 // Quad Damage k took: k's answer names the run's pid, its log, its folder and the bugs marked (`Quad Damage runs as pid
 // <n>`, `log: <path>`, `folder: <path>`, `bugs marked: <ids>`). The session waits in one background command at a time,
 // never polling, `k bugs quad-damage --progress <folder> --after <n>`, which ends at the run's next progress lines
-// (AC-16): it writes them as they are and starts the wait their `kirunak-next:` line names. The last wait prints the
-// summary instead, one line a bug, and a `kirunak-push:` line whose text, the summary cut to a push and starting "Quad
-// Damage", the session sends with PushNotification as it is (AC-13). An answer without the folder leaves the run to
-// the owner's own read.
+// (AC-16): it starts the wait their `kirunak-next:` line names, then writes them as they are. The lines come last, so
+// no turn ends on a tool call, which the engine answers by asking for visible output and the session by writing a line
+// again (gulnya/quad-damage S-11). The last wait prints the summary instead, one line a bug, and a `kirunak-push:` line
+// whose text, the summary cut to a push and starting "Quad Damage", the session sends with PushNotification as it is
+// before it writes the summary (AC-13). An answer without the folder leaves the run to the owner's own read.
 const QUAD = /Quad Damage runs as pid (\d+)/
 function quadDamagePrompt(said: string): string {
   const head = 'The owner tapped Quad Damage in /k-bugs, and kirunak started the run'
@@ -140,7 +141,7 @@ function quadDamagePrompt(said: string): string {
   const bugs = marked ? marked.split(', ').filter(Boolean) : []
   return [
     `${head}${pid === undefined ? '' : ` as pid ${pid}`}${log ? `, its log at ${log}` : ''}: it fixes and reviews the ${bugs.length === 1 ? 'marked bug' : 'marked bugs'}${bugs.length ? ` (${bugs.join(', ')})` : ''} one at a time, unattended, and pushes nothing.`,
-    `Say in one line that Quad Damage started${bugs.length ? `, with ${bugs.length} marked ${bugs.length === 1 ? 'bug' : 'bugs'} waiting` : ', and how many marked bugs wait'}. Then run \`k bugs quad-damage --progress ${sh(folder)} --after 0\` with Bash in the background (run_in_background), and do not poll it or sleep.`,
-    'Each time it ends, write to the owner the lines it printed exactly as they are, adding nothing, without its `kirunak-next:` line; then run the command after `kirunak-next:` the same way. When it prints no `kirunak-next:` line, the run has ended: write its summary lines as they are, without its `kirunak-push:` line, then send the text after `kirunak-push:` with PushNotification, exactly as written. ' + never,
+    `Run \`k bugs quad-damage --progress ${sh(folder)} --after 0\` with Bash in the background (run_in_background), and do not poll it or sleep. Then say in one line that Quad Damage started${bugs.length ? `, with ${bugs.length} marked ${bugs.length === 1 ? 'bug' : 'bugs'} waiting` : ', and how many marked bugs wait'}, and nothing else: that line ends your turn.`,
+    'Each time it ends, first run the command after its `kirunak-next:` line the same way, then write to the owner the lines it printed exactly as they are, adding nothing, without its `kirunak-next:` line: those lines end your turn, with nothing before or after them. When it prints no `kirunak-next:` line, the run has ended: send the text after `kirunak-push:` with PushNotification, exactly as written, then write its summary lines as they are, without its `kirunak-push:` line, and nothing after them. ' + never,
   ].join('\n')
 }

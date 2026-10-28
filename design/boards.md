@@ -194,11 +194,13 @@ What it shows and does, each from the skill's table of shapes:
   The prompt says what the owner did, with kirunak's reason on a refusal, and what to do next; it runs no verb.
   After Quad Damage k took (R34, gulnya/quad-damage AC-1, AC-13, AC-16), the prompt has the session say the run
   started and run `k bugs quad-damage --progress <folder> --after 0` in the background, the folder from k's answer.
-  Each time that ends, the session writes the progress lines it printed to the owner as they are, a short line at
-  each change of the run's status, and runs the next wait its `kirunak-next:` line names; when the run has ended
-  the wait prints the summary instead, and the session writes the summary's lines as they are and sends the text
-  after its `kirunak-push:` line with PushNotification. An answer without the folder leaves the run to `--status`
-  and `--summary`.
+  Each time that ends, the session runs the next wait its `kirunak-next:` line names, then writes the progress lines
+  it printed to the owner as they are, a short line at each change of the run's status; when the run has ended the
+  wait prints the summary instead, and the session sends the text after its `kirunak-push:` line with
+  PushNotification, then writes the summary's lines as they are. Each turn starts its background command first and
+  ends on the owner's lines: a turn that ends on a tool call is asked by the engine for visible output, and the
+  session wrote a line twice that way (gulnya/quad-damage S-11). An answer without the folder leaves the run to
+  `--status` and `--summary`.
 - Tests: `claude plugin test mods/kirunak` (`npm run test:mod`, with `claude plugin validate`): the pane renders a
   task's rows from a `k list --json` fixture on the terminal and the desktop; `/k-approve` and the other four with
   origin `sdk`, `plugin`, `peer`, `unclassified`, `peer-send-message`, `task-notification`, `scheduled-trigger` or
