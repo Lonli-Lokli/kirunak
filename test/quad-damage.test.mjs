@@ -509,3 +509,113 @@ test('findings twice: the bug waits with both reviews and the run goes on; a con
   assert.equal(w.runner.steps.length, 5, 'no session for either');
 });
 
+test('the 150th call\'s result ends the session, and so do its minutes: the bug waits with its branch (AC-11)', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], {
+    fixes: [{ calls: 160, sleep: 30, ...fixed() }, { calls: 2, sleep: 30, ...fixed() }],
+  });
+  const t = Date.now();
+  const r = await fixRun(w, { limit: { calls: 150, minutes: 0.005 } });
+  assert.ok(Date.now() - t < 10000, 'killed, not waited for');
+  assert.deepEqual(r.bugs, [
+    { id: 'hub/a', outcome: 'waits', why: 'its fixing session, try 1, reached 150 tool calls; what holds is on bug/a in hub' },
+    { id: 'hub/c', outcome: 'waits', why: 'its fixing session, try 1, reached 0.005 minutes; what holds is on bug/c in hub' },
+  ]);
+  const a = JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8'));
+  assert.deepEqual([a.calls, a.ended, a.exit], [150, 'calls', 143]);
+  assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'c', 'fix-1.json'), 'utf8')).ended, 'minutes');
+  assert.equal(reviewsRun(w).length, 0);
+  assert.deepEqual(readdirSync(join(w.home, 'running')), [], 'each session unregistered');
+});
+
+test('a fix ready goes straight to review (E-1); a head a review refused takes its retry first (AC-7)', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-19', '']], { fixes: [fixed('cache: as the forecast\n')], verdicts: ['clean', 'clean'] });
+  for (const slug of ['a', 'c']) {
+    const tree = `${w.hubRoot}-quad-${slug}`;
+    gitIn(w.hubRoot, 'worktree', 'add', '-q', '-b', `bug/${slug}`, tree, 'master');
+    writeFileSync(join(tree, `${slug}.txt`), 'the fix\n');
+    gitCommitAll(tree, 'the fix');
+  }
+  const headC = gitIn(w.hubRoot, 'rev-parse', 'bug/c');
+  put(join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md'), `---\nverdict: findings\nhead: ${headC}\nbase: x\n---\n\n## Findings\n1. c.txt:1: wrong\n`);
+  gitCommitAll(w.hubRoot, 'the owner\'s review of c');
+  assert.deepEqual(list(w.ws).map((b) => [b.id, b.fixReady]), [['hub/a', true], ['hub/c', false]]);
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome]), [['hub/a', 'merged'], ['hub/c', 'merged']]);
+  assert.deepEqual(w.runner.steps.map((s) => (s.env[FIX_ENV] ? `fix ${s.env[FIX_ENV]}` : `review ${s.env.KIRUNAK_BUG_REVIEW}`)), ['review hub/a', 'fix hub/c', 'review hub/c']);
+  assert.match(fixes(w)[0].brief, /^# Quad Damage: the bug hub\/c, try 2$/m);
+  assert.ok(fixes(w)[0].brief.includes(`kirunak/bugs/c/review-1.md (${join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md')}) judged the head ${headC} of bug/c`));
+});
+
+test('a fix in another repo than the bug\'s: run there with the bug\'s repo added, merged there, the bug closed in its own (E-6)', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', 'fix-repo: kirunak\n']], { fixes: [fixed()], verdicts: ['clean'] });
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome, b.repo]), [['hub/a', 'merged', 'kirunak']]);
+  const [fix] = fixes(w);
+  assert.equal(fix.cwd, w.self);
+  assert.deepEqual(fix.addDirs, [w.hubRoot, r.folder]);
+  assert.match(fix.brief, /^Its fix repo: kirunak, at /m);
+  assert.equal(readFileSync(join(w.self, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false);
+  assert.match(summaryFile(r), /- hub\/a: merged [0-9a-f]{7} into kirunak's master\n/);
+});
+
+test('E-7 and overage: no tool call or the login gone stops the run, the bug not reached; overage in the stream ends the session', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], { fixes: [{ calls: 0, turns: 1, report: null }] });
+  let r = await fixRun(w);
+  assert.equal(r.stopped, 'a fixing session made no tool call (exit 0: done)');
+  assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome]), [['hub/a', 'not-reached'], ['hub/c', 'not-reached']]);
+  assert.match(summaryFile(r), /; stopped: a fixing session made no tool call/);
+
+  w.runner = (await import(pathToFileURL(join(w.hub, 'kirunak', 'plugins', 'fake-runner.mjs')).href)).fake({
+    fixes: [{ calls: 0, turns: 1, report: null, messages: [{ type: 'assistant', error: 'authentication_failed', message: { content: [{ type: 'text', text: 'Please run /login' }] } }] }],
+  });
+  r = await fixRun(w);
+  assert.equal(r.stopped, 'the login is gone: done');
+  assert.deepEqual(r.bugs.map((b) => b.outcome), ['not-reached', 'not-reached']);
+
+  const overage = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', isUsingOverage: true } };
+  w.runner = (await import(pathToFileURL(join(w.hub, 'kirunak', 'plugins', 'fake-runner.mjs')).href)).fake({ fixes: [{ calls: 5, sleep: 30, messages: [overage], ...fixed() }] });
+  const t = Date.now();
+  r = await fixRun(w);
+  assert.ok(Date.now() - t < 10000);
+  assert.equal(r.stopped, 'the plan is in extra usage');
+  assert.deepEqual(r.bugs, [
+    { id: 'hub/a', outcome: 'waits', why: 'the run stopped in its fixing session: the plan is in extra usage' },
+    { id: 'hub/c', outcome: 'not-reached' },
+  ]);
+  assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).ended, 'overage');
+});
+
+test('E-7 for the review: a review session that wrote nothing before working stops the run; one that worked keeps its malformed review a finding', async () => {
+  const login = { text: null, exitCode: 1, result: { type: 'result', subtype: 'success', is_error: true, num_turns: 1, result: 'Invalid API key · Please run /login' } };
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], { fixes: [fixed()], verdicts: [login] });
+  let r = await fixRun(w);
+  assert.deepEqual(r.bugs, [
+    { id: 'hub/a', outcome: 'waits', why: 'its review session failed: the login is gone: Invalid API key · Please run /login', stop: 'a review session failed: the login is gone: Invalid API key · Please run /login' },
+    { id: 'hub/c', outcome: 'not-reached' },
+  ].map(({ stop, ...b }) => b));
+  assert.equal(r.stopped, 'a review session failed: the login is gone: Invalid API key · Please run /login');
+  assert.equal(fixes(w).length, 1, 'no retry');
+  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+
+  // A crash with no result, and a session of one turn, stop it too.
+  for (const [verdict, why] of [
+    [{ text: null, exitCode: 1, result: null }, 'exit 1 and no result'],
+    [{ text: null, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 1, result: 'I cannot.' } }, 'no tool call (exit 0: I cannot.)'],
+  ]) {
+    const u = await fixWorkspace([['a', '2026-10-20', '']], { fixes: [fixed()], verdicts: [verdict] });
+    r = await fixRun(u);
+    assert.equal(r.stopped, `a review session failed: ${why}`);
+    assert.deepEqual(r.bugs.map((b) => [b.outcome, b.why]), [['waits', `its review session failed: ${why}`]]);
+  }
+
+  // A session that worked (3 turns) and wrote a malformed review: a finding, so the retry and a second review follow.
+  const worked = { text: 'verdict: clean, I think\n' };
+  const v = await fixWorkspace([['a', '2026-10-20', '']], { fixes: [fixed(), fixed('cache: as the forecast\n')], verdicts: [worked, 'clean'] });
+  r = await fixRun(v);
+  assert.equal(r.stopped, null);
+  assert.deepEqual(r.bugs.map((b) => b.outcome), ['merged']);
+  assert.match(gitIn(v.hubRoot, 'log', '--format=%s', 'master'), /^kirunak: review-1\.md of the bug hub\/a: findings$/m);
+  assert.equal(fixes(v).length, 2);
+});
