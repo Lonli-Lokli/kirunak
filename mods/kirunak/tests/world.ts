@@ -160,17 +160,22 @@ export type Asked = { question: string; labels: string[]; header: string }
 // run out; null is a k that failed), `k bugs quad-damage --status --json` from `quadDamage` (`quadReads` counts them,
 // taken as `bugs` are), `k bugs quad-damage` itself an owner verb, `k board --card <id>` a bug's card too,
 // the prompts the mod submitted (`submitted`), events.jsonl's lines as tail would print them, the toasts and panes the mod raised, and the owner's answers to its
-// dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text), null or none
+// dialogs: each dialog takes the next of `taps` (a choice, '[No preference]' for Skip, or typed text, or a function
+// given the dialog's questions that answers once it has looked at the dialog open, gulnya/mobile-dialogs), null or none
 // left dismisses it; the environment (`env`: KIRUNAK_HOME unset, HOME /home/dev unless a test gives its own) and the
 // files the mod wrote (`files`, read back by fs.read; `unwritable` refuses every write).
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[] } = {}) {
+// A tap that looks first: given the dialog's questions, it answers as a tap of `taps` does.
+export type Tap = (questions: unknown[]) => Promise<string | null>
+
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null | Tap)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, bugReads: 0, quadReads: 0, described: {} as Record<string, string>, submitted: [] as { text: string; origin: PromptOrigin }[] }
-  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e) => {
     const q = e.questions[0]
     if (q === undefined) return { deny: 'no question' }
     w.asked.push({ question: q.question, labels: q.options.map(o => o.label), header: q.header })
-    const tap = taps.shift() ?? null
+    const given = taps.shift() ?? null
+    const tap = typeof given === 'function' ? await given(e.questions) : given
     return tap === null ? { deny: 'dismissed' } : { result: { questions: e.questions, answers: { [q.question]: tap } } }
   })
   on('command.register', ($, e) => {

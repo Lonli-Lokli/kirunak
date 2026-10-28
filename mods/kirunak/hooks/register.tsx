@@ -14,6 +14,7 @@ import { nothingRan, owners } from './owner'
 import type { Outcome, Turn } from './owner'
 import { acceptScreen, amendmentsScreen, approveScreen, boardScreen, holdScreen, queueScreen, resumeScreen, startScreen } from './picks'
 import type { Brief } from './picks'
+import { looks } from './look'
 import { lastRows, refresh, sessionTask, tick } from './reads'
 import { forgetRan, noteAuthors, noteRan, submitLater } from './turns'
 import { byNumber, idSuggestions, nth, offerText } from './waiting'
@@ -238,7 +239,14 @@ async function bugsDialog($: EngineInterface, turn: Turn): Promise<string | Outc
     }
   }
   const run = await quadDamageStatus($, turn.k)
-  const out = await turn.dialog(bugsScreen(rows, files, run))
+  // The look's dates by this machine's clock (gulnya/mobile-dialogs AC-1).
+  let now = Date.now()
+  try {
+    now = await $.clock.now()
+  } catch {
+    // The process's clock, then.
+  }
+  const out = await turn.dialog(bugsScreen(rows, files, run, now))
   if (out.ended !== undefined) return startFix($, turn.k, out.ended)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows, run)}`
 }
@@ -368,6 +376,9 @@ export const register: Register = on => {
     const theirs = await next(e)
     return mine.length ? { suggestions: [...theirs.suggestions, ...mine] } : theirs
   })
+
+  // The dialogs' look and Quad Damage's rows on the phone and the desktop app (gulnya/mobile-dialogs D-1, look.tsx).
+  looks(on)
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
