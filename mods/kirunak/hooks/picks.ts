@@ -47,7 +47,7 @@ export function approveScreen(rows: readonly WaitingRow[]): Screen {
     kind: 'item',
     header: 'Approve',
     text: taskText('approve', r),
-    choices: r.why === null ? [{ label: `Approve ${r.id}`, verb: ['approve', r.id, '--via', 'mod'] }] : [],
+    choices: r.why === null ? [{ label: `Approve ${r.id}`, description: 'approves it, so its steps can start', verb: ['approve', r.id, '--via', 'mod'] }] : [],
     question: r.why === null ? 'Approve it?' : REFUSED,
   })
   return { kind: 'list', header: 'Approve', head: 'Waiting for you to approve:', question: 'Which task?', typed: true, rows: rows.map(r => ({ item: waitingItem('approve', r), label: taskLabel(r), open: () => item(r) })) }
@@ -60,7 +60,7 @@ export function acceptScreen(rows: readonly WaitingRow[]): Screen {
     kind: 'item',
     header: 'Accept',
     text: [...taskText('accept', r), `Reason: ${why}`],
-    choices: [{ label: `Accept ${r.id} with open items`, verb: ['accept', r.id, '--checklist-open', why, '--via', 'mod'] }],
+    choices: [{ label: `Accept ${r.id} with open items`, description: 'accepts it as done, for that reason', verb: ['accept', r.id, '--checklist-open', why, '--via', 'mod'] }],
     question: 'Accept it with these items open, for that reason?',
   })
   const reason = (r: WaitingRow): Screen => ({
@@ -72,8 +72,8 @@ export function acceptScreen(rows: readonly WaitingRow[]): Screen {
   })
   const item = (r: WaitingRow): Screen => {
     const choices: Choice[] = []
-    if (r.why === null) choices.push({ label: `Accept ${r.id}`, verb: ['accept', r.id, '--via', 'mod'] })
-    else if (r.onlyChecklist) choices.push({ label: 'Accept with open items', open: () => reason(r) })
+    if (r.why === null) choices.push({ label: `Accept ${r.id}`, description: 'accepts it as done', verb: ['accept', r.id, '--via', 'mod'] })
+    else if (r.onlyChecklist) choices.push({ label: 'Accept with open items', description: 'asks why, then accepts it', open: () => reason(r) })
     const question = r.why === null ? 'Accept it as done?' : r.onlyChecklist ? 'Only open checklist items stop it. Accept it with them open?' : REFUSED
     return { kind: 'item', header: 'Accept', text: taskText('accept', r), choices, question }
   }
@@ -88,7 +88,7 @@ export function amendmentsScreen(rows: readonly AmendmentRow[], files: ReadonlyM
     kind: 'item',
     header: 'Amendments',
     text: [...textOf(x), `Reason: ${why}`],
-    choices: [{ label: `Decline ${x.id} ${x.amendment}`, verb: ['amend', 'decline', x.id, x.amendment, '--why', why] }],
+    choices: [{ label: `Decline ${x.id} ${x.amendment}`, description: 'declines it, for that reason', verb: ['amend', 'decline', x.id, x.amendment, '--why', why] }],
     question: 'Decline it, for that reason?',
   })
   const reason = (x: AmendmentRow): Screen => ({
@@ -103,8 +103,8 @@ export function amendmentsScreen(rows: readonly AmendmentRow[], files: ReadonlyM
     header: 'Amendments',
     text: textOf(x),
     choices: [
-      ...(x.refuse === null ? [{ label: `Approve ${x.id} ${x.amendment}`, verb: ['approve', x.id, '--amendment', x.amendment, '--via', 'mod'] }] : []),
-      { label: 'Decline', open: () => reason(x) },
+      ...(x.refuse === null ? [{ label: `Approve ${x.id} ${x.amendment}`, description: 'applies it to the task', verb: ['approve', x.id, '--amendment', x.amendment, '--via', 'mod'] }] : []),
+      { label: 'Decline', description: 'asks why, then declines it', open: () => reason(x) },
     ],
     question: x.refuse === null ? 'Approve it, or decline it?' : 'k would refuse its approval now. Decline it?',
   })
@@ -123,14 +123,29 @@ export type Brief = { made: string; text: string; ids: string[]; groups: BriefGr
 // Back; the task tapped answers with its card. Both page three and More, as every list does. It runs no verb. The
 // group Drafts (kirunak-drafts S-4: the drafts after the tasks, `k board --card` a draft's card too) asks for a draft,
 // the group Bugs (gulnya/kirunak-bugs AC-7: the bugs before the drafts, a bug's card too) for a bug.
+// Asked in one line (gulnya/mobile-dialogs AC-23): a group's name and count before its question, each entry's words
+// after its id the line of its choice, and the lines that name no choice (Bugs' "2 bugs, 1 with a fix ready") above;
+// the groups' counts are their choices' lines, and only an empty group, which is no choice, is counted above.
 const GROUP_ASKS: Readonly<Record<string, string>> = { Bugs: 'Which bug?', Drafts: 'Which draft?' }
+const GROUP_NOUNS: Readonly<Record<string, string>> = { Bugs: 'bug', Drafts: 'draft' }
+const counted = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
 export function boardScreen(brief: Brief): PickScreen {
-  const group = (g: BriefGroup): PickScreen => ({ kind: 'pick', header: 'Board', text: [`${g.name} (${g.count})`, ...g.lines], labels: g.ids, question: GROUP_ASKS[g.name] ?? 'Which task\'s card?' })
+  const group = (g: BriefGroup): PickScreen => {
+    const described: Record<string, string> = {}
+    const text: string[] = []
+    for (const l of g.lines) {
+      const id = g.ids.find(i => l.startsWith(`${i}: `))
+      if (id !== undefined && described[id] === undefined) described[id] = l.slice(id.length + 2)
+      else text.push(l)
+    }
+    return { kind: 'pick', header: 'Board', text, head: `${g.name} (${g.count})`, labels: g.ids, described, question: GROUP_ASKS[g.name] ?? 'Which task\'s card?' }
+  }
+  const empty = brief.groups.filter(g => !g.ids.length).map(g => `${g.name}: ${g.count}`)
   return {
     kind: 'pick',
     header: 'Board',
-    text: [`Made at ${brief.made}.`, '', ...brief.groups.map(g => `${g.name}: ${g.count}`), '', brief.machine],
-    labels: brief.groups.filter(g => g.ids.length).map(g => ({ label: g.name, open: () => group(g) })),
+    text: [`Made at ${brief.made}.`, ...(empty.length ? ['', ...empty] : []), '', brief.machine],
+    labels: brief.groups.filter(g => g.ids.length).map(g => ({ label: g.name, description: counted(g.count, GROUP_NOUNS[g.name] ?? 'task'), open: () => group(g) })),
     question: 'Which group?',
   }
 }
@@ -150,7 +165,7 @@ export function holdScreen(rows: readonly TaskRow[]): Screen {
     kind: 'item',
     header: 'Hold',
     text: [...stateText(r), `Reason: ${why}`],
-    choices: [{ label: `Hold ${r.id}`, verb: ['hold', r.id, '--why', why, '--via', 'mod'] }],
+    choices: [{ label: `Hold ${r.id}`, description: 'puts it on hold, for that reason', verb: ['hold', r.id, '--why', why, '--via', 'mod'] }],
     question: 'Put it on hold, for that reason?',
   })
   const reason = (r: TaskRow): Screen => ({
@@ -160,7 +175,7 @@ export function holdScreen(rows: readonly TaskRow[]): Screen {
     question: 'Type the reason in the free-text row: why put it on hold?',
     given: why => confirm(r, why),
   })
-  const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Hold', text: stateText(r), choices: [{ label: 'Hold', open: () => reason(r) }], question: 'Put it on hold?' })
+  const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Hold', text: stateText(r), choices: [{ label: 'Hold', description: 'asks why, then puts it on hold', open: () => reason(r) }], question: 'Put it on hold?' })
   return { kind: 'list', header: 'Hold', head: 'Tasks you can put on hold:', question: 'Which task?', rows: rows.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
 }
 
@@ -169,7 +184,7 @@ export function holdScreen(rows: readonly TaskRow[]): Screen {
 export function resumeScreen(rows: readonly TaskRow[]): Screen | null {
   const held = rows.filter(r => r.state === 'on hold')
   if (!held.length) return null
-  const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Resume', text: stateText(r), choices: [{ label: `Resume ${r.id}`, verb: ['resume', r.id] }], question: 'Take it off hold?' })
+  const item = (r: TaskRow): Screen => ({ kind: 'item', header: 'Resume', text: stateText(r), choices: [{ label: `Resume ${r.id}`, description: 'takes it off hold', verb: ['resume', r.id] }], question: 'Take it off hold?' })
   return { kind: 'list', header: 'Resume', head: 'Tasks on hold:', question: 'Which task?', rows: held.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
 }
 
@@ -180,7 +195,7 @@ export function startScreen(rows: readonly TaskRow[], session: string, after: (o
     kind: 'item',
     header: 'Start',
     text: stateText(r),
-    choices: [{ label: `Start ${r.id}`, verb: ['start', r.id, '--via', 'mod', '--session', session], after }],
+    choices: [{ label: `Start ${r.id}`, description: 'names it this session\'s task', verb: ['start', r.id, '--via', 'mod', '--session', session], after }],
     question: 'Work on it in this session?',
   })
   return { kind: 'list', header: 'Start', head: 'Tasks this session can work on:', question: 'Which task?', rows: rows.map(r => ({ item: stateItem(r), label: taskLabel(r), open: () => item(r) })) }
@@ -212,7 +227,7 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
   const placed = (r: QueueRow): string[] => [`${r.id}: ${sentence(titleOf(r))}`, `${capital(r.state)}, place ${r.queue} of ${queued.length} in the queue.`]
   const there = (r: QueueRow, y: QueueRow | null): Screen => {
     const next = queued[queued.indexOf(r) + 1] ?? null
-    const choice: Choice = y === null ? { label: `Move ${r.id} to the end`, verb: ['queue', 'move', r.id, '--last'] } : { label: `Move ${r.id} before ${y.id}`, verb: ['queue', 'move', r.id, '--before', y.id] }
+    const choice: Choice = y === null ? { label: `Move ${r.id} to the end`, description: 'moves it after every task', verb: ['queue', 'move', r.id, '--last'] } : { label: `Move ${r.id} before ${y.id}`, description: 'moves it there', verb: ['queue', 'move', r.id, '--before', y.id] }
     return {
       kind: 'item',
       header: 'Queue',
@@ -238,14 +253,14 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
       rows: [
         ...near,
         ...queued.filter(y => y !== r).map(y => ({ item: queueItem(y), label: taskLabel(y), place: y.queue, open: () => there(r, y) })),
-        { item: { lead: '', name: END, text: '' }, label: END, open: () => there(r, null) },
+        { item: { lead: '', name: END, text: '' }, label: END, description: 'after every task in it', open: () => there(r, null) },
       ],
     }
   }
   const inQueue = (r: QueueRow): Screen => {
     const choices: Choice[] = []
-    if (queued.length > 1) choices.push({ label: 'Move', open: () => where(r) })
-    if (r.state === 'queued') choices.push({ label: `Park ${r.id}`, verb: ['queue', 'remove', r.id] })
+    if (queued.length > 1) choices.push({ label: 'Move', description: 'lists where it can go', open: () => where(r) })
+    if (r.state === 'queued') choices.push({ label: `Park ${r.id}`, description: 'takes it out of the queue', verb: ['queue', 'remove', r.id] })
     const question = choices.length === 2 ? 'Move it, or park it?' : queued.length > 1 ? 'Move it?' : r.state === 'queued' ? 'Park it?' : 'It is alone in the queue. Back to the list?'
     return { kind: 'item', header: 'Queue', text: placed(r), choices, question }
   }
@@ -253,7 +268,7 @@ export function queueScreen(rows: readonly QueueRow[]): Screen | null {
     kind: 'item',
     header: 'Queue',
     text: [`${r.id}: ${sentence(titleOf(r))}`, 'Parked: approved, out of the queue, so no step of it starts.'],
-    choices: [{ label: `Put back ${r.id}`, verb: ['queue', 'add', r.id] }],
+    choices: [{ label: `Put back ${r.id}`, description: 'adds it at the end of the queue', verb: ['queue', 'add', r.id] }],
     question: 'Put it back, at the end of the queue?',
   })
   return {

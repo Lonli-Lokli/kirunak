@@ -245,7 +245,7 @@ const mergeable = (b: BugRow): boolean => b.fixReady && !b.reviewing && !b.quadD
 const quadDamageRow = (marked: number) => ({
   item: { lead: '', name: 'Quad Damage', text: `: fix and review the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed` },
   label: 'Quad Damage',
-  description: `fixes and reviews the ${plural(marked, 'marked bug')} one at a time, unattended`,
+  description: `fixes and reviews the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed`,
   verb: ['bugs', 'quad-damage', '--via', 'mod'],
 })
 
@@ -332,7 +332,9 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
   })
   const live = run?.run ? run : null
   const marked = rows.filter(b => b.quadDamage).length
-  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, description: `${chipOf(b).word}, ${writtenWord(b, now)}`, open: () => item(b) }))
+  // Each bug's line under its choice, its words as the list said them with the date in words (AC-14, AC-23).
+  const lineOf = (b: BugRow): string => `${oneLine(b.title)}, ${fixOf(b)}, ${b.bugOf ? `bug of ${oneLine(b.bugOf)}, ` : ''}${writtenWord(b, now)}`
+  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, description: lineOf(b), open: () => item(b) }))
   return {
     kind: 'list',
     header: 'Bugs',

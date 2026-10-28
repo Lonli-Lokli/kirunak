@@ -58,7 +58,7 @@ export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<strin
     kind: 'item',
     header: 'Drafts',
     text: [...headLines(d), `Reason: ${why}`],
-    choices: [{ label: `Drop ${d.id}`, verb: ['draft', 'drop', d.id, '--why', why] }],
+    choices: [{ label: `Drop ${d.id}`, description: 'drops it in a commit that carries the reason', verb: ['draft', 'drop', d.id, '--why', why] }],
     question: 'Drop it, in a commit that carries that reason?',
   })
   const reason = (d: DraftRow): Screen => ({
@@ -73,8 +73,8 @@ export function draftsScreen(rows: readonly DraftRow[], files: ReadonlyMap<strin
     header: 'Drafts',
     text: draftLines(d, files.get(d.path) ?? null),
     choices: [
-      { label: 'Start intake', ends: d.id },
-      { label: 'Drop', open: () => reason(d) },
+      { label: 'Start intake', description: 'starts a task from it, its intake first', ends: d.id },
+      { label: 'Drop', description: 'asks why, then drops it in a commit', open: () => reason(d) },
     ],
     question: 'Start the intake from it, or drop it?',
   })
