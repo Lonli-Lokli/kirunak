@@ -16,8 +16,7 @@ const OUTPUT_CAP = 10 * 1024 * 1024;
 // The argv after `claude`. step: { prompt, model, effort, permissionMode, maxTurns, maxBudgetUsd, allowedTools,
 // disallowedTools, deny, sessionId, resume, addDirs, stream }. `stream` asks for stream-json (which needs --verbose), a
 // message a line as it comes, in place of the one JSON result. No --model or --effort when none is named, so Claude Code's own
-// default applies. `tools` (a fixing session's or a review's) goes as --tools, so the session starts with only those
-// tools' definitions; none named keeps every tool. `deny` (permission rules, a review's) goes as --settings' permissions.deny, with auto memory off (the repo's memory is shared with the implementing
+// default applies. `deny` (permission rules, a review's) goes as --settings' permissions.deny, with auto memory off (the repo's memory is shared with the implementing
 // sessions and loads before any rule applies); the deny list adds to the
 // other settings' rules. A new run reads its brief on stdin; a resumed one takes its prompt as the argument after -p.
 export function claudeArgs(step) {
@@ -30,7 +29,6 @@ export function claudeArgs(step) {
   args.push('--permission-mode', step.permissionMode || 'auto');
   if (step.maxTurns) args.push('--max-turns', String(step.maxTurns));
   if (step.maxBudgetUsd) args.push('--max-budget-usd', String(step.maxBudgetUsd));
-  if (step.tools?.length) args.push('--tools', step.tools.join(','));
   for (const t of step.allowedTools || []) args.push('--allowedTools', t);
   for (const t of step.disallowedTools ?? ['Agent']) args.push('--disallowedTools', t);
   if (step.deny?.length) args.push('--settings', JSON.stringify({ permissions: { deny: step.deny }, autoMemoryEnabled: false }));
