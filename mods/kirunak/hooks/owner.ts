@@ -98,7 +98,7 @@ export type Choice =
 // a list's look rows are those of its page alone. The question asked is the same with it or without.
 export type Look = KirunakLook
 export type PickStep = { label: string; description?: string; open: () => PickScreen }
-export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; head?: string; labels: readonly (string | PickStep)[]; described?: Readonly<Record<string, string>>; question: string }
+export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; head?: string; labels: readonly (string | PickStep)[]; described?: Readonly<Record<string, string>>; question: string; look?: Look }
 export type Screen =
   | { kind: 'list'; header: string; text?: readonly string[]; head: string; rows: readonly Row[]; question: string; typed?: true; places?: true; look?: Look }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string; cancel?: true; look?: Look }
@@ -237,7 +237,7 @@ async function talk($: EngineInterface, name: string, turn: object, first: Scree
     const drawn = draw(frame, stack.length > 1)
     const { question, choices } = drawn
     const shown: Logged = { t: await askedAt($), command: name, header: frame.screen.header, drawn }
-    const look = frame.screen.kind !== 'pick' ? frame.screen.look : undefined
+    const look = frame.screen.look
     const labels = choices.map(c => c.label)
     await showLook($, { id: ++shownId, question, ask: drawn.ask, described: drawn.described, look: look ? { ...look, rows: look.rows.filter(r => labels.includes(r.id)) } : null })
     let tap

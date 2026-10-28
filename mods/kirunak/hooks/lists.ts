@@ -138,9 +138,9 @@ export function amendmentParts(text: string): { front: Record<string, string>; w
 // changes), the paragraphs of its Why, its Changes as written, and its last word: the stamp of one applied or declined
 // since the list was read, else what `k approve --amendment` would refuse, null when nothing. With no file (it could
 // not be read), the Why is k waiting's first sentence and there are no Changes.
-type Whole = { head: string; why: string[]; changes: string[]; stamp: string | null; refuse: string | null }
+export type Whole = { head: string; why: string[]; changes: string[]; stamp: string | null; refuse: string | null }
 
-function whole(x: AmendmentRow, file: string | null): Whole {
+export function whole(x: AmendmentRow, file: string | null): Whole {
   const { front, why, changes } = file === null ? { front: {} as Record<string, string>, why: [x.why ?? ''], changes: [] } : amendmentParts(file)
   const ops = changes.map(l => l.trim()).filter(Boolean)
   const by = front.by ?? x.by

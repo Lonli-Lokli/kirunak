@@ -1,4 +1,4 @@
-import type { KirunakChip, KirunakSection } from '../types'
+import type { KirunakChip, KirunakLook, KirunakSection } from '../types'
 
 // The parts of the mod's look on the phone and the desktop app (gulnya/mobile-dialogs D-1, D-2), plain data, so the
 // render hooks (look.tsx) only lay them out and the tests reach every one without a surface: the five states, each
@@ -35,6 +35,27 @@ export const STAGES = {
 export type Stage = keyof typeof STAGES
 
 export const stateOf = (stage: string): State => (STAGES as Record<string, State>)[stage] ?? 'na'
+
+// A task's state as k names it (lib/state.mjs) as a chip (AC-8): the stage nearest it, the state itself the word.
+// Running while a session works on it or reviews it; done once done; waits for the owner while it is proposed,
+// reviewed or awaits the owner, and while it is parked or on hold, which the owner lifts; failed when it is blocked or
+// stale; not reached while it is a draft or queued, waiting its turn and no one's choice. A state of no known name is
+// not reached.
+const TASK_STAGES: Readonly<Record<string, Stage>> = {
+  draft: 'not reached',
+  proposed: 'waits',
+  queued: 'not reached',
+  parked: 'paused',
+  blocked: 'stopped',
+  'in progress': 'started',
+  'in review': 'reviewing',
+  reviewed: 'waits',
+  'awaiting owner': 'waits',
+  done: 'done',
+  'on hold': 'paused',
+  stale: 'failed',
+}
+export const taskChip = (state: string): KirunakChip => ({ stage: TASK_STAGES[state] ?? 'not reached', word: state })
 
 // Each stage's glyph on a 16 by 16 disc, drawn in the ink: lines, and a shape filled where it says so.
 const GLYPHS: Record<Stage, string> = {
@@ -100,6 +121,22 @@ export function dateWord(date: string | null, now: number): string | null {
   if (days === 0) return 'today'
   if (days === 1) return 'yesterday'
   return `${MONTHS[mo - 1] ?? mo} ${d}${y === today.getFullYear() ? '' : `, ${y}`}`
+}
+
+// A text as a look's first lines say it (AC-3, AC-10): whole up to `most` characters, else cut at the last sentence's
+// end before them, or at `most`, and " ..." after it; Show all shows it whole.
+export function clipped(text: string, most = 400): string {
+  if (text.length <= most) return text
+  const end = text.slice(0, most).search(/[.!?](?=[^.!?]*$)/)
+  return end > 0 ? `${text.slice(0, end + 1)} ...` : `${text.slice(0, most)} ...`
+}
+
+// A confirm's look after a reason was typed (AC-1): the item's head, then the reason under its heading, as the question
+// asked under it says "for that reason"; a long one cut, whole behind Show all, after `fold`, what else the confirm says.
+export function reasonLook(head: KirunakLook, why: string, fold: readonly KirunakSection[] = []): KirunakLook {
+  const short = clipped(why)
+  const rest = [...(short !== why ? [{ heading: 'Reason', lines: [why] }] : []), ...fold]
+  return { ...head, first: [{ heading: 'Reason', lines: [short] }], rows: [], fold: rest.length ? rest : null }
 }
 
 // A line of an unfolded text as drawn: a heading, a line of its words, or the blank line between two sections.
