@@ -295,6 +295,8 @@ function ownerVerbOf(args) {
   if (verb === 'slapignore' && sub === 'approve') return 'slapignore approve';
   // Review & merge merges a bug's fix into master (gulnya/kirunak-bugs AC-5); the other bug verbs are an agent's.
   if (verb === 'bug' && sub === 'review') return 'bug review';
+  // Quad Damage merges fixes unattended (gulnya/quad-damage AC-6); its --status and --summary only read.
+  if (verb === 'bugs' && sub === 'quad-damage' && !args.includes('--status') && !args.includes('--summary')) return 'bugs quad-damage';
   return null;
 }
 
