@@ -73,6 +73,7 @@ branch that meets them makes the fix ready again. **Start fix** (an intake from 
 `k bug drop <id> --why "<why>"` removes it and its folder in a commit of their own, its fix branch kept and named.
 
 **Quad Damage** (`/k-bugs`) is the owner's too; your shell runs `k bugs quad-damage` only with `--status`,
-`--summary` or `--progress`. It fixes and reviews the bugs marked yes one at a time, unattended, merging a fix with no finding into
+`--summary` or `--progress`. Stopping a run (Stop Quad Damage in `/k-bugs`, `k bugs quad-damage --stop`) is the
+owner's alone as well: never stop one yourself, and never kill its process. It fixes and reviews the bugs marked yes one at a time, unattended, merging a fix with no finding into
 master, never pushed; the owner sets `no` to keep a bug out. A fixing session in a run follows the run's brief and
 reports as it says, FIXED, SKIPPED or FAILED; on SKIPPED it changes nothing, and the run sets the mark to no.
