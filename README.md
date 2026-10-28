@@ -37,8 +37,10 @@ is done.
   works the bugs marked yes one at a time, unattended: a fresh session fixes each on its branch, a second reviews it,
   and a fix with no finding merges into master, never pushed. It reads your plan's limits before every session,
   waits for the 5-hour window at 90% and stops at 98% of the week or on extra usage. `k bugs quad-damage --status`
-  says where it is, `--summary` what it did, `--dry-run` which bugs it would take; from the mod the session pushes
-  the summary to your phone when the run ends.
+  says where it is, `--summary` what it did, `--progress <folder> --after <n>` waits for its next progress lines,
+  `--dry-run` which bugs it would take; from the mod the session writes a short line in its chat at each change of
+  the run's status (a bug started, its fix committed, merged, waiting, a pause) and pushes the summary to your phone
+  when the run ends.
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
@@ -160,8 +162,8 @@ You need Node 22 or later, git and Claude Code.
    uses the model, and nothing on a page approves anything (`design/boards.md` §3, `design/approval.md` §5).
    After a verb on the task this session works on, or ran the intake of, the session takes a turn of its own: it
    says what you did, or what failed with kirunak's reason, and goes on; after `/k-start` it starts the work, and
-   after Review & merge it watches the review and tells you how it ended; after Quad Damage it waits for the run's
-   end, writes its summary and pushes it to your phone.
+   after Review & merge it watches the review and tells you how it ended; after Quad Damage it writes the run's
+   progress lines as they come, then its summary, and pushes the summary to your phone.
 
    Its commands run `k` only when you typed them (at the terminal, or in Remote Control); any other origin, the
    model included, gets a line saying so and nothing runs (`design/approval.md` §5). That rule is a file of this
