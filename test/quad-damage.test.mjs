@@ -59,6 +59,8 @@ async function qdWorkspace() {
     put(join(w.hub, 'kirunak', 'bugs', `${slug}.md`), bugText(`hub/${slug}`, written, mark));
   }
   w.ws.bugs = { ...w.ws.bugs, limitsLog: join(w.root, 'limits.log') };
+  // The loaded workspace's usage.limitsLog is the log lib/limits.mjs writes (bugs.limitsLog its older name, read at load).
+  w.ws.usage = { ...w.ws.usage, limitsLog: join(w.root, 'limits.log') };
   return w;
 }
 
