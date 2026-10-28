@@ -1,6 +1,9 @@
-import { numbered } from './lists'
+import type { KirunakChip, KirunakLookRow, KirunakSection } from '../types'
+
+import { numbered, unmarked } from './lists'
 import type { Item } from './lists'
-import type { Screen } from './owner'
+import { dateWord } from './looks'
+import type { Look, Screen } from './owner'
 
 // /k-bugs (gulnya/kirunak-bugs AC-6, D-1): the bugs, faults in something that exists, as `k bugs --json` gives them,
 // every repo's, those with a fix ready first, then the oldest. The list names each by its id, title, its fix and the
@@ -112,10 +115,8 @@ function fixLines(b: BugRow): string[] {
 // The bug's head: its id and title, the task it is a bug of and the date written, then its fix.
 const headLines = (b: BugRow): string[] => [`${b.id}: ${sentence(oneLine(b.title))}`, sentence(capital(tailOf(b))), ...fixLines(b)]
 
-// The bug whole, for the dialog's text: its head, then its file as written below the front matter (which the head
-// says), blank lines at either end left out; `file` null when it could not be read, which the text says.
-export function bugLines(b: BugRow, file: string | null): string[] {
-  if (file === null) return [...headLines(b), `Its file could not be read: ${b.path}`]
+// The bug's file as written below the front matter (which the head says), blank lines at either end left out.
+function bodyOf(file: string): string[] {
   const lines = file.replace(/\r/g, '').split('\n')
   let i = 0
   if (lines[0] === '---') {
@@ -125,7 +126,116 @@ export function bugLines(b: BugRow, file: string | null): string[] {
   const body = lines.slice(i)
   while (body.length && !(body[0] as string).trim()) body.shift()
   while (body.length && !(body[body.length - 1] as string).trim()) body.pop()
-  return [...headLines(b), '', ...body]
+  return body
+}
+
+// The bug whole, for the dialog's text: its head, then its file's body; `file` null when it could not be read, which
+// the text says.
+export function bugLines(b: BugRow, file: string | null): string[] {
+  if (file === null) return [...headLines(b), `Its file could not be read: ${b.path}`]
+  return [...headLines(b), '', ...bodyOf(file)]
+}
+
+// Its look on the phone and the desktop app (gulnya/mobile-dialogs AC-1, AC-8 to AC-10): its chip, the word beside its
+// icon. Quad Damage on it is yellow even while the run waits for the window, as AC-8 lists it under running, its icon
+// the run's phase; a ready fix, or one a review refused, waits for the owner's choice; no fix yet is not reached.
+export function chipOf(b: BugRow): KirunakChip {
+  const q = b.quadDamageRun
+  if (q) return { stage: q.phase === 'fixing' || q.phase === 'reviewing' ? q.phase : 'started', word: 'Quad Damage on it' }
+  if (b.reviewing) return { stage: 'reviewing', word: 'in review' }
+  if (b.fixReady) return { stage: 'waits', word: 'fix ready' }
+  if ((b.review?.atHead && b.review.verdict !== 'clean') || (b.branch && b.ahead > 0)) return { stage: 'waits', word: 'fix not ready' }
+  return { stage: 'not reached', word: 'no fix yet' }
+}
+
+const writtenWord = (b: BugRow, now: number): string => (b.written ? `written ${dateWord(b.written, now)}` : 'no date written')
+
+// A file's body as sections under its headings (AC-4), each line one of its words as read: a paragraph's lines joined,
+// an entry of a list, a question and its Proposed answer each a line of their own. Ids, paths and commits stay, as
+// short shas (AC-3), since this is what Show all unfolds.
+const STARTS = /^(?:[-*] |\d+\. |> |Proposed:)/
+const shortShas = (s: string): string => s.replace(/\b([0-9a-f]{7})[0-9a-f]{5,57}\b/g, '$1')
+export function sectionsOf(body: readonly string[]): KirunakSection[] {
+  const out: KirunakSection[] = []
+  let at: KirunakSection | null = null
+  let joining = false
+  for (const raw of body) {
+    const heading = /^#{1,6}\s+(.+)$/.exec(raw)
+    if (heading) {
+      at = { heading: unmarked(heading[1] as string).trim(), lines: [] }
+      out.push(at)
+      joining = false
+      continue
+    }
+    const line = raw.trim()
+    if (!line) {
+      joining = false
+      continue
+    }
+    if (at === null) {
+      at = { heading: null, lines: [] }
+      out.push(at)
+    }
+    const words = shortShas(unmarked(line))
+    if (joining && !STARTS.test(line)) at.lines[at.lines.length - 1] += ` ${words}`
+    else at.lines.push(words)
+    joining = true
+  }
+  return out.filter(s => s.lines.length)
+}
+
+// The first lines under a bug's head (AC-10): its Why's first paragraph, else its first section's first line, in
+// plain words (AC-3): no file or commit marks, cut at a sentence past 400 characters, which Show all shows whole.
+const FIRST = 400
+function firstOf(sections: readonly KirunakSection[]): string | null {
+  const s = sections.find(x => x.heading?.toLowerCase() === 'why') ?? sections[0]
+  const line = s?.lines[0]
+  if (line === undefined) return null
+  const plain = line.replace(/\s*\[(?:file|commit)[^\]]*\]/g, '').replace(/^[-*] /, '')
+  if (plain.length <= FIRST) return plain
+  const end = plain.slice(0, FIRST).search(/[.!?](?=[^.!?]*$)/)
+  return end > 0 ? `${plain.slice(0, end + 1)} ...` : `${plain.slice(0, FIRST)} ...`
+}
+
+// A bug's look: its title large, its chip, the repo and the date written; its first lines; then what Show all
+// unfolds: its file's sections, then its fix and where it is, with its id and file (AC-3, AC-10).
+function itemLook(b: BugRow, file: string | null, now: number): Look {
+  const sections = file === null ? [] : sectionsOf(bodyOf(file))
+  const first = firstOf(sections)
+  const where = [`Id: ${b.id}`, ...(b.bugOf ? [`A bug of ${b.bugOf}`] : []), `File: ${b.path}`]
+  return {
+    title: oneLine(b.title),
+    chip: chipOf(b),
+    line: `${b.repo}, ${writtenWord(b, now)}`,
+    first: first === null ? [] : [{ heading: null, lines: [first] }],
+    rows: [],
+    fold: [...sections, { heading: 'Its fix', lines: fixLines(b).map(shortShas) }, { heading: 'Where it is', lines: file === null ? [...where, 'Its file could not be read.'] : where }],
+  }
+}
+
+// The list's look: "Bugs", how many and in which repos, the newest date; its chip, Quad Damage's run while one lives,
+// else the fixes ready, else what is in review, else none ready; a row a bug, its chip, its id and its title (AC-1).
+function listLook(rows: readonly BugRow[], live: QuadDamageStatus | null, now: number): Look {
+  const ready = rows.filter(b => b.fixReady).length
+  const reviewing = rows.filter(b => b.reviewing).length
+  const chip: KirunakChip = live
+    ? { stage: 'started', word: 'Quad Damage runs' }
+    : ready
+      ? { stage: 'waits', word: `${ready} ${ready === 1 ? 'fix' : 'fixes'} ready` }
+      : reviewing
+        ? { stage: 'reviewing', word: 'in review' }
+        : { stage: 'not reached', word: 'no fix ready' }
+  const repos = [...new Set(rows.map(b => b.repo))]
+  const newest = rows.map(b => b.written).filter((d): d is string => d !== null).sort().pop() ?? null
+  const look: KirunakLookRow[] = rows.map(b => ({ chip: chipOf(b), id: b.id, words: oneLine(b.title) }))
+  return {
+    title: 'Bugs',
+    chip,
+    line: `${plural(rows.length, 'bug')} in ${repos.join(', ')}${newest ? `, the newest written ${dateWord(newest, now)}` : ''}`,
+    first: live ? [{ heading: null, lines: [sentence(live.line)] }] : [],
+    rows: look,
+    fold: null,
+  }
 }
 
 // Review & merge is offered while the fix is ready and no review of it runs (D-1), nor Quad Damage on it (E-4).
@@ -135,6 +245,7 @@ const mergeable = (b: BugRow): boolean => b.fixReady && !b.reviewing && !b.quadD
 const quadDamageRow = (marked: number) => ({
   item: { lead: '', name: 'Quad Damage', text: `: fix and review the ${plural(marked, 'marked bug')} one at a time, unattended; nothing is pushed` },
   label: 'Quad Damage',
+  description: `fixes and reviews the ${plural(marked, 'marked bug')} one at a time, unattended`,
   verb: ['bugs', 'quad-damage', '--via', 'mod'],
 })
 
@@ -171,14 +282,19 @@ const stopRow = (live: QuadDamageStatus) => ({
 // What the owner reads to choose is in the dialog's own text, since on the phone the dialog covers the text above it:
 // under a ready fix's bug, what Review & merge does. `files` holds each bug's file by path; one missing could not be
 // read. `run`, Quad Damage's status: while a run lives, its line above the list, Stop Quad Damage first and, on the bug
-// it is on, no choice but Back and Cancel (E-4); while none lives, its row first when a marked bug waits.
-export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>, run: QuadDamageStatus | null = null): Screen {
+// it is on, no choice but Back and Cancel (E-4); while none lives, its row first when a marked bug waits. On the phone
+// and the desktop app each dialog draws its look above the choices, each choice with its line (gulnya/mobile-dialogs
+// AC-1, AC-14), dates said from `now`, this machine's clock.
+export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>, run: QuadDamageStatus | null = null, now = Date.now()): Screen {
+  // Drop's reason and its confirmation keep the bug's head alone.
+  const headOf = (b: BugRow): Look => ({ ...itemLook(b, files.get(b.path) ?? null, now), first: [], fold: null })
   const confirm = (b: BugRow, why: string): Screen => ({
     kind: 'item',
     header: 'Bugs',
     text: [...headLines(b), ...(b.branch ? [`Its fix branch ${b.branch} stays in ${b.fixRepo}.`] : []), `Reason: ${why}`],
-    choices: [{ label: `Drop ${b.id}`, verb: ['bug', 'drop', b.id, '--why', why] }],
+    choices: [{ label: `Drop ${b.id}`, description: 'drops it in a commit that carries the reason', verb: ['bug', 'drop', b.id, '--why', why] }],
     question: 'Drop it, in a commit that carries that reason?',
+    look: headOf(b),
   })
   const reason = (b: BugRow): Screen => ({
     kind: 'reason',
@@ -186,6 +302,7 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     text: headLines(b),
     question: 'Type the reason in the free-text row: why drop it?',
     given: why => confirm(b, why),
+    look: headOf(b),
   })
   const held = (b: BugRow): Screen => ({
     kind: 'item',
@@ -193,6 +310,7 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     text: bugLines(b, files.get(b.path) ?? null),
     choices: [],
     question: 'Review & merge, Start fix and Drop wait until Quad Damage moves on. Back to the list?',
+    look: itemLook(b, files.get(b.path) ?? null, now),
   })
   const item = (b: BugRow): Screen => b.quadDamageRun ? held(b) : ({
     kind: 'item',
@@ -202,15 +320,16 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
       ...(mergeable(b) ? ['', `Review & merge: a fresh Opus session reviews ${b.branch}; only when it finds nothing is the fix merged into ${b.fixRepo}'s master, never pushed, and the bug closed.`] : []),
     ],
     choices: [
-      ...(mergeable(b) ? [{ label: 'Review & merge', verb: ['bug', 'review', b.id, '--detach', '--via', 'mod'] }] : []),
-      { label: 'Start fix', ends: b.id },
-      { label: 'Drop', open: () => reason(b) },
+      ...(mergeable(b) ? [{ label: 'Review & merge', description: 'a fresh session reviews, then merges, never pushes', verb: ['bug', 'review', b.id, '--detach', '--via', 'mod'] }] : []),
+      { label: 'Start fix', description: 'starts a task to fix it, its intake first', ends: b.id },
+      { label: 'Drop', description: 'asks why, then drops it in a commit', open: () => reason(b) },
     ],
     question: mergeable(b) ? 'Review and merge its fix, start a task to fix it, or drop it?' : 'Start a task to fix it, or drop it?',
+    look: itemLook(b, files.get(b.path) ?? null, now),
   })
   const live = run?.run ? run : null
   const marked = rows.filter(b => b.quadDamage).length
-  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, open: () => item(b) }))
+  const bugRows = rows.map(b => ({ item: bugItem(b), label: b.id, description: `${chipOf(b).word}, ${writtenWord(b, now)}`, open: () => item(b) }))
   return {
     kind: 'list',
     header: 'Bugs',
@@ -218,6 +337,7 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     head: 'Bugs, a fix ready first, then the oldest:',
     question: live ? 'Stop Quad Damage, or which bug?' : marked ? 'Quad Damage, or which bug?' : 'Which bug?',
     rows: live ? [stopRow(live), ...bugRows] : marked ? [quadDamageRow(marked), ...bugRows] : bugRows,
+    look: listLook(rows, live, now),
   }
 }
 
