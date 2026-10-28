@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { On } from 'claude-code'
+import type { Elements, On } from 'claude-code'
 
 import type { KirunakChip, KirunakDialog, KirunakSection } from '../types'
-import { DIALOG_ROWS, foldLines, iconOf, messageParts, parts, rowsOf, STATES, stateOf } from './looks'
+import { DIALOG_ROWS, foldLines, iconOf, messageParts, parts, rowsOf, STATES, stateOf, treeRows } from './looks'
 import type { FoldLine, ProgressRow } from './looks'
 
 // The mod's look on the phone and the desktop app (gulnya/mobile-dialogs D-1, D-2): its dialogs drawn as a head, a
@@ -26,6 +26,28 @@ const foldState = atom({ plugin: 'kirunak', key: 'fold' } as const, null)
 // them): the "n of m" line, Back or Show less and Next with their gap, the head chip's gap, the gap above each of the
 // look's four parts (the head, the part, the buttons, the engine's node), and one to spare.
 const FREE = 1 + 2 + 2 + 2 + 4 + 1
+
+// A Quad Damage line as a row (AC-11 to AC-13), in a message and in /k-bugs' head (AC-12) alike: its time dim, its
+// stage's chip (the icon, its alt the stage, and the word), its bug's id in bold, its words as written. A line with no
+// time or no id draws without it, left out of the children so the row's gap counts only what is drawn (AC-19).
+type RowParts = Pick<Elements['desktop'], 'Box' | 'Text' | 'Svg'>
+function progressRow({ Box, Text, Svg }: RowParts, r: ProgressRow, key: string) {
+  const { fill, ink } = STATES[stateOf(r.chip.stage)]
+  const drawn = [
+    r.time === null ? null : <Text key="time" dimColor>{r.time}</Text>,
+    <Box key="chip" flexDirection="row" alignItems="center" gap={1} backgroundColor={fill} paddingX={1}>
+      <Svg source={iconOf(r.chip.stage)} alt={r.chip.stage} width={18} height={18} />
+      <Text color={ink}>{r.chip.word}</Text>
+    </Box>,
+    r.id === null ? null : <Text key="id" weight="bold">{`${r.id}:`}</Text>,
+    <Text key="words">{r.words}</Text>,
+  ].filter(x => x !== null)
+  return (
+    <Box key={key} flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
+      {drawn}
+    </Box>
+  )
+}
 
 // A question as the tool's schema has it; the call hook gives every option its line.
 type Question = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }
@@ -78,7 +100,8 @@ export function looks(on: On): void {
       )
     const sections = (s: readonly KirunakSection[], key: string) => foldLines(s).map((l, i) => line(l, `${key}-${i}`))
 
-    const headRows = rowsOf(look.title) + (look.chip ? rowsOf(look.chip.stage) + rowsOf(look.chip.word) : 0) + (look.line ? rowsOf(look.line) : 0)
+    const run = look.run ? progressRow({ Box, Text, Svg }, look.run, 'run') : null
+    const headRows = rowsOf(look.title) + (look.chip ? rowsOf(look.chip.stage) + rowsOf(look.chip.word) : 0) + (look.line ? rowsOf(look.line) : 0) + treeRows(run)
     const shown = look.fold !== null && open !== null ? parts(foldLines(look.fold), DIALOG_ROWS - headRows - FREE) : null
     const at = shown === null ? 0 : Math.min(open ?? 0, shown.length - 1)
 
@@ -90,6 +113,7 @@ export function looks(on: On): void {
           </Text>
           {look.chip ? chip(look.chip, 'chip') : null}
           {look.line ? <Text dimColor>{look.line}</Text> : null}
+          {run}
         </Box>
         {shown === null ? (
           <Box flexDirection="column">
@@ -124,28 +148,18 @@ export function looks(on: On): void {
     )
   })
 
-  // Quad Damage's progress lines as rows (AC-11, D-3): a reply that holds one draws each as a row and the text
-  // between them as it was; a reply of none, a summary, and the terminal's and VS Code's drawing stay the engine's.
+  // Quad Damage's lines as rows (AC-11, AC-13, D-3): a reply that holds a progress line or the run's summary draws
+  // each as a row and the text between them as it was, in order; a reply of none, the engine's own summary
+  // (`isSummary`), and the terminal's and VS Code's drawing stay the engine's (O-2).
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.props.isSummary || e.surface === 'terminal' || e.surface === 'vscode') return next(e)
     const found = messageParts(e.props.text)
     if (found === null) return next(e)
     const { Box, Text, Markdown, Svg } = $.ui.resolve(e)
-    const row = (r: ProgressRow, key: string) => {
-      const { fill, ink } = STATES[stateOf(r.chip.stage)]
-      return (
-        <Box key={key} flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-          <Text dimColor>{r.time}</Text>
-          <Box flexDirection="row" alignItems="center" gap={1} backgroundColor={fill} paddingX={1}>
-            <Svg source={iconOf(r.chip.stage)} alt={r.chip.stage} width={18} height={18} />
-            <Text color={ink}>{r.chip.word}</Text>
-          </Box>
-          <Text weight="bold">{`${r.id}:`}</Text>
-          <Text>{r.words}</Text>
-        </Box>
-      )
-    }
-
-    return <Box flexDirection="column">{found.map((p, i) => ('row' in p ? row(p.row, `row-${i}`) : <Markdown key={`text-${i}`} text={p.text} />))}</Box>
+    return (
+      <Box flexDirection="column">
+        {found.map((p, i) => ('row' in p ? progressRow({ Box, Text, Svg }, p.row, `row-${i}`) : <Markdown key={`text-${i}`} text={p.text} />))}
+      </Box>
+    )
   })
 }

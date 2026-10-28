@@ -2,7 +2,7 @@ import type { KirunakChip, KirunakLookRow, KirunakSection } from '../types'
 
 import { numbered, unmarked } from './lists'
 import type { Item } from './lists'
-import { clipped, dateWord, reasonLook } from './looks'
+import { clipped, dateWord, reasonLook, runRowOf } from './looks'
 import type { Look, Screen } from './owner'
 
 // /k-bugs (gulnya/kirunak-bugs AC-6, D-1): the bugs, faults in something that exists, as `k bugs --json` gives them,
@@ -211,11 +211,15 @@ function itemLook(b: BugRow, file: string | null, now: number): Look {
 
 // The list's look: "Bugs", how many and in which repos, the newest date; its chip, Quad Damage's run while one lives,
 // else the fixes ready, else what is in review, else none ready; a row a bug, its chip, its id and its title (AC-1).
+// The run's line is a row of the head, drawn as a progress row (AC-12); a line of no form k prints stays the first
+// line, as written (E-2).
 function listLook(rows: readonly BugRow[], live: QuadDamageStatus | null, now: number): Look {
   const ready = rows.filter(b => b.fixReady).length
   const reviewing = rows.filter(b => b.reviewing).length
+  const run = live ? runRowOf(live.line) : null
+  // A run that waits for the 5-hour window is paused, orange, as its row says (AC-8); else it runs.
   const chip: KirunakChip = live
-    ? { stage: 'started', word: 'Quad Damage runs' }
+    ? run?.chip.stage === 'paused' ? { stage: 'paused', word: 'Quad Damage waits' } : { stage: 'started', word: 'Quad Damage runs' }
     : ready
       ? { stage: 'waits', word: `${ready} ${ready === 1 ? 'fix' : 'fixes'} ready` }
       : reviewing
@@ -228,7 +232,8 @@ function listLook(rows: readonly BugRow[], live: QuadDamageStatus | null, now: n
     title: 'Bugs',
     chip,
     line: `${plural(rows.length, 'bug')} in ${repos.join(', ')}${newest ? `, the newest written ${dateWord(newest, now)}` : ''}`,
-    first: live ? [{ heading: null, lines: [sentence(live.line)] }] : [],
+    run,
+    first: live && run === null ? [{ heading: null, lines: [sentence(live.line)] }] : [],
     rows: look,
     fold: null,
   }
