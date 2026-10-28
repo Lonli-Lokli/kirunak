@@ -23,7 +23,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { bugsHookLine, compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
+import { bugsHookLine, cacheChecks, compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -283,6 +283,7 @@ const VERBS = {
     const agentsDir = flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents');
     for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     for (const [ok, line] of compactChecks({ ws, settingsPath: settings })) say(ok, line);
+    for (const [ok, line] of cacheChecks({ ws, settingsPath: settings })) say(ok, line);
     say(...trackerLine({ settingsPath: settings, kirunakRoot: KIRUNAK }));
     say(...bugsHookLine({ settingsPath: settings }));
     try {
