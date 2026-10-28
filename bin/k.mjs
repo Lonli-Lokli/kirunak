@@ -23,7 +23,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { bugsHookLine, compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
+import { bugsHookLine, cacheChecks, compactChecks, ladderChecks, trackerLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -39,6 +39,8 @@ import * as drafts from '../lib/drafts.mjs';
 import * as bugs from '../lib/bugs.mjs';
 import * as bugReview from '../lib/bug-review.mjs';
 import * as quadDamage from '../lib/quad-damage.mjs';
+import { runUsage } from '../lib/usage/run.mjs';
+import { windowOf } from '../lib/usage/week.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -59,6 +61,9 @@ Cost      k cost <id> [--baseline]: the task's token weight, money and calls; --
           k cost <id> --write: cost.md again, rendered from the numbers k accept recorded in done.json
 Cache     k keep --session <id>: in the background, ends when the session's wake-up keeps its cache warm
           k keeper report: keep-alives, misses, hits and skips per task and per week
+Usage     k usage [--from <ISO>] [--to <ISO>] [--out <dir>]: the weekly usage review's files for one limit week (the
+            last finished one by default, its start the workspace's usage.weekStart) from this Mac's transcripts, into
+            <KIRUNAK_HOME>/usage/<to's date>/ unless --out; prints the summary, then each task's and step's weight
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"]: then removes the merged worktrees, printing each removed and kept
           k hold <id> --why "..." | k resume <id>
@@ -278,6 +283,7 @@ const VERBS = {
     const agentsDir = flags.agents ? resolve(expandHome(flags.agents)) : join(homedir(), '.claude', 'agents');
     for (const [ok, line] of ladderChecks({ ws, settingsPath: settings, agentsDir })) say(ok, line);
     for (const [ok, line] of compactChecks({ ws, settingsPath: settings })) say(ok, line);
+    for (const [ok, line] of cacheChecks({ ws, settingsPath: settings })) say(ok, line);
     say(...trackerLine({ settingsPath: settings, kirunakRoot: KIRUNAK }));
     say(...bugsHookLine({ settingsPath: settings }));
     try {
@@ -392,6 +398,19 @@ const VERBS = {
     if (sub !== 'report') throw usage(`unknown keeper verb ${sub}`);
     const r = await keeper.report(ws);
     return { ...r, text: keeper.formatReport(r) };
+  },
+
+  // The weekly usage review's numbers (gulnya/k-usage D-1): the limit week [--from, --to), the last finished one by
+  // default and the week ending at --to when only it is given.
+  async usage({ ws, flags }) {
+    let win;
+    try {
+      win = windowOf(ws.usage.weekStart, { from: flags.from, to: flags.to });
+    } catch (e) {
+      throw usage(e.message);
+    }
+    const out = flags.out ? resolve(expandHome(flags.out)) : join(ws.home, 'usage', win.to.slice(0, 10));
+    return runUsage(ws, { ...win, out });
   },
 
   async step({ ws, pos, flags }) {
