@@ -18,8 +18,14 @@ const LINES = [
   'weather/rain-gap: Rain alerts skip a gap, fix not ready: review-1.md found things to fix, written 2026-11-02',
   'hub/no-fix: no-fix, no fix yet, no date written',
 ]
-const LIST = `Bugs, a fix ready first, then the oldest:\n${LINES.map((l, i) => `${i + 1}. ${l}`).join('\n')}\nWhich bug?`
+// The list asked in one line, each bug's words its choice's line, the date in words (gulnya/mobile-dialogs AC-14, AC-23).
+const LIST = 'Bugs, a fix ready first, then the oldest: Which bug?'
 const LABELS = ['hub/stale-tiles', 'weather/rain-gap', 'hub/no-fix']
+const DESC: Record<string, string> = {
+  'hub/stale-tiles': 'Old tiles stay after an update, fix ready, bug of weather/offline-forecast, written today',
+  'weather/rain-gap': 'Rain alerts skip a gap, fix not ready: review-1.md found things to fix, written Nov 2',
+  'hub/no-fix': 'no-fix, no fix yet, no date written',
+}
 // The answer's list when nothing ran.
 const TEXT = `3 bugs, a fix ready first, then the oldest:\n\n${LINES.map((l, i) => `${i + 1}. **${l.replace(/^([^:]+):/, '$1**:')}`).join('\n')}\n\n/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.`
 // The bug with its fix ready, whole: its head, its file below the front matter, the marks left out, then what Review &
@@ -45,6 +51,7 @@ describe('/k-bugs (kirunak-bugs AC-6, D-1)', () => {
     const w = world(on, { taps: [SKIP] })
     expect(await run($)).toBe(`Nothing ran: skipped.\n\n${TEXT}`)
     expect(w.asked).toEqual([{ header: 'Bugs', question: LIST, labels: LABELS }])
+    expect(w.lines[0]).toEqual(DESC)
     expect(await run($, '', { kind: 'bridge' })).toBe(`Nothing ran: dismissed.\n\n${TEXT}\n\n(typed in Remote Control)`)
     expect([w.bugReads, w.runs]).toEqual([2, []])
   })
@@ -59,8 +66,12 @@ describe('/k-bugs (kirunak-bugs AC-6, D-1)', () => {
     const w = world(on, { bugs: [many(5)], taps: ['More', 'Back', SKIP] })
     await run($)
     const [one, two] = [w.asked[0], w.asked[1]]
-    expect(one).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: (1 to 3 of 5)\n1. hub/b1: Bug 1, no fix yet, written 2026-11-01\n2. hub/b2: Bug 2, no fix yet, written 2026-11-02\n3. hub/b3: Bug 3, no fix yet, written 2026-11-03\nWhich bug?', labels: ['hub/b1', 'hub/b2', 'hub/b3', 'More'] })
-    expect(two).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: (4 to 5 of 5)\n1. hub/b4: Bug 4, no fix yet, written 2026-11-04\n2. hub/b5: Bug 5, no fix yet, written 2026-11-05\nWhich bug?', labels: ['hub/b4', 'hub/b5', 'Back'] })
+    expect(one).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest (1 to 3 of 5): Which bug?', labels: ['hub/b1', 'hub/b2', 'hub/b3', 'More'] })
+    expect(two).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest (4 to 5 of 5): Which bug?', labels: ['hub/b4', 'hub/b5', 'Back'] })
+    expect(w.lines.slice(0, 2)).toEqual([
+      { 'hub/b1': 'Bug 1, no fix yet, written Nov 1', 'hub/b2': 'Bug 2, no fix yet, written Nov 2', 'hub/b3': 'Bug 3, no fix yet, written Nov 3', More: 'the next ones' },
+      { 'hub/b4': 'Bug 4, no fix yet, written Nov 4', 'hub/b5': 'Bug 5, no fix yet, written Nov 5', Back: 'the dialog before' },
+    ])
     expect(w.asked[2]).toEqual(one)
     expect(w.runs).toEqual([])
   })
@@ -159,16 +170,17 @@ const STARTED = 'Quad Damage runs as pid 5150\nlog: /h/bugs/quad-damage/2026-11-
 const FIXING = { phase: 'fixing' as const, try: 1, since: '2026-11-07T23:41:00+00:00', waitUntil: null }
 const ON_READY: BugRow[] = [{ ...MARKED[0] as BugRow, reviewing: { pid: 5150, started: '2026-11-07T23:41:00+00:00' }, quadDamageRun: FIXING }, MARKED[1] as BugRow, NO_FIX]
 const LIVE: QuadDamageStatus = { run: { pid: 5150, bug: 'hub/stale-tiles' }, line: 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41' }
-const QD_LINE = '1. Quad Damage: fix and review the 2 marked bugs one at a time, unattended; nothing is pushed'
+const QD_LINE = 'fixes and reviews the 2 marked bugs one at a time, unattended; nothing is pushed'
 
-const STOP_LINE = '1. Stop Quad Damage: end the run now, the bug it is on left waiting'
+const STOP_LINE = 'ends the run now, the bug it is on left waiting'
 const STOPPED = 'Quad Damage stopped: the owner stopped it; its summary: /h/bugs/quad-damage/2026-11-07-2340/summary.md\n'
 
 describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, AC-17, E-3, E-4, D-1)', () => {
   test('while a marked bug waits and no run lives, Quad Damage is the list\'s first row; with none marked, or a k whose status fails with none marked, it is not', async ($, on) => {
     const w = world(on, { bugs: [MARKED, BUGS], quadDamage: [null], taps: [SKIP, SKIP] })
     await run($)
-    expect(w.asked[0]).toEqual({ header: 'Bugs', question: `Bugs, a fix ready first, then the oldest:\n${QD_LINE}\n${LINES.map((l, i) => `${i + 2}. ${l}`).join('\n')}\nQuad Damage, or which bug?`, labels: ['Quad Damage', ...LABELS] })
+    expect(w.asked[0]).toEqual({ header: 'Bugs', question: 'Bugs, a fix ready first, then the oldest: Quad Damage, or which bug?', labels: ['Quad Damage', ...LABELS] })
+    expect(w.lines[0]).toEqual({ 'Quad Damage': QD_LINE, ...DESC })
     await run($)
     expect(w.asked[1]).toEqual({ header: 'Bugs', question: LIST, labels: LABELS })
     expect([w.quadReads, w.runs]).toEqual([2, []])
@@ -203,15 +215,17 @@ describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, AC-17, E-3, E-
     const onWait: BugRow[] = [{ ...ON_READY[0] as BugRow, quadDamageRun: { phase: 'waiting', try: 1, since: null, waitUntil: '2026-11-08T01:15:00+00:00' } }, MARKED[1] as BugRow]
     const w = world(on, { bugs: [ON_READY, onWait], quadDamage: [LIVE, waiting], taps: ['hub/stale-tiles', 'Back', SKIP, SKIP] })
     expect(await run($)).toBe(`Nothing ran: skipped.\n\n${LIVE.line}.\n\n3 bugs, a fix ready first, then the oldest:\n\n1. **hub/stale-tiles**: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07\n2. **${LINES[1]?.replace(': ', '**: ')}\n3. **${LINES[2]?.replace(': ', '**: ')}\n\n/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.`)
-    expect(w.asked[0]?.question.split('\n').slice(0, 4)).toEqual([`${LIVE.line}.`, 'Bugs, a fix ready first, then the oldest:', STOP_LINE, '2. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07'])
-    expect(w.asked[0]?.question.split('\n').at(-1)).toBe('Stop Quad Damage, or which bug?')
+    // The run's line stays above the list's one line; each row's words are its choice's line.
+    expect(w.asked[0]?.question).toBe(`${LIVE.line}.\nBugs, a fix ready first, then the oldest: Stop Quad Damage, or which bug?`)
+    expect(w.lines[0]).toEqual({ 'Stop Quad Damage': STOP_LINE, 'hub/stale-tiles': 'Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written today', 'weather/rain-gap': DESC['weather/rain-gap'], 'hub/no-fix': DESC['hub/no-fix'] })
     expect(w.asked[0]?.labels).toEqual(['Stop Quad Damage', ...LABELS])
     expect(w.asked[1]?.labels).toEqual(['Cancel', 'Back'])
     expect(w.asked[1]?.question.split('\n')[2]).toBe('Quad Damage is on it: fixing, try 1, since 23:41, on bug/stale-tiles in hub.')
     expect(w.asked[1]?.question.split('\n').slice(-1)).toEqual(['Review & merge, Start fix and Drop wait until Quad Damage moves on. Back to the list?'])
     expect(w.asked[1]?.question).not.toContain('Review & merge: a fresh Opus session')
     await run($)
-    expect(w.asked[3]?.question.split('\n').slice(0, 4)).toEqual(['Quad Damage waits for the 5-hour window until 01:15.', 'Bugs, a fix ready first, then the oldest:', STOP_LINE, '2. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (waiting for the 5-hour window until 01:15), bug of weather/offline-forecast, written 2026-11-07'])
+    expect(w.asked[3]?.question).toBe('Quad Damage waits for the 5-hour window until 01:15.\nBugs, a fix ready first, then the oldest: Stop Quad Damage, or which bug?')
+    expect([w.lines[3]?.['Stop Quad Damage'], w.lines[3]?.['hub/stale-tiles']]).toEqual([STOP_LINE, 'Old tiles stay after an update, Quad Damage is on it (waiting for the 5-hour window until 01:15), bug of weather/offline-forecast, written today'])
     expect(w.runs).toEqual([])
   })
 
