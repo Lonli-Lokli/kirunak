@@ -153,6 +153,7 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   assert.equal(step.model, 'opus');
   assert.equal(step.env.KIRUNAK_BUG_REVIEW, BUG);
   assert.deepEqual(step.disallowedTools, ['Agent']);
+  assert.deepEqual(step.tools, ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Monitor', 'TaskStop']);
   assert.ok(step.deny.includes(`Write(/${step.cwd}/**)`) && step.deny.includes('Read(~/.claude/projects/**)'), step.deny.join(' '));
   assert.match(step.brief, /git diff master\.\.\.bug\/stale-tiles/);
   assert.match(step.brief, /cache: one hour/);

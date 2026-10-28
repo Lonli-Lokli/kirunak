@@ -519,6 +519,7 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.deepEqual(fix.addDirs, [r.folder]);
   assert.equal(fix.model, 'opus');
   assert.deepEqual(fix.disallowedTools, ['Agent']);
+  assert.deepEqual(fix.tools, ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Monitor', 'TaskStop']);
   assert.equal(fix.maxTurns, 150);
   assert.equal('maxBudgetUsd' in fix, false);
   assert.equal(fix.env[FIX_ENV], 'hub/a');

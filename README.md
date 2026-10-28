@@ -78,7 +78,8 @@ You need Node 22 or later, git and Claude Code.
    Commit it with the queue file (one comment line is enough to start).
 
    Optional `bugs` settings (`design/plugins.md` §3): `reviewModel` and `reviewEffort` for Review & merge,
-   `fixModel` (default `opus`) and `fixEffort` for Quad Damage's fixing sessions, `heavyLock` the command a heavy
+   `fixModel` (default `opus`) and `fixEffort` for Quad Damage's fixing sessions, `tools` the tools a fixing session
+   and a review start with (default Bash, Read, Edit, Write, Glob, Grep, Monitor, TaskStop), `heavyLock` the command a heavy
    test runs behind, and `limitsLog` a file, relative to the module, where Quad Damage appends each limits reading
    (time, week %, 5-hour %, `quad-damage`), beside what your status line writes.
 

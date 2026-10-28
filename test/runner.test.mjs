@@ -21,6 +21,12 @@ test('the command of orchestrator.md §3: no --model or --effort when none is na
   ]);
 });
 
+test('a step that names its tools starts with only those, as --tools; none named keeps every tool', () => {
+  const args = claudeArgs({ ...BASE, tools: ['Bash', 'Read', 'Write'] });
+  assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2), ['--tools', 'Bash,Read,Write']);
+  assert.equal(claudeArgs(BASE).includes('--tools'), false);
+});
+
 test('deny rules go as --settings with permissions.deny and auto memory off, and only when there are some', () => {
   const deny = ['Read(//w/weather/kirunak/tasks/offline-forecast/progress.md)', 'Read(~/.claude/projects/**)'];
   const args = claudeArgs({ ...BASE, deny });

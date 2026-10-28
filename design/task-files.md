@@ -99,7 +99,8 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   but what a bug's own work commits.
 - **One bug's work** (`workBug`; AC-4 to AC-8, AC-11, AC-14, E-1, E-5 to E-7): a fix ready goes straight to its review
   (E-1), and a head a findings review refused takes its retry first. Otherwise a fresh fixing session runs through the
-  runner on `ws.bugs.fixModel` (default `opus`) with `ws.bugs.fixEffort` when set, the Agent tool off, no dollar cap,
+  runner on `ws.bugs.fixModel` (default `opus`) with `ws.bugs.fixEffort` when set, only `ws.bugs.tools` loaded (default Bash,
+  Read, Edit, Write, Glob, Grep, Monitor and TaskStop, as a review's), the Agent tool off, no dollar cap,
   `--max-turns 150`, its cwd the fix repo with the bug's repo and the run's folder added, `KIRUNAK_BUG_FIX=<id>` in its
   environment (kirunak's session-start notice and its escalation stay quiet in it; the owner's verbs and the frozen
   files are still refused). Its brief is `templates/quad-damage-brief.md`: the triage first (a choice of the owner's,

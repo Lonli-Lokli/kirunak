@@ -147,6 +147,8 @@ export default {
   the fresh session `k bug review` runs on a fix's diff; `bugs.heavyLock` is the command its brief and the k-bug skill
   name for a heavy test, the job's command after it, and with none they name the heavy lock the machine's CLAUDE.md
   names. Judgement: the machine's resource guard is the workspace's, so kirunak names no path of its own.
+  `bugs.tools` (default Bash, Read, Edit, Write, Glob, Grep, Monitor, TaskStop) is the tools a review and a fixing
+  session start with, as the runner's `--tools`: the others' definitions are not loaded.
   Quad Damage (R34, gulnya/quad-damage, `task-files.md` §1) reads three more: `bugs.fixModel` (default `opus`, AC-8)
   and `bugs.fixEffort` (default none) set its fixing sessions, whose brief names `bugs.heavyLock` with the session's
   own id (AC-14); `bugs.limitsLog` is the log the plan's readings are appended to before each session (AC-9),
