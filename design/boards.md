@@ -179,8 +179,8 @@ What it shows and does, each from the skill's table of shapes:
 | `/k-list [all]`, `/k-board [<id>]`, `/k-amendments [<n>]`, `/k-approve-amendment <n>`, `/k-queue` | five more registered commands, each behind the same origin rule: `/k-list` the tasks as numbered entries (state, queue place, id, title, step; `all` adds done and on hold), `/k-board` the board's groups in a dialog, then a group's tasks, and a tapped task's card, `/k-board <id>` that card (§3), `/k-amendments` the amendments waiting, numbered, and with a number that one in full (its Why and Changes), `/k-approve-amendment <n>` runs `k approve <id> --amendment A-n` for the n-th the list last showed, `/k-queue` the queue in order then the parked tasks (below) | `k list --json --all`, `k board --brief --json` and `k board --card <id>`, `k waiting --json` (the `amendments` rows) |
 | `/k-approve`, `/k-accept`, `/k-hold`, `/k-resume`, `/k-start` with no id | open the owner's dialog (below) in place of printing a list | `k waiting --json`; for `/k-resume`, the tasks on hold of `k list --json --all` |
 | the ids in the typeahead | `prompt.autocomplete`: after `/k-accept `, `/k-approve `, `/k-hold `, `/k-resume ` or `/k-start `, the ids of the tasks in the states each takes, beneath the engine's own rows | the last read's rows, no spawn |
-| `/k-drafts` | the drafts waiting, in the order they wait (`task-files.md` §1, the drafts' order; with no order, by the date written): a dialog with one numbered line a draft (id, title, written), three to a page with More; a draft picked is shown whole, with Start intake, Drop and Back. Start intake runs no `k` verb: it reads `k drafts --json` again, refuses a draft that is gone ("no longer a draft"), and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from that draft (`k intake start <id> --from kirunak/drafts/<slug>.md`, which moves it to `kirunak/tasks/<slug>/draft.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, then runs `k draft drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above (R27, R28). Bugs are not among them: `/k-bugs` (R29) | `k drafts --json` |
-| `/k-bugs` | every bug in every repo (R29, gulnya/kirunak-bugs S-5): a dialog with one numbered line a bug, a fix ready first, then the oldest (id, title, its fix: fix ready, in review since <time>, fix not ready: review-n.md found <verdict>, fix not ready, no fix yet; bug of <task> and the date written), three to a page with More, Back last; with none, "No bugs: no repo holds one." A bug picked is shown whole, its head (title, bug of and date, where the fix is, the review file) above its file, with Review & merge (D-1) only when its fix is ready and no review runs, Start fix and Drop. While a bug marked `quad-damage: yes` waits and no run lives, the list's first row is Quad Damage (R34, gulnya/quad-damage AC-1, D-1): "fix and review the n marked bugs one at a time, unattended; nothing is pushed", and its tap runs `k bugs quad-damage --via mod`, the owner's verb; while a run lives, its line (`k bugs quad-damage --status`) heads the list instead, and the bug it is on reads "Quad Damage is on it (<phase>)", with no Review & merge, Start fix or Drop until the run moves on (E-4), and the list's first row is Stop Quad Damage (gulnya/quad-damage AC-17): one confirm with the run's line and what a stop does (the session it runs for the bug ended at once, a merge already under way let finish, then the bug waits and the bugs left are not reached; or its 5-hour wait ended; or, between bugs, no next bug taken), that nothing is pushed and the summary follows in the chat that started the run, then Stop Quad Damage, Cancel and Back; its tap runs `k bugs quad-damage --stop --via mod`, the owner's verb, and answers that the run stops and where its summary follows, with k's line under it, and no turn follows it. `k bugs quad-damage --stop` writes the stop request `$KIRUNAK_HOME/bugs/quad-damage.stop.json` naming the run's pid, sends the run SIGWINCH and waits up to two minutes for its run file to go ("Quad Damage stopped: the owner stopped it; its summary: <path>", or "still stopping"); with no run it says "Quad Damage is not running" and changes nothing. The run, hearing a request with its own pid, ends the fixing or review session (its process group killed; a killed review keeps no review file), cuts its 5-hour wait short, lets a merge that has begun finish (the bug merged), and stops as any stop does, "stopped: the owner stopped it". Review & merge runs `k bug review <id> --detach --via mod`, the owner's verb, and answers that a fresh session reviews the fix, that it merges into master only with no finding and is never pushed, and that `/k-bugs` or `k bugs` shows the result. Start fix runs no `k` verb: it reads `k bugs --json` again by id, refuses a bug gone or in review, and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from the bug (`k intake start <id> --from kirunak/bugs/<slug>.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, saying the fix branch stays, then runs `k bug drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above | `k bugs --json` |
+| `/k-drafts` | the drafts waiting, in the order they wait (`task-files.md` §1, the drafts' order; with no order, by the date written): a dialog with a choice a draft, its id the label and its title and date written its line (gulnya/mobile-dialogs AC-14, AC-23), three to a page with More; a draft picked is shown whole, with Start intake, Drop and Back. Start intake runs no `k` verb: it reads `k drafts --json` again, refuses a draft that is gone ("no longer a draft"), and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from that draft (`k intake start <id> --from kirunak/drafts/<slug>.md`, which moves it to `kirunak/tasks/<slug>/draft.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, then runs `k draft drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above (R27, R28). Bugs are not among them: `/k-bugs` (R29) | `k drafts --json` |
+| `/k-bugs` | every bug in every repo (R29, gulnya/kirunak-bugs S-5): a dialog with a choice a bug, a fix ready first, then the oldest, its id the label and its line the rest (title, its fix: fix ready, in review since <time>, fix not ready: review-n.md found <verdict>, fix not ready, no fix yet; bug of <task> and the date written), three to a page with More, Back last; with none, "No bugs: no repo holds one." A bug picked is shown whole, its head (title, bug of and date, where the fix is, the review file) above its file, with Review & merge (D-1) only when its fix is ready and no review runs, Start fix and Drop. While a bug marked `quad-damage: yes` waits and no run lives, the list's first row is Quad Damage (R34, gulnya/quad-damage AC-1, D-1): "fix and review the n marked bugs one at a time, unattended; nothing is pushed", and its tap runs `k bugs quad-damage --via mod`, the owner's verb; while a run lives, its line (`k bugs quad-damage --status`) heads the list instead, and the bug it is on reads "Quad Damage is on it (<phase>)", with no Review & merge, Start fix or Drop until the run moves on (E-4), and the list's first row is Stop Quad Damage (gulnya/quad-damage AC-17): one confirm with the run's line and what a stop does (the session it runs for the bug ended at once, a merge already under way let finish, then the bug waits and the bugs left are not reached; or its 5-hour wait ended; or, between bugs, no next bug taken), that nothing is pushed and the summary follows in the chat that started the run, then Stop Quad Damage, Cancel and Back; its tap runs `k bugs quad-damage --stop --via mod`, the owner's verb, and answers that the run stops and where its summary follows, with k's line under it, and no turn follows it. `k bugs quad-damage --stop` writes the stop request `$KIRUNAK_HOME/bugs/quad-damage.stop.json` naming the run's pid, sends the run SIGWINCH and waits up to two minutes for its run file to go ("Quad Damage stopped: the owner stopped it; its summary: <path>", or "still stopping"); with no run it says "Quad Damage is not running" and changes nothing. The run, hearing a request with its own pid, ends the fixing or review session (its process group killed; a killed review keeps no review file), cuts its 5-hour wait short, lets a merge that has begun finish (the bug merged), and stops as any stop does, "stopped: the owner stopped it". Review & merge runs `k bug review <id> --detach --via mod`, the owner's verb, and answers that a fresh session reviews the fix, that it merges into master only with no finding and is never pushed, and that `/k-bugs` or `k bugs` shows the result. Start fix runs no `k` verb: it reads `k bugs --json` again by id, refuses a bug gone or in review, and otherwise sends a prompt, after the command has answered, that loads the `k-intake` skill and starts the intake from the bug (`k intake start <id> --from kirunak/bugs/<slug>.md`). Drop asks for the reason in the free-text row, shows it with "Drop <id>" to confirm, saying the fix branch stays, then runs `k bug drop <id> --why "<reason>"`; no reason, no run. The same owner-only rule as the commands above | `k bugs --json` |
 | `/kirunak` | a command that opens the pane, or closes it when open | |
 | `/k-done` | stays the skill (it needs the model, `review.md` §4); the mod does not register the name | |
 
@@ -220,17 +220,20 @@ the rule of `approval.md` §5.
 **What the dialog is, as measured** (evidence: `evidence/S-1-phone-probe.md`, S-1, 2026-10-20 and 21; a mod's dialog
 reached the phone and its answer came back while the command ran, 8.4 s and 16.6 s):
 
-- It takes **labels only**, two to four: a mod cannot give a choice a description (AC-3's "a label and a description"
-  was changed to this in A-1 of the task). The question's list names each row only, as plain numbered lines
-  (`/k-queue`'s gives each task's title too, A-10, and is numbered by place, A-11), and a picked row's details are the
-  next dialog's text (A-8).
+- It takes **labels only**, two to four: `$.ui.ask` gives a choice no description (AC-3's "a label and a description"
+  was changed to this in A-1 of the task). The question's list named each row only, as plain numbered lines
+  (`/k-queue`'s gave each task's title too, A-10, and was numbered by place, A-11), and a picked row's details are the
+  next dialog's text (A-8). Since gulnya/mobile-dialogs each choice has its line all the same, written into the call
+  by the mod's `tool.call` hook, and a list's question is its head and question alone, each row's words its choice's
+  line (AC-14, AC-23; "The look" below).
 - The question is **plain text**: line breaks are kept, markdown is not drawn (`**` shows as typed), and a line the mod
   logged before the dialog does not appear on the phone.
 - The **app numbers the choices itself** (chips 1 to 4), so a label never starts with a number (a test holds it) and
   the question's numbers are the app's: "1. hub/sync-notes: ..." sits above the choice that opens it. A mod cannot
   hide the chips' numbers (the owner asked, A-11's Q-48): `$.ui.ask` takes labels and a header only. `/k-queue` is the
   one list whose lines carry the task's place in the queue instead ("7. gulnya/large-screens: queued. ..."), so they
-  match `k list` and `k queue show` (A-11); its parked tasks, and Move's Earlier, Later and end, have no number.
+  match `k list` and `k queue show` (A-11); its parked tasks, and Move's Earlier, Later and end, have no number. Since
+  gulnya/mobile-dialogs the place is the first words of the task's choice line ("place 7, ...").
 - Under the choices the app adds a **free-text row** ("Something else") and a **Skip** button. Skip answers the string
   `[No preference]`, which is no rejection: an answer acts only when it equals one of the dialog's own labels, so Skip,
   a dismissal and any other text run nothing. The free-text row is how a reason is typed (hold, decline, accept with
@@ -340,6 +343,119 @@ As built, where the build chose (each judgement unless marked):
 - **The phone check** of `build-order.md` slice 6 passed on 2026-10-19: `/k-accept` typed in Remote Control answered
   "Nothing waits for you to accept." and "(typed in Remote Control)": origin `bridge`, past the rule, `k waiting` run.
 
+### The look: the dialogs drawn, each choice's line, the progress rows (gulnya/mobile-dialogs, built 2026-10-28)
+
+Since gulnya/mobile-dialogs the mod's dialogs and Quad Damage's progress lines have a look in the Desktop app, and
+every choice of the mod's dialogs has a line under it on every surface, the phone included. The hooks are
+`mods/kirunak/hooks/look.tsx`; what they draw is plain data in `hooks/looks.ts` (the five states, each stage's state
+and icon, the row counter, the date words, the parts, the progress lines), so the tests reach every part of it
+without a surface (`tests/look.test.tsx`, `sweep.test.tsx`, `rows.test.tsx`, `agree.test.ts`).
+
+**Where it is drawn** (gulnya/mobile-dialogs D-1, D-2, O-2):
+
+- Two `ui.render` hooks, one on `AskUserQuestion` and one on `AssistantMessage`, return a tree on `desktop`. They
+  pass on `terminal` and `vscode` alone, so a `mobile` render, if the engine ever raises one, draws as `desktop`
+  does. On `terminal` and `vscode` they draw no tree: `next(e)` as it came. The terminal's dialogs keep their look
+  within its 12 rows, each choice's line under it, and its pane takes the five colours as theme keys (below, O-2).
+- The phone draws no tree. Measured in the task's S-2 (`evidence/S-2-spike.md`): with Remote Control open,
+  `$.session.surfaces()` is `["terminal"]` and the render hook on `AskUserQuestion` is raised with `surface:
+  "terminal"` alone; the phone's client never attaches as a surface of its own (no `ui_attach`, no ask to draw), and
+  the mods reference's render sites are Terminal, Desktop and VS Code, none on the phone. What the phone shows is
+  what the `AskUserQuestion` call itself carries: the question's text, each choice's label and its line. No colour,
+  no chip, no tree.
+- A dialog has a look only when it is one of the mod's own. Before each `$.ui.ask`, `talk()` in `owner.ts` writes the
+  dialog to `$.state` (`kirunak.dialog`: the question exactly as asked, its last line, each choice's line by its
+  label, and its look) and clears it once the ask settles; a draft's first question is `kirunak.intake` (below). The
+  hooks match a question by its exact text against these two; any other (a dialog the model raised, another mod's,
+  one asked after a reload lost the state) goes on as the engine draws it (AC-5).
+
+**The head** (AC-1): `Text size="title"` with the item's title (a list's: what it lists and how many), then the state
+chip, a `Box` filled in the state's colour holding its icon and its word in the chip's ink, then one dim line with
+the repo and the dates k's JSON carries, a date written "today", "yesterday" or "Oct 27" (its year added when it is
+not this one; `dateWord`). A list's rows are drawn as rows: a chip, the item's id in bold, its short words. Below the
+look comes the engine's own node, once and last, asked only the question's last line, the look above it showing the
+rest; its choices and their lines are as the call hook wrote them.
+
+**The five states** (AC-7, AC-8, AC-9, AC-20): the tree cannot see the Desktop app's theme, so a state is a fill
+with its own ink, a pair that holds 4.5:1 on any ground (`STATES`; a test computes WCAG's ratio):
+
+| State | Fill, ink | Stages | A task's state (`TASK_STAGES`) |
+| --- | --- | --- | --- |
+| done (green) | `#1b7a3a`, `#ffffff` | merged, done | done |
+| running (yellow) | `#f2c200`, `#1f1f1f` | started, fixing, committed, reviewing | in progress (started), in review (reviewing) |
+| n/a (grey) | `#6e6e6e`, `#ffffff` | skipped, not reached | draft, queued, a state of no known name (not reached) |
+| waits (orange) | `#e8710a`, `#1f1f1f` | waits, paused | proposed, reviewed, awaiting owner (waits); parked, on hold (paused) |
+| failed (red) | `#c62828`, `#ffffff` | stopped, failed | blocked (stopped), stale (failed) |
+
+Each stage's icon (`iconOf`) is an `Svg` of a 16 by 16 disc in its state's fill with its glyph drawn in the ink, its
+`alt` the stage's word, drawn at 18 px, and the word stands beside it in the chip, so colour is never the only sign.
+No dialog or row holds an emoji (AC-6; a test searches every drawn tree for `\p{Extended_Pictographic}`).
+
+**The fold** (AC-3, AC-4, AC-10, E-1): an item's dialog shows its head and its first lines (a bug's or a draft's
+first paragraph, in plain words), then Show all (`variant="primary"`), which unfolds the rest in the same dialog: Why,
+What was found and the questions, the ids, paths and commits (short shas) among them, each section under its heading
+with a blank line between. The part open is `kirunak.fold`, written by the buttons' `onPress` alone, never while
+drawing. Past what a dialog holds, the unfolded text goes in parts, "n of m" above each, Show less on the first part
+and Back on the others, Next on all but the last (`variant="secondary"`). A dialog's tree holds at most 48 rows
+counted at 40 columns (AC-19), the most the engine draws before it falls back to its plain dialog (measured in S-1).
+One counter in `looks.ts` (`rowsOf`, `treeRows`: a text a row a line and one more for each 40 columns, a button's
+label and an Svg's alt the same, a `Box`'s gap a row for each child) counts the head, and the parts take what is left
+of the 48 less `FREE`, the room the "n of m" line, the buttons and the gaps take. The paging and the tests share it.
+
+**The progress rows** (AC-11, AC-12, AC-13, E-2): the `AssistantMessage` hook draws a reply as rows when a line of it
+has one of the forms in `task-files.md`'s "The run's progress" (`progressOf`: a bug's `HH:MM <repo>/<slug>: ...` and
+the run's own `HH:MM Quad Damage ...`), or is the summary's head or, under it, one of its `- <id>: ...` lines
+(`summedOf`). Each such line is one row: its time dim, its stage's chip, the bug's id in bold, its words as written.
+Every other line (the `kirunak-push:` line, prose, any line in a code fence) is drawn as it was, a `Markdown` of the
+lines between rows, in order; a line of no known form stays that text, never hidden or guessed at, and a reply with
+no row, or the engine's own summary (`isSummary`), goes on as it came. /k-bugs' run line (AC-12, the line `k bugs
+quad-damage --status` prints, `runRowOf`) is a row of the list's head, its chip "Quad Damage waits" (paused) while
+the run waits for the 5-hour window, else "Quad Damage runs" (started); a run line of no form stays its text.
+
+**Each choice's line, written into the call** (AC-2, AC-14, AC-17, D-1): a `tool.call` hook on `AskUserQuestion` in
+the same module gives each option of the mod's own dialogs its `description`, matched by the question's exact text
+against `kirunak.dialog`, or against a draft's parts in `kirunak.intake`; any other call goes on as it came. It
+changes nothing else: the question and the labels stay, so the answer is the label tapped (AC-18). Since the line is
+in the call, the phone, the terminal and the Desktop app all show it. Every choice has one, in its screen's own
+words, the likely one first: a bug's "<title>, fix ready, written Oct 27", Review & merge's "a fresh session reviews,
+then merges, never pushes", More "the next ones", Back "the dialog before", Cancel "nothing runs"; those three keep
+their place last.
+
+**Short list questions** (AC-23): a list's question is its head and its question alone, on one line, the page's
+range in it: "Bugs, a fix ready first, then the oldest (1 to 3 of 22): Quad Damage, or which bug?". What each row
+said (its words, its state, its date; on `/k-queue` its place first, "place 7, ...") is its choice's line, written
+once there and never in the question. What a screen says beyond its list (an item's text, a confirm's sentence)
+stays in its question. The dialog log (`dialogs.jsonl`) records the question as asked and the labels.
+
+**The board's page and the pane take the same five** (AC-8, O-2): the page's tokens (`lib/board.mjs`), each measured
+at 4.5:1 or more on its bg, card and work grounds in both themes (`test/board.test.mjs`): light done `#1b7a3a`,
+running `#806000`, n/a `#696969`, waits `#a84300`, failed `#c62828`; dark done `#6fcf8c`, running `#f2c200`, n/a
+`#9e9e9e`, waits `#e8710a`, failed `#ff8a80`. A task's state takes the dialogs' mapping (a test holds every state
+`lib/state.mjs` names to `TASK_STAGES` and `STAGES`); a verdict met is done, not met failed, needs device or owner
+waits, none n/a; a bug's fix as its chip (Quad Damage on it or in review running, a fix ready or not ready waits, no
+fix n/a); a draft waits. The words are unchanged. The terminal pane (`hooks/board.ts` `PANE_COLORS`) takes the
+theme's keys `success`, `warning`, `inactive` and `error` for done, running, n/a and failed, and `#e8710a` for waits,
+which no theme key names.
+
+**A draft agreed in one tap** (AC-15, AC-16, AC-21, E-3, D-4): Start intake in `/k-drafts` sends a prompt
+(`intakePrompt` in `hooks/drafts.ts`) whose first question holds every Proposed answer of the draft (`questionsOf`
+reads its Questions section; a Proposed that only says what is missing counts as none). `firstQuestion` writes it:
+"<id>: <title>.", "N proposed answers:", each proposal "n. question" with "Proposed: ..." under it, then "Agree to all
+N, or not?". Past 48 rows the questions go in parts, "part k of m", by the same counter: an early part asks "On to
+part k+1 of m, or not?" with Next, Not and Back (no Back on the first), the last Agree, Not and Back, so Agree is
+offered on the last part alone and no proposal is agreed unseen. The lines: Agree "all N proposals become your
+answers", Not "asks each proposal alone", Next and Back "part k of m". The prompt has the session ask each part
+exactly as written, the choices in order with their lines; the questions with no proposal follow, each asked alone.
+Start intake writes the parts to `kirunak.intake` before the prompt is sent (`showIntake`), since the model asks in a
+turn of its own, so the call hook writes their lines and the Desktop app draws the draft's head over its list; any
+answer but Next or Back, any mod dialog opening, or the next Start intake clears it, and a question in other words
+is the engine's. The k-intake skill's "Starting from a kirunak draft" says what Agree records (each proposal the
+owner's answer, sourced `[owner <date> Q-n]` to that question) and that Not asks each proposal alone. Nothing in the
+k CLI changed (D-4).
+
 ## 5. Requirements this file satisfies
 
 D5 and R16 (§1, §2), R28 (§2 the Drafts group, §4 `/k-drafts`), R29 (§2 the Bugs group and the line in `k waiting` and a new session, §4 `/k-bugs`), R34 (§2 Quad Damage's line, §4 its row in `/k-bugs` and the turn after it), R27 (§4 Drop), D10 (§2), D13 (§3), D14 (§4; the approval half in `approval.md` §5), the phone half of D7 (§4, `approval.md` §5), R30's names in `k waiting` and `/k-accept` (§4).
+The look of the mod's dialogs and rows, each choice's line and a draft agreed in one tap (§4, "The look"):
+gulnya/mobile-dialogs AC-1 to AC-16, AC-23, E-1 to E-3, D-1, D-2, D-4, O-2, held by the mod tests
+it names (AC-17 to AC-21).

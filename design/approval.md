@@ -354,7 +354,11 @@ Code 2.1.302, `types/claude-code.d.ts`, read 2026-10-18; line numbers from that 
   same class (S-7 review, finding 5): the mod's dialog is a `tool.call` of `AskUserQuestion` "through every hook but
   the calling one" (2.1.304's types, `$.ui.ask`, line 2455), so another plugin's `tool.call` hook on
   `AskUserQuestion` could answer it, with a verb's label among the answers; a loaded plugin doing so is the same
-  deliberate act, D7's class, and the same `/plugins` shows it.
+  deliberate act, D7's class, and the same `/plugins` shows it. The mod's own hooks on `AskUserQuestion`
+  (`mods/kirunak/hooks/look.tsx`, gulnya/mobile-dialogs D-1) are not of that class: its `tool.call` hook writes each
+  choice's line into the call of the mod's own dialog and passes it on with `next`, the question and the labels as
+  they came, and its `ui.render` hook draws the dialog's look; neither answers the dialog, so the answer is still
+  the label tapped, reaching only the dialog's own loop in `owner.ts` (below).
   (2) The mod must be loaded in the owner's session: installed from a folder marketplace, or named in
   `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (plugin-authoring reference.md,
   "`--plugin-dir`"); hot reloading from the dev-mods folder is for developing it. (3) The gate is a file of the loaded
@@ -413,10 +417,19 @@ mods/kirunak`, 79 of 79 at the build's end, in `mods/kirunak/tests/`):
   That is accepted, not worked around: the words are the owner's own, they name the verb and the id, and they are
   typed under the item's text, in the dialog of the owner's own command, the same gesture as the tap. Only exact
   equality counts: a case or a space apart is no choice and runs nothing (`rule.test.ts`).
-- *A dialog the model raised runs nothing.* The mod has no hook on `AskUserQuestion`, and the engine refuses a mod the
-  tool anyway (S-1: "that is $.ui.ask"). `rule.test.ts` answers a dialog the model raised with "Approve <id>", "Hold
-  <id>", "Start <id>", "Move <id> before <Y>", "Park <id>" and "Put back <id>", before and after the owner's own
-  dialog: nothing runs.
+- *A dialog the model raised runs nothing.* The engine refuses a mod the tool itself (S-1: "that is $.ui.ask"), and
+  the mod's hooks on `AskUserQuestion` answer nothing (gulnya/mobile-dialogs D-1, `hooks/look.tsx`): the `tool.call`
+  hook writes each choice's line into the call of the mod's own dialog alone, matched by the question's exact text
+  against the dialog `talk()` has open (`kirunak.dialog`) or a draft's first question (`kirunak.intake`), and passes
+  the call on with `next`, the question and the labels unchanged; it reads the answer only to clear a draft's
+  parts. The `ui.render` hook draws the look of that same dialog; its buttons (Show all, Show less, Next, Back) only
+  fold and unfold it, writing `kirunak.fold` and nothing else, and the dialog's choices stay the engine's own, below
+  the look, so a tap reaches nothing but the dialog's own loop. A dialog the model raised, even one these hooks
+  match (a draft's first question, whose Agree the session records as an answer), reaches no `Turn`, so its answer
+  runs no verb: a hook that answered a dialog would be of the class finding 5 names (above), and these do not.
+  `rule.test.ts` answers a dialog the model raised with "Approve <id>", "Hold <id>", "Start <id>", "Move <id> before
+  <Y>", "Park <id>" and "Put back <id>", before and after the owner's own dialog: nothing runs; the look's tests
+  hold that the answer is the label tapped, as before (gulnya/mobile-dialogs AC-18).
 - *Anything else is nothing.* Skip, a dismissal, a label typed where it is no choice, a blank reason, a reason
   starting with `--` (S-7 finding 8: k would take it for a flag) and Cancel run nothing, at every depth of every
   command (tested at four depths); Back shows the dialog before again; no dialog names kirunak.
@@ -537,7 +550,8 @@ that tell the session to send it with PushNotification. Best effort (amendment A
 
 ## 8. Requirements this file satisfies
 
-D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
+D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included; the look's hooks on `AskUserQuestion` that answer nothing,
+gulnya/mobile-dialogs D-1, AC-18), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
 R15 (`k accept`, with `review.md`), R30 (§4, what blocks `k accept`), R31 (§3, the `Task:` trailer and an accepted
 task), R32 (§4, what blocks `k accept` in another repo), R34 (§2, `k bugs quad-damage` is the owner's; §7, quiet
 in a fixing session).

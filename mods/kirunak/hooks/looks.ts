@@ -1,12 +1,12 @@
 import type { KirunakChip, KirunakLook, KirunakProgressRow, KirunakSection } from '../types'
 
-// The parts of the mod's look on the phone and the desktop app (gulnya/mobile-dialogs D-1, D-2), plain data, so the
+// The parts of the mod's look in the desktop app (gulnya/mobile-dialogs D-1, D-2), plain data, so the
 // render hooks (look.tsx) only lay them out and the tests reach every one without a surface: the five states, each
 // stage's state and icon, the rows a tree takes, the date words, a long text's parts, and the progress lines drawn as
 // rows.
 
 // The five states (AC-8): a fill and the ink on it. The chip carries its own ground, so the pair reads the same in
-// the phone's light and dark themes; each holds 4.5:1 or more (AC-7, AC-20; the test computes WCAG's ratio).
+// the desktop app's light and dark themes; each holds 4.5:1 or more (AC-7, AC-20; the test computes WCAG's ratio).
 export type State = 'done' | 'running' | 'na' | 'waits' | 'failed'
 export const STATES: Record<State, { fill: string; ink: string }> = {
   done: { fill: '#1b7a3a', ink: '#ffffff' },
@@ -86,7 +86,7 @@ export function iconOf(stage: string): string {
   )
 }
 
-// The rows a dialog's tree may take (AC-19): 48 on the phone, the desktop app and VS Code, counted at 40 columns, as
+// The rows a dialog's tree may take (AC-19): 48 in the desktop app and VS Code, counted at 40 columns, as
 // the engine counts them: a row a line, and one more for each 40 characters of it. Counted the same way here.
 export const COLUMNS = 40
 export const DIALOG_ROWS = 48

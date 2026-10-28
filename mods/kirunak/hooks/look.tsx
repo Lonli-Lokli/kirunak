@@ -6,7 +6,7 @@ import { BACK, NEXT } from './drafts'
 import { DIALOG_ROWS, foldLines, FREE, iconOf, messageParts, parts, rowsOf, STATES, stateOf, treeRows } from './looks'
 import type { FoldLine, ProgressRow } from './looks'
 
-// The mod's look on the phone and the desktop app (gulnya/mobile-dialogs D-1, D-2): its dialogs drawn as a head, a
+// The mod's look in the desktop app (gulnya/mobile-dialogs D-1, D-2): its dialogs drawn as a head, a
 // chip and their first lines, the rest behind Show all, and Quad Damage's progress lines drawn as rows. The terminal
 // and VS Code draw as they did, each choice's line under it alone (AC-14, AC-18).
 //
@@ -92,8 +92,8 @@ export function looks(on: On): void {
     // wrote (AC-14, AC-18); a dialog with no look draws so everywhere.
     if (q === undefined || dialog === null || dialog.look === null) return next(e)
     if (e.surface === 'terminal' || e.surface === 'vscode') return next(e)
-    // The phone and the desktop app ask its last line, the look above it showing the rest (AC-1), the choices and
-    // their lines as they came.
+    // The desktop app, and a mobile render if one is ever raised, ask its last line, the look above it showing the
+    // rest (AC-1), the choices and their lines as they came.
     const engine = await next({ ...e, props: { ...e.props, questions: [{ ...q, question: dialog.ask }, ...others] } })
     const fold = await read($, foldState)
     const open = fold !== null && fold.dialog === dialog.id ? fold.part : null
