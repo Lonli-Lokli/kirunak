@@ -40,7 +40,7 @@ import * as bugReview from '../lib/bug-review.mjs';
 import * as quadDamage from '../lib/quad-damage.mjs';
 
 const KIRUNAK = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach', 'status', 'summary']);
+const BOOLEAN = new Set(['json', 'dry-run', 'first', 'last', 'all', 'print', 'no-queue', 'no-open', 'markdown', 'brief', 'staged', 'baseline', 'once', 'watch', 'write', 'replace-agents', 'no-commit', 'detach', 'status', 'summary', 'progress']);
 
 const HELP = `k: tasks the owner approves and agents cannot rewrite.
 
@@ -93,6 +93,9 @@ Bugs      k bug new <repo>/<slug> --title "..." --quad-damage yes|no [--bug-of <
             marked quad-damage: yes, one at a time while the plan's windows allow; prints its pid, log and folder
           k bugs quad-damage --status: the run and the bug it is on | k bugs quad-damage --summary [<folder>]: the
             latest run's summary (or the folder's), and its kirunak-push line
+          k bugs quad-damage --progress [<folder>] --after <n>: waits until the run's progress has more than n lines,
+            or the run ends, and prints the new lines and a kirunak-next line, the command for the next wait; at the
+            end the summary instead, as --summary prints it (reads only)
           k intake start <id> --from kirunak/bugs/<slug>.md: Start fix, the intake takes the bug, moved to the task's
             bug.md, its records to bug/
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
@@ -164,8 +167,8 @@ async function approvalProblems(ws, id, amendmentId) {
   return out;
 }
 
-// `k bugs quad-damage`: its status, a run's summary, the run itself in the detached process its start hands the run
-// file to, or the start.
+// `k bugs quad-damage`: its status, a run's summary, the wait for its progress, the run itself in the detached process
+// its start hands the run file to, or the start.
 async function quadDamaged(ws, pos, flags) {
   if (flags.status) {
     if (pos.length) throw usage('k bugs quad-damage --status takes no argument');
@@ -178,7 +181,15 @@ async function quadDamaged(ws, pos, flags) {
     const r = quadDamage.summaryOf(ws.home, pos[0] ?? null);
     return { ...r, text: `${r.summary.trimEnd()}\nkirunak-push: ${r.push}` };
   }
-  if (pos.length) throw usage(`k bugs quad-damage takes no argument but --summary's folder: ${pos[0]}`);
+  if (flags.progress) {
+    // The session's wait for the run's next progress line (gulnya/quad-damage AC-16); it reads only.
+    if (pos.length > 1) throw usage('k bugs quad-damage --progress [<folder>] --after <n>: one folder at most');
+    const after = flags.after === undefined ? 0 : Number(flags.after);
+    if (!Number.isInteger(after) || after < 0) throw usage(`k bugs quad-damage --progress: --after takes a count of lines, not ${flags.after}`);
+    const r = await quadDamage.progressOf(ws.home, pos[0] ?? null, after);
+    return { ...r, text: quadDamage.progressText(r) };
+  }
+  if (pos.length) throw usage(`k bugs quad-damage takes no argument but the folder of --summary or --progress: ${pos[0]}`);
   const via = typeof flags.via === 'string' ? flags.via : 'shell';
   const from = Number(process.env[quadDamage.RUN_ENV]) || null;
   if (from) {
@@ -193,7 +204,7 @@ async function quadDamaged(ws, pos, flags) {
   }
   const r = quadDamage.start({ ws, via });
   return { ...r, text: [`Quad Damage runs as pid ${r.pid}`, `log: ${r.log}`, `folder: ${r.folder}`,
-    `bugs marked: ${r.bugs.join(', ')}`].join('\n') };
+    `bugs marked: ${r.bugs.join(', ')}`, `progress: ${quadDamage.progressCommand(r.folder, 0)}`].join('\n') };
 }
 
 // `k bug review <id>`: Review & merge, here or (--detach) in a process of its own whose log it names.
@@ -649,7 +660,7 @@ const VERBS = {
 
   // Every bug in every repo, those with a fix ready first, then the oldest: for /k-bugs, as an array with --json.
   // `quad-damage` starts Quad Damage, the owner's (kirunak-freeze refuses it from an agent's Bash tool but for
-  // --status and --summary, which only read).
+  // --status, --summary and --progress, which only read).
   async bugs({ ws, pos, flags }) {
     if (pos[0] === 'quad-damage') return quadDamaged(ws, pos.slice(1), flags);
     if (pos.length) throw usage(`unknown bugs verb ${pos[0]}: k bugs | k bugs quad-damage`);

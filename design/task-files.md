@@ -86,8 +86,9 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   made with O_EXCL: a second start is refused while its pid lives, naming that pid, its start and its bug (E-3), and a
   dead pid's file is taken over. The start takes the file, is refused when no bug is marked yes, and hands the file to
   a detached `k bugs quad-damage` in its own process group, printing its pid, its log and its folder
-  `$KIRUNAK_HOME/bugs/quad-damage/<started>/` (`run.log`, `state.json`, `summary.md`, and a folder a bug with each
-  fixing session's `fix-<n>.brief.md`, `fix-<n>.md` report and `fix-<n>.json` result); `--dry-run` names the bugs it
+  `$KIRUNAK_HOME/bugs/quad-damage/<started>/` (`run.log`, `progress.log`, `state.json`, `summary.md`, and a folder a
+  bug with each fixing session's `fix-<n>.brief.md`, `fix-<n>.md` report and `fix-<n>.json` result), and the command
+  that waits for its progress; `--dry-run` names the bugs it
   would take; `--via` records who started it (the mod passes `mod`, else `shell`). The run keeps the Mac awake with
   `caffeinate -i -w <pid>` on macOS (E-2), then before each bug reads the list again and takes the first marked bug it
   has not tried, in `k bugs`' order, so a bug marked during the run joins it and one whose lock another live pid holds
@@ -122,6 +123,20 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   owner's phone; `k bugs quad-damage --status` prints the run in one line (AC-12): its bug and phase and since when,
   between bugs, or waiting for the 5-hour window until when. A run killed leaves its run file to the next run's
   dead-pid takeover.
+- **The run's progress** (AC-16): `progress.log` in the run's folder holds a short line for the owner, `HH:MM <line>`,
+  at each change of the run's status: `<id>: started` once its first session passes the limits (`, fix ready, to
+  review` for a fix ready, `, try 2 from its review's findings` for a head a review refused), `<id>: fix committed
+  <sha7>`, `<id>: skipped: <why>` or `failed: <why>`, `<id>: review clean, merged <sha7> into <repo>`, `<id>: review
+  found something, try 2`, `<id>: waits: <why>`, `Quad Damage paused for the 5-hour window until HH:MM`, `Quad Damage
+  goes on`, then `Quad Damage stopped: <why>` or `Quad Damage done: n merged, m wait, k not reached`, written before
+  `summary.md`; a reason is cut to 160 characters, and no reading of the limits goes in. `run.log` also names the
+  fixing session's branch head (`bug/<slug> at <sha>, n ahead of master`) and the merge's commit. `k bugs quad-damage
+  --progress [<folder>] --after <n>` reads only: it waits, reading the file every 3 seconds, until it holds more than
+  n whole lines or the run has ended (`summary.md` written, or the run file gone, its pid dead or naming another
+  folder), then prints the new lines and `kirunak-next: <the command for the next wait>`; once the run has ended it
+  prints the lines left and then the summary as `--summary` prints it, `kirunak-push:` line and all, or, for a run
+  killed before its summary, a line saying so. The session that started the run waits on it in the background and
+  writes each line in its chat (`boards.md` §4).
 - `k bug drop <id> --why "..."` removes the bug and its folder in a commit of those paths alone, the reason in its
   message, other staged files left staged and out; a fix branch is kept and named with its head. `k bug from <id>
   [--no-commit]` moves a draft (`git mv` to `kirunak/bugs/<slug>.md`) or a task whose intake is not approved (its

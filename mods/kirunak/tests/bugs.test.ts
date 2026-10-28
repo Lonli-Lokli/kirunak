@@ -171,16 +171,18 @@ describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, E-3, E-4, D-1)
     expect([w.quadReads, w.runs]).toEqual([2, []])
   })
 
-  test('its tap runs k bugs quad-damage --via mod, the owner\'s verb, and answers that the run started and how many marked bugs wait; then a turn waits for its pid and prints and pushes its summary (AC-1, AC-13)', async ($, on) => {
+  test('its tap runs k bugs quad-damage --via mod, the owner\'s verb, and answers that the run started and how many marked bugs wait; then a turn waits for its progress lines and writes them, then prints and pushes its summary (AC-1, AC-13, AC-16)', async ($, on) => {
     const w = world(on, { bugs: [MARKED], taps: ['Quad Damage'], verb: { exitCode: 0, stdout: STARTED, stderr: '' } })
-    expect(await run($)).toBe(`Quad Damage started with 2 marked bugs waiting: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.\n/k-bugs, \`k waiting\` and the board show the bug it is on; when it ends, its summary is written here and sent to your phone.\n\n${STARTED.trim()}`)
+    expect(await run($)).toBe(`Quad Damage started with 2 marked bugs waiting: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.\n/k-bugs, \`k waiting\` and the board show the bug it is on; each step it takes is written here as a short line, and when it ends, its summary is written here and sent to your phone.\n\n${STARTED.trim()}`)
     expect(verbs(w.runs)).toEqual([['bugs', 'quad-damage', '--via', 'mod']])
     expect(w.submitted).toEqual([])
     await w.clock.advance(10)
     expect(w.submitted.map(x => x.origin)).toEqual([{ kind: 'plugin', name: 'kirunak' }])
     const turn = w.submitted[0]?.text ?? ''
-    expect(turn).toContain('`while kill -0 5150 2>/dev/null; do sleep 60; done; k bugs quad-damage --summary /h/bugs/quad-damage/2026-11-07-2340`')
+    expect(turn).toContain('`k bugs quad-damage --progress /h/bugs/quad-damage/2026-11-07-2340 --after 0` with Bash in the background (run_in_background)')
+    expect(turn).toContain('then run the command after `kirunak-next:` the same way')
     expect(turn).toContain('send the text after `kirunak-push:` with PushNotification, exactly as written')
+    expect(turn).not.toContain('kill -0')
     expect(turn).not.toContain('k run stopped for the owner')
   })
 

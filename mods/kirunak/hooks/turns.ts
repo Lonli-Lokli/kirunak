@@ -7,8 +7,9 @@ import { reason } from './commands'
 // what to do now. The verb itself runs only on the owner's gesture (owner.ts); a turn runs no verb, and tells the
 // session never to run one.
 // - Review & merge k took (AC-11): say the review started, wait for its process in the background, then say its result.
-// - Quad Damage k took (gulnya/quad-damage AC-1, AC-13): say the run started, wait for its process in the background,
-//   then print its summary, one line a bug, and send its push line to the owner's phone.
+// - Quad Damage k took (gulnya/quad-damage AC-1, AC-13, AC-16): say the run started, wait in the background for each
+//   line of its progress and write it, then print its summary, one line a bug, and send its push line to the owner's
+//   phone.
 // - /k-start k took (AC-12), picked or typed: start work on the task, from where its progress left off.
 // - /k-approve (a task or an amendment), /k-accept and /k-resume on this session's task or one whose intake it ran
 //   (AC-13, AC-14): what the owner did and the work that waited, or what failed, with kirunak's reason, and the work
@@ -120,24 +121,26 @@ function reviewPrompt(id: string, said: string): string {
 }
 
 // Quad Damage k took: k's answer names the run's pid, its log, its folder and the bugs marked (`Quad Damage runs as pid
-// <n>`, `log: <path>`, `folder: <path>`, `bugs marked: <ids>`). The session waits for the process in one background
-// command, never polling, that then prints the run's summary with `k bugs quad-damage --summary <folder>`: one line a
-// bug, and last a `kirunak-push:` line whose text, the summary cut to a push and starting "Quad Damage", the session
-// sends with PushNotification as it is (AC-13). An answer without the pid leaves the summary to the owner's own read.
+// <n>`, `log: <path>`, `folder: <path>`, `bugs marked: <ids>`). The session waits in one background command at a time,
+// never polling, `k bugs quad-damage --progress <folder> --after <n>`, which ends at the run's next progress lines
+// (AC-16): it writes them as they are and starts the wait their `kirunak-next:` line names. The last wait prints the
+// summary instead, one line a bug, and a `kirunak-push:` line whose text, the summary cut to a push and starting "Quad
+// Damage", the session sends with PushNotification as it is (AC-13). An answer without the folder leaves the run to
+// the owner's own read.
 const QUAD = /Quad Damage runs as pid (\d+)/
 function quadDamagePrompt(said: string): string {
   const head = 'The owner tapped Quad Damage in /k-bugs, and kirunak started the run'
-  const never = 'Never run `k bugs quad-damage` yourself without --status or --summary, nor `k bug review`.'
+  const never = 'Never run `k bugs quad-damage` yourself without --status, --summary or --progress, nor `k bug review`.'
   const pid = QUAD.exec(said)?.[1]
   const line = (name: string): string | undefined => new RegExp(`^${name}: (.+)$`, 'm').exec(said)?.[1]?.trim()
   const [log, folder, marked] = [line('log'), line('folder'), line('bugs marked')]
-  if (pid === undefined || folder === undefined) {
+  if (folder === undefined) {
     return `${head}: ${said}\nSay in one line that Quad Damage started, and that \`k bugs quad-damage --status\` shows where it is and \`k bugs quad-damage --summary\` its summary once it ends. ${never}`
   }
   const bugs = marked ? marked.split(', ').filter(Boolean) : []
   return [
-    `${head} as pid ${pid}${log ? `, its log at ${log}` : ''}: it fixes and reviews the ${bugs.length === 1 ? 'marked bug' : 'marked bugs'}${bugs.length ? ` (${bugs.join(', ')})` : ''} one at a time, unattended, and pushes nothing.`,
-    `Say in one line that Quad Damage started${bugs.length ? `, with ${bugs.length} marked ${bugs.length === 1 ? 'bug' : 'bugs'} waiting` : ', and how many marked bugs wait'}. Then run this one command with Bash in the background (run_in_background), and do not poll it or sleep: \`while kill -0 ${pid} 2>/dev/null; do sleep 60; done; k bugs quad-damage --summary ${sh(folder)}\``,
-    'When it ends, write to the owner the summary it printed, its lines as they are, one line a bug, without its `kirunak-push:` line. Then send the text after `kirunak-push:` with PushNotification, exactly as written. ' + never,
+    `${head}${pid === undefined ? '' : ` as pid ${pid}`}${log ? `, its log at ${log}` : ''}: it fixes and reviews the ${bugs.length === 1 ? 'marked bug' : 'marked bugs'}${bugs.length ? ` (${bugs.join(', ')})` : ''} one at a time, unattended, and pushes nothing.`,
+    `Say in one line that Quad Damage started${bugs.length ? `, with ${bugs.length} marked ${bugs.length === 1 ? 'bug' : 'bugs'} waiting` : ', and how many marked bugs wait'}. Then run \`k bugs quad-damage --progress ${sh(folder)} --after 0\` with Bash in the background (run_in_background), and do not poll it or sleep.`,
+    'Each time it ends, write to the owner the lines it printed exactly as they are, adding nothing, without its `kirunak-next:` line; then run the command after `kirunak-next:` the same way. When it prints no `kirunak-next:` line, the run has ended: write its summary lines as they are, without its `kirunak-push:` line, then send the text after `kirunak-push:` with PushNotification, exactly as written. ' + never,
   ].join('\n')
 }

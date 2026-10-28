@@ -197,7 +197,7 @@ export function quadDamageStarted(said: string): string {
   const marked = /^bugs marked: (.+)$/m.exec(said)?.[1]?.split(', ').filter(Boolean).length ?? 0
   return [
     `Quad Damage started${marked ? ` with ${plural(marked, 'marked bug')} waiting` : ''}: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.`,
-    '/k-bugs, `k waiting` and the board show the bug it is on; when it ends, its summary is written here and sent to your phone.',
+    '/k-bugs, `k waiting` and the board show the bug it is on; each step it takes is written here as a short line, and when it ends, its summary is written here and sent to your phone.',
     ...(said.trim() ? ['', said.trim()] : []),
   ].join('\n')
 }

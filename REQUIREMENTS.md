@@ -151,7 +151,11 @@ validation, archives) then go unused, and what the owner needs is not in it:
   Review & merge, Start fix and Drop on the bug a run works on, until it moves on (E-4). While it runs, `k waiting`,
   the board and `/k-bugs` say so and name its bug, or that it waits for the 5-hour window and until when (AC-12). At
   its end one line a bug (merged with its commit, waits and why, or not reached) is written in the console of the
-  session that started it and sent as a notification to the owner's phone (AC-13).
+  session that started it and sent as a notification to the owner's phone (AC-13). While it runs, that session
+  writes one short line in its chat at each change of the run's status: a bug started; its fix committed, with the
+  commit; skipped or failed and why; its review clean and merged, with the merge's commit, or with findings and the
+  retry started; a bug left waiting and why; a pause for the 5-hour window until when, and the run going on; a stop
+  and why. The readings of the limits are not shown (AC-16).
 
 ### The task is frozen
 - R5 On approval, the task's file is frozen: its goal, numbered acceptance criteria (AC-1, AC-2, ...), numbered edge

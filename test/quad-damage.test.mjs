@@ -7,7 +7,8 @@ import { lock } from '../lib/bug-review.mjs';
 import { checkBugText, drop, fixLine, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { start as intakeStart } from '../lib/intake.mjs';
 import {
-  claim, FIX_ENV, keepAwake, preview, pushLine, release, run, runsDir, start, state, statusLine, summaryOf, summaryText, workBug,
+  claim, FIX_ENV, keepAwake, preview, progressCommand, progressOf, progressText, pushLine, release, run, runsDir, start, state, statusLine,
+  summaryOf, summaryText, workBug,
 } from '../lib/quad-damage.mjs';
 import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
 
@@ -80,6 +81,9 @@ function seams(readings = []) {
 const writeRun = (home, run) => put(quadDamagePath(home), JSON.stringify(run) + '\n');
 const writeLock = (home, id, pid) => put(reviewLockPath(home, id), JSON.stringify({ pid, started: '2026-10-27T22:00:00.000Z' }) + '\n');
 const summaryFile = (r) => readFileSync(join(r.folder, 'summary.md'), 'utf8');
+const progressFile = (folder) => readFileSync(join(folder, 'progress.log'), 'utf8');
+// progress.log's lines without their HH:MM (AC-16).
+const progressLines = (folder) => progressFile(folder).trimEnd().split('\n').map((l) => l.replace(/^\d\d:\d\d /, ''));
 
 test('run: the marked bugs in the list\'s order, the work\'s outcome, the lock and the run file let go', async () => {
   const w = await qdWorkspace();
@@ -97,6 +101,9 @@ test('run: the marked bugs in the list\'s order, the work\'s outcome, the lock a
   assert.equal(reviewing(w.home, 'hub/a'), null);
   assert.equal(existsSync(reviewLockPath(w.home, 'hub/a')), false);
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /^23:40:05 Quad Damage runs: pid \d+, via shell\n23:40:05 hub\/a: taken\n/);
+  // The stub starts no session, so neither bug has a started line (AC-16).
+  assert.equal(progressFile(r.folder), '23:40 hub/a: waits: a stub\n23:40 hub/c: waits: a stub\n' +
+    '23:40 Quad Damage done: 0 merged, 2 wait, 0 not reached\n', 'AC-16');
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'state.json'), 'utf8')).bugs.length, 2);
   const e = events(w.home).at(-1);
   assert.deepEqual({ ...e, time: null }, { time: null, kind: 'quad-damage', via: 'shell', folder: r.folder, merged: 0, waits: 2, notReached: 0, stopped: null });
@@ -139,12 +146,19 @@ test('run: the 5-hour window at 90% pauses until its reset and a minute, then th
   const logged = readFileSync(join(w.root, 'limits.log'), 'utf8').trim().split('\n').map((l) => l.split('\t').slice(1));
   assert.deepEqual(logged, [['50', '91', 'quad-damage'], ['50', '5', 'quad-damage'], ['60', '10', 'quad-damage']]);
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: the 5-hour window is at 91%: waiting until 01:15 and a minute/);
+  assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: merged abcdef123456 into hub\n/);
+  // AC-16: the pause and its end, the merges and the end in progress.log, and never a reading of the limits.
+  // The bug starts once the window lets its first session go.
+  assert.equal(progressFile(r.folder), '23:40 Quad Damage paused for the 5-hour window until 01:15\n' +
+    '01:16 Quad Damage goes on\n01:16 hub/a: started\n01:16 hub/a: review clean, merged abcdef1 into hub\n01:16 hub/c: started\n' +
+    '01:16 hub/c: review clean, merged cbcdef1 into hub\n01:16 Quad Damage done: 2 merged, 0 wait, 0 not reached\n');
+  assert.doesNotMatch(progressFile(r.folder), /%|limits/);
 });
 
 test('run: the week at 98%, extra usage or a failed reading stops it, the bugs left not reached (AC-10)', async () => {
   const cases = [
-    [[reading(10, 98)], "the week's limit is at 98%"],
-    [[reading(10, 97.99), reading(10, 98.5)], "the week's limit is at 98%"],
+    [[reading(10, 98)], "the week's limit reached 98%"],
+    [[reading(10, 97.99), reading(10, 98.5)], "the week's limit reached 98%"],
     [[reading(10, 50, { overage: true })], 'the plan is in extra usage'],
     [[{ error: 'the turn carried no rate_limit_event' }], 'the limits reading failed: the turn carried no rate_limit_event'],
     [[{ fiveHour: null }], 'the limits reading failed: it gave no windows'],
@@ -165,11 +179,29 @@ test('run: the week at 98%, extra usage or a failed reading stops it, the bugs l
       (merged ? "- hub/a: merged 1234567 into hub's master\n- hub/c: not reached\n" : '- hub/a: not reached\n- hub/c: not reached\n'), why);
     assert.equal(state(w.home), null);
     assert.equal(reviewing(w.home, 'hub/a'), null);
+    assert.equal(progressLines(r.folder).at(-1), `Quad Damage stopped: ${why}`, `AC-16: ${why}`);
+    assert.doesNotMatch(progressFile(r.folder), /limits:|5-hour/);
+    // A bug the limits stop before its first session never started (AC-16).
+    assert.doesNotMatch(progressFile(r.folder), merged ? /hub\/c: started/ : /started/, `AC-16: ${why}`);
   }
   // A runner with no reading stops it as well.
   const w = await qdWorkspace();
   const r = await run({ ws: w.ws, ...seams(), runner: {}, work: async (ctx) => ctx.beforeSession() });
   assert.equal(r.stopped, 'the limits reading failed: the runner has no limits reading');
+});
+
+test('run: a bug\'s started line says a fix ready goes to review, and a retry first says its try (AC-16)', async () => {
+  const w = await qdWorkspace();
+  const phases = { 'hub/a': ['reviewing', 1], 'hub/c': ['fixing', 2] };
+  const work = async (ctx) => {
+    ctx.setPhase(...phases[ctx.bug.id]);
+    await ctx.beforeSession();
+    await ctx.beforeSession();
+    return { outcome: 'waits', why: 'a stub' };
+  };
+  const r = await run({ ws: w.ws, ...seams([reading(10, 50), reading(10, 50), reading(10, 50), reading(10, 50)]), work });
+  assert.deepEqual(progressLines(r.folder), ['hub/a: started, fix ready, to review', 'hub/a: waits: a stub',
+    "hub/c: started, try 2 from its review's findings", 'hub/c: waits: a stub', 'Quad Damage done: 0 merged, 2 wait, 0 not reached']);
 });
 
 test('run: the work\'s stop ends the run; its outcome is kept; a work that throws leaves its bug waiting', async () => {
@@ -304,10 +336,10 @@ test('summary: its shapes, the push line, and --summary of the latest run or a f
     { id: 'hub/b', outcome: 'waits', why: 'the review found two things twice' },
     { id: 'hub/c', outcome: 'not-reached' },
   ];
-  const text = summaryText({ started: '2026-10-27T23:40:05+00:00', ended: '2026-10-28T03:02:00+00:00', bugs, stopped: "the week's limit is at 98%" });
-  assert.equal(text, "Quad Damage, 23:40 to 03:02: 1 merged, 1 wait, 1 not reached; stopped: the week's limit is at 98%\n" +
+  const text = summaryText({ started: '2026-10-27T23:40:05+00:00', ended: '2026-10-28T03:02:00+00:00', bugs, stopped: "the week's limit reached 98%" });
+  assert.equal(text, "Quad Damage, 23:40 to 03:02: 1 merged, 1 wait, 1 not reached; stopped: the week's limit reached 98%\n" +
     "- hub/a: merged 0123456 into kirunak's master\n- hub/b: waits: the review found two things twice\n- hub/c: not reached\n");
-  assert.equal(pushLine(text), "Quad Damage, 23:40 to 03:02: 1 merged, 1 wait, 1 not reached; stopped: the week's limit is at 98%. " +
+  assert.equal(pushLine(text), "Quad Damage, 23:40 to 03:02: 1 merged, 1 wait, 1 not reached; stopped: the week's limit reached 98%. " +
     'hub/a merged; hub/b waits: the review found two things twice; hub/c not reached');
   const many = summaryText({ started: 'T', ended: 'T', bugs: Array.from({ length: 20 }, (_, i) => ({ id: `hub/bug-${i}`, outcome: 'waits', why: 'a reason long enough to be cut in the push line' })) });
   const push = pushLine(many);
@@ -333,6 +365,63 @@ test('summary: its shapes, the push line, and --summary of the latest run or a f
   mkdirSync(join(runsDir(w.home), '2026-10-29T08-00-00'));
   writeRun(w.home, { pid: OTHER, started: 'S', folder: join(runsDir(w.home), '2026-10-29T08-00-00') });
   assert.throws(() => summaryOf(w.home), /no Quad Damage summary in .*2026-10-29T08-00-00: its run goes on \(pid \d+\), and k bugs quad-damage --status shows it/);
+});
+
+test('progress: --progress prints the lines after n at once, waits for the next, and at the end prints the summary as --summary does (AC-16)', async () => {
+  assert.equal(progressCommand('/h/bugs/quad-damage/2026-10-27T23-40-05', 4), 'k bugs quad-damage --progress /h/bugs/quad-damage/2026-10-27T23-40-05 --after 4');
+  assert.equal(progressCommand("/h/a folder/it's", 0), "k bugs quad-damage --progress '/h/a folder/it'\\''s' --after 0");
+
+  // A run that goes on: the whole lines after n, and the command for the next wait.
+  const w = await qdWorkspace();
+  const folder = join(runsDir(w.home), '2026-10-28T09-00-00');
+  put(join(folder, 'progress.log'), '09:00 hub/a: started\n09:04 hub/a: fix committed 1234567\n09:05 hub/a: rev');
+  writeRun(w.home, { pid: process.pid, started: '2026-10-28T09:00:00', folder });
+  const now = await progressOf(w.home, folder, 0, { sleep: async () => assert.fail('no wait: two lines are there') });
+  assert.deepEqual(now, { folder, after: 2, lines: ['09:00 hub/a: started', '09:04 hub/a: fix committed 1234567'], ended: false,
+    next: progressCommand(folder, 2), summary: null, push: null });
+  assert.equal(progressText(now), `09:00 hub/a: started\n09:04 hub/a: fix committed 1234567\nkirunak-next: ${progressCommand(folder, 2)}`);
+  assert.equal((await progressOf(w.home, null, 1)).lines[0], '09:04 hub/a: fix committed 1234567', 'the latest run with no folder named');
+
+  // Nothing new yet: it reads again every poll until a whole line comes.
+  const slept = [];
+  const waited = await progressOf(w.home, folder, 2, { poll: 7, sleep: async (ms) => {
+    slept.push(ms);
+    if (slept.length === 2) put(join(folder, 'progress.log'), `${progressFile(folder)}iew found something, try 2\n`);
+  } });
+  assert.deepEqual(slept, [7, 7]);
+  assert.deepEqual([waited.lines, waited.next], [['09:05 hub/a: review found something, try 2'], progressCommand(folder, 3)]);
+
+  // The run ends while it waits: its last lines, then its summary and push line.
+  const summary = "Quad Damage, 09:00 to 09:40: 1 merged, 0 wait, 0 not reached\n- hub/a: merged 7654321 into hub's master\n";
+  const ended = await progressOf(w.home, folder, 3, { poll: 1, sleep: async () => {
+    put(join(folder, 'progress.log'), `${progressFile(folder)}09:40 hub/a: review clean, merged 7654321 into hub\n09:40 Quad Damage done: 1 merged, 0 wait, 0 not reached\n`);
+    put(join(folder, 'summary.md'), summary);
+  } });
+  assert.equal(ended.ended, true);
+  assert.equal(ended.next, null);
+  assert.equal(progressText(ended), '09:40 hub/a: review clean, merged 7654321 into hub\n09:40 Quad Damage done: 1 merged, 0 wait, 0 not reached\n' +
+    `${summary}kirunak-push: ${pushLine(summary)}`);
+  // The k verb, as the session runs it: the summary just as --summary prints it.
+  const out = k(w.home, ['bugs', 'quad-damage', '--progress', folder, '--after', '5']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.stdout, k(w.home, ['bugs', 'quad-damage', '--summary', folder]).stdout);
+  assert.equal(k(w.home, ['bugs', 'quad-damage', '--progress', folder, '--after', '4']).stdout.split('\n')[0], '09:40 Quad Damage done: 1 merged, 0 wait, 0 not reached');
+
+  // A run killed before its summary, or a run file that names another run: it ends at once and says so.
+  const killed = join(runsDir(w.home), '2026-10-28T10-00-00');
+  put(join(killed, 'progress.log'), '10:00 hub/c: started\n');
+  writeRun(w.home, { pid: process.pid, started: '2026-10-28T10:00:00', folder });
+  const other = await progressOf(w.home, killed, 1, { sleep: async () => assert.fail('no wait: another run holds the run file') });
+  assert.deepEqual([other.ended, other.lines, other.summary], [true, [], null]);
+  writeRun(w.home, { pid: DEAD, started: '2026-10-28T10:00:00', folder: killed });
+  const gone = await progressOf(w.home, killed, 0, { sleep: async () => assert.fail('no wait: its pid is dead') });
+  assert.equal(progressText(gone), `10:00 hub/c: started\nQuad Damage ended with no summary: its process is gone; ${join(killed, 'run.log')} shows how far it got\n` +
+    'kirunak-push: Quad Damage ended with no summary: its process is gone');
+
+  await assert.rejects(progressOf(w.home, 'nowhere'), /no Quad Damage run in .*nowhere/);
+  for (const args of [['--after', 'x'], ['--after', '-1'], ['--after', '1.5'], [folder, killed, '--after', '0']]) {
+    assert.equal(k(w.home, ['bugs', 'quad-damage', '--progress', ...args]).status, 2, args.join(' '));
+  }
 });
 
 test('k bugs quad-damage: refused with no marked bug; else a detached run that really works its bug, its pid, log and folder', async () => {
@@ -367,6 +456,11 @@ test('k bugs quad-damage: refused with no marked bug; else a detached run that r
   assert.match(log, new RegExp(`Quad Damage runs: pid ${out.pid}, via mod`));
   assert.deepEqual(readdirSync(runsDir(w.home)), [out.folder.split('/').pop()]);
   assert.equal(k(w.home, ['bugs', 'quad-damage', 'x']).status, 2);
+  // AC-16: its progress, and the session's wait on it, which ends at once with the summary.
+  assert.match(progressFile(out.folder), /^\d\d:\d\d hub\/c: started\n\d\d:\d\d hub\/c: fix committed [0-9a-f]{7}\n\d\d:\d\d hub\/c: review clean, merged [0-9a-f]{7} into hub\n\d\d:\d\d Quad Damage done: 1 merged, 0 wait, 0 not reached\n$/);
+  const waited = k(w.home, ['bugs', 'quad-damage', '--progress', out.folder, '--after', '0']);
+  assert.equal(waited.status, 0, waited.stderr);
+  assert.equal(waited.stdout, `${progressFile(out.folder)}${k(w.home, ['bugs', 'quad-damage', '--summary']).stdout}`);
 });
 
 test('keepAwake: caffeinate -i -w on macOS, nothing elsewhere (E-2)', () => {
@@ -443,7 +537,11 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.equal(summaryFile(r).split('\n')[1], `- hub/a: merged ${r.bugs[0].sha.slice(0, 7)} into hub's master`);
   const log = readFileSync(join(r.folder, 'run.log'), 'utf8');
   assert.match(log, /hub\/a: fixing, try 1: session \S+ in /);
-  assert.match(log, /hub\/a: fixing, try 1: 3 tool calls, exit 0\n/);
+  const head = /hub\/a: fixing, try 1: 3 tool calls, exit 0; bug\/a at ([0-9a-f]{12}), 1 ahead of master\n/.exec(log)?.[1];
+  assert.ok(head, log);
+  assert.match(log, new RegExp(`hub/a: merged ${r.bugs[0].sha.slice(0, 12)} into hub\n`));
+  assert.deepEqual(progressLines(r.folder), ['hub/a: started', `hub/a: fix committed ${head.slice(0, 7)}`,
+    `hub/a: review clean, merged ${r.bugs[0].sha.slice(0, 7)} into hub`, 'Quad Damage done: 1 merged, 0 wait, 0 not reached'], 'AC-16');
   assert.match(log, /hub\/a: review: merged, kirunak\/bugs\/a\/review-1\.md\n/);
   assert.deepEqual(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).calls, 3);
   assert.equal(existsSync(reviewLockPath(w.home, 'hub/a')), false);
@@ -470,6 +568,12 @@ test('skipped: the mark set to no, the reason under What was found, the bug file
   assert.equal(gitIn(w.hubRoot, 'status', '--porcelain'), '?? notes.txt');
   assert.equal(list(w.ws).find((b) => b.id === 'hub/a').quadDamage, false);
   assert.equal(reviewsRun(w).length, 0, 'no review after SKIPPED, FAILED or FIXED with nothing ahead');
+  assert.deepEqual(progressLines(r.folder), [
+    'hub/a: started', 'hub/a: skipped: the fix needs the owner\'s choice (of the hour)',
+    'hub/b: started', 'hub/b: failed: the test cannot see the cache',
+    'hub/c: started', 'hub/c: waits: its report says FIXED, but bug/c in hub has no commit ahead of master at a head no review refused',
+    'Quad Damage done: 0 merged, 3 wait, 0 not reached',
+  ], 'AC-16');
 });
 
 test('findings, then the retry from them, then clean: merged; the retry\'s brief names the review and its head (AC-7)', async () => {
@@ -483,6 +587,11 @@ test('findings, then the retry from them, then clean: merged; the retry\'s brief
   assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: as the forecast\n');
   assert.equal(reviewsRun(w).length, 2);
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a')), false, 'closed with its reviews');
+  const said = progressLines(r.folder);
+  assert.deepEqual(said.map((l) => l.replace(/\b[0-9a-f]{7}\b/, '<sha>')), ['hub/a: started', 'hub/a: fix committed <sha>',
+    'hub/a: review found something, try 2', 'hub/a: fix committed <sha>', 'hub/a: review clean, merged <sha> into hub',
+    'Quad Damage done: 1 merged, 0 wait, 0 not reached'], 'AC-16');
+  assert.notEqual(said[1], said[3], 'the retry\'s own commit');
 });
 
 test('findings twice: the bug waits with both reviews and the run goes on; a conflict merges nothing (E-5)', async () => {
@@ -552,6 +661,7 @@ test('a fix ready goes straight to review (E-1); a head a review refused takes i
   assert.deepEqual(w.runner.steps.map((s) => (s.env[FIX_ENV] ? `fix ${s.env[FIX_ENV]}` : `review ${s.env.KIRUNAK_BUG_REVIEW}`)), ['review hub/a', 'fix hub/c', 'review hub/c']);
   assert.match(fixes(w)[0].brief, /^# Quad Damage: the bug hub\/c, try 2$/m);
   assert.ok(fixes(w)[0].brief.includes(`kirunak/bugs/c/review-1.md (${join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md')}) judged the head ${headC} of bug/c`));
+  assert.deepEqual(progressLines(r.folder).slice(0, 2), ['hub/a: started, fix ready, to review', `hub/a: review clean, merged ${r.bugs[0].sha.slice(0, 7)} into hub`], 'AC-16');
 });
 
 test('a fix in another repo than the bug\'s: run there with the bug\'s repo added, merged there, the bug closed in its own (E-6)', async () => {
