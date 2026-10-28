@@ -67,7 +67,7 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     expect(w.runs).toEqual([])
   })
 
-  test('Start intake reads the drafts again and submits a prompt of its own that names the draft, the k-intake skill and k intake start; it runs no verb', async ($, on) => {
+  test('Start intake reads the drafts again and submits a prompt of its own that names the draft, the k-intake skill and k intake start, and a draft that proposes no answer each question to ask alone; it runs no verb', async ($, on) => {
     const w = world(on, { taps: ['hub/offline-maps', 'Start intake'] })
     expect(await run($)).toBe('The intake from hub/offline-maps starts next in this session, with the k-intake skill.')
     // Submitted once the command answered: the engine refuses a submit from inside its hook.
@@ -75,7 +75,7 @@ describe('/k-drafts (kirunak-drafts AC-2, AC-7, E-3)', () => {
     await w.clock.advance(10)
     expect(w.toasts).toEqual([])
     expect(w.submitted).toEqual([{
-      text: 'The owner tapped Start intake on the draft hub/offline-maps in /k-drafts. Start the intake from it now: first load the k-intake skill with the Skill tool (skill "k-intake"), then follow it from this draft: run `k intake start hub/offline-maps --from kirunak/drafts/offline-maps.md`, that moves the draft to kirunak/tasks/offline-maps/draft.md, read it there (it is at /w/hub/kirunak/drafts/offline-maps.md until then) as background, and ask the owner every line of the task as the skill says, one question at a time.',
+      text: 'The owner tapped Start intake on the draft hub/offline-maps in /k-drafts. Start the intake from it now: first load the k-intake skill with the Skill tool (skill "k-intake"), then follow its "Starting from a kirunak draft": run `k intake start hub/offline-maps --from kirunak/drafts/offline-maps.md`, that moves the draft to kirunak/tasks/offline-maps/draft.md, read it there (it is at /w/hub/kirunak/drafts/offline-maps.md until then) as background, and ask the owner every line of the task as the skill says, one question at a time.\n\nThe draft proposes no answer, so ask each of its questions alone:\n1. Which areas are kept?\n2. How old may a tile be?',
       origin: { kind: 'plugin', name: 'kirunak' },
     }])
     expect([w.draftReads, w.runs]).toEqual([2, []])
