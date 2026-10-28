@@ -58,7 +58,8 @@ async function turnText($: EngineInterface, { name, k, argv, tapped, ok, said }:
   if (argv.includes('--dry-run')) return null
   const [verb, id = ''] = argv
   if (verb === 'bug') return argv[1] === 'review' && ok ? reviewPrompt(argv[2] ?? '', said) : null
-  if (verb === 'bugs') return argv[1] === 'quad-damage' && ok ? quadDamagePrompt(said) : null
+  // Stop Quad Damage hands the model nothing: the run's own session writes its summary (AC-17).
+  if (verb === 'bugs') return argv[1] === 'quad-damage' && !argv.includes('--stop') && ok ? quadDamagePrompt(said) : null
   if (verb === 'start') return ok ? startPrompt(id, tapped) : null
   if (verb !== 'approve' && verb !== 'accept' && verb !== 'resume') return null
   if (!(await mine($, k, id))) return null

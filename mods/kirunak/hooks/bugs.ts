@@ -13,7 +13,9 @@ import type { Screen } from './owner'
 // Quad Damage (gulnya/quad-damage AC-1, AC-12, E-4, D-1): the list's first row while a bug marked `quad-damage: yes`
 // waits and no run lives runs `k bugs quad-damage --via mod`, the owner's verb, which fixes and reviews the marked bugs
 // one at a time, unattended; while a run lives, its line (`k bugs quad-damage --status`) instead, and the bug it is on
-// says so, with no Review & merge, Start fix or Drop until the run moves on.
+// says so, with no Review & merge, Start fix or Drop until the run moves on. While a run lives, Stop Quad Damage is the
+// list's first row (AC-17): one confirm, naming the bug it is on or its wait and what a stop does, then `k bugs
+// quad-damage --stop --via mod`, the owner's verb.
 
 // A bug as `k bugs --json` gives it (lib/bugs.mjs): `written` null when no date is written, `bugOf` the accepted task
 // it was found in, `fixRepo` the repo its fix branch is in, `branch` null when that branch does not exist, `ahead` the
@@ -39,9 +41,9 @@ export type BugRow = {
   quadDamageRun: QuadDamagePhase | null
   path: string
 }
-export type QuadDamagePhase = { phase: 'fixing' | 'reviewing' | 'waiting' | null; try: number | null; since: string | null; waitUntil: string | null }
+export type QuadDamagePhase = { phase: 'fixing' | 'reviewing' | 'merging' | 'waiting' | null; try: number | null; since: string | null; waitUntil: string | null }
 // What `k bugs quad-damage --status --json` gives: the live run's file, null when none lives, and its line.
-export type QuadDamageStatus = { run: { pid: number; bug: string | null } | null; line: string }
+export type QuadDamageStatus = { run: { pid: number; bug: string | null; phase?: QuadDamagePhase['phase']; waitUntil?: string | null } | null; line: string }
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`)
@@ -136,12 +138,40 @@ const quadDamageRow = (marked: number) => ({
   verb: ['bugs', 'quad-damage', '--via', 'mod'],
 })
 
+// What Stop Quad Damage does, said in its confirm: the run's line, then what ends at once and what is let finish.
+function stopLines(live: QuadDamageStatus): string[] {
+  const r = live.run
+  const bug = r?.bug ?? null
+  const what = !bug
+    ? 'Stop Quad Damage ends the run before it takes another bug; the bugs left are not reached.'
+    : r?.phase === 'waiting'
+      ? `Stop Quad Damage ends its wait for the 5-hour window at once; ${bug} waits, and the bugs left are not reached.`
+      : r?.phase === 'merging'
+        ? `The merge of ${bug} is under way and is let finish; then the run ends, and the bugs left are not reached.`
+        : `Stop Quad Damage ends the session it runs for ${bug} at once; a merge already under way is let finish. Then ${bug} waits with what its branch holds, and the bugs left are not reached.`
+  return [sentence(live.line), '', what, 'Nothing is pushed. Its summary follows in the chat that started the run, and goes to your phone.']
+}
+
+// Stop Quad Damage as the list's first row while a run lives, and its one confirm, with Cancel.
+const stopRow = (live: QuadDamageStatus) => ({
+  item: { lead: '', name: 'Stop Quad Damage', text: ': end the run now, the bug it is on left waiting' },
+  label: 'Stop Quad Damage',
+  open: (): Screen => ({
+    kind: 'item',
+    header: 'Bugs',
+    text: stopLines(live),
+    choices: [{ label: 'Stop Quad Damage', verb: ['bugs', 'quad-damage', '--stop', '--via', 'mod'] }],
+    question: 'Stop Quad Damage now?',
+    cancel: true,
+  }),
+})
+
 // The dialog: the bugs, three a page with More; the one picked whole, with Review & merge (a verb, the last tap) when
 // its fix is ready, Start fix (which ends the dialog with its id) and Drop; Drop's reason, then "Drop <id>" under it.
 // What the owner reads to choose is in the dialog's own text, since on the phone the dialog covers the text above it:
 // under a ready fix's bug, what Review & merge does. `files` holds each bug's file by path; one missing could not be
-// read. `run`, Quad Damage's status: while a run lives, its line above the list and, on the bug it is on, no choice
-// but Back and Cancel (E-4); while none lives, its row first when a marked bug waits.
+// read. `run`, Quad Damage's status: while a run lives, its line above the list, Stop Quad Damage first and, on the bug
+// it is on, no choice but Back and Cancel (E-4); while none lives, its row first when a marked bug waits.
 export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>, run: QuadDamageStatus | null = null): Screen {
   const confirm = (b: BugRow, why: string): Screen => ({
     kind: 'item',
@@ -186,8 +216,8 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
     header: 'Bugs',
     ...(live ? { text: [sentence(live.line)] } : {}),
     head: 'Bugs, a fix ready first, then the oldest:',
-    question: !live && marked ? 'Quad Damage, or which bug?' : 'Which bug?',
-    rows: !live && marked ? [quadDamageRow(marked), ...bugRows] : bugRows,
+    question: live ? 'Stop Quad Damage, or which bug?' : marked ? 'Quad Damage, or which bug?' : 'Which bug?',
+    rows: live ? [stopRow(live), ...bugRows] : marked ? [quadDamageRow(marked), ...bugRows] : bugRows,
   }
 }
 
@@ -198,6 +228,15 @@ export function quadDamageStarted(said: string): string {
   return [
     `Quad Damage started${marked ? ` with ${plural(marked, 'marked bug')} waiting` : ''}: it fixes and reviews them one at a time, unattended, and merges a fix into master only when its review finds nothing; nothing is pushed.`,
     '/k-bugs, `k waiting` and the board show the bug it is on; each step it takes is written here as a short line, and when it ends, its summary is written here and sent to your phone.',
+    ...(said.trim() ? ['', said.trim()] : []),
+  ].join('\n')
+}
+
+// The answer once k took Stop Quad Damage: what the stop does and where the summary follows; then k's own line, that
+// the run stopped or is still stopping.
+export function quadDamageStopping(said: string): string {
+  return [
+    'Quad Damage stops: the session it was in is ended, a merge already under way is let finish, the bug it was on waits and the bugs left are not reached. Its summary follows in the chat that started the run, and goes to your phone.',
     ...(said.trim() ? ['', said.trim()] : []),
   ].join('\n')
 }
