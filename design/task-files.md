@@ -53,7 +53,9 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   the skeleton and commits nothing; it refuses an id that is already a bug, a draft (naming `k bug from`) or a task,
   an unknown repo or fix repo, and a task that does not exist or is not accepted. `k bug check <id>` holds the shape,
   the task accepted, the fix repo known, and every Fix written commit found by `git cat-file -e` in the fix repo, the
-  bug's or the task's. No bug has a `state` field. Judgement: a bug and a draft wait for different things, a bug for a
+  bug's, the task's or kirunak's own checkout (gulnya/draft-check-kirunak-commits; left out when `k` runs from a copy
+  that is no git checkout of its own), a commit in none of them refused, naming every repo looked in. No bug has a
+  `state` field. Judgement: a bug and a draft wait for different things, a bug for a
   fix and its review, a draft for the owner's choices, so they wait in different lists, and a draft that names
   `bug-of` or holds Fix written is refused by `k draft check`, naming `k bug from`.
 - **The mark** (R33, gulnya/quad-damage AC-3): a third key, required, `quad-damage: yes` or `quad-damage: no`, in the

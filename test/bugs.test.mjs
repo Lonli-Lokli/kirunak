@@ -182,8 +182,9 @@ test('E-4, E-6: k bug check finds the fix\'s commits in its fix repo, its own or
   const lost = filled({ front: `bug-of: ${TASK}\nfix-repo: kirunak\n`, fix: fix(nowhere) });
   put(bugFile(w), lost);
   assert.deepEqual(checkBug(w.ws, BUG), [{ line: lineOf(lost, nowhere), problem: `## Fix written: commit ${nowhere} is found in none of kirunak, hub, weather` }]);
+  // With no fix-repo named, kirunak's own checkout is looked in too (gulnya/draft-check-kirunak-commits AC-1).
   put(bugFile(w), filled({ front: '', fix: fix(inSelf) }));
-  assert.deepEqual(checkBug(w.ws, BUG).map((p) => p.problem), [`## Fix written: commit ${inSelf} is not found in hub`]);
+  assert.deepEqual(checkBug(w.ws, BUG), []);
   const unknown = filled({ front: 'fix-repo: radio\n', fix: null });
   put(bugFile(w), unknown);
   assert.deepEqual(checkBug(w.ws, BUG), [{ line: 5, problem: "fix-repo: unknown repo radio: name a repo of the workspace (weather, hub) or kirunak, kirunak's own checkout" }]);
@@ -192,6 +193,43 @@ test('E-4, E-6: k bug check finds the fix\'s commits in its fix repo, its own or
   put(bugFile(w), filled({ fix: null }));
   assert.deepEqual(checkBug(w.ws, BUG).map((p) => p.problem), [`bug-of: ${TASK} is not accepted yet: a bug found while a task is open goes into that task, through its review or an amendment (k amend new ${TASK} --title "...")`]);
   assert.throws(() => checkBug(w.ws, 'hub/none'), (e) => e.code === 1 && /^no bug hub\/none: /.test(e.message));
+});
+
+test('gulnya/draft-check-kirunak-commits AC-1 to AC-3, E-1, E-2: k bug check looks in kirunak\'s own checkout too, when it is one', async () => {
+  const w = await bugWorkspace();
+  const inTask = git(w.weather, 'rev-parse', 'HEAD');
+  const inSelf = fixBranch(w.self, 'bug/stale-tiles');
+  const nowhere = '0123456789abc';
+  const fix = (...shas) => shas.map((s) => `- a part of it [commit ${s}]\n`).join('');
+  const problems = (ws = w.ws) => checkBug(ws, BUG).map((p) => p.problem);
+  // AC-1: a commit only in kirunak's own repo passes, with a task or none; AC-3: the bug's and the task's still do.
+  for (const front of ['', `bug-of: ${TASK}\n`]) {
+    put(bugFile(w), filled({ front, fix: fix(inSelf) }));
+    assert.deepEqual(problems(), []);
+  }
+  put(bugFile(w), filled({ fix: fix(inTask, inSelf) }));
+  assert.deepEqual(problems(), []);
+  // AC-2: a commit in none of them is refused, the problem naming each repo looked in.
+  put(bugFile(w), filled({ front: '', fix: fix(nowhere) }));
+  assert.deepEqual(problems(), [`## Fix written: commit ${nowhere} is found in neither hub nor kirunak`]);
+  put(bugFile(w), filled({ fix: fix(nowhere) }));
+  assert.deepEqual(problems(), [`## Fix written: commit ${nowhere} is found in none of hub, weather, kirunak`]);
+  // E-2: a kirunak commit on a branch since deleted and pruned no longer exists.
+  const gone = fixBranch(w.self, 'bug/gone', 'a fix since dropped');
+  git(w.self, 'branch', '-D', 'bug/gone');
+  git(w.self, 'reflog', 'expire', '--expire=now', '--all');
+  git(w.self, 'gc', '-q', '--prune=now');
+  put(bugFile(w), filled({ front: '', fix: fix(gone) }));
+  assert.deepEqual(problems(), [`## Fix written: commit ${gone} is found in neither hub nor kirunak`]);
+  // E-1: k run from a copy that is no git checkout (here inside weather's, as an npm install in a project would be)
+  // looks in the workspace's repos only, as before, and never in the checkout around it.
+  const copy = join(w.weather, 'node_modules', 'kirunak');
+  mkdirSync(copy, { recursive: true });
+  const fromCopy = { ...w.ws, kirunakRoot: copy };
+  put(bugFile(w), filled({ front: '', fix: fix(inSelf) }));
+  assert.deepEqual(problems(fromCopy), [`## Fix written: commit ${inSelf} is not found in hub`]);
+  put(bugFile(w), filled({ front: '', fix: fix(inTask) }));
+  assert.deepEqual(problems(fromCopy), [`## Fix written: commit ${inTask} is not found in hub`]);
 });
 
 test('k bugs: every repo\'s bugs, a ready fix first, then by date; fix ready from the branch and the reviews; reviewing from the lock', async () => {
