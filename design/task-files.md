@@ -124,7 +124,8 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   between bugs, or waiting for the 5-hour window until when. A run killed leaves its run file to the next run's
   dead-pid takeover.
 - **The run's progress** (AC-16): `progress.log` in the run's folder holds a short line for the owner, `HH:MM <line>`,
-  at each change of the run's status: `<id>: started` (`, fix ready, to review` for a fix ready), `<id>: fix committed
+  at each change of the run's status: `<id>: started` once its first session passes the limits (`, fix ready, to
+  review` for a fix ready, `, try 2 from its review's findings` for a head a review refused), `<id>: fix committed
   <sha7>`, `<id>: skipped: <why>` or `failed: <why>`, `<id>: review clean, merged <sha7> into <repo>`, `<id>: review
   found something, try 2`, `<id>: waits: <why>`, `Quad Damage paused for the 5-hour window until HH:MM`, `Quad Damage
   goes on`, then `Quad Damage stopped: <why>` or `Quad Damage done: n merged, m wait, k not reached`, written before
