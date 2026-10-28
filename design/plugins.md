@@ -192,10 +192,12 @@ export default {
   folder the usage-review skill reads the last review and `standing.md` from and writes the new review to (`k usage`
   prints it last); `baseline`, a `quality.tsv` of an earlier week `quality.txt` compares with; `limitsLog`, the
   rate-limit log the status line tracker appends to and the summary reads (else `bugs.limitsLog`, its older name, else
-  `<KIRUNAK_HOME>/rate-limits.log`); and `stale`, the stale-session hook's `minutes` since the last call and
-  `context` in tokens, both past which it says once to hand over or start fresh. Paths resolve against the module or
-  `~/...`. A bad day, time, zone, path or number is refused at load. `k install` copies `stale` and `limitsLog` into
-  `escalate/config.json`, so a change needs `k install` again.
+  `<KIRUNAK_HOME>/rate-limits.log`), the tracker only forward within a window whichever session's reading it holds and
+  the summary counting a rise only above the highest point so far (gulnya/limits-log-flaps); and `stale`, the
+  stale-session hook's `minutes` since the last call and `context` in tokens, both past which it says once to hand
+  over or start fresh. Paths resolve against the module or `~/...`. A bad day, time, zone, path or number is refused
+  at load. `k install` copies `stale` and `limitsLog` into `escalate/config.json`, so a change needs `k install`
+  again.
 - **`cache`** names the prompt-cache settings `~/.claude/settings.json` should hold (D-6): `promptCacheTtl`,
   `subagentPromptCacheTtl` (strings) and `syncClaudeAiSkills` (a boolean), each a value or `null` for a key that must
   be absent. `k doctor` prints one line for each key named, ok or a failure naming both values; a key not named, and
