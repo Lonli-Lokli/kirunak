@@ -233,3 +233,30 @@ test('a finish whose evidence commit git refuses fails with git\'s message, and 
   assert.doesNotMatch(progress(w), /S-1 finished/);
   assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'running');
 });
+
+test('a step needing a step written below it is ready once that one is done', async () => {
+  const w = await approvedWorkspace(`---
+task: weather/offline-forecast
+blocked-by: []
+---
+
+### S-1 Keep the last forecast on disk [agent]
+covers: AC-1
+inputs: task
+outputs: steps/S-1/report.md
+
+### S-2 Show it [agent]
+needs: S-3
+covers: AC-2
+inputs: task
+outputs: steps/S-2/report.md
+
+### S-3 Read it back [agent]
+covers: AC-3
+inputs: task
+outputs: steps/S-3/report.md
+`);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-2').why, 'S-3 is not done');
+  writeFileSync(join(w.p.dir, 'progress.md'), '2026-10-28 01:59 S-3 finished\n');
+  assert.deepEqual(statesOf(w), { 'S-1': 'ready', 'S-2': 'ready', 'S-3': 'done' });
+});
