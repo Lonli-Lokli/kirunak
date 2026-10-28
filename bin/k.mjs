@@ -96,6 +96,8 @@ Bugs      k bug new <repo>/<slug> --title "..." --quad-damage yes|no [--bug-of <
           k bugs quad-damage --progress [<folder>] --after <n>: waits until the run's progress has more than n lines,
             or the run ends, and prints the new lines and a kirunak-next line, the command for the next wait; at the
             end the summary instead, as --summary prints it (reads only)
+          k bugs quad-damage --stop [--dry-run] (the owner's): stops the run at once: its session ended, a merge under
+            way let finish, the bug it is on waits, the rest not reached; waits up to 2 minutes for the run to end
           k intake start <id> --from kirunak/bugs/<slug>.md: Start fix, the intake takes the bug, moved to the task's
             bug.md, its records to bug/
 Drafts    k draft new <repo>/<slug> --title "...": a draft's skeleton, kirunak/drafts/<slug>.md in that repo, to fill in
@@ -142,9 +144,16 @@ async function approvalProblems(ws, id, amendmentId) {
   return out;
 }
 
-// `k bugs quad-damage`: its status, a run's summary, the wait for its progress, the run itself in the detached process
-// its start hands the run file to, or the start.
+// `k bugs quad-damage`: its status, a run's summary, the wait for its progress, the owner's stop, the run itself in the
+// detached process its start hands the run file to, or the start.
 async function quadDamaged(ws, pos, flags) {
+  if (flags.stop) {
+    // The owner's stop (gulnya/quad-damage AC-17); with --dry-run it reads only.
+    if (pos.length || flags.status || flags.summary || flags.progress) throw usage('k bugs quad-damage --stop [--via <who>] takes no argument and no other of --status, --summary, --progress');
+    if (flags['dry-run']) return quadDamage.stopPreview({ home: ws.home });
+    const via = typeof flags.via === 'string' ? flags.via : 'shell';
+    return quadDamage.stop({ ws, via });
+  }
   if (flags.status) {
     if (pos.length) throw usage('k bugs quad-damage --status takes no argument');
     const run = quadDamage.state(ws.home);

@@ -4,7 +4,8 @@
 // JSON file $FAKE_SCRIPT names.
 //
 // A verdict: 'clean' or 'findings' (the file written, 3 turns), or { text (the file's whole text, or null for none),
-// exitCode (0), result (the result message, 3 turns by default; null for none) } for a review session gone wrong.
+// exitCode (0), result (the result message, 3 turns by default; null for none) } for a review session gone wrong, or
+// { verdict, sleep } for one that takes `sleep` seconds in a process of its own first (killed, it writes nothing).
 //
 // An act: { calls (tool calls streamed, 3), turns (the result's num_turns, calls + 1), messages (streamed after the
 // calls), sleep (the session's seconds, 0.05), commit: { file, text } (committed on the fix branch, in the worktree the
@@ -24,7 +25,17 @@ function review(step, script) {
   const head = /^head: (\S+)$/m.exec(step.brief)[1];
   const base = /^base: (\S+)$/m.exec(step.brief)[1];
   const out = /^## Write `([^`]+)`$/m.exec(step.brief)[1];
-  const verdict = script.verdicts.shift() ?? 'clean';
+  const next = script.verdicts.shift() ?? 'clean';
+  if (typeof next === 'object' && next.sleep != null) {
+    const child = spawn('sleep', [String(next.sleep)], { detached: true, stdio: 'ignore' });
+    const done = new Promise((resolve) => child.on('exit', (code, signal) => {
+      if (signal) return resolve({ exitCode: 128 + 15, result: null });
+      script.verdicts.unshift(next.verdict ?? 'clean');
+      resolve(review(step, script).done);
+    }));
+    return { pid: child.pid, sessionId: step.sessionId, done };
+  }
+  const verdict = next;
   const odd = typeof verdict === 'object' ? verdict : {};
   const text = typeof verdict === 'object' ? verdict.text : `---\nverdict: ${verdict}\nhead: ${head}\nbase: ${base}\n---\n\n## Findings\n${verdict === 'clean' ? 'none' : FINDING}\n`;
   if (text != null) {

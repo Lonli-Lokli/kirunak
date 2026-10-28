@@ -1,6 +1,6 @@
 import type { CommandRunInput, CommandRunResult, EngineInterface } from 'claude-code'
 
-import { quadDamageStarted, reviewStarted } from './bugs'
+import { quadDamageStarted, quadDamageStopping, reviewStarted } from './bugs'
 import { isOwners, reason, refusal, refused } from './commands'
 import { placeLines, plainLines, queueNow, unmarked } from './lists'
 import type { Item } from './lists'
@@ -78,7 +78,7 @@ export type Choice =
 //   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
 //   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33); `text`, when
 //   given, above `head` on every page;
-// - item: the item's own words (`text`), then its choices, a verb's among them;
+// - item: the item's own words (`text`), then its choices, a verb's among them, and Cancel with `cancel`;
 // - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel;
 // - pick: `text` whole on every page, then a page of `labels`, paged as a list's rows, the page named in the question
 //   ("Which task's card (4 to 5 of 11)?"); a label tapped ends the dialog, a step opens its next pick dialog, with Back
@@ -87,7 +87,7 @@ export type PickStep = { label: string; open: () => PickScreen }
 export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; labels: readonly (string | PickStep)[]; question: string }
 export type Screen =
   | { kind: 'list'; header: string; text?: readonly string[]; head: string; rows: readonly Row[]; question: string; typed?: true; places?: true }
-  | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string }
+  | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string; cancel?: true }
   | { kind: 'reason'; header: string; text: readonly string[]; question: string; given: (why: string) => Screen }
   | PickScreen
 
@@ -115,7 +115,7 @@ async function runVerb($: EngineInterface, name: string, k: string, argv: readon
   const said = r.exitCode !== 0 ? capBlocking((r.stderr || r.stdout).trim().split('\n')).join('\n') : r.stdout.trim()
   if (r.exitCode !== 0) return { ok: false, text: refused(name, r), said }
   if (argv[0] === 'bug' && argv[1] === 'review') return { ok: true, text: reviewStarted(argv[2] ?? '', r.stdout), said }
-  if (argv[0] === 'bugs' && argv[1] === 'quad-damage') return { ok: true, text: quadDamageStarted(r.stdout), said }
+  if (argv[0] === 'bugs' && argv[1] === 'quad-damage') return { ok: true, text: argv.includes('--stop') ? quadDamageStopping(r.stdout) : quadDamageStarted(r.stdout), said }
   return { ok: true, text: argv[0] === 'queue' ? queueNow(r.stdout) : r.stdout.trim(), said }
 }
 
@@ -272,7 +272,7 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
     lines = [...screen.text]
     if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after } : 'ends' in c ? { pick: c.ends } : { open: c.open } })))
-    if (screen.kind === 'reason') choices.push({ label: CANCEL, act: 'cancel' })
+    if (screen.kind === 'reason' || (screen.kind === 'item' && screen.cancel)) choices.push({ label: CANCEL, act: 'cancel' })
   }
   if (choices.length + (back ? 1 : 0) === 1) choices.push({ label: CANCEL, act: 'cancel' })
   if (back) choices.push({ label: BACK, act: 'back' })

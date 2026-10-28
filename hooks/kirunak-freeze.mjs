@@ -307,7 +307,9 @@ function ownerVerbOf(args) {
   // Review & merge merges a bug's fix into master (gulnya/kirunak-bugs AC-5); the other bug verbs are an agent's.
   if (verb === 'bug' && sub === 'review') return 'bug review';
   // Quad Damage merges fixes unattended (gulnya/quad-damage AC-6); its --status, --summary and --progress only read
-  // (--progress, the session's wait for the run's next line, AC-16).
+  // (--progress, the session's wait for the run's next line, AC-16). Its --stop is the owner's too (AC-17), whatever
+  // flag comes with it.
+  if (verb === 'bugs' && sub === 'quad-damage' && args.some((a) => a === '--stop' || a.startsWith('--stop='))) return 'bugs quad-damage --stop';
   if (verb === 'bugs' && sub === 'quad-damage' && !['--status', '--summary', '--progress'].some((f) => args.includes(f))) return 'bugs quad-damage';
   return null;
 }

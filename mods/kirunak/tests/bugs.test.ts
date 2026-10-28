@@ -161,7 +161,10 @@ const ON_READY: BugRow[] = [{ ...MARKED[0] as BugRow, reviewing: { pid: 5150, st
 const LIVE: QuadDamageStatus = { run: { pid: 5150, bug: 'hub/stale-tiles' }, line: 'Quad Damage runs: hub/stale-tiles, fixing (try 1) since 23:41' }
 const QD_LINE = '1. Quad Damage: fix and review the 2 marked bugs one at a time, unattended; nothing is pushed'
 
-describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, E-3, E-4, D-1)', () => {
+const STOP_LINE = '1. Stop Quad Damage: end the run now, the bug it is on left waiting'
+const STOPPED = 'Quad Damage stopped: the owner stopped it; its summary: /h/bugs/quad-damage/2026-11-07-2340/summary.md\n'
+
+describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, AC-17, E-3, E-4, D-1)', () => {
   test('while a marked bug waits and no run lives, Quad Damage is the list\'s first row; with none marked, or a k whose status fails with none marked, it is not', async ($, on) => {
     const w = world(on, { bugs: [MARKED, BUGS], quadDamage: [null], taps: [SKIP, SKIP] })
     await run($)
@@ -195,20 +198,64 @@ describe('Quad Damage in /k-bugs (gulnya/quad-damage AC-1, AC-12, E-3, E-4, D-1)
     expect([verbs(w.runs), w.submitted]).toEqual([[['bugs', 'quad-damage', '--via', 'mod']], []])
   })
 
-  test('while a run lives: its line above the list and no Quad Damage row; the bug it is on says so, its phase or its wait, and offers no Review & merge, Start fix or Drop (AC-12, E-4)', async ($, on) => {
+  test('while a run lives: its line above the list and Stop Quad Damage first, no Quad Damage row; the bug it is on says so, its phase or its wait, and offers no Review & merge, Start fix or Drop (AC-12, E-4)', async ($, on) => {
     const waiting: QuadDamageStatus = { ...LIVE, line: 'Quad Damage waits for the 5-hour window until 01:15' }
     const onWait: BugRow[] = [{ ...ON_READY[0] as BugRow, quadDamageRun: { phase: 'waiting', try: 1, since: null, waitUntil: '2026-11-08T01:15:00+00:00' } }, MARKED[1] as BugRow]
     const w = world(on, { bugs: [ON_READY, onWait], quadDamage: [LIVE, waiting], taps: ['hub/stale-tiles', 'Back', SKIP, SKIP] })
     expect(await run($)).toBe(`Nothing ran: skipped.\n\n${LIVE.line}.\n\n3 bugs, a fix ready first, then the oldest:\n\n1. **hub/stale-tiles**: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07\n2. **${LINES[1]?.replace(': ', '**: ')}\n3. **${LINES[2]?.replace(': ', '**: ')}\n\n/k-bugs shows one whole, to review and merge its fix, start a fix or drop it.`)
-    expect(w.asked[0]?.question.split('\n').slice(0, 3)).toEqual([`${LIVE.line}.`, 'Bugs, a fix ready first, then the oldest:', '1. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07'])
-    expect(w.asked[0]?.labels).toEqual(LABELS)
+    expect(w.asked[0]?.question.split('\n').slice(0, 4)).toEqual([`${LIVE.line}.`, 'Bugs, a fix ready first, then the oldest:', STOP_LINE, '2. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (fixing, try 1), bug of weather/offline-forecast, written 2026-11-07'])
+    expect(w.asked[0]?.question.split('\n').at(-1)).toBe('Stop Quad Damage, or which bug?')
+    expect(w.asked[0]?.labels).toEqual(['Stop Quad Damage', ...LABELS])
     expect(w.asked[1]?.labels).toEqual(['Cancel', 'Back'])
     expect(w.asked[1]?.question.split('\n')[2]).toBe('Quad Damage is on it: fixing, try 1, since 23:41, on bug/stale-tiles in hub.')
     expect(w.asked[1]?.question.split('\n').slice(-1)).toEqual(['Review & merge, Start fix and Drop wait until Quad Damage moves on. Back to the list?'])
     expect(w.asked[1]?.question).not.toContain('Review & merge: a fresh Opus session')
     await run($)
-    expect(w.asked[3]?.question.split('\n').slice(0, 3)).toEqual(['Quad Damage waits for the 5-hour window until 01:15.', 'Bugs, a fix ready first, then the oldest:', '1. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (waiting for the 5-hour window until 01:15), bug of weather/offline-forecast, written 2026-11-07'])
+    expect(w.asked[3]?.question.split('\n').slice(0, 4)).toEqual(['Quad Damage waits for the 5-hour window until 01:15.', 'Bugs, a fix ready first, then the oldest:', STOP_LINE, '2. hub/stale-tiles: Old tiles stay after an update, Quad Damage is on it (waiting for the 5-hour window until 01:15), bug of weather/offline-forecast, written 2026-11-07'])
     expect(w.runs).toEqual([])
+  })
+
+  test('Stop Quad Damage opens one confirm naming the bug it is on and what a stop does; Cancel runs nothing (AC-17)', async ($, on) => {
+    const w = world(on, { bugs: [ON_READY], quadDamage: [LIVE], taps: ['Stop Quad Damage', 'Cancel'] })
+    expect(await run($)).toMatch(/^Nothing ran: cancelled\./)
+    expect(w.asked[1]).toEqual({
+      header: 'Bugs',
+      question: [`${LIVE.line}.`, '',
+        'Stop Quad Damage ends the session it runs for hub/stale-tiles at once; a merge already under way is let finish. Then hub/stale-tiles waits with what its branch holds, and the bugs left are not reached.',
+        'Nothing is pushed. Its summary follows in the chat that started the run, and goes to your phone.', 'Stop Quad Damage now?'].join('\n'),
+      labels: ['Stop Quad Damage', 'Cancel', 'Back'],
+    })
+    await w.clock.advance(10)
+    expect([w.runs, w.submitted]).toEqual([[], []])
+  })
+
+  test('its confirm names the 5-hour wait, a merge under way, or the run between bugs', async ($, on) => {
+    const at = (run: NonNullable<QuadDamageStatus['run']>, line: string): QuadDamageStatus => ({ run, line })
+    const w = world(on, {
+      bugs: [ON_READY, ON_READY, ON_READY],
+      quadDamage: [
+        at({ pid: 5150, bug: 'hub/stale-tiles', phase: 'waiting', waitUntil: '2026-11-08T01:15:00+00:00' }, 'Quad Damage waits for the 5-hour window until 01:15'),
+        at({ pid: 5150, bug: 'hub/stale-tiles', phase: 'merging' }, 'Quad Damage runs: hub/stale-tiles, merging since 23:58'),
+        at({ pid: 5150, bug: null }, 'Quad Damage runs, between bugs, since 23:40'),
+      ],
+      taps: ['Stop Quad Damage', SKIP, 'Stop Quad Damage', SKIP, 'Stop Quad Damage', SKIP],
+    })
+    await run($)
+    await run($)
+    await run($)
+    const said = (n: number) => w.asked[n]?.question.split('\n').slice(0, 3)
+    expect(said(1)).toEqual(['Quad Damage waits for the 5-hour window until 01:15.', '', 'Stop Quad Damage ends its wait for the 5-hour window at once; hub/stale-tiles waits, and the bugs left are not reached.'])
+    expect(said(3)).toEqual(['Quad Damage runs: hub/stale-tiles, merging since 23:58.', '', 'The merge of hub/stale-tiles is under way and is let finish; then the run ends, and the bugs left are not reached.'])
+    expect(said(5)).toEqual(['Quad Damage runs, between bugs, since 23:40.', '', 'Stop Quad Damage ends the run before it takes another bug; the bugs left are not reached.'])
+    expect(w.runs).toEqual([])
+  })
+
+  test('its confirm runs k bugs quad-damage --stop --via mod, the owner\'s verb, and answers that the run stops and where its summary follows; no turn after it (AC-17)', async ($, on) => {
+    const w = world(on, { bugs: [ON_READY], quadDamage: [LIVE], taps: ['Stop Quad Damage', 'Stop Quad Damage'], verb: { exitCode: 0, stdout: STOPPED, stderr: '' } })
+    expect(await run($)).toBe(`Quad Damage stops: the session it was in is ended, a merge already under way is let finish, the bug it was on waits and the bugs left are not reached. Its summary follows in the chat that started the run, and goes to your phone.\n\n${STOPPED.trim()}`)
+    expect(verbs(w.runs)).toEqual([['bugs', 'quad-damage', '--stop', '--via', 'mod']])
+    await w.clock.advance(10)
+    expect(w.submitted).toEqual([])
   })
 
   test('Start fix on a bug the run took since the list was shown runs nothing and says the run is on it (E-4)', async ($, on) => {

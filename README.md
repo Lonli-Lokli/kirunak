@@ -40,7 +40,10 @@ is done.
   says where it is, `--summary` what it did, `--progress <folder> --after <n>` waits for its next progress lines,
   `--dry-run` which bugs it would take; from the mod the session writes a short line in its chat at each change of
   the run's status (a bug started, its fix committed, merged, waiting, a pause) and pushes the summary to your phone
-  when the run ends.
+  when the run ends. While a run lives, **Stop Quad Damage** is the first row of `/k-bugs` (or `k bugs quad-damage
+  --stop` at your own prompt), with one confirm: it stops the run at once, a wait for the 5-hour window included. The
+  session it is in is ended, a merge already under way is let finish, the bug it was on waits with what its branch
+  holds, the bugs left are not reached, and the summary says you stopped it.
 - **Small commits.** Every commit is measured, and one over size M is refused (below, "Change size").
 - Plain files in git, one folder per repo (`kirunak/`), one queue across your repos. No server, no database, no
   dependency beyond Node.
