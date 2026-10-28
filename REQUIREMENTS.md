@@ -128,6 +128,30 @@ validation, archives) then go unused, and what the owner needs is not in it:
   waiting`, the board and every session the owner starts name the bugs before the drafts, as "N bugs wait, M with a
   fix ready: /k-bugs", and say nothing when there are none; a step's session is told nothing.
   After Review & merge, or an owner's verb in the mod on its own task, the session takes a turn of its own and goes on.
+- R33 Every bug's head says `quad-damage: yes` or `quad-damage: no` (gulnya/quad-damage AC-3, D-1): whoever writes a
+  bug writes yes when no question waits on the owner's choice, the fix is in one repo, and it is no music-engine or
+  real-time audio work, else no. The k-bug skill says so, `k bug new` and `k bug from` need `--quad-damage yes` or
+  `--quad-damage no`, `k bug check` refuses a bug with neither, and the owner sets no to keep a bug out.
+- R34 **Quad Damage** in `/k-bugs`, or `k bugs quad-damage`, is the owner's verb (D7): one run, unattended, that takes
+  the bugs marked yes one at a time, each fixed and then reviewed before the next starts, and pushes nothing; it
+  takes bugs only and starts no queued task (gulnya/quad-damage AC-1, AC-2, O-1 to O-4). A fresh fixing session tries
+  the fix as the k-bug skill's step 4 says and never merges or pushes; it skips a bug whose fix is a choice of the
+  owner's or belongs in another repo, and the run sets that bug's mark to no with the reason written in it (AC-4,
+  AC-5, E-6). A fix ready already goes straight to its review (E-1). The review is Review & merge's: with no finding
+  the fix merges into its repo's master with no tap of the owner's and the bug closes as Review & merge closes it
+  (AC-6); with findings one more fixing session works from them and a second review follows, and failing twice the
+  bug waits for the owner with both reviews beside it, as it waits on a conflict or a refused merge, and the run goes
+  on to the next bug (AC-7, E-5). Every fixing session and review runs on Opus (AC-8), a fixing session is held to
+  150 tool calls and 150 minutes, the bug waiting with what it got to, and a run has no dollar cap (AC-11). Before
+  each session the run reads the plan's windows and logs the reading where the status line logs its own: the 5-hour
+  window at 90% pauses it until the window resets (AC-9); the week at 98%, extra usage, a reading that fails, an
+  expired login or a session that fails before its first tool call stops it, the bugs left not reached (AC-10,
+  E-7). One session runs at a time, and each queues its heavy jobs through the heavy lock with its own session id
+  (AC-14). The Mac does not sleep while a run goes (E-2); a second run is refused (E-3), and so are the owner's
+  Review & merge, Start fix and Drop on the bug a run works on, until it moves on (E-4). While it runs, `k waiting`,
+  the board and `/k-bugs` say so and name its bug, or that it waits for the 5-hour window and until when (AC-12). At
+  its end one line a bug (merged with its commit, waits and why, or not reached) is written in the console of the
+  session that started it and sent as a notification to the owner's phone (AC-13).
 
 ### The task is frozen
 - R5 On approval, the task's file is frozen: its goal, numbered acceptance criteria (AC-1, AC-2, ...), numbered edge

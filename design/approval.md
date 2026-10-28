@@ -51,7 +51,7 @@ It refuses, with the reason that says what to do instead:
 | Any write under `kirunak/approvals/`, to `done.json`, `hold.md`, or an amendment's `applied:`/`declined:` stamp (an Edit whose new text adds one) | D7: only the owner | "only the owner's own command writes this: ask them to type `! k approve <id>` / `! k accept <id>`" |
 | A Bash command that writes there (redirection, `tee`, `sed -i`, `cp`/`mv`/`rm` into it, `git checkout`/`restore` of it), found by a small segment parser (split on `;`, `&&`, `\|\|`, `\|` and newlines, then the write targets of each segment) | the same | the same |
 | Any write to `kirunak/tasks/<slug>/cost.md` (Edit, Write, or a Bash command that writes there) | generated from `done.json`'s `cost`, which only `k accept` records (`orchestrator.md` §6) | "cost.md is generated from done.json's cost, which only `k accept` records: `k cost <id> --write` writes it again" |
-| A Bash command running `k approve`, `k accept`, `k amend decline`, `k hold`, `k resume`, `k queue`, `k bug review` (Review & merge, which merges a bug's fix into master, R29) (or `k.mjs` with those verbs) | the owner's verbs | "`k <verb>` is the owner's: it runs only from the owner's own prompt (`!`) or the mod" |
+| A Bash command running `k approve`, `k accept`, `k amend decline`, `k hold`, `k resume`, `k queue`, `k bug review` (Review & merge, which merges a bug's fix into master, R29), `k bugs quad-damage` without `--status` or `--summary` (Quad Damage, which merges fixes unattended, R34, gulnya/quad-damage AC-6) (or `k.mjs` with those verbs; any of them with `--dry-run` passes) | the owner's verbs | "`k <verb>` is the owner's: it runs only from the owner's own prompt (`!`) or the mod" |
 | Edit/Write of `kirunak/tasks/<slug>/intake.md` | append-only through `k intake` | "record the question or answer with `k intake question|answer`" |
 | Edit/Write of `checklist.md` ticks (`- [x]`) | R15: the owner's checklist | "the owner ticks the checklist" |
 | Edit/Write of any `.slapignore`, or a shell write to one (redirection, `sed -i`, `cp`, `rm`, `git checkout`/`restore` of it, a `node -e` that writes it) | R23: the owner's list (`change-size.md` §4) | "`.slapignore` is the owner's (R23): say which pattern to add or remove and why, and ask the owner to edit it and type `! k slapignore approve <repo>`" |
@@ -459,7 +459,8 @@ when the same signature fails again after the session edited something in betwee
 a test written red and then fixed, and an edit that did not apply are not repeats. A known runner's log with no
 failure line left in it (an xcodebuild or Gradle output cut short) counts nothing; a command known only from the
 workspace is signed by its exit code. The count is per session; a subagent's is kept apart from its caller's. Inside a
-`k run` step (`KIRUNAK_STEP` set) it does nothing.
+`k run` step (`KIRUNAK_STEP` set) or a Quad Damage fixing session (`KIRUNAK_BUG_FIX` set, R34) it does nothing, and
+the freeze hook neither blocks nor counts there; the owner's verbs and frozen files stay refused.
 
 **When it fires.** At `hook.repeats` repeats (2: fail, edit, fail, edit, fail), once for that signature, never again
 on the same failures. Its message is three lines: the label and the count, the task by title and id (or that the
@@ -538,5 +539,6 @@ that tell the session to send it with PushNotification. Best effort (amendment A
 
 D7 (§2, §3, §4), D11 and R20 (§6), D12 (`k-approve`, `k-accept`), D14 (§5, the tap in the dialog included), R5 (§1, §2), R7 (§2 row 1, §4 step 1),
 R15 (`k accept`, with `review.md`), R30 (§4, what blocks `k accept`), R31 (§3, the `Task:` trailer and an accepted
-task), R32 (§4, what blocks `k accept` in another repo).
+task), R32 (§4, what blocks `k accept` in another repo), R34 (§2, `k bugs quad-damage` is the owner's; §7, quiet
+in a fixing session).
 The escalation hook, its block and the owner's `/k-go-on` (§7): gulnya/enforced-escalation AC-8 to AC-14, AC-27, AC-29.
