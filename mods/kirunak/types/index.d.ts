@@ -37,8 +37,7 @@ export type KirunakLookRow = { chip: KirunakChip; id: string; words: string };
 // A part of the text under a heading (AC-4); `lines` are the lines as drawn, '' a blank line between paragraphs.
 export type KirunakSection = { heading: string | null; lines: string[] };
 // The head (AC-1): the title large, the chip, the dim line with the repo and the dates; `first`, the first lines
-// shown under it (AC-10); `rows`, a list's; `fold`, what Show all unfolds (AC-3, AC-10), null when nothing is folded;
-// `described`, each choice's line under it by its label (AC-14).
+// shown under it (AC-10); `rows`, a list's; `fold`, what Show all unfolds (AC-3, AC-10), null when nothing is folded.
 export type KirunakLook = {
   title: string;
   chip: KirunakChip | null;
@@ -46,12 +45,13 @@ export type KirunakLook = {
   first: KirunakSection[];
   rows: KirunakLookRow[];
   fold: KirunakSection[] | null;
-  described: Record<string, string>;
 };
 // The dialog open now, as talk() asked it (owner.ts): `question`, exactly the question passed to $.ui.ask, which the
 // hook draws a look for and no other; `ask`, its last line, the question the engine's card shows under the look;
-// `id`, a new one each time a dialog is shown, so a fold left open belongs to that showing alone.
-export type KirunakDialog = { id: number; question: string; ask: string; look: KirunakLook };
+// `id`, a new one each time a dialog is shown, so a fold left open belongs to that showing alone; `described`, each
+// choice's line by its label, which the `tool.call` hook writes into the call (AC-14); `look`, null for a dialog with
+// none, which every surface draws as the engine draws it.
+export type KirunakDialog = { id: number; question: string; ask: string; described: Record<string, string>; look: KirunakLook | null };
 // Where the fold is (E-1): the dialog's `id` it was opened in, and the part shown (0 the first); written by the fold's
 // buttons alone, never while drawing.
 export type KirunakFold = { dialog: number; part: number } | null;

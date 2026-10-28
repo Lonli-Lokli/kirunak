@@ -9,10 +9,14 @@ import type { FoldLine, ProgressRow } from './looks'
 // chip and their first lines, the rest behind Show all, and Quad Damage's progress lines drawn as rows. The terminal
 // and VS Code draw as they did, each choice's line under it alone (AC-14, AC-18).
 //
+// The call hook writes every choice's line into the mod's own AskUserQuestion call, so the engine, every surface and
+// the phone (which draws no tree, S-2) get them as the tool's own descriptions (AC-14, AC-17); it changes nothing else,
+// and leaves a call the model raised, or one of another mod, as it came.
+//
 // The dialog hook draws and never answers (owner.ts's head): it draws only a dialog `talk()` wrote to kirunak.dialog
-// and asked with the same question, so a dialog the model raised, or one of another mod, draws as the engine draws it.
-// Its buttons write kirunak.fold alone, which part of the look is open; they neither answer the dialog nor run a verb,
-// and the dialog's choices stay the engine's own, below the look (the engine's node, last).
+// with a look and asked with the same question, so a dialog the model raised, or one of another mod, draws as the
+// engine draws it. Its buttons write kirunak.fold alone, which part of the look is open; they neither answer the
+// dialog nor run a verb, and the dialog's choices stay the engine's own, below the look (the engine's node, last).
 
 // The dialog open now, as talk() wrote it (owner.ts), and the part of its look unfolded; both declared where read.
 const dialogState = atom({ plugin: 'kirunak', key: 'dialog' } as const, null)
@@ -23,23 +27,32 @@ const foldState = atom({ plugin: 'kirunak', key: 'fold' } as const, null)
 // look's four parts (the head, the part, the buttons, the engine's node), and one to spare.
 const FREE = 1 + 2 + 2 + 2 + 4 + 1
 
-// A question as the tool's schema has it; the hook reads it and gives every option its line.
+// A question as the tool's schema has it; the call hook gives every option its line.
 type Question = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }
 
 export function looks(on: On): void {
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const [q, ...others] = e.questions as Question[]
+    const dialog: KirunakDialog | null = await read($, dialogState)
+    if (q === undefined || dialog === null || q.question !== dialog.question) return next(e)
+    const options = q.options.map(o => ({ ...o, description: dialog.described[o.label] ?? o.description ?? '' }))
+    return next({ ...e, questions: [{ ...q, options }, ...others] } as typeof e)
+  })
+
   on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
     const [q, ...others] = e.props.questions as Question[]
     const dialog: KirunakDialog | null = await read($, dialogState)
-    if (q === undefined || dialog === null || q.question !== dialog.question) return next(e)
-    const options = q.options.map(o => ({ ...o, description: dialog.look.described[o.label] ?? o.description ?? '' }))
-    // The terminal and VS Code keep the whole question; the phone and the desktop app ask its last line, the look
-    // above it showing the rest (AC-1, AC-18).
-    if (e.surface === 'terminal' || e.surface === 'vscode') return next({ ...e, props: { ...e.props, questions: [{ ...q, options }, ...others] } })
-    const engine = await next({ ...e, props: { ...e.props, questions: [{ ...q, question: dialog.ask, options }, ...others] } })
+    // The terminal and VS Code draw the whole question as the engine does, the lines under the choices the call hook
+    // wrote (AC-14, AC-18); a dialog with no look draws so everywhere.
+    if (q === undefined || dialog === null || q.question !== dialog.question || dialog.look === null) return next(e)
+    if (e.surface === 'terminal' || e.surface === 'vscode') return next(e)
+    // The phone and the desktop app ask its last line, the look above it showing the rest (AC-1), the choices and
+    // their lines as they came.
+    const engine = await next({ ...e, props: { ...e.props, questions: [{ ...q, question: dialog.ask }, ...others] } })
     const fold = await read($, foldState)
     const open = fold !== null && fold.dialog === dialog.id ? fold.part : null
     const { Box, Text, Button, Svg } = $.ui.resolve(e)
-    const { look } = dialog
+    const look = dialog.look
 
     const foldTo = (part: number | null) => () => {
       update($, foldState, () => (part === null ? null : { dialog: dialog.id, part })).catch(() => {

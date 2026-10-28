@@ -5,7 +5,7 @@ import type { KirunakDialog, KirunakLook } from '../types'
 
 import { quadDamageStarted, quadDamageStopping, reviewStarted } from './bugs'
 import { isOwners, reason, refusal, refused } from './commands'
-import { placeLines, plainLines, queueNow, unmarked } from './lists'
+import { queueNow, unmarked } from './lists'
 import type { Item } from './lists'
 import { kOf, refresh } from './reads'
 import { told } from './turns'
@@ -21,8 +21,9 @@ import { capBlocking } from './waiting'
 //   Outcome this same turn made: the verb typed on the command line itself, or the verb choice that was the dialog's
 //   last tap (a turn that opened its dialog can type none);
 // - no other hook, no later command and no dialog the model raised can make such an Outcome or reach runVerb: the mod's
-//   one hook on AskUserQuestion (look.tsx, gulnya/mobile-dialogs D-1) draws the dialog's look and never answers it,
-//   its buttons only fold and unfold the look, and a tap reaches nothing but the dialog's own loop;
+//   hooks on AskUserQuestion (look.tsx, gulnya/mobile-dialogs D-1) write each choice's line into the call and draw the
+//   dialog's look, and never answer it; the look's buttons only fold and unfold it, and a tap reaches nothing but the
+//   dialog's own loop;
 // - a dialog that runs no verb (`pick`, /k-board's) offers labels alone, no verb choice, and ends on a tap with such a
 //   label, which the command reads; a choice of it may open the next step, always another pick dialog (checked as it
 //   opens), so no verb choice is ever reached from it; it is the turn's one dialog, so no verb is typed after it;
@@ -69,7 +70,8 @@ export type Turn = {
 // A list dialog's row: its words (numbered above the choices as the app numbers them, or in a list of `places` by its
 // own `place`, none when null: /k-queue's, kirunak-phone A-11), its choice's short name, and the dialog that choice
 // opens, or the verb it runs, the last tap (A-11's Earlier and Later, the task's text above them).
-// `description`: its choice's line, as every choice's below (gulnya/mobile-dialogs AC-14).
+// `description`: its choice's line, as every choice's below (gulnya/mobile-dialogs AC-14); with none, the line is the
+// item's words after its name, as the list's numbered line said them before (AC-23).
 export type Row = { item: Item; label: string; place?: number | null; description?: string } & ({ open: () => Screen | Promise<Screen> } | { verb: readonly string[] })
 // An item dialog's choice: one that opens another dialog, or a verb, run if it is the last tap; its `after` is told
 // whether k took it, as a typed verb's is; or one that `ends` the dialog with nothing run, its value the Outcome's
@@ -80,20 +82,23 @@ export type Choice =
   | { label: string; description?: string; verb: readonly string[]; after?: (ok: boolean) => void }
   | { label: string; description?: string; ends: string }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
-// - list: `head`, then the rows of one page (three and More when there are more than four; one fewer under Back);
-//   with `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the
-//   first each line keeps the app's number and adds that one: "1. hub/t4 (type 4)" (kirunak-phone Q-33); `text`, when
-//   given, above `head` on every page;
+// - list: the rows of one page (three and More when there are more than four; one fewer under Back), asked in one
+//   line, `head` and the page's range before the question: "Bugs, a fix ready first, then the oldest (1 to 3 of 22):
+//   Which bug?" (gulnya/mobile-dialogs AC-23); each row's words are its choice's line, never the question's; with
+//   `typed`, the rows are the list a typed number takes (`/k-approve <n>`), in its order, so on a page after the first
+//   each line adds that number: "proposed (type 4)" (kirunak-phone Q-33); with `places`, each line starts with the
+//   row's place; `text`, when given, above that line on every page (what the list is not: the task being moved);
 // - item: the item's own words (`text`), then its choices, a verb's among them, and Cancel with `cancel`;
 // - reason: the item's words; the reason is typed in the free-text row and handed to `given`, choices Back and Cancel;
 // - pick: `text` whole on every page, then a page of `labels`, paged as a list's rows, the page named in the question
-//   ("Which task's card (4 to 5 of 11)?"); a label tapped ends the dialog, a step opens its next pick dialog, with Back
+//   ("Which task's card (4 to 5 of 11)?"), `head`, when given, before it on its line, as a list's; `described`, each
+//   label's line (a step's its own); a label tapped ends the dialog, a step opens its next pick dialog, with Back
 //   (A-9's AC-5: /k-board's groups, then a group's tasks).
 // `look`, when given: what the phone and the desktop app draw above the choices (gulnya/mobile-dialogs D-1, look.tsx);
 // a list's look rows are those of its page alone. The question asked is the same with it or without.
-export type Look = Omit<KirunakLook, 'described'>
-export type PickStep = { label: string; open: () => PickScreen }
-export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; labels: readonly (string | PickStep)[]; question: string }
+export type Look = KirunakLook
+export type PickStep = { label: string; description?: string; open: () => PickScreen }
+export type PickScreen = { kind: 'pick'; header: string; text: readonly string[]; head?: string; labels: readonly (string | PickStep)[]; described?: Readonly<Record<string, string>>; question: string }
 export type Screen =
   | { kind: 'list'; header: string; text?: readonly string[]; head: string; rows: readonly Row[]; question: string; typed?: true; places?: true; look?: Look }
   | { kind: 'item'; header: string; text: readonly string[]; choices: readonly Choice[]; question: string; cancel?: true; look?: Look }
@@ -115,7 +120,7 @@ const dialogState = atom({ plugin: 'kirunak', key: 'dialog' } as const, null)
 // A new id each dialog shown, so a fold left open in one is closed in the next (look.tsx).
 let shownId = 0
 
-// The dialog's look, its page's rows and every choice's line, written before it is asked and taken away once it is
+// Every choice's line and the dialog's look, its page's rows, written before it is asked and taken away once it is
 // answered or dismissed; a write that fails leaves the dialog unstyled, never unasked (gulnya/mobile-dialogs D-1).
 async function showLook($: EngineInterface, look: KirunakDialog | null): Promise<void> {
   try {
@@ -234,7 +239,7 @@ async function talk($: EngineInterface, name: string, turn: object, first: Scree
     const shown: Logged = { t: await askedAt($), command: name, header: frame.screen.header, drawn }
     const look = frame.screen.kind !== 'pick' ? frame.screen.look : undefined
     const labels = choices.map(c => c.label)
-    if (look) await showLook($, { id: ++shownId, question, ask: drawn.ask, look: { ...look, rows: look.rows.filter(r => labels.includes(r.id)), described: drawn.described } })
+    await showLook($, { id: ++shownId, question, ask: drawn.ask, described: drawn.described, look: look ? { ...look, rows: look.rows.filter(r => labels.includes(r.id)) } : null })
     let tap
     try {
       tap = await $.ui.ask(question, { options: labels, header: frame.screen.header })
@@ -242,7 +247,7 @@ async function talk($: EngineInterface, name: string, turn: object, first: Scree
       await logDialog($, shown, null, 'dismissed')
       return { nothing: 'dismissed' }
     } finally {
-      if (look) await showLook($, null)
+      await showLook($, null)
     }
     const act = tap === SKIP ? undefined : choices.find(c => c.label === tap)?.act
     const ends = tap === SKIP ? 'skipped' : act === undefined ? (frame.screen.kind === 'reason' && tap.trim() && !tap.trim().startsWith('--') ? null : 'typed') : typeof act !== 'object' ? (act === 'cancel' ? 'cancelled' : null) : 'verb' in act ? act.verb.join(' ') : 'pick' in act ? 'picked' : null
@@ -282,6 +287,18 @@ function paging<T>(all: readonly T[], start: number, back: boolean): { page: rea
 // A dialog's question and choices: a list's or a pick's page from `start`, More after it; Cancel when there would be
 // one choice alone, which the dialog would pad with Yes and No; and Back, on every dialog but the command's first, the
 // lowest choice of all (kirunak-phone A-11's E-5).
+// A list's question on one line: its head, less the colon it ends in, the page's range, then the question.
+const listAsk = (head: string, range: string | null, question: string): string => `${head.replace(/:\s*$/, '')}${range !== null ? ` (${range})` : ''}: ${question}`
+
+// A list row's line under its choice (AC-23): its own, else what its numbered line said after the name: the item's
+// words, the number to type on a typed page after the first, and its `under` lines; with places, its place first.
+function lineOf(r: Row, typed: number | null, places: boolean): string {
+  if (r.description) return r.description
+  const words = `${r.item.lead}${r.item.text.replace(/^[:.]?\s*/, '')}`.trim()
+  const said = [`${words}${typed !== null ? ` (type ${typed})` : ''}`.trim(), ...(r.item.under ?? []).map(l => l.trim())].filter(Boolean).join('; ')
+  return places && r.place != null ? `place ${r.place}${said ? `, ${said}` : ''}` : said
+}
+
 function draw({ screen, start }: Frame, back: boolean): Drawn {
   const choices: Drawn['choices'] = []
   const described: Record<string, string> = { ...OWN }
@@ -289,18 +306,24 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   let question = screen.question
   if (screen.kind === 'list') {
     const { page, more, range } = paging(screen.rows, start, back)
-    const items = page.map((r, i) => (screen.typed && start > 0 ? { ...r.item, name: `${r.item.name} (type ${start + i + 1})` } : r.item))
-    const head = range !== null ? `${screen.head} (${range})` : screen.head
-    lines = [...(screen.text ?? []), head, ...(screen.places ? placeLines(items, page.map(r => r.place ?? null)) : plainLines(items))]
+    lines = [...(screen.text ?? [])]
+    question = listAsk(screen.head, range, screen.question)
     choices.push(...page.map(r => ({ label: r.label, act: 'verb' in r ? { verb: r.verb, after: undefined } : { open: r.open } })))
-    for (const r of page) if (r.description) described[r.label] = r.description
+    page.forEach((r, i) => {
+      described[r.label] = unmarked(lineOf(r, screen.typed && start > 0 ? start + i + 1 : null, screen.places === true))
+    })
     if (more) choices.push({ label: MORE, act: 'more' })
   } else if (screen.kind === 'pick') {
-    if (!screen.text.length) throw new Error('a pick dialog shows its text')
+    if (!screen.text.length && screen.head === undefined) throw new Error('a pick dialog shows its text or its head')
     const { page, more, range } = paging(screen.labels, start, back)
     lines = [...screen.text]
     if (range !== null) question = question.replace(/\??$/, ` (${range})?`)
+    if (screen.head !== undefined) question = listAsk(screen.head, null, question)
     choices.push(...page.map(l => (typeof l === 'string' ? { label: l, act: { pick: l } } : { label: l.label, act: { open: l.open } })))
+    for (const l of page) {
+      const line = typeof l === 'string' ? screen.described?.[l] : (l.description ?? screen.described?.[l.label])
+      if (line) described[typeof l === 'string' ? l : l.label] = unmarked(line)
+    }
     if (more) choices.push({ label: MORE, act: 'more' })
   } else {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
