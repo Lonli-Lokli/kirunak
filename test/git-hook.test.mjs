@@ -878,3 +878,39 @@ test('in a step a merge and a commit after `cherry-pick -n` carry Task: <id> and
   assert.equal(n.status, 0, n.stderr);
   assert.equal(said(w.weather), 'other: words\n\nTask: weather/next-task');
 });
+
+// A branch that merges its default branch takes the owner's records master already holds, each committed there
+// through this hook (bug gulnya/merge-refuses-owner-records). Only a record that differs from the merged-in commit's
+// is the merge's own writing, and refused.
+function branchBehindOwnerRecords() {
+  const dir = makeRepo();
+  git(dir, ['checkout', '-q', '-b', 'task-branch']);
+  put(dir, 'src.txt', 'work\n');
+  assert.equal(commit(dir).status, 0);
+  git(dir, ['checkout', '-q', 'master']);
+  put(dir, 'kirunak/approvals/radar-tiles.json', '{"task":"weather/radar-tiles"}\n');
+  assert.equal(commit(dir, { KIRUNAK_APPROVING: 'weather/radar-tiles' }).status, 0);
+  put(dir, `kirunak/tasks/${SLUG}/done.json`, '{}\n');
+  appendFileSync(join(dir, `kirunak/tasks/${SLUG}/amendments/A-1.md`), 'applied: 2026-11-06\n');
+  assert.equal(commit(dir, { KIRUNAK_ACCEPTING: ID, KIRUNAK_APPROVING: ID }).status, 0);
+  git(dir, ['checkout', '-q', 'task-branch']);
+  git(dir, ['merge', '-q', '--no-ff', '--no-commit', 'master']);
+  return dir;
+}
+
+test('a merge of master that takes its owner records unchanged passes (bug gulnya/merge-refuses-owner-records)', () => {
+  const dir = branchBehindOwnerRecords();
+  const r = spawnSync('git', ['commit', '-q', '--no-edit'], { cwd: dir, env: cleanEnv(), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('a merge that writes an owner record other than the merged-in commit\'s is still refused (bug gulnya/merge-refuses-owner-records)', () => {
+  const dir = branchBehindOwnerRecords();
+  put(dir, 'kirunak/approvals/radar-tiles.json', '{"task":"weather/radar-tiles","forged":true}\n');
+  appendFileSync(join(dir, `kirunak/tasks/${SLUG}/amendments/A-1.md`), 'declined: 2026-11-07\n');
+  git(dir, ['add', '-A']);
+  const r = spawnSync('git', ['commit', '-q', '--no-edit'], { cwd: dir, env: cleanEnv(), encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /kirunak\/approvals\/radar-tiles\.json: written by the owner's command only/);
+  assert.match(r.stderr, /amendments\/A-1\.md: its applied:\/declined: stamp is written by the owner's command only/);
+});

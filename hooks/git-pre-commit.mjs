@@ -12,6 +12,8 @@ import { costMarkdown } from '../lib/cost-md.mjs';
 // 3. a staged intake.md is not an append of the committed one (or, removed, of the one `k bug from` moved);
 // 4. a staged cost.md is not the rendering of its done.json's cost (`k cost <id> --write` writes it again).
 // The owner's commands set those variables on the one `git commit` they run. A mistake guard, not a lock.
+// While a merge is under way, a record of 2 staged exactly as the merged-in commit (MERGE_HEAD) holds it passes: that
+// commit put it there through this hook, so the merge only takes it (bug gulnya/merge-refuses-owner-records).
 // `ownerRecord` tells the SLAP hook (git-prepare-commit-msg.mjs) which paths are those records, from the same patterns.
 
 const TASK = /^kirunak\/tasks\/([^/]+)\/task\.md$/;
@@ -44,11 +46,13 @@ const stamps = (buf) => (buf ? (buf.toString('utf8').match(STAMP) ?? []).length 
  * The problems that refuse a commit. `staged` are the staged paths (relative to the repo root), `show(spec)` returns
  * the bytes of `:path` (the index) or `HEAD:path`, or null when there are none.
  */
-export function check({ staged, show, env = process.env }) {
+export function check({ staged, show, env = process.env, merging = false }) {
   const read = (spec) => {
     const b = show(spec);
     return b == null ? null : Buffer.from(b);
   };
+  const same = (a, b) => (a == null ? b == null : b != null && a.equals(b));
+  const taken = (path) => merging && same(read(`:${path}`), read(`MERGE_HEAD:${path}`));
   const byOwner = (slug) => OWNER_VARS.some((v) => names(env[v], slug));
   const problems = [];
   for (const path of staged) {
@@ -71,9 +75,9 @@ export function check({ staged, show, env = process.env }) {
           `\`k approve ${id} --amendment A-n\` applies an approved amendment and re-hashes`);
       }
     } else if ((m = RECORD.exec(path) ?? OWNED.exec(path))) {
-      if (!byOwner(m[1])) problems.push(`kirunak: ${path}: written by the owner's command only`);
+      if (!byOwner(m[1]) && !taken(path)) problems.push(`kirunak: ${path}: written by the owner's command only`);
     } else if ((m = AMENDMENT.exec(path))) {
-      if (stamps(read(`:${path}`)) > stamps(read(`HEAD:${path}`)) && !byOwner(m[1])) {
+      if (stamps(read(`:${path}`)) > stamps(read(`HEAD:${path}`)) && !byOwner(m[1]) && !taken(path)) {
         problems.push(`kirunak: ${path}: its applied:/declined: stamp is written by the owner's command only`);
       }
     } else if ((m = COST.exec(path))) {
@@ -120,7 +124,12 @@ function main() {
       return null;
     }
   };
-  const problems = check({ staged: ours, show, env: process.env });
+  let merging = false;
+  try {
+    git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], 'utf8');
+    merging = true;
+  } catch {}
+  const problems = check({ staged: ours, show, env: process.env, merging });
   if (!problems.length) return;
   process.stderr.write(problems.join('\n') + '\n');
   process.exitCode = 1;
