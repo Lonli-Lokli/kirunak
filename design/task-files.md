@@ -355,7 +355,10 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
   history and never refused for it. `k waiting` names an untitled one by the lines it changes ("replaces AC-2, AC-3;
   adds AC-17").
 - `k amend check A-n` verifies the operations against the current `task.md` (ids exist, numbers free, sources
-  present). `k approve <id> --amendment A-n` (owner only, `approval.md`) applies them, re-hashes, appends the old
+  present), then runs the task's check on the text they leave, as the approval does: `task.md` with them applied and
+  the amendment stamped `applied:`, each problem as `with A-n applied, line <n>: <problem>`, so an amendment that
+  removes a line an aspect still names is fixed while it is a proposal (gulnya/amend-check-task-check). It reads the
+  files as they are and writes nothing. `k approve <id> --amendment A-n` (owner only, `approval.md`) applies them, re-hashes, appends the old
   hash and the amendment id to the approval record's `history`, stamps the amendment file `applied: <date>` and
   commits the three files. An amendment the owner declines is stamped `declined: <date> <why>` by `k amend decline`
   (owner only). Both stamps are the only writes to an amendment file after it is proposed.
