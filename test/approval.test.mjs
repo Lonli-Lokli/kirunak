@@ -327,6 +327,39 @@ test('k amend check and k approve --amendment refuse a waiting amendment with no
   assert.deepEqual(checkAmendment(task, declined).map((x) => x.problem), ['already declined: 2026-11-07 not now']);
 });
 
+test('k amend check refuses what k approve --amendment would: the task check on the amended text, in the approval\'s words (gulnya/amend-check-task-check)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  const task = readFileSync(taskFile(weather), 'utf8');
+  const a = newAmendment({ ws, id: ID, title: 'Drop E-1', now: NOV6 });
+
+  // (c) One that fails its own check reports only those problems, as before.
+  const check0 = run(['amend', 'check', ID, 'A-1']);
+  assert.equal(check0.status, 1);
+  assert.match(check0.stderr, /A-1\.md line \d+: .*Why is empty/);
+  assert.doesNotMatch(check0.stderr, /applied/);
+
+  // (a) Removing E-1 alone leaves the offline aspect naming a line that is gone: refused now, not at the approval.
+  fill(a.path, 'E-1 is covered elsewhere. [owner 2026-11-02 Q-4]', ['- remove E-1']);
+  const am = readFileSync(a.path, 'utf8');
+  const check = run(['amend', 'check', ID, 'A-1']);
+  assert.equal(check.status, 1, check.stdout);
+  assert.equal(check.stderr, `${ID} A-1: 1 problem\n  with A-1 applied, line 27: aspect offline: in names E-1, which the task does not have\n`);
+  await assert.rejects(approve({ ws, id: ID, amendment: 'A-1', now: NOV6 }), /A-1 applied fails k check:\n.*aspect offline: in names E-1/);
+  // It writes nothing.
+  assert.equal(readFileSync(taskFile(weather), 'utf8'), task);
+  assert.equal(readFileSync(a.path, 'utf8'), am);
+
+  // (b) One that passes both checks still prints "check passes", and the approval takes it.
+  writeFileSync(a.path, am
+    .replace('E-1 is covered elsewhere. [owner 2026-11-02 Q-4]', 'Hourly data. [research docs/offline.md §3]')
+    .replace('- remove E-1', '- replace D-1: Keep three days, the first hourly. [research docs/offline.md §3]'));
+  const ok = run(['amend', 'check', ID, 'A-1']);
+  assert.deepEqual([ok.status, ok.stdout], [0, `${ID} A-1: check passes\n`], ok.stderr);
+  await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
+});
+
 const headOf = (repo) => sh(repo, 'git', ['rev-parse', '--short', 'HEAD']).trim();
 
 // A review of the invented task at the commit head: AC-3 for a device, E-1 for the owner, or every row met.
