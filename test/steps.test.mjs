@@ -308,6 +308,34 @@ test('a finish whose evidence commit git refuses fails with git\'s message, and 
   assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'running');
 });
 
+// kirunak's own pre-commit hook: every refusal of it starts `kirunak: ` (gulnya/finish-refused-commit-waits).
+const KIRUNAK_REFUSAL = 'kirunak: binary files that .slapignore does not list: evidence/S-1-shot.png';
+
+test('a finish whose evidence commit kirunak\'s own hook refuses waits for the owner, counts no failure, and k step finish commits it once fixed', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const hook = join(w.weather, '.git', 'hooks', 'pre-commit');
+  writeFileSync(hook, `#!/bin/sh\necho "${KIRUNAK_REFUSAL}" >&2\nexit 1\n`, { mode: 0o755 });
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 1);
+  const owner = `kirunak refused the commit of ${w.id} S-1's evidence: ${KIRUNAK_REFUSAL}. Once it is fixed: k step finish ${w.id} S-1`;
+  assert.equal(r.stderr.trim(), `${w.id} S-1 waits for the owner: ${owner}`);
+  assert.match(progress(w), /S-1 waiting for the owner: kirunak refused the commit/);
+  assert.doesNotMatch(progress(w), /S-1 failed|S-1 finished/);
+  const st = steps.load(w.ws, w.id).states.get('S-1');
+  assert.deepEqual([st.state, st.needs.owner], ['waiting-owner', owner]);
+  assert.match(readFileSync(join(w.home, 'events.jsonl'), 'utf8'), /"kind":"awaiting owner","task":"weather\/offline-forecast","step":"S-1"/);
+
+  writeFileSync(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const again = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim(), 'kirunak/tasks/offline-forecast/evidence/S-1-cache-sizes.tsv');
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'done');
+  assert.equal(existsSync(join(w.p.dir, 'steps', 'S-1', 'needs.json')), false, 'the question is set aside');
+});
+
 test('a step needing a step written below it is ready once that one is done', async () => {
   const w = await approvedWorkspace(`---
 task: weather/offline-forecast

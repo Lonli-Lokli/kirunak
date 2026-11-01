@@ -137,7 +137,10 @@ pending  →  ready  →  running  →  done
     `k run` again, so this does not loop). A stop writes no failure report, its `failed` line the whole record, and
     the attempt after a stop reads the step's last own report, if it has one since the last climb. A review's `not
     met` verdict is the review's result, never a failure. `k step fail --why` refuses a stop's words: a failure given
-    by hand is the step's own and counts.
+    by hand is the step's own and counts. Nor is a refusal by kirunak's own commit check (its message starts
+    `kirunak: `: a binary file `.slapignore` does not list, a frozen file) of a finished step's evidence: the step
+    waits for the owner, its `needs.json` and `waiting for the owner:` line naming the refusal, and `k step finish`
+    commits it once that is fixed, nothing run again (gulnya/finish-refused-commit-waits).
   - **The record**: `progress.md` gets a line `escalated: to <model> (…)` per climb and the stop line; `events.jsonl`
     gets an `escalate` event per climb or stop (trigger `k run failure count`, the failures, the rung from and to)
     and an `escalated-run` event when each rung's conversation ends, with its tokens and cost; `k board --card` lists
