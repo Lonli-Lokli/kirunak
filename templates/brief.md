@@ -29,5 +29,5 @@ You run one step of a task whose file the owner approved and froze. Do this step
 - A question only the owner can answer: write `{{stepDir}}/needs.json` as `{ "owner": "<the question>" }` and end
   your turn.
 - No agents.
-- Every result is a file under `{{stepDir}}/` or `{{evidenceDir}}/`. The task file is frozen: never edit it.
+- Every result is a file under `{{stepDir}}/`, or under `{{evidenceDir}}/` named `{{step}}-<name>` or inside `{{evidenceDir}}/{{step}}/`: the evidence commit takes only those. The task file is frozen: never edit it.
 - Last, write `{{stepDir}}/report.md`, at most a page: what you did, the files, what is left.

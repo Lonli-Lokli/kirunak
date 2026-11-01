@@ -173,10 +173,15 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   `tasks/<slug>/bug/`. `k draft drop <id> --why "..."` removes a draft in a commit of that file alone, with the
   reason in the message (R27).
 
-- `evidence/` is committed by `k step finish`: the files the step wrote there that are new or changed, and nothing
+- `evidence/` is committed by `k step finish`: the step's own files there that are new or changed, and nothing
   else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks; a commit git
   refuses fails the finish. So a review's `measure` or `screenshot` row cites a path that stands at `head`
-  (`review.md` §2). Judgement: the other task files are the session's to commit with its work.
+  (`review.md` §2). A file is a step's when the step declares it among its outputs, else when its first path segment
+  is the step's id or begins with it and a `-` (`S-1-sizes.tsv`, `S-1/shot.png`), the longest such id of the plan
+  winning (`S-1-look-x.tsv` is S-1-look's, never S-1's; `S-10-x` is never S-1's), else when the step declares a
+  folder holding it; a file no step's id or outputs name goes with the next finish. So a finish never commits the
+  half-written evidence of a step running beside it (gulnya/evidence-commit-own-step). The brief tells each step to
+  name its evidence so. Judgement: the other task files are the session's to commit with its work.
 - Judgement: one folder per task, every file named for one reader, so a `git log kirunak/tasks/x/task.md` is the
   task's whole history and `progress.md` can churn without touching it (R6).
 - Judgement: `approvals/` sits beside `tasks/`, not inside the task folder, so one hook rule covers every record

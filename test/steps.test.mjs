@@ -245,6 +245,56 @@ test('k step finish commits the evidence the step wrote and nothing else; a revi
   assert.equal(git('diff', '--cached', '--name-only'), 'docs/staged.md');
 });
 
+// A plan whose steps run side by side, one id beginning with another's and a dash (gulnya/evidence-commit-own-step).
+const PLAN_SIDE_BY_SIDE = `---
+task: weather/offline-forecast
+blocked-by: []
+---
+
+### S-1 Keep the last forecast on disk [agent]
+covers: AC-1, AC-2, E-1, D-1
+inputs: task, docs/offline.md
+outputs: steps/S-1/report.md, evidence/cache-sizes.tsv
+budget: 80 calls
+
+### S-1-look Look at the cached forecast [agent]
+covers: AC-3
+inputs: task
+outputs: steps/S-1-look/report.md
+
+### S-2 Show the forecast's age [agent]
+covers: AC-3
+inputs: task
+outputs: steps/S-2/report.md
+
+### S-3 Review [review]
+needs: S-1, S-1-look, S-2
+covers: all
+inputs: task, diff, evidence/
+outputs: review.md
+`;
+
+test('k step finish commits only its own step\'s evidence: named for it, inside its folder, or declared; never another running step\'s', async () => {
+  const w = await approvedWorkspace(PLAN_SIDE_BY_SIDE);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  const ev = (f) => `kirunak/tasks/offline-forecast/evidence/${f}`;
+  for (const s of ['S-1', 'S-1-look', 'S-2']) assert.equal(k(w.home, ['step', 'start', w.id, s]).status, 0, s);
+  put(w, 'steps/S-1/report.md');
+  for (const f of ['S-1-a.tsv', 'S-1/shot.txt', 'cache-sizes.tsv', 'S-2-b.tsv', 'S-1-look-x.tsv', 'S-10-y.tsv']) put(w, `evidence/${f}`);
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD'),
+    `weather/offline-forecast S-1: the step's evidence\n\n${['S-1-a.tsv', 'S-1/shot.txt', 'S-10-y.tsv', 'cache-sizes.tsv'].map(ev).join('\n')}`,
+    'its own by name, by folder and by declaration; S-10-y.tsv no step names, so it goes too');
+  assert.deepEqual(git('ls-files', '--others', '--', ev('')).split('\n').sort(), [ev('S-1-look-x.tsv'), ev('S-2-b.tsv')],
+    'S-1-look\'s and S-2\'s files stay untracked');
+
+  put(w, 'steps/S-1-look/report.md');
+  assert.equal(k(w.home, ['step', 'finish', w.id, 'S-1-look']).status, 0);
+  assert.equal(git('show', '--name-only', '--format=', 'HEAD'), ev('S-1-look-x.tsv'));
+  assert.equal(git('ls-files', '--others', '--', ev('')), ev('S-2-b.tsv'));
+});
+
 test('a finish whose evidence commit git refuses fails with git\'s message, and the step stays running', async () => {
   const w = await approvedWorkspace(PLAN);
   writeFileSync(join(w.weather, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "the repo takes no commits now" >&2\nexit 1\n', { mode: 0o755 });
