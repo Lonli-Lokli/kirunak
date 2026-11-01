@@ -89,6 +89,9 @@ reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuse
    after approval; `k approve <id> --amendment A-n` applies an approved amendment and re-hashes";
 2. a staged file under `kirunak/approvals/`, a `done.json`, a `hold.md`, or an amendment stamp, without
    `KIRUNAK_APPROVING` / `KIRUNAK_ACCEPTING` / `KIRUNAK_HOLDING` naming the task: "written by the owner's command only";
+   while a merge is under way, one staged exactly as the merged-in commit (`MERGE_HEAD`) holds it, or removed as it
+   is removed there, passes: that commit put it there through this hook, and the merge only takes it (bug
+   gulnya/merge-refuses-owner-records);
 3. a staged `intake.md` that is not an append of the committed one (the old text must be a prefix of the new):
    "intake.md is append-only; use `k intake`";
 4. a staged `cost.md` that is not the rendering of its `done.json`'s `cost` (in the index, else in HEAD), whatever
