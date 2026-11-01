@@ -26,9 +26,6 @@ test('logLimits appends to the workspace\'s bugs.limitsLog, beside its module, a
   const elsewhere = join(dir, 'abs.log');
   assert.ok(logLimits({ ...ws, bugs: { limitsLog: elsewhere } }, READING, { now: AT }));
   assert.equal(readFileSync(elsewhere, 'utf8'), '2026-10-27T23:18:51Z\t53\t1\t-\n');
-  // A plan with no 5-hour window (gulnya/five-hour-optional) logs -1 for it, as the status line tracker does.
-  assert.equal(logLimits({ ...ws, bugs: { limitsLog: elsewhere } }, { ...READING, fiveHour: null }, { label: 'quad-damage', now: AT }),
-    '2026-10-27T23:18:51Z\t53\t-1\tquad-damage');
 
   assert.equal(logLimits({ modulePath: ws.modulePath }, READING), null);
   assert.equal(logLimits({ ...ws, bugs: { limitsLog: ' ' } }, READING), null);
@@ -36,4 +33,12 @@ test('logLimits appends to the workspace\'s bugs.limitsLog, beside its module, a
   mkdirSync(join(dir, 'a-folder'));
   assert.equal(logLimits({ ...ws, bugs: { limitsLog: 'a-folder' } }, READING), null, 'a failed write is swallowed, as the status line does');
   assert.equal(readFileSync(log, 'utf8').split('\n').length, 3);
+});
+
+test('logLimits: a plan with no 5-hour window (fiveHour null) logs -1 for it, as the status line tracker does (gulnya/five-hour-optional)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-limits-'));
+  const ws = { modulePath: join(dir, 'workspace.mjs'), bugs: { limitsLog: 'rate-limits.log' } };
+  const line = logLimits(ws, { ...READING, fiveHour: null }, { label: 'quad-damage', now: AT });
+  assert.deepEqual(line.split('\t').slice(0, 4), ['2026-10-27T23:18:51Z', '53', '-1', 'quad-damage']);
+  assert.equal(readFileSync(join(dir, 'rate-limits.log'), 'utf8'), `${line}\n`);
 });
