@@ -59,6 +59,14 @@ test('the plan of the design parses: kinds, model, effort, lists, budget', () =>
   assert.deepEqual(parseBudget('3 USD, 1 call'), { usd: 3, calls: 1, bad: [] });
 });
 
+test('parsePlan keeps the text above the first step as header, trimmed, and \'\' when a step comes first (gulnya/brief-what-and-header)', () => {
+  const header = '# Rules\n\nBuild at the lock.\n\nKeep images out of git.';
+  assert.equal(parsePlan(PLAN.replace('---\n\n### S-1', `---\n\n${header}\n\n### S-1`)).header, header);
+  assert.equal(parsePlan(PLAN).header, '');
+  assert.equal(parsePlan(`${header}\n\n### S-1 Build [agent]\ncovers: all\n`).header, header, 'no front matter: the header from the first line');
+  assert.equal(parsePlan('### S-1 Build [agent]\ncovers: all\n').header, '');
+});
+
 test('a full plan passes the check', async () => {
   const w = await fixture();
   assert.deepEqual(problemsOf(w, PLAN), []);

@@ -69,6 +69,30 @@ test('the brief quotes the goal and the covered lines, names the paths and the r
   assert.doesNotMatch(text, /\{\{/);
 });
 
+// The plan's header (its text above the first step) and a step's `what:` line, quoted in its brief and its design
+// brief, never in a review's (gulnya/brief-what-and-header).
+const HEADER_TEXT = '# The plan\n\nRules for every step: build at the lock, keep images out of git.';
+const WHAT = 'what: cache the forecast in one JSON file, written after every fetch';
+const PLAN_WITH_HEADER = PLAN.replace('---\n\n### S-1', `---\n\n${HEADER_TEXT}\n\n### S-1`).replace('budget: 80 calls\n', `budget: 80 calls\n${WHAT}\n`);
+
+test('the brief and the design brief quote the step\'s what line and the plan\'s header; with neither, no heading', async () => {
+  const w = await approvedWorkspace(PLAN_WITH_HEADER);
+  const what = `## What this step does, quoted from the plan\n\n${WHAT.slice('what: '.length)}\n`;
+  const header = `## The plan's rules for every step, quoted from the plan\n\n${HEADER_TEXT}\n`;
+  const built = (await steps.brief({ ws: w.ws, id: w.id, step: 'S-1' })).text;
+  const designed = (await steps.brief({ ws: w.ws, id: w.id, step: 'S-1', retry: { reports: [], rung: w.ws.ladder[1], phase: 'design', design: null } })).text;
+  for (const text of [built, designed]) {
+    assert.ok(text.includes(`then stop.\n\n${what}\n${header}\n## The task's goal`), text);
+    assert.doesNotMatch(text, /\{\{/);
+  }
+  const plain = await approvedWorkspace(PLAN);
+  const none = (await steps.brief({ ws: plain.ws, id: plain.id, step: 'S-1' })).text;
+  assert.doesNotMatch(none, /What this step does|The plan's rules|\{\{/);
+  assert.match(none, /then stop\.\n\n## The task's goal/);
+  const review = (await steps.brief({ ws: w.ws, id: w.id, step: 'S-2', session: 'rev-1' })).text;
+  assert.doesNotMatch(review, /What this step does|The plan's rules|build at the lock/, 'a review may not read plan.md');
+});
+
 test('a review step refuses a session another step ran, and starts in a fresh one', async () => {
   const w = await approvedWorkspace(PLAN);
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-7']).status, 0);
