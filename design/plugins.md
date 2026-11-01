@@ -192,8 +192,10 @@ export default {
   folder the usage-review skill reads the last review and `standing.md` from and writes the new review to (`k usage`
   prints it last); `baseline`, a `quality.tsv` of an earlier week `quality.txt` compares with; `limitsLog`, the
   rate-limit log the status line tracker appends to and the summary reads (else `bugs.limitsLog`, its older name, else
-  `<KIRUNAK_HOME>/rate-limits.log`), the tracker only forward within a window whichever session's reading it holds and
-  the summary counting a rise only above the highest point so far (gulnya/limits-log-flaps); and `stale`, the
+  `<KIRUNAK_HOME>/rate-limits.log`), the tracker only forward within a window whichever session's reading it holds (a
+  reading a session's status line already showed moves nothing, so an idle session open across a reset never takes
+  the log back) and the summary counting a rise only above the highest point so far in the week, from a new week's
+  first line again (gulnya/limits-log-flaps); and `stale`, the
   stale-session hook's `minutes` since the last call and `context` in tokens, both past which it says once to hand
   over or start fresh. Paths resolve against the module or `~/...`. A bad day, time, zone, path or number is refused
   at load. `k install` copies `stale` and `limitsLog` into `escalate/config.json`, so a change needs `k install`

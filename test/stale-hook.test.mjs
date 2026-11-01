@@ -214,6 +214,33 @@ test('the tracker over sessions holding different readings: one behind writes no
   assert.equal(readFileSync(bareLog, 'utf8'), '2026-10-27T22:00:00Z\t92\t12\tidle\n2026-10-27T22:02:00Z\t3\t1\tnew\t-\t-\n');
 });
 
+test('an idle session left open across the week reset never takes the log back, with no reset time or only the busy session\'s (gulnya/limits-log-flaps AC-2, review-1 finding 1)', () => {
+  const at = (m) => new Date(Date.parse('2026-10-27T22:00:00Z') + m * MIN);
+  const W2 = 1793545200 + 7 * 86400;
+  const iso = (s) => new Date(s * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // Each its own session, as the status lines are; `weekReset` the busy session's (null: none).
+  const S = (sid, week, fiveHour, weekReset = null) => ({
+    session_id: sid, session_name: sid,
+    rate_limits: { seven_day: { used_percentage: week, resets_at: weekReset }, five_hour: { used_percentage: fiveHour, resets_at: null } },
+  });
+  for (const weekReset of [null, W2]) {
+    const home = tmp(), log = join(home, 'rate-limits.log');
+    track(S('idle', 94, 30), home, at(1)); // last week's last reading: written
+    track(S('busy', 1, 2, weekReset), home, at(2)); // the week reset: written
+    track(S('idle', 94, 30), home, at(3)); // the idle session's status line again, its reading unchanged: nothing
+    track(S('busy', 2, 3, weekReset), home, at(4));
+    track(S('idle', 94, 30), home, at(5));
+    track(S('busy', 3, 4, weekReset), home, at(6));
+    const r = weekReset === null ? '-' : iso(weekReset);
+    assert.equal(readFileSync(log, 'utf8'), [
+      '2026-10-27T22:01:00Z\t94\t30\tidle\t-\t-',
+      `2026-10-27T22:02:00Z\t1\t2\tbusy\t${r}\t-`,
+      `2026-10-27T22:04:00Z\t2\t3\tbusy\t${r}\t-`,
+      `2026-10-27T22:06:00Z\t3\t4\tbusy\t${r}\t-`,
+    ].join('\n') + '\n', `the busy session's week reset ${r}`);
+  }
+});
+
 test('a failed write of the tracker is silent, and the hook still exits 0 and prints nothing', () => {
   const home = tmp();
   mkdirSync(join(home, 'rate-limits.log'));

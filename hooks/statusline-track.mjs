@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
-import { TTL, updateSession } from '../lib/keeper.mjs';
+import { TTL, readSession, updateSession } from '../lib/keeper.mjs';
 import { logChange } from '../lib/limits.mjs';
 
 // One line in the user's status line command (orchestrator.md §5), fed the same JSON on stdin (statusline.md): it
@@ -65,15 +65,23 @@ export function limitsLogPath(home) {
   return join(home, 'rate-limits.log');
 }
 
-// One status line refresh: the session's file, then the limits log's line; each fails silently on its own.
+// One status line refresh: the session's file, then the limits log's line; each fails silently on its own. The
+// session's file keeps the reading its status line showed (`limits`), so the next refresh of a session that made no
+// call since, an idle one, moves nothing in the log (lib/limits.mjs: logChange's `seen`).
 export function track(input, home = kirunakHome(), now = new Date()) {
+  let seen = null, l = null;
   try {
-    const p = fromStatusline(input, now);
-    if (p) updateSession(home, p.session, p.patch);
+    l = limitsOf(input);
   } catch {}
   try {
-    const l = limitsOf(input);
-    if (l) logChange(limitsLogPath(home), l.reading, { label: l.label, now });
+    const p = fromStatusline(input, now);
+    if (p) {
+      seen = readSession(home, p.session)?.limits ?? null;
+      updateSession(home, p.session, l ? { ...p.patch, limits: l.reading } : p.patch);
+    }
+  } catch {}
+  try {
+    if (l) logChange(limitsLogPath(home), l.reading, { label: l.label, now, seen });
   } catch {}
 }
 
