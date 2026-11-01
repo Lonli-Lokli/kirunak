@@ -348,6 +348,21 @@ test('exit 1 fails the step with its exit code', async () => {
   assert.match(progress(w), /S-1 failed: exit 1\n$/);
 });
 
+test('a step whose work is done but whose evidence commit kirunak\'s own hook refuses stops k run for the owner, no failure counted (gulnya/finish-refused-commit-waits)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const refusal = 'kirunak: binary files that .slapignore does not list: evidence/S-1-shot.png';
+  fakeRunner(w, () => {
+    writeFileSync(join(w.weather, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\necho "${refusal}" >&2\nexit 1\n`, { mode: 0o755 });
+    return 'write';
+  });
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.deepEqual([r.ended['S-1'], r.states['S-1']], ['waiting-owner', 'waiting-owner']);
+  assert.doesNotMatch(progress(w), /S-1 failed/);
+  assert.match(progress(w), /S-1 waiting for the owner: kirunak refused the commit of weather\/offline-forecast S-1's evidence: kirunak: binary files/);
+  assert.match(pushes(lines)[0] ?? '', /S-1 waits for your answer\. why: kirunak refused the commit/);
+});
+
 test('a runner that throws after the step started fails the step instead of leaving it running', async () => {
   const w = await approvedWorkspace(PLAN);
   w.ws.seams.runner = { start() { throw new Error('no runner here'); }, keepAlive: () => null };

@@ -174,8 +174,9 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   reason in the message (R27).
 
 - `evidence/` is committed by `k step finish`: the step's own files there that are new or changed, and nothing
-  else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks; a commit git
-  refuses fails the finish. So a review's `measure` or `screenshot` row cites a path that stands at `head`
+  else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks. A commit
+  kirunak's own hook refuses (its message starts `kirunak: `) leaves the step waiting for the owner, no failure
+  counted, until `k step finish` commits it; one git refuses otherwise fails the finish. So a review's `measure` or `screenshot` row cites a path that stands at `head`
   (`review.md` §2). A file is a step's when the step declares it among its outputs, else when its first path segment
   is the step's id or begins with it and a `-` (`S-1-sizes.tsv`, `S-1/shot.png`), the longest such id of the plan
   winning (`S-1-look-x.tsv` is S-1-look's, never S-1's; `S-10-x` is never S-1's), else when the step declares a

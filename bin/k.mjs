@@ -441,7 +441,8 @@ const VERBS = {
       return { text: `${id} ${step}: started` };
     }
     if (sub === 'finish') {
-      steps.finish({ ws, id, step });
+      const r = steps.finish({ ws, id, step });
+      if (r.state === 'waiting-owner') return { code: 1, text: `${id} ${step} waits for the owner: ${r.owner}` };
       return { text: `${id} ${step}: done` };
     }
     const why = need(flags.why, '--why "<why>"');
