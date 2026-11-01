@@ -360,6 +360,27 @@ test('k amend check refuses what k approve --amendment would: the task check on 
   await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
 });
 
+test('k amend check takes the A-n as the approval does: typed a-n, the amendment\'s own removals still count (gulnya/amend-check-task-check review-1)', async () => {
+  const { ws, home } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  // A-1, applied, adds E-2 and E-3; A-2 removes E-2 from the middle, a gap only its own removal explains.
+  const a1 = newAmendment({ ws, id: ID, title: 'Two edges', now: NOV6 });
+  fill(a1.path, 'Two more edges. [owner 2026-11-02 Q-4]', [
+    '- add E-2: A forecast fetched in another time zone shows its own zone. [owner 2026-11-02 Q-4]',
+    '- add E-3: A forecast with no hours shows the days alone. [owner 2026-11-02 Q-4]',
+  ]);
+  await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
+  const a2 = newAmendment({ ws, id: ID, title: 'Drop E-2', now: NOV7 });
+  fill(a2.path, 'Zones are shown everywhere already. [owner 2026-11-02 Q-4]', ['- remove E-2']);
+
+  for (const typed of ['A-2', 'a-2', '2']) {
+    const check = run(['amend', 'check', ID, typed]);
+    assert.deepEqual([check.status, check.stdout, check.stderr], [0, `${ID} A-2: check passes\n`, ''], typed);
+  }
+  assert.deepEqual(await approve({ ws, id: ID, amendment: 'a-2', now: NOV7, dryRun: true }), { state: 'would approve', amendment: 'A-2' });
+});
+
 const headOf = (repo) => sh(repo, 'git', ['rev-parse', '--short', 'HEAD']).trim();
 
 // A review of the invented task at the commit head: AC-3 for a device, E-1 for the owner, or every row met.

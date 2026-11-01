@@ -130,7 +130,11 @@ const session = (flags) => flags.session || process.env.CLAUDE_CODE_SESSION_ID |
 const baselineOf = (ws) => (ws.baseline && existsSync(ws.baseline) ? JSON.parse(readFileSync(ws.baseline, 'utf8')) : null);
 
 // What `k approve` would refuse, without writing anything (the --dry-run the model may run).
-async function approvalProblems(ws, id, amendmentId) {
+async function approvalProblems(ws, id, typedAmendment) {
+  // The A-n as the approval reads it ('a-2' and '2' are 'A-2'), for the file, the stamp's key and the messages alike:
+  // on a disk that ignores case 'a-2.md' finds A-2.md, but its own removals count only under A-2
+  // (gulnya/amend-check-task-check review-1).
+  const amendmentId = typedAmendment ? amend.amendmentId(typedAmendment) : null;
   const p = taskPaths(ws, id);
   const aspectIds = (await aspectsOf(ws)).map((a) => a.id);
   const out = [];
@@ -569,8 +573,9 @@ const VERBS = {
     }
     const a = need(pos[2], 'A-n');
     if (sub === 'check') {
-      const problems = await approvalProblems(ws, id, a);
-      return report(`${id} ${a}`, problems.map((x) => ({ problem: x })), '');
+      const aid = amend.amendmentId(a);
+      const problems = await approvalProblems(ws, id, aid);
+      return report(`${id} ${aid}`, problems.map((x) => ({ problem: x })), '');
     }
     if (sub === 'decline') {
       if (flags['dry-run']) return { text: `would decline ${a}` };
