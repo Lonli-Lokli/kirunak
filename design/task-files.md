@@ -122,8 +122,9 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
 - **The run's limits** (AC-9, AC-10): before every session the run reads the plan's windows through the runner's
   `limits()` (`orchestrator.md` §3) and appends the reading to `ws.bugs.limitsLog`, labelled `quad-damage`. The 5-hour
   window at 90% or more sets the phase waiting with `waitUntil` and sleeps until its reset and a minute, then reads
-  again; the week at 98% or more, extra usage, or a reading that fails (a runner with no `limits()` included) stops the
-  run, every marked bug not tried "not reached".
+  again; a plan with no 5-hour window never waits, its reading logged with -1 for it (gulnya/five-hour-optional). The
+  week at 98% or more, extra usage, or a reading that fails or has no week (a runner with no `limits()` included) stops
+  the run, every marked bug not tried "not reached".
 - **The run's end** (AC-13): `summary.md` is `Quad Damage, HH:MM to HH:MM: n merged, m wait, k not reached[; stopped:
   why]`, then a line a bug, `- <id>: merged <sha7> into <repo>'s master`, `- <id>: waits: <why>` or `- <id>: not
   reached`, and the run file goes. `k bugs quad-damage --summary [<folder>]` prints the latest run's summary (or the

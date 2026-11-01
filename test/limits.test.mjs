@@ -26,6 +26,9 @@ test('logLimits appends to the workspace\'s bugs.limitsLog, beside its module, a
   const elsewhere = join(dir, 'abs.log');
   assert.ok(logLimits({ ...ws, bugs: { limitsLog: elsewhere } }, READING, { now: AT }));
   assert.equal(readFileSync(elsewhere, 'utf8'), '2026-10-27T23:18:51Z\t53\t1\t-\n');
+  // A plan with no 5-hour window (gulnya/five-hour-optional) logs -1 for it, as the status line tracker does.
+  assert.equal(logLimits({ ...ws, bugs: { limitsLog: elsewhere } }, { ...READING, fiveHour: null }, { label: 'quad-damage', now: AT }),
+    '2026-10-27T23:18:51Z\t53\t-1\tquad-damage');
 
   assert.equal(logLimits({ modulePath: ws.modulePath }, READING), null);
   assert.equal(logLimits({ ...ws, bugs: { limitsLog: ' ' } }, READING), null);

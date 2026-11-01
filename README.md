@@ -36,7 +36,7 @@ is done.
   Quad Damage, the first row of `/k-bugs` while a marked bug waits (or `k bugs quad-damage` at your own prompt),
   works the bugs marked yes one at a time, unattended: a fresh session fixes each on its branch, a second reviews it,
   and a fix with no finding merges into master, never pushed. It reads your plan's limits before every session,
-  waits for the 5-hour window at 90% and stops at 98% of the week or on extra usage. `k bugs quad-damage --status`
+  waits for the 5-hour window at 90% (a plan with none never waits) and stops at 98% of the week or on extra usage. `k bugs quad-damage --status`
   says where it is, `--summary` what it did, `--progress <folder> --after <n>` waits for its next progress lines,
   `--dry-run` which bugs it would take; from the mod the session writes a short line in its chat at each change of
   the run's status (a bug started, its fix committed, merged, waiting, a pause) and pushes the summary to your phone
