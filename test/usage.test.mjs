@@ -158,6 +158,61 @@ test('k usage --to: the London week from the workspace, every file written, the 
   assert.match(readFileSync(join(out, 'report.txt'), 'utf8'), /\nsub claude-sonnet-5\t[\d.]+%\t1 calls\n/);
 });
 
+test('k usage over a limits log that flaps between sessions counts each point of the week once (gulnya/limits-log-flaps AC-3, AC-4)', async (t) => {
+  const w = await withUsage(t, { weekStart: LONDON, limitsLog: './rate-limits.log' });
+  const fx = transcripts(w.root);
+  // A busy session's readings and an idle one's behind it, before the fix (four columns), then the tracker's with the
+  // windows' resets (E-3); the agent's call at 2026-10-20T10:01 lies between the sixth line and the seventh.
+  const W = '2026-10-25T15:00:00Z';
+  writeFileSync(join(w.hub, 'kirunak', 'rate-limits.log'), [
+    '2026-10-18T13:00:00Z\t5\t1\tbusy', // before the week
+    '2026-10-18T15:00:00Z\t10\t1\tbusy',
+    '2026-10-19T00:00:00Z\t12\t2\tbusy',
+    '2026-10-19T00:00:10Z\t10\t-1\tidle',
+    '2026-10-19T00:00:20Z\t12\t2\tbusy',
+    '2026-10-19T00:00:30Z\t10\t-1\tidle',
+    '2026-10-19T00:00:40Z\t13\t3\tbusy',
+    `2026-10-20T12:00:00Z\t20\t1\tbusy\t${W}\t2026-10-20T15:00:00Z`,
+    `2026-10-21T00:00:00Z\t25\t5\tbusy\t${W}\t2026-10-21T04:00:00Z`,
+  ].join('\n') + '\n');
+  const r = k(w.home, ['usage', '--to', '2026-10-25T15:00:00Z'], { CLAUDE_CONFIG_DIR: fx.config });
+  assert.equal(r.status, 0, r.stderr);
+  // 2 up to 12, 1 more to 13 and 5 to 25; the flaps back up to 12 count nothing, nor does the rise across the call.
+  assert.equal(r.stdout.split('\n')[4], 'weekly limit: peaked at 25%; 8 points rose with no local call (claude.ai, cloud, another machine)');
+});
+
+test('k usage over a range that holds a week reset counts the new week\'s rises from its own start (gulnya/limits-log-flaps AC-3, review-1 finding 2)', async (t) => {
+  const w = await withUsage(t, { weekStart: LONDON, limitsLog: './rate-limits.log' });
+  const fx = transcripts(w.root);
+  const W1 = '2026-10-21T15:00:00Z', W2 = '2026-10-28T15:00:00Z';
+  writeFileSync(join(w.hub, 'kirunak', 'rate-limits.log'), [
+    // the tracker's lines, the week's reset moving on at 2026-10-21T15:00
+    `2026-10-21T12:00:00Z\t80\t1\tbusy\t${W1}\t-`,
+    `2026-10-21T13:00:00Z\t90\t2\tbusy\t${W1}\t-`,
+    `2026-10-21T16:00:00Z\t2\t1\tbusy\t${W2}\t-`,
+    `2026-10-21T18:00:00Z\t7\t3\tbusy\t${W2}\t-`,
+    // the tracker's lines with no reset known: a fall by more than half is the new week
+    '2026-10-23T00:00:00Z\t50\t1\tbusy\t-\t-',
+    '2026-10-23T01:00:00Z\t60\t2\tbusy\t-\t-',
+    '2026-10-24T00:00:00Z\t3\t1\tbusy\t-\t-',
+    '2026-10-24T01:00:00Z\t8\t2\tbusy\t-\t-',
+    // lines from before the reset columns, an idle session's last week's 94 among the new week's: no new week there
+    '2026-10-25T00:00:00Z\t94\t1\tidle',
+    '2026-10-25T00:00:10Z\t1\t1\tbusy',
+    '2026-10-25T00:00:20Z\t94\t1\tidle',
+    '2026-10-25T00:00:30Z\t2\t1\tbusy',
+  ].join('\n') + '\n');
+  const line = (from, to) => {
+    const r = k(w.home, ['usage', '--from', from, '--to', to, '--out', join(w.root, `out-${from.slice(0, 10)}`)], { CLAUDE_CONFIG_DIR: fx.config });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.split('\n')[4];
+  };
+  // 10 to 90, then 5 in the new week from its 2; with no reset, 10 to 60, then 5 from 3
+  assert.equal(line('2026-10-21T00:00:00Z', '2026-10-22T00:00:00Z'), 'weekly limit: peaked at 90%; 15 points rose with no local call (claude.ai, cloud, another machine)');
+  assert.equal(line('2026-10-22T00:00:00Z', '2026-10-25T00:00:00Z'), 'weekly limit: peaked at 60%; 15 points rose with no local call (claude.ai, cloud, another machine)');
+  assert.equal(line('2026-10-25T00:00:00Z', '2026-10-25T01:00:00Z'), 'weekly limit: peaked at 94%; 0 points rose with no local call (claude.ai, cloud, another machine)');
+});
+
 test('k usage: the default week, --out, and a window that is not one refused', async (t) => {
   const w = await withUsage(t, { weekStart: LONDON });
   const fx = transcripts(w.root);

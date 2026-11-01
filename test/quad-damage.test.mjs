@@ -145,7 +145,7 @@ test('run: the 5-hour window at 90% pauses until its reset and a minute, then th
   assert.deepEqual(during, ['Quad Damage waits for the 5-hour window until 01:15', '01:15']);
   assert.equal(summaryFile(r), "Quad Damage, 23:40 to 01:16: 2 merged, 0 wait, 0 not reached\n- hub/a: merged abcdef1 into hub's master\n" +
     "- hub/c: merged cbcdef1 into hub's master\n");
-  const logged = readFileSync(join(w.root, 'limits.log'), 'utf8').trim().split('\n').map((l) => l.split('\t').slice(1));
+  const logged = readFileSync(join(w.root, 'limits.log'), 'utf8').trim().split('\n').map((l) => l.split('\t').slice(1, 4));
   assert.deepEqual(logged, [['50', '91', 'quad-damage'], ['50', '5', 'quad-damage'], ['60', '10', 'quad-damage']]);
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: the 5-hour window is at 91%: waiting until 01:15 and a minute/);
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: merged abcdef123456 into hub\n/);

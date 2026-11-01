@@ -164,9 +164,10 @@ export default {
   and `bugs.fixEffort` (default none) set its fixing sessions, whose brief names `bugs.heavyLock` with the session's
   own id (AC-14); `bugs.limitsLog` is the log the plan's readings are appended to before each session (AC-9),
   relative to the workspace module or `~/...`, one tab-separated line a reading as a status line writes it (the time
-  in UTC to the second, the week's use and the 5-hour window's in whole percent, the label `quad-damage`), every
-  reading appended (`lib/limits.mjs`). With no `limitsLog` nothing is logged and the run reads the windows all the
-  same. Judgement: a workspace whose status line keeps such a log names it, so one file holds every reading.
+  in UTC to the second, the week's use and the 5-hour window's in whole percent, the label `quad-damage`, then when
+  each window resets, `-` when not known), every reading appended (`lib/limits.mjs`). With no `limitsLog` nothing is
+  logged and the run reads the windows all the same. Judgement: a workspace whose status line keeps such a log names
+  it, so one file holds every reading.
 - **`compact`** sets the handover, the compaction a session working a task makes at a step boundary (`orchestrator.md`
   §5): `enabled` (default true; false makes the compact hook allow every compaction and `k install` take its window
   back out of each repo's file), `handoverSize` (default 150000, the context a session hands over at; `k install`
@@ -191,10 +192,14 @@ export default {
   folder the usage-review skill reads the last review and `standing.md` from and writes the new review to (`k usage`
   prints it last); `baseline`, a `quality.tsv` of an earlier week `quality.txt` compares with; `limitsLog`, the
   rate-limit log the status line tracker appends to and the summary reads (else `bugs.limitsLog`, its older name, else
-  `<KIRUNAK_HOME>/rate-limits.log`); and `stale`, the stale-session hook's `minutes` since the last call and
-  `context` in tokens, both past which it says once to hand over or start fresh. Paths resolve against the module or
-  `~/...`. A bad day, time, zone, path or number is refused at load. `k install` copies `stale` and `limitsLog` into
-  `escalate/config.json`, so a change needs `k install` again.
+  `<KIRUNAK_HOME>/rate-limits.log`), the tracker only forward within a window whichever session's reading it holds (a
+  reading a session's status line already showed moves nothing, so an idle session open across a reset never takes
+  the log back) and the summary counting a rise only above the highest point so far in the week, from a new week's
+  first line again (gulnya/limits-log-flaps); and `stale`, the
+  stale-session hook's `minutes` since the last call and `context` in tokens, both past which it says once to hand
+  over or start fresh. Paths resolve against the module or `~/...`. A bad day, time, zone, path or number is refused
+  at load. `k install` copies `stale` and `limitsLog` into `escalate/config.json`, so a change needs `k install`
+  again.
 - **`cache`** names the prompt-cache settings `~/.claude/settings.json` should hold (D-6): `promptCacheTtl`,
   `subagentPromptCacheTtl` (strings) and `syncClaudeAiSkills` (a boolean), each a value or `null` for a key that must
   be absent. `k doctor` prints one line for each key named, ok or a failure naming both values; a key not named, and

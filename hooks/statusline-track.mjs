@@ -3,14 +3,15 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
-import { TTL, updateSession } from '../lib/keeper.mjs';
+import { TTL, readSession, updateSession } from '../lib/keeper.mjs';
 import { logChange } from '../lib/limits.mjs';
 
 // One line in the user's status line command (orchestrator.md §5), fed the same JSON on stdin (statusline.md): it
 // writes the session's file, sessions/<session_id>.json, with the last call's context, the model's window, the cache's
 // lifetime and expiry and the session's cost, and keeps what `k start` wrote there; and it appends the plan's rate
-// limits to the workspace's limits log when they changed (gulnya/k-usage AC-4, D-5, lib/limits.mjs). It prints nothing,
-// since the status line shows what the user's own command prints, and it never fails the status line.
+// limits to the workspace's limits log when they move it on (gulnya/k-usage AC-4, D-5; gulnya/limits-log-flaps,
+// lib/limits.mjs). It prints nothing, since the status line shows what the user's own command prints, and it never
+// fails the status line.
 
 const n = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 
@@ -41,14 +42,17 @@ export function fromStatusline(input, now = new Date()) {
 }
 
 // The status line's rate limits as a reading for the limits log, or null when it has no week: the 5-hour window is
-// -1 when the status line has none, as the user's own status line wrote it. The label is the session's name, or '-'.
+// -1 when the status line has none, as the user's own status line wrote it, and each window's resetsAt the status
+// line's resets_at in epoch seconds, or null. The label is the session's name, or '-'.
 export function limitsOf(input) {
   const pct = (w) => (Number.isFinite(w?.used_percentage) && w.used_percentage >= 0 ? w.used_percentage : null);
-  const week = pct(input?.rate_limits?.seven_day);
+  const at = (w) => (Number.isFinite(w?.resets_at) ? w.resets_at : null);
+  const { seven_day: sevenDay, five_hour: fiveHour } = input?.rate_limits ?? {};
+  const week = pct(sevenDay);
   if (week === null) return null;
-  const fiveHour = pct(input.rate_limits.five_hour) ?? -1;
   const label = typeof input.session_name === 'string' ? input.session_name : '';
-  return { reading: { week: { used: week }, fiveHour: { used: fiveHour } }, label };
+  const reading = { week: { used: week, resetsAt: at(sevenDay) }, fiveHour: { used: pct(fiveHour) ?? -1, resetsAt: at(fiveHour) } };
+  return { reading, label };
 }
 
 // The limits log k install wrote into escalate/config.json from the workspace (usage.limitsLog), else
@@ -61,15 +65,23 @@ export function limitsLogPath(home) {
   return join(home, 'rate-limits.log');
 }
 
-// One status line refresh: the session's file, then the limits log's line; each fails silently on its own.
+// One status line refresh: the session's file, then the limits log's line; each fails silently on its own. The
+// session's file keeps the reading its status line showed (`limits`), so the next refresh of a session that made no
+// call since, an idle one, moves nothing in the log (lib/limits.mjs: logChange's `seen`).
 export function track(input, home = kirunakHome(), now = new Date()) {
+  let seen = null, l = null;
   try {
-    const p = fromStatusline(input, now);
-    if (p) updateSession(home, p.session, p.patch);
+    l = limitsOf(input);
   } catch {}
   try {
-    const l = limitsOf(input);
-    if (l) logChange(limitsLogPath(home), l.reading, { label: l.label, now });
+    const p = fromStatusline(input, now);
+    if (p) {
+      seen = readSession(home, p.session)?.limits ?? null;
+      updateSession(home, p.session, l ? { ...p.patch, limits: l.reading } : p.patch);
+    }
+  } catch {}
+  try {
+    if (l) logChange(limitsLogPath(home), l.reading, { label: l.label, now, seen });
   } catch {}
 }
 

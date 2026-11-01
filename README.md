@@ -100,10 +100,12 @@ You need Node 22 or later, git and Claude Code.
    `k-board-page` and `usage-review` skills into `~/.claude/skills/` (`k-board-page` publishes the board as a page,
    below). It also prints one line to add to your status line command, so the cache keeper sees each session's
    context and cache and `k cost` its money, and the rate-limit log gets a line (time, week %, 5-hour %, the session's
-   name) whenever the two figures change; it never edits your status line itself, and `k doctor` warns until the
-   status line, or a script it names, runs that line. A **stale-session hook** on UserPromptSubmit says once, when a
-   prompt comes over 60 minutes after the last call with over 150,000 tokens of context (the cache has expired, and
-   the next call writes all of it again), to write the handoff (`k handoff <id>`) or start fresh; it never blocks.
+   name, when each window resets) whenever a session's reading moves either figure on: a rise, or a new window, never
+   an idle session's older reading taking it back, nor a reading a session's status line already showed; it never
+   edits your status line itself, and `k doctor` warns until the status line, or a script it names, runs that line. A
+   **stale-session hook** on UserPromptSubmit says once, when a prompt comes over 60 minutes after the last call with
+   over 150,000 tokens of context (the cache has expired, and the next call writes all of it again), to write the
+   handoff (`k handoff <id>`) or start fresh; it never blocks.
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
    ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
    `k-go-on` skill.
