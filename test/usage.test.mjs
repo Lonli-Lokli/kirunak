@@ -191,11 +191,16 @@ test('k usage over a range that holds a week reset counts the new week\'s rises 
     `2026-10-21T13:00:00Z\t90\t2\tbusy\t${W1}\t-`,
     `2026-10-21T16:00:00Z\t2\t1\tbusy\t${W2}\t-`,
     `2026-10-21T18:00:00Z\t7\t3\tbusy\t${W2}\t-`,
-    // lines with no reset: a fall by more than half is the new week
-    '2026-10-23T00:00:00Z\t50\t1\tbusy',
-    '2026-10-23T01:00:00Z\t60\t2\tbusy',
-    '2026-10-24T00:00:00Z\t3\t1\tbusy',
-    '2026-10-24T01:00:00Z\t8\t2\tbusy',
+    // the tracker's lines with no reset known: a fall by more than half is the new week
+    '2026-10-23T00:00:00Z\t50\t1\tbusy\t-\t-',
+    '2026-10-23T01:00:00Z\t60\t2\tbusy\t-\t-',
+    '2026-10-24T00:00:00Z\t3\t1\tbusy\t-\t-',
+    '2026-10-24T01:00:00Z\t8\t2\tbusy\t-\t-',
+    // lines from before the reset columns, an idle session's last week's 94 among the new week's: no new week there
+    '2026-10-25T00:00:00Z\t94\t1\tidle',
+    '2026-10-25T00:00:10Z\t1\t1\tbusy',
+    '2026-10-25T00:00:20Z\t94\t1\tidle',
+    '2026-10-25T00:00:30Z\t2\t1\tbusy',
   ].join('\n') + '\n');
   const line = (from, to) => {
     const r = k(w.home, ['usage', '--from', from, '--to', to, '--out', join(w.root, `out-${from.slice(0, 10)}`)], { CLAUDE_CONFIG_DIR: fx.config });
@@ -205,6 +210,7 @@ test('k usage over a range that holds a week reset counts the new week\'s rises 
   // 10 to 90, then 5 in the new week from its 2; with no reset, 10 to 60, then 5 from 3
   assert.equal(line('2026-10-21T00:00:00Z', '2026-10-22T00:00:00Z'), 'weekly limit: peaked at 90%; 15 points rose with no local call (claude.ai, cloud, another machine)');
   assert.equal(line('2026-10-22T00:00:00Z', '2026-10-25T00:00:00Z'), 'weekly limit: peaked at 60%; 15 points rose with no local call (claude.ai, cloud, another machine)');
+  assert.equal(line('2026-10-25T00:00:00Z', '2026-10-25T01:00:00Z'), 'weekly limit: peaked at 94%; 0 points rose with no local call (claude.ai, cloud, another machine)');
 });
 
 test('k usage: the default week, --out, and a window that is not one refused', async (t) => {
