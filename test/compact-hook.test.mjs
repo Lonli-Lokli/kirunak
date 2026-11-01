@@ -109,8 +109,22 @@ test('lastUsage: two 300 KB tool results after the last assistant entry are read
   const path = join(makeRepos().top, 't.jsonl');
   writeTranscript(path, [assistant(90000), assistant(140000), toolResult(300 * 1024), toolResult(300 * 1024)]);
   assert.deepEqual(lastUsage(path), { ctx: 140000, model: MODEL });
-  writeTranscript(path, [assistant(140000), toolResult(1100 * 1024)]);
-  assert.equal(lastUsage(path), null);
+});
+
+// gulnya/compact-ctx-past-tail: six fires read `ctx unknown` with 0.5 to 1.2 MB of tool results after the usage line.
+test('lastUsage: past 1 MB of tool results, it reads further back to the last assistant entry, and null only with none in the file', () => {
+  const path = join(makeRepos().top, 't.jsonl');
+  writeTranscript(path, [assistant(140000), toolResult(1200 * 1024)]);
+  assert.deepEqual(lastUsage(path), { ctx: 140000, model: MODEL }, 'one 1.2 MB line after it');
+  writeTranscript(path, [assistant(90000), assistant(150000), toolResult(700 * 1024), toolResult(700 * 1024), toolResult(700 * 1024)]);
+  assert.deepEqual(lastUsage(path), { ctx: 150000, model: MODEL }, 'three 700 KB lines after it');
+  writeTranscript(path, [assistant(160000), toolResult(5 * 1024 * 1024)]);
+  assert.deepEqual(lastUsage(path), { ctx: 160000, model: MODEL }, 'one 5 MB line after it');
+  writeTranscript(path, [toolResult(100), toolResult(3 * 1024 * 1024)]);
+  assert.equal(lastUsage(path), null, 'no usage in the file at all');
+  writeTranscript(path, [assistant(170000, MODEL, { isSidechain: true }), toolResult(1200 * 1024)]);
+  assert.equal(lastUsage(path), null, 'only a sidechain entry, for the main');
+  assert.deepEqual(lastUsage(path, { sidechain: true }), { ctx: 170000, model: MODEL }, 'the same, for the agent');
 });
 
 test('lastUsage: an agent\'s own transcript, every entry a sidechain one, is read with sidechain; the main\'s reading passes over them', () => {

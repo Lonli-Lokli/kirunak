@@ -71,15 +71,16 @@ function tail(path, size) {
 // ---- The context and the model (R2.1, R2.3) ----
 
 const FIRST_READ = 256 * 1024;
-const SECOND_READ = 1024 * 1024;
+const GROWTH = 4;
+const LAST_READ = 64 * 1024 * 1024;
 
 // The newest main-thread assistant entry with usage in `text`, read from the end: { ctx, model }. A synthetic entry
-// (an error Claude Code wrote itself, all zeros) says nothing of the context, so it is passed over. The tail's first
-// line is usually cut, and fails to parse. `sidechain`: an agent's own transcript, every entry of which is marked
-// `isSidechain` (R3.2), so none is passed over for it; the main transcript's are.
-function usageIn(text, { sidechain = false } = {}) {
+// (an error Claude Code wrote itself, all zeros) says nothing of the context, so it is passed over. `whole`: the text
+// starts at the file's start; else its first line is cut, and is passed over. `sidechain`: an agent's own transcript,
+// every entry of which is marked `isSidechain` (R3.2), so none is passed over for it; the main transcript's are.
+function usageIn(text, { sidechain = false } = {}, whole = false) {
   const lines = text.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
+  for (let i = lines.length - 1; i >= (whole ? 0 : 1); i--) {
     const line = lines[i];
     if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
     let x;
@@ -96,19 +97,24 @@ function usageIn(text, { sidechain = false } = {}) {
   return null;
 }
 
-// The context of a transcript's last request, the status line's own formula, and its model: 256 KB of its
-// tail first, then 1 MB when the first held no usage (a few large tool results); null when 1 MB holds none.
-// `opts.sidechain` for an agent's own transcript (usageIn).
+// The context of a transcript's last request, the status line's own formula, and its model: 256 KB of its tail
+// first, then four times as much each time the read held no usage (large tool results after the last assistant
+// entry: six fires of 2026-10-27 had 0.5 to 1.2 MB of them, gulnya/compact-ctx-past-tail), until a read reaches the
+// file's start; null when none holds one. The last read is 64 MB, a few hundred ms inside the hook's 10 s, and a
+// transcript that holds no usage in 64 MB gives null. `opts.sidechain` for an agent's own transcript (usageIn).
 export function lastUsage(path, opts = {}) {
   if (typeof path !== 'string' || !path) return null;
-  const first = usageIn(tail(path, FIRST_READ), opts);
-  if (first) return first;
+  let total;
   try {
-    if (statSync(path).size <= FIRST_READ) return null;
+    total = statSync(path).size;
   } catch {
     return null;
   }
-  return usageIn(tail(path, SECOND_READ), opts);
+  for (let size = FIRST_READ; ; size = Math.min(size * GROWTH, LAST_READ)) {
+    const whole = size >= total;
+    const found = usageIn(tail(path, size), opts, whole);
+    if (found || whole || size === LAST_READ) return found;
+  }
 }
 
 // The model's own context window (R2.4): the 1M models of the ladder (each passed 200k in the week of 2026-10-19),
