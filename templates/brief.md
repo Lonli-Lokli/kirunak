@@ -1,7 +1,7 @@
 # {{id}} {{step}}: {{title}}
 
 You run one step of a task whose file the owner approved and froze. Do this step only, then stop.
-
+{{what}}{{header}}
 ## The task's goal, quoted from the frozen file
 
 {{goal}}

@@ -2,7 +2,7 @@
 
 You design one step of a task whose file the owner approved and froze. The step failed on every attempt so far, and
 a fresh run builds it from your design. Design only, then stop.
-
+{{what}}{{header}}
 ## The task's goal, quoted from the frozen file
 
 {{goal}}
