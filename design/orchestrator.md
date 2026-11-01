@@ -231,10 +231,11 @@ claude -p
   word ok" --model haiku --max-turns 1 --output-format stream-json --verbose --tools ''` (`--tools` takes a list, so
   its empty one goes last), in the temporary folder unless `cwd` names one, its process group killed after
   `timeoutMs` (default 2 minutes). The reading is the stream's last `rate_limit_event` whose `unifiedWindows` holds
-  `five_hour` and `seven_day`: `{ fiveHour: { used, resetsAt }, week: { used, resetsAt }, overage }`, `used` its
-  utilization in percent, `resetsAt` in epoch seconds, `overage` its `isUsingOverage`; a turn refused after the event
-  still leaves a reading. Else `{ error }`: the login gone (an `authentication_failed`, or "/login" in its words), the
-  session failed, no event, or one without both windows. Evidence: a real reading equal to the status line log's line
+  `seven_day`: `{ fiveHour: { used, resetsAt } | null, week: { used, resetsAt }, overage }`, `used` its
+  utilization in percent, `resetsAt` in epoch seconds, `overage` its `isUsingOverage`, `fiveHour` null when it has no
+  `five_hour` (a plan with no 5-hour limit, a verified Ultra one, gulnya/five-hour-optional); a turn refused after the
+  event still leaves a reading. Else `{ error }`: the login gone (an `authentication_failed`, or "/login" in its
+  words), the session failed, no event, or one without `seven_day`. Evidence: a real reading equal to the status line log's line
   three seconds before (gulnya/quad-damage `evidence/S-2-limits.txt`). Not yet recorded: a logged-out session's stream.
 - **A step's stream** (`onMessage`, gulnya/quad-damage AC-11): a step given `onMessage` runs with `--output-format
   stream-json --verbose`, each message handed on as it comes, and its result is the stream's last `result` message;

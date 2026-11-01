@@ -105,6 +105,9 @@ const EVENT = lines.find((x) => x.type === 'rate_limit_event');
 const stream = (...xs) => xs.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n');
 const withInfo = (info) => ({ ...EVENT, rate_limit_info: { ...EVENT.rate_limit_info, ...info } });
 const windows = (five, week) => ({ unifiedWindows: { five_hour: { utilization: five, resetsAt: 1793142600, status: 'allowed' }, seven_day: { utilization: week, resetsAt: 1793545200, status: 'allowed' } } });
+// gulnya/five-hour-optional: a real event of 2026-11-01 (Claude Code 2.1.316, a verified Ultra plan, which has no
+// 5-hour limit), its ids replaced by dummies: unifiedWindows holds seven_day alone.
+const WEEK_ONLY = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1794150000, rateLimitType: 'seven_day', overageStatus: 'rejected', overageDisabledReason: 'out_of_credits', isUsingOverage: false, unifiedWindows: { seven_day: { utilization: 0.01, resetsAt: 1794150000, status: 'allowed' } } }, uuid: '00000000-0000-4000-8000-000000000003', session_id: '00000000-0000-4000-8000-000000000000' };
 
 // A node script as `claude`, for what fakeClaude cannot do: fail, or never end.
 function fakeBin(body) {
@@ -126,12 +129,20 @@ test('limits: one turn on Haiku with no tools, read from the stream\'s rate_limi
   assert.deepEqual(readLimits(stream(withInfo({ ...windows(1, 0.6), status: 'rejected' }), refused), { exitCode: 1 }).fiveHour, { used: 100, resetsAt: 1793142600 });
 });
 
+test('limits: a plan with no 5-hour window reads the week alone, fiveHour null (gulnya/five-hour-optional)', () => {
+  const [init, said, , result] = lines;
+  assert.deepEqual(readLimits(stream(init, said, WEEK_ONLY, result)), { fiveHour: null, week: { used: 1, resetsAt: 1794150000 }, overage: false });
+  // The last event with a week is the reading, whether or not an earlier one had a 5-hour window.
+  assert.deepEqual(readLimits(stream(init, EVENT, WEEK_ONLY, result)).fiveHour, null);
+  assert.deepEqual(readLimits(stream(init, WEEK_ONLY, EVENT, result)).fiveHour, { used: 33, resetsAt: 1793142600 });
+});
+
 test('limits: no reading says why, an event without its windows, a failed session, the login gone, no event', () => {
   const [init, said, , result] = lines;
   const { unifiedWindows, ...bare } = EVENT.rate_limit_info;
-  assert.deepEqual(readLimits(stream(init, said, { ...EVENT, rate_limit_info: bare }, result)), { error: 'its rate_limit_event has no unifiedWindows with five_hour and seven_day' });
+  assert.deepEqual(readLimits(stream(init, said, { ...EVENT, rate_limit_info: bare }, result)), { error: 'its rate_limit_event has no unifiedWindows with seven_day' });
   const half = { ...EVENT, rate_limit_info: { ...bare, unifiedWindows: { five_hour: unifiedWindows.five_hour } } };
-  assert.deepEqual(readLimits(stream(half, result)), { error: 'its rate_limit_event has no unifiedWindows with five_hour and seven_day' });
+  assert.deepEqual(readLimits(stream(half, result)), { error: 'its rate_limit_event has no unifiedWindows with seven_day' });
   assert.deepEqual(readLimits(stream(init, said, result)), { error: 'the session gave no rate_limit_event' });
   assert.deepEqual(readLimits(''), { error: 'the session gave no rate_limit_event' });
 

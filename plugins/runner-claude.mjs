@@ -60,11 +60,12 @@ export function limitsArgs() {
   return ['-p', LIMITS_PROMPT, '--model', 'haiku', '--max-turns', '1', '--output-format', 'stream-json', '--verbose', '--tools', ''];
 }
 
-// The reading in a stream's lines: the last rate_limit_event with both windows, unifiedWindows' five_hour and
-// seven_day, as { fiveHour: { used, resetsAt }, week: { used, resetsAt }, overage }, used in percent (two decimals) and
-// resetsAt in epoch seconds; a refused turn after it still leaves a reading, the windows being why it was refused. With
-// none, { error } says why: the login gone (an assistant message's `error`, or its words), the session failed, or no
-// event came, or one without its windows.
+// The reading in a stream's lines: the last rate_limit_event whose unifiedWindows holds seven_day, as { fiveHour:
+// { used, resetsAt } or null, week: { used, resetsAt }, overage }, used in percent (two decimals) and resetsAt in epoch
+// seconds; fiveHour is null when the event has no five_hour, as a plan with no 5-hour limit (a verified Ultra one) gives
+// none (gulnya/five-hour-optional; the status line's docs: each window may be absent on its own). A refused turn after
+// it still leaves a reading, the windows being why it was refused. With none, { error } says why: the login gone (an
+// assistant message's `error`, or its words), the session failed, or no event came, or one without a week.
 export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
   const lines = [];
   for (const line of String(stdout || '').split('\n')) {
@@ -77,9 +78,8 @@ export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
   const events = lines.filter((x) => x.type === 'rate_limit_event');
   for (const e of [...events].reverse()) {
     const u = e.rate_limit_info?.unifiedWindows;
-    const fiveHour = window(u?.five_hour);
     const week = window(u?.seven_day);
-    if (fiveHour && week) return { fiveHour, week, overage: e.rate_limit_info.isUsingOverage === true };
+    if (week) return { fiveHour: window(u?.five_hour), week, overage: e.rate_limit_info.isUsingOverage === true };
   }
   const result = lines.filter((x) => x.type === 'result').pop() ?? null;
   const assistant = lines.filter((x) => x.type === 'assistant');
@@ -90,7 +90,7 @@ export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
     return { error: `the login is gone: ${said || 'authentication failed'}` };
   }
   if (exitCode !== 0 || result?.is_error) return { error: `the session failed (exit ${exitCode})${said ? `: ${said}` : ''}` };
-  if (events.length) return { error: 'its rate_limit_event has no unifiedWindows with five_hour and seven_day' };
+  if (events.length) return { error: 'its rate_limit_event has no unifiedWindows with seven_day' };
   return { error: 'the session gave no rate_limit_event' };
 }
 

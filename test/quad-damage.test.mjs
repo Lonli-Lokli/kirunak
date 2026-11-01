@@ -157,6 +157,25 @@ test('run: the 5-hour window at 90% pauses until its reset and a minute, then th
   assert.doesNotMatch(progressFile(r.folder), /%|limits/);
 });
 
+test('run: a plan with no 5-hour window goes on, never paused, its reading logged with -1 (gulnya/five-hour-optional)', async () => {
+  const w = await qdWorkspace();
+  const weekOnly = (week) => ({ fiveHour: null, week: { used: week, resetsAt: epoch(new Date(2026, 10, 1, 15, 0, 0)) }, overage: false });
+  const s = seams([weekOnly(50), weekOnly(60)]);
+  const work = async (ctx) => {
+    await ctx.beforeSession();
+    return { outcome: 'merged', sha: `${ctx.bug.slug}bcdef1234567`, repo: 'hub' };
+  };
+  const r = await run({ ws: w.ws, ...s, work });
+  assert.equal(r.stopped, null);
+  assert.deepEqual(s.slept, []);
+  assert.equal(summaryFile(r), "Quad Damage, 23:40 to 23:40: 2 merged, 0 wait, 0 not reached\n- hub/a: merged abcdef1 into hub's master\n" +
+    "- hub/c: merged cbcdef1 into hub's master\n");
+  const logged = readFileSync(join(w.root, 'limits.log'), 'utf8').trim().split('\n').map((l) => l.split('\t').slice(1, 4));
+  assert.deepEqual(logged, [['50', '-1', 'quad-damage'], ['60', '-1', 'quad-damage']]);
+  assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: limits: week 50%, no 5-hour window\n/);
+  assert.doesNotMatch(progressFile(r.folder), /%|limits|5-hour/);
+});
+
 test('run: the week at 98%, extra usage or a failed reading stops it, the bugs left not reached (AC-10)', async () => {
   const cases = [
     [[reading(10, 98)], "the week's limit reached 98%"],
