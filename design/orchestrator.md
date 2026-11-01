@@ -398,7 +398,9 @@ mid-step limits from a 200,000 to a 400,000 window, as the least weight with the
 
 **R2 What the hook reads.**
 - **R2.1** The context: the main transcript's last assistant entry, `input_tokens + cache_creation_input_tokens +
-  cache_read_input_tokens` (the status line's formula), read from the file's tail, 256 KB then 1 MB; none → unknown.
+  cache_read_input_tokens` (the status line's formula), read from the file's tail, 256 KB then four times as much
+  each time until a read holds one or reaches the file's start, at most 64 MB (large tool results after it,
+  gulnya/compact-ctx-past-tail); none → unknown.
 - **R2.2** The lag: the context read is a lower bound on the real one, late by at most `LAG`.
 - **R2.3** The model: the last assistant entry's, else the escalation record's.
 - **R2.4** The model's window: `sessions/<id>.json` `window` when the status line's tracker wrote it, else a table
