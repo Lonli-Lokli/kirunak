@@ -11,11 +11,11 @@ Your inputs are in `{{inDir}}/` and nowhere else:
 - `{{inDir}}/diff.patch`: the task's own change in {{repo}}, from its first approval {{base}} to head {{head}}: each
   file touched by a commit in that range that names the task or names no task, diffed once. A commit that names only
   other tasks is left out, and so are kirunak's records (the task folders, the drafts, the approvals, the
-  queue).{{amended}}{{repos}}
+  queue).{{amended}}{{last}}{{repos}}
 - `{{inDir}}/evidence/`: what the steps produced (test reports, measurements, screenshots, logs).{{extra}}
 
 The repo itself is readable: read the code at head to check the change against it.{{readable}}
-{{unnamed}}
+{{unnamed}}{{follows}}
 ## The task's lines, quoted from the frozen file
 
 {{lines}}
@@ -30,8 +30,10 @@ Write `{{output}}` in the grammar below: a row per AC and E, none missing and no
   `measure <path>` or `screenshot <path>`. Paths are from the repo root, or from the task's folder for
   `evidence/`, and must exist at head {{head}}.
 - When you cannot verify (a device, the owner's eye or ear), say `needs device` or `needs owner`, never guess
-  `met`. The row says what to check: it becomes an item of the owner's checklist.
-- A `not met` row names what is wrong.
+  `met`. The row says what to check: it becomes an item of the owner's checklist. It names the files it concerns,
+  so a later review can carry it; a row that names none is checked again by every later review.
+- A `not met` row names what is wrong, and every place the same fault holds that you can find: the same element in
+  each theme, on each ground, screen, platform and locale. It says where you looked, so one fix answers all of them.
 - The last line is `verdict: met` only when every row is `met`; else `verdict: not met (<ids>)` with the rows not
   met; else `verdict: needs owner (<ids>)` with the rows that need a device or the owner.
 
