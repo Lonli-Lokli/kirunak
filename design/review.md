@@ -160,8 +160,9 @@ verdict: not met (AC-2)
   between that review's head and this review's head. A path is a word of the evidence, split on spaces, brackets,
   commas and semicolons, with quotes, punctuation and a trailing `:<line>` or `:<line>-<line>` dropped, and never
   the form's first word (`test`, `file`, `measure`, `screenshot`; a `test/` folder would otherwise be named by every
-  `test` row). It counts when it is a file or folder at that review's head, from the task folder or the repo root,
-  or when it is an absolute or `~/` path inside the task's repo, a repo the step's `given.json` names, or a workspace
+  `test` row). It counts when it is a file or folder at that review's head, from the task folder or the repo root;
+  when it is one from the top of a repo the step's `given.json` names, at the head the last review recorded there
+  (at its head now when that is not known), as a review of a change there cites its files; or when it is an absolute or `~/` path inside the task's repo, a repo the step's `given.json` names, or a workspace
   repo or a git worktree of one (matched by git's common dir), read there at the head that review's step recorded.
   Changed means `git diff --name-only` between the two heads holds it or anything under it, over the whole repo, so
   evidence in the task folder counts too; in another repo, between the head the last review's `given.json` recorded
