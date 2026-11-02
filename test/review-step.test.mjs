@@ -7,7 +7,7 @@ import { accept, hashBytes } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
-import { approvedWorkspace, events, k, sh } from './helpers.mjs';
+import { approvedWorkspace, events, k, reviewsRan, sh } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -288,4 +288,112 @@ test('an output check that throws fails the step, so the retry and [escalate] ap
   assert.equal((progress.match(/S-2 failed: kirunak stopped the step: EISDIR/g) || []).length, 4);
   assert.match(progress, /S-2 escalated: to fable \(high, build\) after 1 failure on opus\n/);
   assert.ok(!/S-2 finished/.test(progress));
+});
+
+// A review that follows a review (gulnya/review-reruns-whole-task): the last review that counts and what changed since
+// it, in in/ and given.json, the brief's section on carrying a row (AC-1); none for a first review (E-1) or one that
+// follows a review that does not count or whose head is gone (E-3); the sweep rule in every brief (AC-3).
+const RERUN = `${PLAN}
+### S-3 Review again [review]
+needs: S-2
+covers: all
+inputs: task, diff, evidence/
+outputs: review-2.md
+`;
+const headOf = (dir, ref = 'HEAD') => sh(dir, 'git', ['rev-parse', '--short', ref]).trim();
+function work(dir, path, text, message) {
+  mkdirSync(join(dir, path, '..'), { recursive: true });
+  writeFileSync(join(dir, path), text);
+  sh(dir, 'git', ['add', '--', path]);
+  sh(dir, 'git', ['commit', '-qm', message, '--', path]);
+  return headOf(dir);
+}
+const reviewText = (w, head, rows = ['AC-1', 'AC-2', 'AC-3', 'E-1']) =>
+  `---\ntask: ${w.id}\nhead: ${head}\nbase: ${approvedAt(w)}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.map((id) => `| ${id} | met | file docs/offline.md:1 |`).join('\n')}\n\nverdict: met\n`;
+const givenOf = (w, step) => JSON.parse(readFileSync(join(w.p.dir, 'steps', step, 'given.json'), 'utf8'));
+const SWEEP = ['every place the same fault holds that you can find: the same element in\n  each theme, on each ground, screen, platform and locale. It says where you looked',
+  'It names the files it concerns,\n  so a later review can carry it'];
+
+test('a first review is whole: no last review, no since patch, no section, given.json\'s last is null; its brief holds the sweep rule (E-1, AC-3)', async () => {
+  const w = await implemented(RERUN);
+  work(w.weather, 'docs/offline.md', 'the cache keeps three days\n', `docs/offline.md (${w.id} S-1)`);
+  const { text } = await steps.brief({ ws: w.ws, id: w.id, step: 'S-2', session: 'rev-1' });
+  assert.deepEqual(readdirSync(join(w.p.dir, 'steps', 'S-2', 'in')).sort(), ['diff.patch', 'evidence', 'task.md']);
+  assert.equal(givenOf(w, 'S-2').last, null);
+  assert.doesNotMatch(text, /last-review\.md|since\.patch|A review that follows|carried from/);
+  for (const s of SWEEP) assert.ok(text.includes(s), s);
+});
+
+test('a review that follows a review gets that review verbatim and the since patch, here and in another repo; given.json records the last; the brief names both and the carry rule (AC-1, AC-3)', async () => {
+  const w = await implemented(RERUN);
+  work(w.weather, 'docs/offline.md', 'the cache keeps three days\n', `docs/offline.md (${w.id} S-1)`);
+  work(w.hub, 'tools/cache.txt', 'cache\n', `tools/cache.txt (${w.id} S-1)`);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
+  const seen = headOf(w.weather);
+  const hubSeen = headOf(w.hub);
+  assert.equal(givenOf(w, 'S-2').repos[0].head, hubSeen);
+  const first = reviewText(w, seen);
+  put(w, 'review.md', first);
+  const r = k(w.home, ['step', 'finish', w.id, 'S-2']);
+  assert.equal(r.status, 0, r.stderr);
+
+  work(w.weather, 'docs/offline.md', 'the cache keeps three days\nand a week on a tablet\n', `docs/offline.md: a week (${w.id} S-1)`);
+  work(w.hub, 'tools/cache.txt', 'cache\nevicted after a week\n', `tools/cache.txt: eviction (${w.id} S-1)`);
+  const head = headOf(w.weather);
+  const { text } = await steps.brief({ ws: w.ws, id: w.id, step: 'S-3', session: 'rev-2' });
+  const inDir = join(w.p.dir, 'steps', 'S-3', 'in');
+  assert.deepEqual(readdirSync(inDir).sort(), ['diff.patch', 'evidence', 'last-review.md', 'repos', 'since.patch', 'task.md']);
+  assert.equal(readFileSync(join(inDir, 'last-review.md'), 'utf8'), first, 'the last review verbatim');
+  const since = readFileSync(join(inDir, 'since.patch'), 'utf8');
+  assert.match(since, /^ the cache keeps three days\n\+and a week on a tablet$/m, 'from the last review\'s head');
+  assert.doesNotMatch(since, /^\+the cache keeps three days$/m);
+  assert.match(readFileSync(join(inDir, 'diff.patch'), 'utf8'), /^\+the cache keeps three days$/m, 'the whole diff stays (D-1)');
+  assert.deepEqual(readdirSync(join(inDir, 'repos')).sort(), ['hub.patch', 'hub.since.patch']);
+  const hubSince = readFileSync(join(inDir, 'repos', 'hub.since.patch'), 'utf8');
+  assert.match(hubSince, /^ cache\n\+evicted after a week$/m);
+  assert.doesNotMatch(hubSince, /^\+cache$/m);
+  assert.deepEqual(givenOf(w, 'S-3').last, { file: 'review.md', review: 'review-1', head: seen, repos: { hub: hubSeen } });
+
+  const rel = 'kirunak/tasks/offline-forecast/steps/S-3/in';
+  for (const s of [`\`${rel}/last-review.md\`: review-1 (\`review.md\`), the last review of this task that counts`,
+    `\`${rel}/since.patch\`: the same files as \`diff.patch\`, from review-1's head ${seen} to head ${head}`,
+    `\`${rel}/repos/hub.since.patch\`: the same files in hub, from ${hubSeen}, the head the last review saw there`,
+    '## A review that follows review-1', 'Still write a row for every AC and E', '`carried from review-1: `',
+    'kirunak/tasks/offline-forecast/checklist.md', `git diff --name-only ${seen} ${head}`,
+    `git diff ${seen} ${head} -- kirunak/tasks/offline-forecast/task.md`, 'every row whose evidence names no path',
+    '`k review check` refuses a carry that breaks this rule', ...SWEEP]) {
+    assert.ok(text.includes(s), s);
+  }
+  assert.doesNotMatch(text, /\{\{/);
+});
+
+test('a review follows only a review that counts and whose head is still behind: a failed grammar, an edit after its step, or a rebase give a whole review (E-3)', async () => {
+  const w = await implemented(RERUN);
+  work(w.weather, 'docs/offline.md', 'the cache keeps three days\n', `docs/offline.md (${w.id} S-1)`);
+  const seen = headOf(w.weather);
+  const whole = async (why) => {
+    const { text } = await steps.brief({ ws: w.ws, id: w.id, step: 'S-3', session: 'rev-2' });
+    assert.ok(!readdirSync(join(w.p.dir, 'steps', 'S-3', 'in')).includes('last-review.md'), why);
+    assert.ok(!readdirSync(join(w.p.dir, 'steps', 'S-3', 'in')).includes('since.patch'), why);
+    assert.equal(givenOf(w, 'S-3').last, null, why);
+    assert.doesNotMatch(text, /A review that follows/, why);
+  };
+  const ran = (text) => {
+    put(w, 'review.md', text);
+    reviewsRan(w.p.dir, ['review.md', 'review-2.md']);
+  };
+  ran(reviewText(w, seen));
+  await steps.brief({ ws: w.ws, id: w.id, step: 'S-3', session: 'rev-2' });
+  assert.equal(givenOf(w, 'S-3').last.review, 'review-1', 'a review that counts is followed');
+
+  ran(reviewText(w, seen, ['AC-1', 'AC-2', 'AC-3']));
+  await whole('a review missing a row fails its grammar');
+  ran(reviewText(w, seen));
+  put(w, 'review.md', reviewText(w, seen).replace('verdict: met', 'verdict: met\n'));
+  await whole('a review edited after its step finished');
+  sh(w.weather, 'git', ['checkout', '-qb', 'old']);
+  const gone = work(w.weather, 'docs/offline.md', 'the old cache\n', 'docs/offline.md: before a rebase');
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  ran(reviewText(w, gone));
+  await whole('a review whose head is not behind the head now');
 });
