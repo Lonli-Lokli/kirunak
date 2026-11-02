@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { accept } from '../lib/approval.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
@@ -126,4 +126,28 @@ test('k checklist refuses rows the owner should check that are not spelled as a 
   writeFileSync(join(p.dir, 'review.md'), reviewText(w, ROWS, 'verdict: not met (AC-2)'));
   writeFileSync(join(p.dir, 'progress.md'), '2026-11-06 10:00 S-2 started (session r-1)\n');
   assert.match(k(w.home, ['checklist', ID]).stderr, /:\n {2}S-2, the review step that writes review\.md, has not finished \(running\)\n$/);
+});
+
+test('a row carried into a new review keeps the owner\'s tick and words: k checklist takes the carried prefix off (review-reruns-whole-task AC-2)', async () => {
+  const w = await approvedWorkspace('');
+  const file = join(w.p.dir, 'checklist.md');
+  const device = '| AC-3 | needs device | On a phone: restart the app offline (docs/offline.md) |';
+  const rows = [ROWS[0], '| AC-2 | met | file docs/offline.md:1 |', device, ROWS[3]];
+  writeFileSync(join(w.p.dir, 'review.md'), reviewText(w, rows, 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(w.p.dir);
+  assert.equal(k(w.home, ['checklist', ID]).status, 0);
+  writeFileSync(file, readFileSync(file, 'utf8').replace(/- \[ \] (AC-3 .*\(review\.md\))\n/, '- [x] $1, done on the Pixel 7\n'));
+
+  const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const carried = '| AC-3 | needs device | carried from review-1: On a phone: restart the app offline (docs/offline.md) |';
+  writeFileSync(join(w.p.dir, 'review-2.md'), reviewText(w, [rows[0], rows[1], carried, rows[3]], 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(w.p.dir, ['review.md', 'review-2.md']);
+  mkdirSync(join(w.p.dir, 'steps', 'S-3'), { recursive: true });
+  writeFileSync(join(w.p.dir, 'steps', 'S-3', 'given.json'), JSON.stringify({ head, repos: [], last: { file: 'review.md', review: 'review-1', head, repos: {} } }));
+  const r = k(w.home, ['checklist', ID]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(file, 'utf8'), [
+    '- [x] AC-3 On a phone: restart the app offline (docs/offline.md) (review-2.md), done on the Pixel 7',
+    '- [ ] E-1 Read: the age line reads naturally (evidence/S-4-wording.md) (review-2.md)',
+  ].join('\n') + '\n');
 });
