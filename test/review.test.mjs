@@ -245,6 +245,20 @@ test('a re-review refuses a carried row whose named path changed since, here or 
   assert.deepEqual(problems(v.carry(rows)), [`AC-1: carried from review-2, but ${tree}/cache.txt changed in hub between ${v.hubSeen} and ${v.hubHead}: check the line again`]);
 });
 
+test('a re-review refuses a carried row naming another repo\'s file from that repo\'s top, as a review of a change there cites it, once it changed or its earlier head is not known (AC-2, review-1 of gulnya/review-reruns-whole-task)', async () => {
+  const v = await rereviewed();
+  const rows = CARRIED_ROWS(v);
+  writeFileSync(join(v.p.dir, 'review-2.md'), readFileSync(join(v.p.dir, 'review-2.md'), 'utf8').replace(ROWS[0], '| AC-1 | met | file src/cache.ts:1, and hub cache.txt:1 |'));
+  rows[0] = '| AC-1 | met | carried from review-2: file src/cache.ts:1, and hub cache.txt:1 |';
+  assert.deepEqual(problems(v.carry(rows)), [`AC-1: carried from review-2, but cache.txt changed in hub between ${v.hubSeen} and ${v.hubHead}: check the line again`]);
+  const unseen = { ...v.given, last: { ...v.given.last, repos: {} } };
+  assert.deepEqual(problems(v.carry(rows, { given: unseen })).filter((x) => x.startsWith('AC-1')), ['AC-1: carried from review-2, but cache.txt is in hub, whose head the last review saw is not known: check the line again']);
+  // A file of the other repo that did not change is carried.
+  writeFileSync(join(v.p.dir, 'review-2.md'), readFileSync(join(v.p.dir, 'review-2.md'), 'utf8').replace('hub cache.txt:1', 'hub tools.txt:1'));
+  rows[0] = rows[0].replace('hub cache.txt:1', 'hub tools.txt:1');
+  assert.deepEqual(problems(v.carry(rows)), []);
+});
+
 test('a re-review refuses a carried row of a line amended since, with no path, from a review not given, or in other words (AC-2, E-2, E-4)', async () => {
   const w = await rereviewed();
   const rows = CARRIED_ROWS(w);
