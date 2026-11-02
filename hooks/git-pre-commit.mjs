@@ -13,7 +13,8 @@ import { costMarkdown } from '../lib/cost-md.mjs';
 // 4. a staged cost.md is not the rendering of its done.json's cost (`k cost <id> --write` writes it again).
 // The owner's commands set those variables on the one `git commit` they run. A mistake guard, not a lock.
 // While a merge is under way, a record of 2 staged exactly as the merged-in commit (MERGE_HEAD) holds it passes: that
-// commit put it there through this hook, so the merge only takes it (bug gulnya/merge-refuses-owner-records).
+// commit put it there through this hook, so the merge only takes it (bug gulnya/merge-refuses-owner-records). A removal
+// passes only as git's own merge makes it: MERGE_HEAD has no such record and HEAD's is the merge base's, unchanged.
 // `ownerRecord` tells the SLAP hook (git-prepare-commit-msg.mjs) which paths are those records, from the same patterns.
 
 const TASK = /^kirunak\/tasks\/([^/]+)\/task\.md$/;
@@ -44,15 +45,24 @@ const stamps = (buf) => (buf ? (buf.toString('utf8').match(STAMP) ?? []).length 
 
 /**
  * The problems that refuse a commit. `staged` are the staged paths (relative to the repo root), `show(spec)` returns
- * the bytes of `:path` (the index) or `HEAD:path`, or null when there are none.
+ * the bytes of `:path` (the index), `HEAD:path`, and while `merging` `MERGE_HEAD:path` and `<base>:path`, or null
+ * when there are none. `base` is the merge base of HEAD and MERGE_HEAD, null when there is none.
  */
-export function check({ staged, show, env = process.env, merging = false }) {
+export function check({ staged, show, env = process.env, merging = false, base = null }) {
   const read = (spec) => {
     const b = show(spec);
     return b == null ? null : Buffer.from(b);
   };
   const same = (a, b) => (a == null ? b == null : b != null && a.equals(b));
-  const taken = (path) => merging && same(read(`:${path}`), read(`MERGE_HEAD:${path}`));
+  // Whether the merge only takes `path` as MERGE_HEAD has it: staged as its bytes, or removed where it removed it and
+  // the branch left it as at the merge base (a record only the branch holds is not the merge's to remove).
+  const taken = (path) => {
+    if (!merging) return false;
+    const ours = read(`:${path}`);
+    const theirs = read(`MERGE_HEAD:${path}`);
+    if (ours != null) return same(ours, theirs);
+    return theirs == null && base != null && same(read(`HEAD:${path}`), read(`${base}:${path}`));
+  };
   const byOwner = (slug) => OWNER_VARS.some((v) => names(env[v], slug));
   const problems = [];
   for (const path of staged) {
@@ -125,11 +135,13 @@ function main() {
     }
   };
   let merging = false;
+  let base = null;
   try {
     git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], 'utf8');
     merging = true;
+    base = git(['merge-base', 'HEAD', 'MERGE_HEAD'], 'utf8').trim() || null;
   } catch {}
-  const problems = check({ staged: ours, show, env: process.env, merging });
+  const problems = check({ staged: ours, show, env: process.env, merging, base });
   if (!problems.length) return;
   process.stderr.write(problems.join('\n') + '\n');
   process.exitCode = 1;

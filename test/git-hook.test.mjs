@@ -914,3 +914,40 @@ test('a merge that writes an owner record other than the merged-in commit\'s is 
   assert.match(r.stderr, /kirunak\/approvals\/radar-tiles\.json: written by the owner's command only/);
   assert.match(r.stderr, /amendments\/A-1\.md: its applied:\/declined: stamp is written by the owner's command only/);
 });
+
+// A removal passes only when git's own merge makes it: the merged-in commit removed the record and the branch never
+// touched it since the merge base (review-1 of bug gulnya/merge-refuses-owner-records).
+test('a merge that removes a record only the branch holds is refused (bug gulnya/merge-refuses-owner-records)', () => {
+  const dir = makeRepo();
+  const HOLD = `kirunak/tasks/${SLUG}/hold.md`;
+  git(dir, ['checkout', '-q', '-b', 'task-branch']);
+  put(dir, HOLD, 'held: 2026-11-06\n');
+  assert.equal(commit(dir, { KIRUNAK_HOLDING: ID }).status, 0);
+  git(dir, ['checkout', '-q', 'master']);
+  put(dir, 'src.txt', 'master work\n');
+  assert.equal(commit(dir).status, 0);
+  git(dir, ['checkout', '-q', 'task-branch']);
+  git(dir, ['merge', '-q', '--no-ff', '--no-commit', 'master']);
+  git(dir, ['rm', '-q', HOLD]);
+  const r = spawnSync('git', ['commit', '-q', '--no-edit'], { cwd: dir, env: cleanEnv(), encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /hold\.md: written by the owner's command only/);
+});
+
+test('a merge of master that takes a record master removed passes (bug gulnya/merge-refuses-owner-records)', () => {
+  const dir = makeRepo();
+  const OTHER = 'kirunak/approvals/radar-tiles.json';
+  put(dir, OTHER, '{"task":"weather/radar-tiles"}\n');
+  assert.equal(commit(dir, { KIRUNAK_APPROVING: 'weather/radar-tiles' }).status, 0);
+  git(dir, ['checkout', '-q', '-b', 'task-branch']);
+  put(dir, 'src.txt', 'work\n');
+  assert.equal(commit(dir).status, 0);
+  git(dir, ['checkout', '-q', 'master']);
+  git(dir, ['rm', '-q', OTHER]);
+  assert.equal(commit(dir, { KIRUNAK_APPROVING: 'weather/radar-tiles' }).status, 0);
+  git(dir, ['checkout', '-q', 'task-branch']);
+  git(dir, ['merge', '-q', '--no-ff', '--no-commit', 'master']);
+  assert.equal(staged(dir).includes(OTHER), true);
+  const r = spawnSync('git', ['commit', '-q', '--no-edit'], { cwd: dir, env: cleanEnv(), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+});
