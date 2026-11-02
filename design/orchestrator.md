@@ -131,6 +131,18 @@ pending  →  ready  →  running  →  done
     gets a `failures:` field naming every failure report of the step, and the stop line reads `S-1 failed on every
     rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md`. Removing the mark retries the
     step on its own rung. An older plan's `[escalate: <model>, <effort>]` mark still parses.
+  - **A review that would repeat a `not met`** stops the same way, before it starts (gulnya/review-reruns-whole-task
+    AC-4, D-4; `review.md` §2). `k run`'s pass, before it admits a ready `review` step, and `k step start` read the
+    two latest reviews that count before the file the step writes. When an id is `not met` in both, the step gets
+    `[escalate]` in `plan.md` (no `failures:` field: nothing failed), `steps/<step>/repeat.md` (each such id, both
+    reviews' rows verbatim, and the owner's three ways on: amend the line, accept a ratio by an amendment, or let one
+    more fix run), the progress line `escalated: stopped for the owner, AC-1 not met in review-1 and review-2` and an
+    `escalate` event with trigger `repeated not met`. `k run` stops with `S-4 AC-1 not met in review-1 and review-2;
+    the owner decides: read steps/S-4/repeat.md`, both rows of each id under it, and the push; `k step start`
+    refuses and names the file; `k waiting` and the board show the step stopped, its why the repeat file. The owner's
+    session takes the mark off once the owner has chosen. The progress line records the pair of reviews, so that pair
+    never stops the step again, and a new pair does. Judgement: two reviews in a row that find the same fault say the
+    fix or the line is wrong, and a third review spends a whole review to say so again.
   - **What counts**: a step that exits other than 0, ends without its outputs, times out or overruns its budget. Only
     the step's own failures count: one written because `k run` stopped (`k run was stopped (<signal>)`, or `the k run
     that started it stopped` after a crash) is not one of them (nothing went wrong in the step; a person starts every

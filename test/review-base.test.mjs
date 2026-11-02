@@ -77,7 +77,7 @@ test('a task approved, amended and then reviewed: the diff starts at the first a
   assert.ok(text.includes(`A-1, the last amendment, was approved in ${amended}`), 'the last amendment\'s approval');
   assert.ok(text.includes(`\`git diff ${amended} ${head}\``), 'what changed since it');
   assert.ok(text.includes(`base: ${w.first}`), 'the review\'s base is the first approval');
-  assert.deepEqual(given(w), { base: w.first, amendment: { id: 'A-1', commit: amended }, head, repos: [] });
+  assert.deepEqual(given(w), { base: w.first, amendment: { id: 'A-1', commit: amended }, head, repos: [], last: null });
 });
 
 test('a task never amended: the brief names its first approval only (E-1)', async () => {

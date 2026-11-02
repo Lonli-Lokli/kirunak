@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkReview, parseEvidence } from '../lib/review.mjs';
+import { checkReview, evidenceWords, parseEvidence, verdictOf, verdictText } from '../lib/review.mjs';
 import { parseTask } from '../lib/task.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
-import { gitCommitAll, k, makeWorkspace, sh } from './helpers.mjs';
+import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
 
@@ -159,4 +159,145 @@ test('k review check reads the latest review, or the one named, and exits 1 on a
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /review-2\.md: 1 problem\n {2}line 9: AC-1 has no row: one row per AC and E\n$/);
   assert.equal(k(w.home, ['review', 'check', ID, 'review.md']).status, 0);
+});
+
+// A re-review (gulnya/review-reruns-whole-task AC-2, AC-5): review-2.md written at head `seen`, whose E-1 row was itself
+// carried, then more work; a review-3 at the head now carries rows from it. given is what kirunak gave review-3.
+async function rereviewed() {
+  const w = await reviewed();
+  writeFileSync(join(w.hub, 'tools.txt'), 'tools\n');
+  writeFileSync(join(w.hub, 'cache.txt'), 'cache\n');
+  gitCommitAll(w.hub, 'hub work');
+  const hubSeen = sh(w.hub, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const seenRows = [
+    ROWS[0],
+    '| AC-2 | not met | file src/cache.ts:88: a fixed 24-hour format |',
+    `| AC-3 | needs device | On a phone: restart the app offline (src/cache.ts, ${w.hub}/tools.txt) |`,
+    '| E-1 | needs owner | carried from review-1: Read the age line aloud: does it read naturally? |',
+  ];
+  writeFileSync(join(w.p.dir, 'review-2.md'), review(w.head, seenRows, 'verdict: not met (AC-2)'));
+  writeFileSync(join(w.p.dir, 'checklist.md'), [
+    `- [x] AC-3 On a phone: restart the app offline (src/cache.ts, ${w.hub}/tools.txt) (review-2.md), done on the Pixel 7`,
+    '- [ ] E-1 Read the age line aloud: does it read naturally? (review.md)',
+  ].join('\n') + '\n');
+  // Work after review-2: a file no row names, here and in hub.
+  writeFileSync(join(w.weather, 'src', 'other.ts'), 'other\n');
+  gitCommitAll(w.weather, 'more work');
+  writeFileSync(join(w.hub, 'cache.txt'), 'cache\nevicted\n');
+  gitCommitAll(w.hub, 'more hub work');
+  const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const hubHead = sh(w.hub, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const given = {
+    head,
+    repos: [{ name: 'hub', root: w.hub, ref: 'master', base: hubSeen, head: hubHead, files: ['cache.txt'] }],
+    last: { file: 'review-2.md', review: 'review-2', head: w.head, repos: { hub: hubSeen } },
+  };
+  const task = parseTask(sh(w.weather, 'cat', [w.p.task]));
+  const carry = (rows, opts = {}) => checkReview(review(sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim(), rows, 'verdict: ' + verdictText(verdictOf(rows.map((r) => ({ id: r.split('|')[1].trim(), verdict: r.split('|')[2].trim() }))))), { task, id: ID, p: w.p, given, ws: w.ws, ...opts });
+  return { ...w, seen: w.head, hubSeen, head, hubHead, given, carry };
+}
+
+const CARRIED_ROWS = (w) => [
+  '| AC-1 | met | carried from review-2: test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2) |',
+  '| AC-2 | met | file src/cache.ts:3: the reader\'s own format |',
+  `| AC-3 | needs device | carried from review-2: On a phone: restart the app offline (src/cache.ts, ${w.hub}/tools.txt) |`,
+  '| E-1 | needs owner | Read the age line aloud: does it read naturally? |',
+];
+
+test('a re-review carries a met row and a needs device row on the owner\'s checklist whose paths did not change, here and in another repo (AC-2, D-2, D-3)', async () => {
+  const w = await rereviewed();
+  assert.deepEqual(problems(w.carry(CARRIED_ROWS(w))), []);
+  // An untouched folder of the task folder, and an absolute path in hub that did not change, carry too.
+  writeFileSync(join(w.p.dir, 'review-2.md'), readFileSync(join(w.p.dir, 'review-2.md'), 'utf8').replace(ROWS[0], `| AC-1 | met | measure evidence/S-1-cache-sizes.tsv, ${w.hub}/tools.txt |`));
+  const rows = CARRIED_ROWS(w);
+  rows[0] = `| AC-1 | met | carried from review-2: measure evidence/S-1-cache-sizes.tsv, ${w.hub}/tools.txt |`;
+  assert.deepEqual(problems(w.carry(rows)), []);
+});
+
+test('a re-review refuses a carried row that was not met there, or needs device with no item on the checklist (AC-2, D-3)', async () => {
+  const w = await rereviewed();
+  const rows = CARRIED_ROWS(w);
+  rows[1] = '| AC-2 | not met | carried from review-2: file src/cache.ts:88: a fixed 24-hour format |';
+  assert.deepEqual(problems(w.carry(rows)), ['AC-2: carried from review-2, where it was not met: only a met row, or a needs device or needs owner row on the owner\'s checklist, is carried; check the line again']);
+  writeFileSync(join(w.p.dir, 'checklist.md'), '- [ ] E-1 Read the age line aloud: does it read naturally? (review.md)\n');
+  assert.deepEqual(problems(w.carry(CARRIED_ROWS(w))), ['AC-3: carried from review-2, where it was needs device with no item of the same id and words on the owner\'s checklist, checklist.md: check the line again']);
+});
+
+test('a re-review refuses a carried row whose named path changed since, here or in another repo, or in a repo whose earlier head is not known (AC-2)', async () => {
+  const w = await rereviewed();
+  writeFileSync(join(w.weather, 'test', 'forecast.test.ts'), readFileSync(join(w.weather, 'test', 'forecast.test.ts'), 'utf8') + '// more\n');
+  gitCommitAll(w.weather, 'the test changed');
+  const now = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  assert.deepEqual(problems(w.carry(CARRIED_ROWS(w))), [`AC-1: carried from review-2, but test/forecast.test.ts changed between ${w.seen} and ${now}: check the line again`]);
+
+  const v = await rereviewed();
+  const unknown = { ...v.given, repos: [] };
+  assert.deepEqual(problems(v.carry(CARRIED_ROWS(v), { given: unknown })), [`AC-3: carried from review-2, but ${v.hub}/tools.txt is in hub, whose head the last review saw is not known: check the line again`]);
+  const rows = CARRIED_ROWS(v);
+  writeFileSync(join(v.p.dir, 'review-2.md'), readFileSync(join(v.p.dir, 'review-2.md'), 'utf8').replace(ROWS[0], `| AC-1 | met | file src/cache.ts:1, and ${v.hub}/cache.txt |`));
+  rows[0] = `| AC-1 | met | carried from review-2: file src/cache.ts:1, and ${v.hub}/cache.txt |`;
+  assert.deepEqual(problems(v.carry(rows)), [`AC-1: carried from review-2, but ${v.hub}/cache.txt changed in hub between ${v.hubSeen} and ${v.hubHead}: check the line again`]);
+  // The same file named in a git worktree of hub is hub's.
+  const tree = join(v.root, 'hub-tree');
+  sh(v.hub, 'git', ['worktree', 'add', '-q', '--detach', tree]);
+  writeFileSync(join(v.p.dir, 'review-2.md'), readFileSync(join(v.p.dir, 'review-2.md'), 'utf8').replace(`${v.hub}/cache.txt`, `${tree}/cache.txt`));
+  rows[0] = rows[0].replace(`${v.hub}/cache.txt`, `${tree}/cache.txt`);
+  assert.deepEqual(problems(v.carry(rows)), [`AC-1: carried from review-2, but ${tree}/cache.txt changed in hub between ${v.hubSeen} and ${v.hubHead}: check the line again`]);
+});
+
+test('a re-review refuses a carried row naming another repo\'s file from that repo\'s top, as a review of a change there cites it, once it changed or its earlier head is not known (AC-2, review-1 of gulnya/review-reruns-whole-task)', async () => {
+  const v = await rereviewed();
+  const rows = CARRIED_ROWS(v);
+  writeFileSync(join(v.p.dir, 'review-2.md'), readFileSync(join(v.p.dir, 'review-2.md'), 'utf8').replace(ROWS[0], '| AC-1 | met | file src/cache.ts:1, and hub cache.txt:1 |'));
+  rows[0] = '| AC-1 | met | carried from review-2: file src/cache.ts:1, and hub cache.txt:1 |';
+  assert.deepEqual(problems(v.carry(rows)), [`AC-1: carried from review-2, but cache.txt changed in hub between ${v.hubSeen} and ${v.hubHead}: check the line again`]);
+  const unseen = { ...v.given, last: { ...v.given.last, repos: {} } };
+  assert.deepEqual(problems(v.carry(rows, { given: unseen })).filter((x) => x.startsWith('AC-1')), ['AC-1: carried from review-2, but cache.txt is in hub, whose head the last review saw is not known: check the line again']);
+  // A file of the other repo that did not change is carried.
+  writeFileSync(join(v.p.dir, 'review-2.md'), readFileSync(join(v.p.dir, 'review-2.md'), 'utf8').replace('hub cache.txt:1', 'hub tools.txt:1'));
+  rows[0] = rows[0].replace('hub cache.txt:1', 'hub tools.txt:1');
+  assert.deepEqual(problems(v.carry(rows)), []);
+});
+
+test('a re-review refuses a carried row of a line amended since, with no path, from a review not given, or in other words (AC-2, E-2, E-4)', async () => {
+  const w = await rereviewed();
+  const rows = CARRIED_ROWS(w);
+  rows[3] = '| E-1 | needs owner | carried from review-2: Read the age line aloud: does it read naturally? |';
+  assert.deepEqual(problems(w.carry(rows)), ['E-1: carried from review-2, but its evidence names no path, a file or folder at review-2\'s head ' + w.seen + ': check the line again']);
+
+  const other = CARRIED_ROWS(w);
+  other[0] = '| AC-1 | met | carried from review-1: test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2) |';
+  assert.deepEqual(problems(w.carry(other)), ['AC-1: carried from review-1, but the last review kirunak gave this review is review-2 (review-2.md): a row is carried only from it; check the line again']);
+  assert.deepEqual(problems(w.carry(CARRIED_ROWS(w), { given: null })).slice(0, 1), ['AC-1: carried from review-2, but kirunak gave this review no last review: a row is carried only from it; check the line again']);
+
+  const words = CARRIED_ROWS(w);
+  words[0] = '| AC-1 | met | carried from review-2: test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:1) |';
+  assert.deepEqual(problems(w.carry(words)), ['AC-1: carried from review-2, but its row there is met: test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2): a carried row keeps that verdict and that evidence verbatim; check the line again']);
+
+  const task = readFileSync(w.p.task, 'utf8');
+  writeFileSync(w.p.task, task.replace('with the time it was fetched.', 'with the time and date it was fetched.'));
+  gitCommitAll(w.weather, 'amended');
+  const amended = parseTask(readFileSync(w.p.task, 'utf8'));
+  assert.deepEqual(problems(w.carry(CARRIED_ROWS(w), { task: amended })), [`AC-1: carried from review-2, but its task line was amended since review-2's head ${w.seen}: check the line again`]);
+});
+
+test('k review check reads the last review from given.json and refuses a carry it does not take', async () => {
+  const w = await rereviewed();
+  reviewsRan(w.p.dir, ['review.md', 'review-2.md', 'review-3.md']);
+  mkdirSync(join(w.p.dir, 'steps', 'S-4'), { recursive: true });
+  writeFileSync(join(w.p.dir, 'steps', 'S-4', 'given.json'), JSON.stringify(w.given));
+  const rows = CARRIED_ROWS(w);
+  writeFileSync(join(w.p.dir, 'review-3.md'), review(w.head, rows, 'verdict: needs owner (AC-3, E-1)'));
+  const ok = k(w.home, ['review', 'check', ID, 'review-3.md']);
+  assert.equal(ok.status, 0, ok.stderr);
+  rows[1] = '| AC-2 | not met | carried from review-2: file src/cache.ts:88: a fixed 24-hour format |';
+  writeFileSync(join(w.p.dir, 'review-3.md'), review(w.head, rows, 'verdict: not met (AC-2)'));
+  const bad = k(w.home, ['review', 'check', ID, 'review-3.md']);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /line 12: AC-2: carried from review-2, where it was not met: only a met row/);
+});
+
+test('the words of a row\'s evidence that may name a path', () => {
+  assert.deepEqual(evidenceWords('test A.b c (t/x.test.ts:41), `src/a.ts:3-9`; ~/x/y.md.'), ['A.b', 'c', 't/x.test.ts', 'src/a.ts', '~/x/y.md']);
+  assert.deepEqual(evidenceWords('measure evidence/x.tsv row 2 [docs/a.md]'), ['evidence/x.tsv', 'row', '2', 'docs/a.md']);
 });
