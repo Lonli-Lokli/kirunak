@@ -204,6 +204,21 @@ test('a k run --once that fails a step, then one that climbs it, prints no push:
   assert.deepEqual(pushes(lines), []);
 });
 
+// An owner step with nothing before it is ready from the start, ahead of agent steps that become ready one by one.
+const OWNER_FIRST = PLAN.replace('### S-3 Restart offline on a phone [owner]\nneeds: S-2\n', '### S-3 Restart offline on a phone [owner]\n');
+
+test('an owner step ready while agent steps run waits for them: k run --watch starts each agent step that becomes ready, then stops at the owner\'s (gulnya/run-stops-at-ready-owner-step)', async () => {
+  const w = await approvedWorkspace(OWNER_FIRST);
+  const lines = [];
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1', 'S-2'], lines.join('\n'));
+  assert.deepEqual(r.states, BOTH);
+  assert.match(r.stopped, /^S-3 waits for the owner/);
+  const yours = PUSHED('S-3 is yours: Restart offline on a phone. once it is done: k step finish weather/offline-forecast S-3');
+  assert.deepEqual([pushes(lines), lines.at(-1)], [[yours], yours]);
+});
+
 test('a step that fails twice climbs to opus and k run goes on by itself: an event and a plain line, nothing for the owner, a line on the card (AC-1, E-17)', async () => {
   const w = await approvedWorkspace(PLAN);
   const lines = [];
