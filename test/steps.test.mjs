@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { hold } from '../lib/approval.mjs';
-import { approvedWorkspace, k, sh } from './helpers.mjs';
+import { approvedWorkspace, events, k, repeatedWorkspace, sh } from './helpers.mjs';
 
 export const PLAN = `---
 task: weather/offline-forecast
@@ -361,4 +361,51 @@ outputs: steps/S-3/report.md
   assert.equal(steps.load(w.ws, w.id).states.get('S-2').why, 'S-3 is not done');
   writeFileSync(join(w.p.dir, 'progress.md'), '2026-10-28 01:59 S-3 finished\n');
   assert.deepEqual(statesOf(w), { 'S-1': 'ready', 'S-2': 'ready', 'S-3': 'done' });
+});
+
+test('k step start stops a review whose two latest counting reviews repeat a not met: [escalate], repeat.md with both rows and the three ways on, the progress line; the same pair stops it once, a new pair again (review-reruns-whole-task AC-4, D-4)', async () => {
+  const w = await repeatedWorkspace();
+  const first = w.review('review.md', ['AC-1', 'AC-2']);
+  w.finished('S-2', 'review.md');
+  const t0 = steps.load(w.ws, w.id);
+  assert.equal(steps.repeatOf(t0, steps.stepOf(t0, 'S-3')), null, 'one review: nothing repeats yet');
+  const second = w.review('review-2.md', ['AC-1', 'AC-3']);
+  w.finished('S-3', 'review-2.md');
+
+  const r = k(w.home, ['step', 'start', w.id, 'S-4', '--session', 'rev-3']);
+  assert.notEqual(r.status, 0);
+  const file = 'kirunak/tasks/offline-forecast/steps/S-4/repeat.md';
+  assert.match(r.stderr, new RegExp(`S-4 is stopped for the owner: AC-1 not met in review-1 and review-2; read ${file.replace(/\./g, '\\.')}`));
+  assert.match(r.stderr, /amend the line, accept a ratio by an amendment, or let one more fix run/);
+  assert.doesNotMatch(progress(w), /S-4 started/);
+  const plan = readFileSync(join(w.p.dir, 'plan.md'), 'utf8');
+  assert.match(plan, /^### S-4 Review 3 \[review\] \[escalate\]$/m);
+  assert.doesNotMatch(plan, /^failures:/m);
+  assert.match(progress(w), /S-4 escalated: stopped for the owner, AC-1 not met in review-1 and review-2\n$/);
+  const repeat = readFileSync(join(w.p.dir, 'steps', 'S-4', 'repeat.md'), 'utf8');
+  const row = (text, id) => text.split('\n').find((l) => l.startsWith(`| ${id} |`));
+  for (const x of [row(first, 'AC-1'), row(second, 'AC-1'), '## AC-1', 'review-1 (`review.md`)', 'review-2 (`review-2.md`)', '1. Amend the line', '2. Accept a ratio', '3. Let one more fix run', 'takes `[escalate]` off S-4']) assert.ok(repeat.includes(x), x);
+  assert.doesNotMatch(repeat, /AC-2|AC-3/, 'only the id not met in both');
+  assert.deepEqual(events(w.home).filter((e) => e.kind === 'escalate').map(({ time, ...e }) => e), [
+    { kind: 'escalate', trigger: 'repeated not met', task: w.id, step: 'S-4', ids: ['AC-1'], reviews: ['review-1', 'review-2'], to: null, stopped: true },
+  ]);
+  // k waiting and the board read it as a stopped step, its why the repeat file.
+  assert.deepEqual(steps.stopsOf(w.ws, w.p), [{
+    step: 'S-4', kind: 'escalated', what: 'stopped, AC-1 not met in review-1 and review-2',
+    why: 'not met in two reviews in a row: steps/S-4/repeat.md holds both rows and your three ways on',
+    reports: ['steps/S-4/repeat.md'], dir: 'kirunak/tasks/offline-forecast/steps/S-4/',
+  }]);
+
+  // The owner chose one more fix run: the session takes the mark off, and the same pair does not stop S-4 again.
+  writeFileSync(join(w.p.dir, 'plan.md'), plan.replace(' [escalate]', ''));
+  const again = k(w.home, ['step', 'start', w.id, 'S-4', '--session', 'rev-3']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(progress(w), /S-4 started \(session rev-3\)\n$/);
+  // review-3 has AC-1 not met again: a new pair, review-2 and review-3, stops S-5.
+  w.review('review-3.md', ['AC-1', 'AC-3']);
+  w.finished('S-4', 'review-3.md');
+  const next = k(w.home, ['step', 'start', w.id, 'S-5', '--session', 'rev-4']);
+  assert.notEqual(next.status, 0);
+  assert.match(next.stderr, /S-5 is stopped for the owner: AC-1, AC-3 not met in review-2 and review-3; read /);
+  assert.match(progress(w), /S-5 escalated: stopped for the owner, AC-1, AC-3 not met in review-2 and review-3\n$/);
 });

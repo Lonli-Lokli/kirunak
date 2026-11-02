@@ -17,7 +17,7 @@ import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
 import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK } from './helpers.mjs';
+import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK, repeatedWorkspace } from './helpers.mjs';
 
 // The user's settings folder of every step this file runs: empty, so a step's window is the one R7.4 gives with no
 // user window (orchestrator.md §5), whatever this machine's own settings say.
@@ -1182,4 +1182,57 @@ test('a resume whose device claim fails never starts, and records neither a hit 
   await run({ ws: w.ws, id: w.id, clock });
   assert.equal(calls.length, 1);
   assert.deepEqual(readLines(w.home).map((l) => l.kind), ['skip']);
+});
+
+test('k run stops before a review whose two latest counting reviews repeat a not met: the line, both rows, the push, no run; the same pair once, a new pair again (review-reruns-whole-task AC-4)', async () => {
+  const w = await repeatedWorkspace();
+  const first = w.review('review.md', ['AC-1']);
+  w.finished('S-2', 'review.md');
+  const second = w.review('review-2.md', ['AC-1', 'AC-2']);
+  w.finished('S-3', 'review-2.md');
+  const calls = [];
+  w.ws.seams.runner = {
+    start(step) {
+      calls.push(step);
+      const child = spawn('sleep', ['0.05'], { detached: true });
+      const done = new Promise((resolve) => child.on('exit', () => {
+        w.review('review-3.md', ['AC-2']);
+        resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });
+      }));
+      return { pid: child.pid, sessionId: step.sessionId, done };
+    },
+    keepAlive: () => null,
+  };
+  const row = (text, id) => text.split('\n').find((l) => l.startsWith(`| ${id} |`));
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.equal(calls.length, 0, 'no third review runs');
+  const stop = `S-4 AC-1 not met in review-1 and review-2; the owner decides: read steps/S-4/repeat.md\n  review-1: ${row(first, 'AC-1')}\n  review-2: ${row(second, 'AC-1')}`;
+  assert.equal(r.stopped, stop);
+  assert.ok(lines.includes(`${w.id} stopped: ${stop}`), lines.join('\n'));
+  assert.equal(lines.at(-1), PUSHED('S-4 stopped, AC-1 not met in review-1 and review-2. read kirunak/tasks/offline-forecast/steps/S-4/ (repeat.md)'));
+  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-4 Review 3 \[review\] \[escalate\]$/m);
+  assert.match(progress(w), /S-4 escalated: stopped for the owner, AC-1 not met in review-1 and review-2\n$/);
+  const [waiting] = stoppedFor(await rows(w.ws, { all: true }));
+  assert.deepEqual(waiting.lines, [
+    'The last forecast stays readable offline (weather/offline-forecast)',
+    'S-4 stopped, AC-1 not met in review-1 and review-2: not met in two reviews in…',
+    'read kirunak/tasks/offline-forecast/steps/S-4/ (repeat.md)',
+  ]);
+
+  // A second k run while the mark stands stops as any [escalate] does, writing nothing more.
+  const r2 = await run({ ws: w.ws, id: w.id });
+  assert.equal(r2.stopped, 'S-4 is marked [escalate] in plan.md: the owner\'s session decides');
+  assert.equal(progress(w).match(/S-4 escalated/g).length, 1);
+
+  // The owner lets one more fix run: the mark off, the same pair does not stop S-4, which runs and writes review-3
+  // with AC-2 not met again; review-2 and review-3 are a new pair, which stops S-5.
+  const planFile = join(w.p.dir, 'plan.md');
+  writeFileSync(planFile, readFileSync(planFile, 'utf8').replace(' [escalate]', ''));
+  const r3 = await watch(w);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].env.KIRUNAK_STEP, 'S-4');
+  assert.equal(r3.states['S-4'], 'done');
+  assert.equal(r3.states['S-5'], 'escalated');
+  assert.match(r3.stopped, /^S-5 AC-2 not met in review-2 and review-3; the owner decides: read steps\/S-5\/repeat\.md\n  review-2: \| AC-2 \| not met \| AC-2 still fails in review-2\.md: the cache keeps one day \|\n  review-3: \| AC-2 \| not met \| AC-2 still fails in review-3\.md: the cache keeps one day \|$/);
 });

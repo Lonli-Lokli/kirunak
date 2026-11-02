@@ -120,3 +120,39 @@ export async function ladderWorkspace(extra = {}) {
   const { loadWorkspaceModule } = await import('../lib/workspace.mjs');
   return { dir, home, modulePath, ws: await loadWorkspaceModule(modulePath) };
 }
+
+// The invented task with S-1 done and four review steps, S-2 to S-5 writing review.md to review-4.md
+// (review-reruns-whole-task AC-4): repeated.review(file, notMet) writes a review of the task's four rows whose ids in
+// notMet are `not met` and the rest `needs owner`, at the weather repo's head and the task's first approval;
+// repeated.finished(step, file) records the step finished with the file's hash, so the review counts.
+export const REPEAT_PLAN = `---
+task: weather/offline-forecast
+blocked-by: []
+---
+
+### S-1 Keep the last forecast on disk [agent]
+covers: AC-1, AC-2, AC-3, E-1
+inputs: task, docs/offline.md
+outputs: steps/S-1/report.md
+
+${[2, 3, 4, 5].map((n) => `### S-${n} Review ${n - 1} [review]\nneeds: S-${n - 1}\ncovers: all\ninputs: task, diff, evidence/\noutputs: ${n === 2 ? 'review.md' : `review-${n - 1}.md`}\n`).join('\n')}`;
+export async function repeatedWorkspace() {
+  const w = await approvedWorkspace(REPEAT_PLAN);
+  mkdirSync(join(w.p.dir, 'steps', 'S-1'), { recursive: true });
+  mkdirSync(join(w.p.dir, 'evidence'), { recursive: true });
+  writeFileSync(join(w.p.dir, 'steps', 'S-1', 'report.md'), 'done');
+  writeFileSync(join(w.p.dir, 'progress.md'), '2026-11-02 09:00 S-1 started (session impl-1)\n2026-11-02 09:30 S-1 finished\n');
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  const review = (file, notMet) => {
+    const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => (notMet.includes(id) ? `| ${id} | not met | ${id} still fails in ${file}: the cache keeps one day |` : `| ${id} | needs owner | the owner reads ${id} on a phone |`));
+    const verdict = notMet.length ? `not met (${notMet.join(', ')})` : 'needs owner (AC-1, AC-2, AC-3, E-1)';
+    const text = `---\ntask: ${w.id}\nhead: ${git('rev-parse', '--short', 'HEAD')}\nbase: ${git('log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json')}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.join('\n')}\n\nverdict: ${verdict}\n`;
+    writeFileSync(join(w.p.dir, file), text);
+    return text;
+  };
+  const finished = (step, file) => {
+    const line = `2026-11-02 10:00 ${step} started (session rev-${step})\n2026-11-02 10:30 ${step} finished (${file} ${hashBytes(readFileSync(join(w.p.dir, file)))})\n`;
+    writeFileSync(join(w.p.dir, 'progress.md'), readFileSync(join(w.p.dir, 'progress.md'), 'utf8') + line);
+  };
+  return { ...w, review, finished };
+}
