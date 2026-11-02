@@ -255,7 +255,14 @@ task is started by hand, one task per session:
    `! k approve <id> --amendment A-n`.
 5. The plan's review step writes `review.md` in a fresh conversation, and `k review check <id>` holds it to the
    grammar. `k checklist <id>` then writes `checklist.md` from its `needs device` and `needs owner` rows; only the
-   owner ticks them.
+   owner ticks them. A review after fixes is a new step and file (`review-2.md`). It also gets the last review that
+   counts (`in/last-review.md`) and what changed since its head (`in/since.patch`), beside the whole diff. It still
+   writes a row for every line, but may carry a row as `carried from review-<n>: <that row's evidence>`.
+   `k review check` takes a carry only for a row that was `met` there, or `needs device` or `needs owner` with an
+   item on the checklist, whose task line was not amended, and whose evidence names a path, none of them changed
+   since. When the same line is `not met` in two reviews in a row, the next review does not start: the step is
+   marked `[escalate]`, and `steps/<step>/repeat.md` holds both rows and your three ways on (amend the line, accept
+   a ratio by an amendment, or let one more fix run). `design/review.md` §1 and §2.
 6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>` (with the
    mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what waits for you to accept, the one you
    pick showing what still blocks it, and `/k-accept 1` takes the first). It refuses

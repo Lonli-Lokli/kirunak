@@ -66,9 +66,34 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   with its short hash, subject and files, so the reviewer knows it may be other work (AC-7).
 - **`given.json`**, in the review step's folder beside `in/` and written with it, records what kirunak gave the
   review: the base, the last amendment's approval, the head, and for each other repo its name, root, the ref its head
-  was read from, its base, head and files. The step's `.gitignore` does not name it, so it is committed with the
-  step's folder. `k review check` holds the review's `base` to it (§2), and `k accept` reads each other repo's head
-  from it (`approval.md` §4).
+  was read from, its base, head and files, and `last`, the review it follows (below), or `null`. The step's
+  `.gitignore` does not name it, so it is committed with the step's folder. `k review check` holds the review's
+  `base` to it and takes a carried row only from its `last` (§2), and `k accept` reads each other repo's head from it
+  (`approval.md` §4).
+- **A review that follows a review** (gulnya/review-reruns-whole-task AC-1, D-1). The last review is the latest
+  review file before the one this step writes, by number (`review.md` is 1, `review-2.md` is 2), that counts (§2):
+  it passes the grammar and its review step finished with the file as it stands, so a review that failed its grammar
+  or was changed after its step is never followed (E-3). Its name in rows is `review-<n>` (`review-1` for
+  `review.md`). When the latest that counts names a head that is no longer a commit of the repo, or not an ancestor
+  of the head now (a rebase), kirunak looks no further back: the review is whole. A first review is whole too (E-1):
+  no last review, no since patch, and nothing about them in the brief or `given.json` (`last: null`). A review that
+  follows one gets two more inputs in `in/`:
+  - `in/last-review.md`: that review's text verbatim, its rows and findings.
+  - `in/since.patch`: the same files as `diff.patch`, diffed from that review's `head` to the head now. For each other
+    repo, `in/repos/<name>.since.patch` holds the same files as its `<name>.patch`, from the head that review's
+    `given.json` recorded for that repo to the head now. There is none when that review's step recorded no head
+    there (the repo had no part then, or the step kept no `given.json`), or when that head is no longer a commit.
+
+  `given.json` records it as `last: { file, review: "review-<n>", head, repos: { <name>: <head> } }`. The whole diff
+  stays (R32): the since patch is beside it, never instead of it. The last review is not the implementer's account
+  that R13 keeps out: it is a reviewer's record, written in a fresh conversation and held to the grammar, so a
+  re-review may read it (D-1). The brief names both files with the inputs and adds a section, "A review that follows
+  review-<n>": still a row for every AC and E (D-2); check again every row that was `not met` there, every `needs
+  device` or `needs owner` row there with no item of the same id and words on `checklist.md`, every row whose
+  evidence names a path changed since that review's head, every row of a task line amended since (`git diff <head>
+  <head now> -- task.md`) and every row whose evidence names no path; any other row may be carried (§2). Judgement:
+  a re-review that checks every line again costs a whole review for each fix, and one that reads only the since
+  patch misses a row whose evidence the fix broke; the carry rule sits between, and `k review check` holds it.
 - The reviewer's brief: the task's AC, E and O lines verbatim; "write `review.md` in the grammar below; a row per
   AC and E; `met` only with evidence you verified yourself: a test you can name and whose assertion you read, a
   file and line, a measurement in `evidence/`, a screenshot in `evidence/`; when you cannot verify (a device, the
@@ -112,8 +137,49 @@ verdict: not met (AC-2)
   <path>:<line>`, `measure <path>`, or `screenshot <path>`, and the path exists at `head` (a test name must appear
   in the file named in parentheses; a `file` line must be within the file's length; `k step finish` commits the
   evidence a step writes, `task-files.md` §1, so a path under `evidence/` is there). A `not met` row names what is
-  wrong. The last line is `verdict: met` only when every row is `met`; else `verdict: not met (<ids>)` or
-  `verdict: needs owner (<ids>)` when nothing is `not met`.
+  wrong, and every place the same fault holds that the reviewer can find (the same element in each theme, on each
+  ground, screen, platform and locale), and says where it looked, so one fix answers all of them (AC-3, the brief's
+  sweep rule; the grammar cannot check it). A `needs device` or `needs owner` row names the files it concerns, so a
+  later review can carry it. The last line is `verdict: met` only when every row is `met`; else `verdict: not met
+  (<ids>)` or `verdict: needs owner (<ids>)` when nothing is `not met`.
+- **A carried row** (gulnya/review-reruns-whole-task AC-2, D-2, D-3, E-2, E-4): its evidence is `carried from
+  review-<n>: ` followed by that review's row's evidence verbatim, its own carried prefix taken off, and its verdict
+  is the verdict there:
+
+  ```markdown
+  | AC-1 | met | carried from review-1: test OfflineForecastTest.opens on the last forecast (test/offline-forecast.test.ts:41) |
+  ```
+
+  `k review check` takes it only when all of these hold, and else names each that failed, ending "check the line
+  again": review-<n> is the `last` the step's `given.json` records (a step with no `last`, or no `given.json`,
+  carries nothing); that review has a row for the id, with the same verdict and, both prefixes off, the same
+  evidence; the verdict there is `met`, or `needs device` or `needs owner` with an item of the same id and words on
+  `checklist.md`, ticked or not, matched as `k checklist` matches the owner's line (§3, D-3), so `not met` is never
+  carried; the task line's text at that review's head (`git show <head>:<task.md>`) is the text now, so a line
+  amended since is checked whole (E-2); the evidence names at least one path (E-4); and no path it names changed
+  between that review's head and this review's head. A path is a word of the evidence, split on spaces, brackets,
+  commas and semicolons, with quotes, punctuation and a trailing `:<line>` or `:<line>-<line>` dropped, and never
+  the form's first word (`test`, `file`, `measure`, `screenshot`; a `test/` folder would otherwise be named by every
+  `test` row). It counts when it is a file or folder at that review's head, from the task folder or the repo root,
+  or when it is an absolute or `~/` path inside the task's repo, a repo the step's `given.json` names, or a workspace
+  repo or a git worktree of one (matched by git's common dir), read there at the head that review's step recorded.
+  Changed means `git diff --name-only` between the two heads holds it or anything under it, over the whole repo, so
+  evidence in the task folder counts too; in another repo, between the head the last review's `given.json` recorded
+  there and the head this step's records. A repo whose earlier head is not known counts as changed. A carried `met`
+  row's grammar (the form, the path at `head`) reads its evidence after the prefix. `k list`, which runs no git
+  command, checks only the parts that read none: the `last`, the row there, its verdict and words, and the checklist.
+- **The stop after a repeated not met** (gulnya/review-reruns-whole-task AC-4, D-4). Before a `review` step starts,
+  in `k run`'s pass and in `k step start`, kirunak reads the two latest reviews that count before the file the step
+  writes. When an id is `not met` in both, a third review would most likely find the same, so the step stops for the
+  owner instead, as the stop past the ladder's top rung does (`orchestrator.md` §2): `plan.md` marks the step
+  `[escalate]`, `steps/<step>/repeat.md` holds each such id with both reviews' rows verbatim and the owner's three
+  ways on, and `progress.md` gets `escalated: stopped for the owner, <ids> not met in review-<a> and review-<b>`
+  (and `events.jsonl` an `escalate` event, trigger `repeated not met`). `k run` stops with that line, both rows of
+  each id under it and the push; `k step start` refuses and names the file. `k waiting` and the board show a stopped
+  step whose why is the repeat file. The three ways on (D-4): amend the line (`k amend new <id>`, then the owner's
+  `! k approve <id> --amendment A-<n>`); accept a ratio, by an amendment whose line states the ratio the work
+  reaches; or let one more fix run. The owner's session takes `[escalate]` off once the owner has chosen. The
+  progress line records the pair, so the same pair never stops that step again, and a new pair does.
 - The review is a file the reviewer writes (an agent step), so the freeze hook allows it; `k review check` runs as
   the step's output check (`outputs: review.md`), and a review that fails the grammar fails the step.
 - A second review after fixes is a new step (`S-review-2`), a new file `review-2.md`; `k list` reads the latest.
@@ -143,7 +209,9 @@ what the owner wrote: a line with an item's id and words, closed by the name of 
 on the old phone`), and every line that is not an item stays, after the items, in its order; an item line from an
 older review goes. So after a new review, an item whose row has the same id and the same words as in the review
 before keeps the owner's tick and words and names the new review; a row with other words comes unticked
-(gulnya/kirunak-accept-shared-repo AC-9). `k accept` matches the same way, so it takes a carried tick before
+(gulnya/kirunak-accept-shared-repo AC-9). A row carried from an earlier review (§2) makes its item from its words
+with `carried from review-<n>: ` taken off, so it keeps the owner's tick and words (gulnya/review-reruns-whole-task
+AC-2). `k accept` matches the same way, so it takes a carried tick before
 `k checklist` is run again. `k accept` refuses while an item is unticked unless the owner passes
 `--checklist-open "<why>"`, which `done.json` records with the text of each item left open (unticked, or a row with no
 item yet), beside the review it took. It takes only a latest review that counts (§2) and ends `verdict: met` or
@@ -191,4 +259,5 @@ handoff) and the record must not (D7). The owner may prefer one name for both; t
 
 R13 (§1), R14 (§2), R15 (§3, §4), D12 (§4), R30 (§3, the tick a new review keeps; what blocks `k accept` is
 `approval.md` §4), R32 (§1, what a review sees; §2, its base; what `k accept` refuses in other repos is
-`approval.md` §4).
+`approval.md` §4). gulnya/review-reruns-whole-task: §1 (the last review and the since patches), §2 (the carried
+row, the sweep rule, the stop after a repeated not met), §3 (a carried row's tick).
