@@ -501,6 +501,50 @@ test('needs.json owner: the task stops with the question; the next k run resumes
   assert.match(calls[1].prompt, /^the owner has answered the question of kirunak\/tasks\/offline-forecast\/steps\/S-1\/needs-1\.json; read kirunak\/tasks\/offline-forecast\/notes\.md/);
 });
 
+// S-2 asks the owner; the answer is a new step S-5 that S-2 now needs (gulnya/resume-before-needs).
+const NEEDS_S5 = PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\n', '### S-2 Restart keeps it [agent]\nneeds: S-1, S-5\n') + `
+### S-5 Design the restart [agent]
+needs: S-1
+inputs: task
+outputs: steps/S-5/report.md
+`;
+async function waitingOnNewNeed() {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, (step) => {
+    const s = step.env.KIRUNAK_STEP;
+    if (s === 'S-5') return (put(w, 'steps/S-5/report.md'), 'nothing');
+    if (s === 'S-2' && !step.resume) return (put(w, 'steps/S-2/needs.json', JSON.stringify({ owner: 'Which restart?' })), 'nothing');
+    return 'write';
+  });
+  const first = await watch(w);
+  assert.equal(first.stopped, 'S-2 waits for the owner: Which restart?');
+  writeFileSync(join(w.p.dir, 'plan.md'), NEEDS_S5);
+  return { w, calls };
+}
+
+test('a waiting-owner step whose need is not done is not resumed until it is: k run --watch starts the need, then resumes the step as answered (gulnya/resume-before-needs)', async () => {
+  const { w, calls } = await waitingOnNewNeed();
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1', 'S-2', 'S-5', 'S-2'], lines.join('\n'));
+  assert.ok(lines.includes(`${w.id} S-2 waits for S-5 before it resumes`), lines.join('\n'));
+  const text = progress(w);
+  assert.ok(text.indexOf('S-5 finished') < text.indexOf('S-2 resumed'), text);
+  assert.match(calls[3].prompt, /^the owner has answered/);
+  assert.deepEqual(r.states, { ...BOTH, 'S-5': 'done' });
+});
+
+test('k run --once leaves a waiting-owner step whose need is not done waiting; the next k run resumes it (gulnya/resume-before-needs)', async () => {
+  const { w, calls } = await waitingOnNewNeed();
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1', 'S-2', 'S-5'], lines.join('\n'));
+  assert.deepEqual([r.states['S-2'], r.states['S-5'], r.stopped], ['waiting-owner', 'done', null]);
+  assert.doesNotMatch(progress(w), /S-2 resumed/);
+  const again = await run({ ws: w.ws, id: w.id });
+  assert.deepEqual([calls.length, calls[3].env.KIRUNAK_STEP, again.states['S-2']], [4, 'S-2', 'done']);
+});
+
 test('a k run --once whose step asks the owner ends with the push of the question, though no pass stopped it', async () => {
   const w = await approvedWorkspace(PLAN);
   fakeRunner(w, () => (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));

@@ -106,7 +106,10 @@ pending  →  ready  →  running  →  done
   same way, the `needs.json` left for the session that wrote it.
 - `waiting-owner`: `needs.json` has `{ "owner": "<question>" }`: the orchestrator stops the task, appends the
   question to `progress.md` and `events.jsonl`, and `k list` shows `awaiting owner`. The owner answers in a session
-  (`k intake answer` if it changes the task: then an amendment) or by editing `notes.md`; `k run` resumes.
+  (`k intake answer` if it changes the task: then an amendment) or by editing `notes.md`; `k run` resumes. An answer
+  may be a new step the waiting one now needs (`needs:` in `plan.md`): while a step it needs is not done, `k run`
+  leaves it waiting, says "S-n waits for S-m before it resumes", and resumes it as answered on the first pass after
+  every step it needs is done (gulnya/resume-before-needs).
 - `failed` climbs the ladder (gulnya/enforced-escalation; **evidence**: its design, S-2, and the builders' reports).
   The workspace's `ladder` (`plugins.md` §3) is a list of rungs, lowest first; kirunak's default is `sonnet`, then
   `opus` at high effort in build mode, then `fable` at high effort in design mode, one attempt on each rung above the
