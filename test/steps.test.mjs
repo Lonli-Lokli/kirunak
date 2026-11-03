@@ -165,7 +165,7 @@ test('a stop of k run is not one of the step\'s two failures and writes no repor
 test('k step fail refuses a stop\'s words, so a failure given by hand always counts', async () => {
   const w = await approvedWorkspace(PLAN);
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
-  for (const why of ['k run was stopped (SIGINT)', '  the k run   that started it stopped ']) {
+  for (const why of ['k run was stopped (SIGINT)', '  the k run   that started it stopped ', 'unfinished: two tests left']) {
     const r = k(w.home, ['step', 'fail', w.id, 'S-1', '--why', why]);
     assert.equal(r.status, 1, why);
     assert.match(r.stderr, /is k run's own reason for a stop; say what went wrong/);
@@ -202,7 +202,7 @@ test('a step starts only on a task that may run: approved, queued, not on hold, 
   assert.equal(existsSync(join(w.p.dir, 'progress.md')), false);
 });
 
-test('needs.json: heavy and owner requests parse, anything else is an error a run fails on', async () => {
+test('needs.json: heavy, owner and unfinished requests parse, anything else is an error a run fails on', async () => {
   const w = await approvedWorkspace(PLAN);
   const dir = join(w.p.dir, 'steps', 'S-1');
   const needs = (x) => {
@@ -213,7 +213,9 @@ test('needs.json: heavy and owner requests parse, anything else is an error a ru
   assert.deepEqual(needs({ owner: ' Three days or a week? ' }), { owner: 'Three days or a week?' });
   assert.match(needs({ heavy: { what: 'tests', command: 'npm test' } }).error, /heavy wants/);
   assert.match(needs('{').error, /not JSON/);
-  assert.match(needs({}).error, /neither heavy nor owner/);
+  assert.deepEqual(needs({ unfinished: ' two tests\n left ' }), { unfinished: 'two tests left' });
+  assert.match(needs({ unfinished: ' ' }).error, /none of heavy, owner and unfinished/);
+  assert.match(needs({}).error, /none of heavy, owner and unfinished/);
 });
 
 test('k step finish commits the evidence the step wrote and nothing else; a review then cites it at head; no evidence, no commit', async () => {
