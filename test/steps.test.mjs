@@ -409,3 +409,43 @@ test('k step start stops a review whose two latest counting reviews repeat a not
   assert.match(next.stderr, /S-5 is stopped for the owner: AC-1, AC-3 not met in review-2 and review-3; read /);
   assert.match(progress(w), /S-5 escalated: stopped for the owner, AC-1, AC-3 not met in review-2 and review-3\n$/);
 });
+
+test('an owner step is finished with k step finish alone, as k run\'s notice says, once its needs are done; never before (gulnya/owner-step-finish)', async () => {
+  const plan = `${PLAN}
+### S-3 The owner's yes to push [owner]
+needs: S-1
+outputs: steps/S-3/answer.md
+`;
+  const w = await approvedWorkspace(plan);
+  put(w, 'steps/S-3/answer.md', 'yes');
+  const early = k(w.home, ['step', 'finish', w.id, 'S-3']);
+  assert.notEqual(early.status, 0, 'an owner step whose needs are not done finished');
+  assert.match(early.stderr, /S-3 is pending: S-1 is not done/);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
+  for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
+  assert.equal(k(w.home, ['step', 'finish', w.id, 'S-1']).status, 0);
+  const done = k(w.home, ['step', 'finish', w.id, 'S-3']);
+  assert.equal(done.status, 0, done.stderr);
+  assert.equal(statesOf(w)['S-3'], 'done');
+  assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status === 0, false, 'an agent step still needs k step start');
+  const again = k(w.home, ['step', 'finish', w.id, 'S-3']);
+  assert.notEqual(again.status, 0, 'a done owner step finished again');
+  assert.match(again.stderr, /S-3 is done\n/);
+});
+
+test('an owner step finished from ready goes through the task\'s gate, as k step start does: a held task refuses it (gulnya/owner-step-finish)', async () => {
+  const plan = `${PLAN}
+### S-3 The owner's yes to push [owner]
+outputs: steps/S-3/answer.md
+`;
+  const w = await approvedWorkspace(plan);
+  put(w, 'steps/S-3/answer.md', 'yes');
+  assert.equal(statesOf(w)['S-3'], 'ready');
+  hold({ ws: w.ws, id: w.id, why: 'waiting for the provider' });
+  assert.notEqual(k(w.home, ['step', 'start', w.id, 'S-3']).status, 0, 'k step start ran a step of a held task');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-3']);
+  assert.notEqual(r.status, 0, 'k step finish moved a held task\'s owner step');
+  assert.match(r.stderr, /cannot finish a step:\n.*is on hold/);
+  assert.notEqual(statesOf(w)['S-3'], 'done');
+  assert.doesNotMatch(existsSync(join(w.p.dir, 'progress.md')) ? progress(w) : '', /S-3 finished/);
+});
