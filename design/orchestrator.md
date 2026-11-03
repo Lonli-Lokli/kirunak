@@ -259,7 +259,7 @@ claude -p
   should run as the owner's interactive sessions do; a workspace whose sessions use another mode sets it). A
   behaviour to check in slice 2 before trusting it: a step that hits a prompt no one can answer must fail within the
   timeout, not hang. The orchestrator's timeout (budget minutes) kills the process tree as the default guard does
-  (TERM, then KILL, `plugins.md` §2).
+  (TERM, then KILL, `plugins.md` §2), a background job its claude started in a group of its own included.
 - On resume, pass the same `--add-dir`, `--settings`, `--plugin-dir` flags (sessions.md: they are not remembered).
 - **The limits reading** (`limits()`, gulnya/quad-damage AC-9, AC-10, outside the seam): `claude -p "reply with the
   word ok" --model haiku --max-turns 1 --output-format stream-json --verbose --tools ''` (`--tools` takes a list, so
