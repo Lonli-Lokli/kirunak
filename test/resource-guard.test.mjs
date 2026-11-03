@@ -5,7 +5,7 @@ import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import resourceGuardLocal, { alive, isStill, OWN_START, stillRuns } from '../plugins/resource-guard-local.mjs';
+import resourceGuardLocal, { alive, isStill, killTree, OWN_START, stillRuns } from '../plugins/resource-guard-local.mjs';
 import { fakePs } from './helpers.mjs';
 
 function guard(opts = {}) {
@@ -78,6 +78,42 @@ test('past maxMinutes the job and its children are killed, exit code 124', async
   assert.equal(alive(Number(readFileSync(pidFile, 'utf8'))), false, 'the background child is gone too');
   assert.equal(logOf(home)[0].exitCode, 124);
   assert.equal(existsSync(join(home, 'guard', 'lock')), false);
+});
+
+// A node process that starts a grandchild in a process group of its own (as Claude Code starts a background Bash
+// job), writes its pid to pidFile and stays alive, as the step's claude does while its job runs. The grandchild
+// ignores TERM when stubborn, so only a KILL ends it.
+const DETACHES = `const [f, stubborn] = process.argv.slice(1);
+const c = require('child_process').spawn('/bin/sh', ['-c', (stubborn ? 'trap "" TERM; ' : '') + 'sleep 30'], { detached: true, stdio: 'ignore' });
+require('fs').writeFileSync(f, String(c.pid));
+setTimeout(() => {}, 30000);`;
+
+test('past maxMinutes a grandchild in a process group of its own is killed too', async () => {
+  const { home, g } = guard({ killAfterMs: 500 });
+  const pidFile = join(home, 'grandchild.pid');
+  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 0.01, cwd: home, command: [process.execPath, '-e', DETACHES, pidFile] });
+  assert.equal(r.exitCode, 124);
+  const grandchild = Number(readFileSync(pidFile, 'utf8'));
+  await until(() => !groupAlive(grandchild), 3000).catch(() => {});
+  assert.equal(groupAlive(grandchild), false, 'the grandchild\'s group is gone');
+});
+
+test('killTree ends every descendant whatever its group, KILLing what ignores TERM, and leaves the rest alone', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-kill-'));
+  const pidFile = join(dir, 'grandchild.pid');
+  const step = spawn(process.execPath, ['-e', DETACHES, pidFile, 'stubborn'], { detached: true, stdio: 'ignore' });
+  const bystander = spawn('/bin/sh', ['-c', 'sleep 30'], { detached: true, stdio: 'ignore' });
+  await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8'));
+  const grandchild = Number(readFileSync(pidFile, 'utf8'));
+  await sleep(100);
+  const t0 = Date.now();
+  await killTree(step.pid, 300);
+  assert.ok(Date.now() - t0 < 3000, 'KILL after the grace, not after the sleep');
+  await until(() => !groupAlive(step.pid) && !groupAlive(grandchild), 2000).catch(() => {});
+  assert.equal(groupAlive(step.pid), false, 'the step\'s group is gone');
+  assert.equal(groupAlive(grandchild), false, 'the grandchild, in a group of its own and ignoring TERM, is gone');
+  assert.equal(alive(bystander.pid), true, 'a process that is no descendant runs on');
+  process.kill(-bystander.pid, 'SIGKILL');
 });
 
 test('a dead owner\'s lock is taken over; a live owner\'s is waited for', async () => {

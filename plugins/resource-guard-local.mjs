@@ -87,18 +87,71 @@ export const OWN_START = new Date(Date.now() - process.uptime() * 1000).toISOStr
 // pid whose start ps cannot tell now is believed to run, so nothing is taken over or failed on a guess.
 export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso) !== false;
 
-// TERM to the process group, then KILL after graceMs if anything of it is left.
+// Every process now, from one `ps`: pid, ppid, pgid and its start (now less its elapsed time, in ms). Null when ps
+// cannot answer.
+function processes() {
+  const ps = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid=,etime='], { encoding: 'utf8' });
+  if (ps.status !== 0) return null;
+  const now = Date.now();
+  const all = [];
+  for (const line of ps.stdout.split('\n')) {
+    const [pid, ppid, pgid, etime] = line.trim().split(/\s+/);
+    const s = etime ? elapsed(etime) : null;
+    if (s !== null) all.push({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), start: now - s * 1000 });
+  }
+  return all;
+}
+
+// The processes of the group pid leads and every descendant of theirs, whatever its group: a child may start one
+// in a group of its own (Claude Code does, for a background Bash job), which a kill of -pid misses and which, once
+// its parent dies, is reparented and no descendant any more. So they are found before the first signal.
+function treeOf(all, roots) {
+  const kids = new Map();
+  for (const p of all) kids.set(p.ppid, [...(kids.get(p.ppid) || []), p]);
+  const found = new Map(all.filter((p) => roots.has(p.pgid) || roots.has(p.pid)).map((p) => [p.pid, p]));
+  for (const p of found.values()) for (const k of kids.get(p.pid) || []) if (!found.has(k.pid)) found.set(k.pid, k);
+  return found;
+}
+
+// TERM to the process group and to every descendant found (each pid, and each group one of them leads), then KILL
+// after graceMs to what is left, again looking for descendants started meanwhile. A pid whose start is not the one
+// found is another process by now (pids are reused) and is not signalled; this process's own group never is.
 export async function killTree(pid, graceMs = 10000) {
   if (!isGroup(pid)) return;
-  try {
-    process.kill(-pid, 'SIGTERM');
-  } catch {}
-  const until = Date.now() + graceMs;
-  while (groupAlive(pid) && Date.now() < until) await sleep(50);
-  if (groupAlive(pid)) {
+  const own = new Set([process.pid, process.ppid]);
+  const ownGroup = processes()?.find((p) => p.pid === process.pid)?.pgid;
+  let tree = treeOf(processes() || [], new Set([pid]));
+  const send = (signal) => {
     try {
-      process.kill(-pid, 'SIGKILL');
+      process.kill(-pid, signal);
     } catch {}
+    for (const p of tree.values()) {
+      if (own.has(p.pid)) continue;
+      if (p.pgid === p.pid && p.pid !== ownGroup && isGroup(p.pid)) {
+        try {
+          process.kill(-p.pid, signal);
+        } catch {}
+      }
+      try {
+        process.kill(p.pid, signal);
+      } catch {}
+    }
+  };
+  // The tree as it is now: what still runs with the start it was found with, and its descendants since.
+  const still = () => {
+    const all = processes();
+    if (!all) return tree;
+    const now = new Map(all.map((p) => [p.pid, p]));
+    const kept = new Set([pid, ...[...tree.values()].filter((p) => now.has(p.pid) && Math.abs(now.get(p.pid).start - p.start) <= 2000).map((p) => p.pid)]);
+    return treeOf(all, kept);
+  };
+  send('SIGTERM');
+  const until = Date.now() + graceMs;
+  const left = () => groupAlive(pid) || [...tree.values()].some((p) => !own.has(p.pid) && alive(p.pid));
+  while (left() && Date.now() < until) await sleep(50);
+  if (left()) {
+    tree = still();
+    send('SIGKILL');
   }
 }
 

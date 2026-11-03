@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
-import { run } from '../lib/run.mjs';
+import { run, timed } from '../lib/run.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { snapshot } from '../lib/board.mjs';
 import { card } from '../lib/board-md.mjs';
@@ -1347,4 +1347,22 @@ test('k run stops before a review whose two latest counting reviews repeat a not
   assert.equal(r3.states['S-4'], 'done');
   assert.equal(r3.states['S-5'], 'escalated');
   assert.match(r3.stopped, /^S-5 AC-2 not met in review-2 and review-3; the owner decides: read steps\/S-5\/repeat\.md\n  review-2: \| AC-2 \| not met \| AC-2 still fails in review-2\.md: the cache keeps one day \|\n  review-3: \| AC-2 \| not met \| AC-2 still fails in review-3\.md: the cache keeps one day \|$/);
+});
+
+test('a step ended on its budget leaves no background job running, though the job is in a process group of its own', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-timed-'));
+  const pidFile = join(dir, 'job.pid');
+  // The step's claude, leading its own group as the runner starts it, keeps a background job in another group.
+  const js = `const c = require('child_process').spawn('/bin/sh', ['-c', 'sleep 60'], { detached: true, stdio: 'ignore' });
+require('fs').writeFileSync(process.argv[1], String(c.pid));
+setTimeout(() => {}, 60000);`;
+  const child = spawn(process.execPath, ['-e', js, pidFile], { detached: true, stdio: 'ignore' });
+  const done = new Promise((r) => child.on('exit', (code) => r({ exitCode: code })));
+  const o = await timed({ pid: child.pid, done }, 0.01);
+  assert.equal(o.exitCode, 124);
+  assert.equal(o.timedOut, true);
+  const job = Number(readFileSync(pidFile, 'utf8'));
+  const end = Date.now() + 2000;
+  while (groupAlive(job) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(groupAlive(job), false, 'the background job is gone with its step');
 });
