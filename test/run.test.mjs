@@ -559,6 +559,59 @@ const jobGuard = (jobs) => ({ run: (job) => (jobs.push(job.what), { exitCode: 0,
 const HEAVY = (what) => JSON.stringify({ heavy: { what, command: ['npm', 'test'], maxMinutes: 10 }, then: 'resume' });
 const stepFile = (w, f) => join(w.p.dir, 'steps', 'S-1', f);
 
+// A step that ran out of budget with work left (gulnya/budget-stop-marked-done): its needs.json says what is left.
+const UNFINISHED = JSON.stringify({ unfinished: 'three of six tests fail; detekt' });
+
+test('a step that stops unfinished fails, so nothing that needs it starts, and resumes once in its own conversation with half more budget, no climb (gulnya/budget-stop-marked-done)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const seen = [];
+  const calls = fakeRunner(w, (step, n, w2) => {
+    if (n === 1) return (put(w2, 'steps/S-1/needs.json', UNFINISHED), 'nothing');
+    if (n === 2) seen.push(steps.load(w2.ws, w2.id).states.get('S-2').state);
+    return 'write';
+  });
+  const r = await watch(w);
+  assert.deepEqual(r.states, BOTH);
+  assert.match(calls[0].prompt, /needs\.json` as\s+`\{ "unfinished": "<what is left>" \}`/, 'the brief says how to stop unfinished');
+  assert.equal(calls[1].resume, calls[0].sessionId, 'the resume is the same conversation');
+  assert.deepEqual([calls[1].maxTurns, calls[1].maxBudgetUsd], [147, 4.4], 'half more calls and money: 150 and 4.5 less what it used');
+  assert.match(calls[1].prompt, /^your budget is raised by half for this one resume: finish what is left \(three of six tests fail; detekt\)/);
+  assert.deepEqual(seen, ['pending'], 'S-2 waits while S-1 resumes');
+  assert.match(progress(w), /S-1 failed: unfinished: three of six tests fail; detekt\n.*S-1 resumed \(session [0-9a-f-]{36}\): unfinished, half more budget\n.*S-1 finished\n.*S-2 started/);
+  assert.match(readFileSync(stepFile(w, 'failure-1.md'), 'utf8'), /unfinished: three of six tests fail; detekt/);
+  assert.ok(existsSync(stepFile(w, 'needs-1.json')) && !existsSync(stepFile(w, 'needs.json')));
+  assert.ok(!/escalated/.test(progress(w)), 'running out of budget climbs nothing');
+});
+
+test('a step that stops unfinished again after its one resume stops for the owner, marked [escalate], with no climb (gulnya/budget-stop-marked-done)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, (step, n, w2) => (put(w2, 'steps/S-1/needs.json', UNFINISHED), 'nothing'));
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.equal(calls.length, 2, 'one resume, no more');
+  assert.equal(r.stopped, 'S-1 stopped unfinished after its resume with half more budget; the owner decides: read steps/S-1/failure-2.md');
+  assert.deepEqual([r.states['S-1'], r.states['S-2']], ['escalated', 'pending']);
+  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
+  assert.ok(!/escalated: to /.test(progress(w)), 'no climb');
+  assert.equal(pushes(lines).length, 1, 'the owner gets a push');
+});
+
+test('a step that ends cleanly after its last heavy job failed is not done: it fails naming the job (gulnya/budget-stop-marked-done)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  w.ws.seams.resourceGuard = { ...jobGuard([]), run: () => ({ exitCode: 1, log: 'red\n' }) };
+  fakeRunner(w, (step, n, w2) => (n === 1 ? (put(w2, 'steps/S-1/needs.json', HEAVY('unit tests')), 'nothing') : 'write'));
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.equal(r.states['S-2'], 'pending');
+  assert.match(progress(w), /S-1 heavy job ended: exit 1 .*\n.*S-1 resumed .*\n.*S-1 failed: its last check failed \(steps\/S-1\/heavy-1\.json\)\n$/);
+  // A passing job after the failed one is a check that holds: the step is done.
+  const g = await approvedWorkspace(PLAN);
+  let job = 0;
+  g.ws.seams.resourceGuard = { ...jobGuard([]), run: () => ({ exitCode: ++job === 1 ? 1 : 0, log: 'x\n' }) };
+  fakeRunner(g, (step, n, w2) => (n <= 2 ? (put(w2, 'steps/S-1/needs.json', HEAVY('unit tests')), 'nothing') : 'write'));
+  const rg = await run({ ws: g.ws, id: g.id });
+  assert.equal(rg.states['S-1'], 'done');
+});
+
 test('a failed run\'s needs.json is moved aside and named in its failure: the retry is not failed by it and runs no job for it', async () => {
   // A malformed request fails the run; the retry does the step right.
   const a = await approvedWorkspace(PLAN);
