@@ -1400,3 +1400,44 @@ test('a verify command that cannot start is the step\'s failure, with its error 
   assert.deepEqual([gone.ok, gone.why], [false, 'its verify command could not start: spawn /bin/sh ENOENT: true']);
   assert.match(gone.detail, /It could not start: spawn \/bin\/sh ENOENT\.\n\nIt printed nothing\./);
 });
+
+test('an agent step starts with only Read, Edit, Write, Bash, Glob, Grep and Skill, kept in its run record (gulnya/k-run-step-models AC-4)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w);
+  assert.deepEqual((await watch(w)).states, BOTH);
+  for (const c of calls) {
+    assert.deepEqual(c.tools, ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'Skill']);
+    assert.deepEqual(c.disallowedTools, ['Agent'], 'Agent stays refused');
+  }
+  const rec = JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'run-1.json'), 'utf8'));
+  assert.deepEqual(rec.kirunak.tools, steps.NARROW_TOOLS);
+});
+
+test('a step with device: or tools: all starts with every tool and the MCP servers (gulnya/k-run-step-models AC-4)', async () => {
+  const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ndevice: ios.low').replace('outputs: steps/S-2/report.md', '$&\ntools: all'));
+  const calls = fakeRunner(w);
+  assert.deepEqual((await watch(w)).states, BOTH);
+  assert.deepEqual(calls.map((c) => [c.env.KIRUNAK_STEP, c.tools]), [['S-1', null], ['S-2', null]]);
+  assert.equal(JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-2', 'run-1.json'), 'utf8')).kirunak.tools, null);
+});
+
+test('a resumed step keeps the tool list it started with, whatever its plan line says now (gulnya/k-run-step-models E-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, (step, n) => {
+    if (n > 1) return 'write';
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' }));
+    return 'nothing';
+  });
+  assert.equal((await watch(w)).stopped, 'S-1 waits for the owner: Three days or a week?');
+  writeFileSync(join(w.p.dir, 'plan.md'), PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ntools: all'));
+  assert.deepEqual((await watch(w)).states, BOTH);
+  assert.equal(calls[1].resume, calls[0].sessionId);
+  assert.deepEqual([calls[0].tools, calls[1].tools], [steps.NARROW_TOOLS, steps.NARROW_TOOLS], 'the resume keeps the narrow list');
+  // A conversation whose record is from before the list was kept had every tool, and keeps them.
+  const recPath = join(w.p.dir, 'steps', 'S-1', 'run-1.json');
+  const rec = JSON.parse(readFileSync(recPath, 'utf8'));
+  delete rec.kirunak.tools;
+  writeFileSync(recPath, JSON.stringify(rec));
+  assert.equal(steps.toolsFor(w.p, { id: 'S-1' }, calls[0].sessionId), null);
+  assert.deepEqual(steps.toolsFor(w.p, { id: 'S-1' }, 'a-new-session'), steps.NARROW_TOOLS);
+});

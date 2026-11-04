@@ -220,6 +220,8 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   // The review may not read the task's progress, notes or plan, another step's folder, or the transcripts; its own
   // folder and in/ stay readable. The implementing step runs without deny rules.
   assert.equal(impl.deny, undefined);
+  // The implementing step and the review start with the narrow tool list (gulnya/k-run-step-models AC-4).
+  for (const c of calls) assert.deepEqual(c.tools, ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'Skill']);
   const S1 = join(w.p.dir, 'steps', 'S-1');
   const deny = [
     ...['progress.md', 'notes.md', 'plan.md'].map((f) => `Read(/${join(w.p.dir, f)})`),

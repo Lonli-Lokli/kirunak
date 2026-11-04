@@ -21,9 +21,22 @@ test('the command of orchestrator.md §3: no --model or --effort when none is na
   ]);
 });
 
-test('a step never gets --tools, even one that names tools: every deferred tool stays loadable (gulnya/headless-tools AC-2)', () => {
-  assert.equal(claudeArgs({ ...BASE, tools: ['Bash', 'Read', 'Write'] }).includes('--tools'), false);
-  assert.equal(claudeArgs(BASE).includes('--tools'), false);
+test('a step that names no tools gets no --tools and keeps its MCP servers: a bug session\'s deferred tools stay loadable (gulnya/headless-tools AC-1)', () => {
+  for (const tools of [undefined, null, []]) {
+    const args = claudeArgs({ ...BASE, tools });
+    assert.equal(args.includes('--tools'), false);
+    assert.equal(args.includes('--strict-mcp-config'), false);
+  }
+});
+
+test('a step that names its tools gets them as one --tools list and no MCP server: --strict-mcp-config with no --mcp-config (gulnya/k-run-step-models AC-4)', () => {
+  const args = claudeArgs({ ...BASE, tools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'Skill'] });
+  assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 3), ['--tools', 'Read,Edit,Write,Bash,Glob,Grep,Skill', '--strict-mcp-config']);
+  assert.equal(args.includes('--mcp-config'), false);
+  assert.deepEqual(args.slice(args.indexOf('--disallowedTools'), args.indexOf('--disallowedTools') + 2), ['--disallowedTools', 'Agent'], 'Agent stays refused');
+  const resumed = claudeArgs({ ...BASE, tools: ['Read', 'Bash'], resume: 'abc-session', prompt: 'continue' });
+  assert.deepEqual([resumed[1], resumed.at(-1)], ['continue', 'abc-session'], 'the list goes before --resume, the prompt stays after -p');
+  assert.ok(resumed.includes('Read,Bash'));
 });
 
 test('deny rules go as --settings with permissions.deny and auto memory off, and only when there are some', () => {

@@ -232,3 +232,10 @@ test('a task first approved before the rule gets the same finding as a warning: 
   assert.match(since.stderr, /line 6: S-1 is an agent step on Sonnet with no verify line/);
   assert.deepEqual(gate(load(w.ws, ID)).filter((x) => x.startsWith('plan.md')), [`plan.md line 6: ${NO_VERIFY}`]);
 });
+
+test('a step\'s tools: is all or nothing; any other list is a problem (gulnya/k-run-step-models AC-4)', () => {
+  const plan = (tools) => `### S-1 Shoot the phone [agent]\noutputs: steps/S-1/report.md\n${tools === undefined ? '' : `tools: ${tools}\n`}`;
+  assert.deepEqual([parsePlan(plan()).steps[0].tools, parsePlan(plan()).problems], [null, []]);
+  assert.deepEqual([parsePlan(plan('all')).steps[0].tools, parsePlan(plan('all')).problems], ['all', []]);
+  assert.deepEqual(parsePlan(plan('Read, Bash')).problems.map((x) => x.problem), ['S-1: tools is `all` or nothing, not Read, Bash']);
+});
