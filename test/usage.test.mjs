@@ -158,6 +158,16 @@ test('k usage --to: the London week from the workspace, every file written, the 
   assert.match(readFileSync(join(out, 'report.txt'), 'utf8'), /\nsub claude-sonnet-5\t[\d.]+%\t1 calls\n/);
 });
 
+test('k usage names the workspace\'s heavy-job report for the week before the reviews\' folder; a bad one is refused at load', async (t) => {
+  const w = await withUsage(t, { weekStart: LONDON, heavyReport: 'node ~/tools/jobs.mjs --from <from> --to <to>' });
+  const fx = transcripts(w.root);
+  const r = k(w.home, ['usage', '--to', '2026-10-25T15:00:00Z'], { CLAUDE_CONFIG_DIR: fx.config });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\n\nheavy jobs: node ~\/tools\/jobs\.mjs --from 2026-10-18T14:00:00\.000Z --to 2026-10-25T15:00:00\.000Z\nreviews: none named .*\n$/);
+  const bad = await withUsage(t, { heavyReport: 42 });
+  await assert.rejects(loadWorkspace(join(bad.home, 'workspace')), /usage\.heavyReport must be a command/);
+});
+
 test('k usage over a limits log that flaps between sessions counts each point of the week once (gulnya/limits-log-flaps AC-3, AC-4)', async (t) => {
   const w = await withUsage(t, { weekStart: LONDON, limitsLog: './rate-limits.log' });
   const fx = transcripts(w.root);
