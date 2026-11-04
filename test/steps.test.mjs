@@ -175,6 +175,50 @@ test('k step fail refuses a stop\'s words, so a failure given by hand always cou
   assert.equal(steps.historyOf(progress(w), 'S-1').failures, 1);
 });
 
+test('an owner\'s stop, k step stop, counts no failure and writes stop-<k>.md, which the next attempt\'s brief reads first; own failures still climb (gulnya/escalation-counts-non-work-failures)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const briefText = () => (assert.equal(k(w.home, ['step', 'brief', w.id, 'S-1']).status, 0), readFileSync(join(w.p.dir, 'steps', 'S-1', 'brief.md'), 'utf8'));
+  assert.equal(k(w.home, ['step', 'stop', w.id, 'S-1', '--why', 'not now']).status, 1, 'a step not running is not stopped');
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
+  const r = k(w.home, ['step', 'stop', w.id, 'S-1', '--why', "S-46 finishes S-41's result bar first"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /S-1: stopped by the owner, no failure counted, kirunak\/tasks\/offline-forecast\/steps\/S-1\/stop-1\.md\n$/);
+  assert.match(progress(w), /S-1 failed: stopped by the owner: S-46 finishes S-41's result bar first\n$/);
+  const h = steps.historyOf(progress(w), 'S-1');
+  assert.deepEqual([h.last, h.stopped, h.failures, h.total], ['failed', true, 0, 0]);
+  assert.deepEqual([statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').retry], ['ready', null]);
+  assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'stop-1.md'), 'utf8'), /S-1 stopped by the owner\n\n.*: S-46 finishes S-41's result bar first/);
+  assert.ok(!existsSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md')), 'a stop writes no failure report');
+  assert.ok(briefText().includes('- kirunak/tasks/offline-forecast/steps/S-1/stop-1.md (the owner stopped the last attempt: read why first)'));
+  // k step fail refuses the stop's words: only k step stop writes them.
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1']).status, 0);
+  const f = k(w.home, ['step', 'fail', w.id, 'S-1', '--why', '  stopped by the owner:  later']);
+  assert.equal(f.status, 1);
+  assert.match(f.stderr, /k step stop/);
+  // An own failure counts as before, and the brief after it reads its report, not the old stop.
+  assert.equal(steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'the cache test does not build' }).failures, 1);
+  assert.doesNotMatch(briefText(), /stop-1\.md/);
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1' });
+  assert.equal(steps.stop({ ws: w.ws, id: w.id, step: 'S-1', why: 'the Mac restarts' }).failures, 1);
+  assert.deepEqual(readdirSync(join(w.p.dir, 'steps', 'S-1')).filter((x) => /^(stop|failure)-/.test(x)).sort(), ['failure-1.md', 'stop-1.md', 'stop-2.md']);
+  assert.deepEqual([statesOf(w)['S-1'], steps.load(w.ws, w.id).states.get('S-1').retry.reports], ['ready', ['steps/S-1/failure-1.md']]);
+  assert.ok(briefText().includes('steps/S-1/stop-2.md (the owner stopped the last attempt'));
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1' });
+  assert.equal(steps.fail({ ws: w.ws, id: w.id, step: 'S-1', why: 'still' }).failures, 2);
+  assert.equal(statesOf(w)['S-1'], 'failed', 'two own failures climb, the stops between them aside');
+});
+
+test('a progress.md written before k step stop reads the same: a stop given with k step fail still counts', () => {
+  const old = [
+    '2026-10-26 09:12 S-44 started (opus, session a1)',
+    "2026-10-26 09:14 S-44 failed: stopped before running, by the owner's answer Q-39: S-46 finishes S-41's result bar first",
+    '2026-10-26 10:02 S-44 started (opus, session a2)',
+    '2026-10-26 10:36 S-44 failed: kirunak stopped the step: git commit failed',
+  ].join('\n');
+  const h = steps.historyOf(old, 'S-44');
+  assert.deepEqual([h.last, h.stopped, h.failures, h.total], ['failed', false, 2, 2]);
+});
+
 test('a step\'s needs.json takes the name it keeps as its run ends: k step fail moves it and its report says so; k step finish moves it too', async () => {
   const w = await approvedWorkspace(PLAN);
   const requests = () => readdirSync(join(w.p.dir, 'steps', 'S-1')).filter((f) => f.startsWith('needs')).sort();
