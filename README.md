@@ -183,8 +183,11 @@ You need Node 22 or later, git and Claude Code.
    On the phone each choice has its line under it. In the Desktop app the same dialogs are drawn with a head (the
    title, a coloured state chip with its icon and word, the repo and dates), and long parts fold behind Show all;
    Quad Damage's progress lines are drawn there as rows of the same chips (`design/boards.md` §4, "The look").
-   After a verb on the task this session works on, or ran the intake of, the session takes a turn of its own: it
-   says what you did, or what failed with kirunak's reason, and goes on; after `/k-start` it starts the work, and
+   The answer of an approve, accept or resume k took starts with what was done ("Approved the amendment A-2 of
+   <id>."), ahead of k's state line. After a verb on the task this session works on, or ran the intake of, the
+   session takes a turn of its own: it says what you did, or what failed with kirunak's reason, and goes on; a turn
+   that cannot start says why under the answer, or once the answer is out in a toast, and in a `no turn` row of
+   `dialogs.jsonl` either way; after `/k-start` it starts the work, and
    after Review & merge it watches the review and tells you how it ended; after Quad Damage it writes the run's
    progress lines as they come, then its summary, and pushes the summary to your phone.
 

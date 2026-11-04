@@ -7,8 +7,9 @@ import { quadDamageStarted, quadDamageStopping, reviewStarted } from './bugs'
 import { isOwners, reason, refusal, refused } from './commands'
 import { queueNow, unmarked } from './lists'
 import type { Item } from './lists'
+import { appendDialogLog } from './log'
 import { kOf, refresh } from './reads'
-import { told } from './turns'
+import { doneLine, told } from './turns'
 import { capBlocking } from './waiting'
 
 // The owner-only rule (kirunak-phone AC-4, D-1; approval.md §5), held by this module's shape:
@@ -224,9 +225,11 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
   if (verb === undefined || verb.turn !== me || verb.tapped !== asked) throw new Error(`/${name}: a verb this command did not choose`)
   const r = await runVerb($, name, k, verb.argv)
   verb.after?.(r.ok)
-  // The session's turn after it, when it gets one (turns.ts); it runs no verb.
-  await told($, { name, k, argv: verb.argv, tapped: verb.tapped, ok: r.ok, said: r.said })
-  return r.text
+  // The session's turn after it, when it gets one (turns.ts); it runs no verb. The answer names what k took ahead of
+  // its state line, and a turn due that cannot start says why under it (gulnya/approval-turn-missing AC-2, AC-3).
+  const why = await told($, { name, k, argv: verb.argv, tapped: verb.tapped, ok: r.ok, said: r.said })
+  const done = r.ok ? doneLine(verb.argv) : null
+  return [...(done === null ? [] : [done]), r.text, ...(why === null ? [] : [`No turn followed in this session: ${why}`])].join('\n')
 }
 
 function choose(turn: object, tapped: boolean, argv: readonly string[], after?: (ok: boolean) => void): Outcome {
@@ -365,10 +368,12 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
 }
 
 // The dialog log (kirunak-docs-promo S-1 §3): one line a dialog shown, appended to <state>/dialogs.jsonl, where the
-// state folder is $KIRUNAK_HOME else ~/.kirunak, as k finds it. It records the owner's gestures and nothing else: the
+// state folder is $KIRUNAK_HOME else ~/.kirunak, as k finds it (log.ts). It records the owner's gestures: the
 // command, what the dialog drew, the tap (or `typed`, words that were none of the choices) with its time, and `end`,
 // how the dialog closed when it closed there (skipped, dismissed, cancelled, picked, typed, or the verb its tap
-// chose). It never changes an answer: a log that cannot be written is left unwritten.
+// chose); besides them, only a turn due after a verb that did not start, in the same shape with `end` "no turn"
+// (turns.ts, gulnya/approval-turn-missing AC-3). It never changes an answer: a log that cannot be written is left
+// unwritten.
 type Logged = { t: number | null; command: string; header: string; drawn: Drawn }
 async function askedAt($: EngineInterface): Promise<number | null> {
   try {
@@ -378,20 +383,10 @@ async function askedAt($: EngineInterface): Promise<number | null> {
   }
 }
 async function logDialog($: EngineInterface, shown: Logged, tap: string | null, end: string | null): Promise<void> {
-  try {
-    const [state, home, session, tAnswer] = await Promise.all([$.env.get('KIRUNAK_HOME'), $.env.get('HOME'), $.session.id(), $.clock.now()])
-    const dir = state || (home ? `${home}/.kirunak` : null)
-    if (!dir) return
-    const choices = shown.drawn.choices.map(c => c.label)
-    const isChoice = tap !== null && choices.includes(tap)
-    const line = JSON.stringify({
-      t: shown.t, session, command: shown.command, header: shown.header, text: shown.drawn.text, question: shown.drawn.ask, choices,
-      tap: isChoice ? tap : null, ...(tap !== null && !isChoice && { typed: tap }), tAnswer, end,
-    })
-    const path = `${dir}/dialogs.jsonl`
-    const before = await $.fs.read(path).then(t => String(t), () => '')
-    await $.fs.write(path, `${before}${before && !before.endsWith('\n') ? '\n' : ''}${line}\n`)
-  } catch {
-    // An unwritable state folder: the dialog goes on unrecorded.
-  }
+  const choices = shown.drawn.choices.map(c => c.label)
+  const isChoice = tap !== null && choices.includes(tap)
+  await appendDialogLog($, (session, tAnswer) => ({
+    t: shown.t, session, command: shown.command, header: shown.header, text: shown.drawn.text, question: shown.drawn.ask, choices,
+    tap: isChoice ? tap : null, ...(tap !== null && !isChoice && { typed: tap }), tAnswer, end,
+  }))
 }
