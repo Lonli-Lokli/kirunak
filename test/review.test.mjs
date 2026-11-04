@@ -109,6 +109,15 @@ test('a file:line past the file, a test name not in the named file, a path not a
   assert.deepEqual(problems(w.check(review(w.head, rows))).slice(0, 2), ["AC-1: test/forecast.test.ts:4 is past the file's length (3 lines at head)", 'E-1: evidence/S-4-age.png does not exist at head']);
 });
 
+// A cited file with a trailing slash is not a file at head, as before the tree lookup (review-1 of
+// gulnya/k-waiting-cat-file-per-word): a problem, never a throw.
+test('a cited file with a trailing slash does not exist at head, and the check does not throw', async () => {
+  const w = await reviewed();
+  const rows = [...ROWS];
+  rows[3] = '| E-1 | met | measure evidence/S-1-cache-sizes.tsv/ row 2 |';
+  assert.deepEqual(problems(w.check(review(w.head, rows))), ['E-1: evidence/S-1-cache-sizes.tsv/ does not exist at head']);
+});
+
 test('the verdict line: from the rows, the last line, and only there', async () => {
   const w = await reviewed();
   const allMet = ROWS.map((r) => r.replace('| needs device | a restart', '| met | file src/cache.ts:3: a restart'));
