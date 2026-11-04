@@ -67,6 +67,7 @@ Usage     k usage [--from <ISO>] [--to <ISO>] [--out <dir>]: the weekly usage re
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"]: then removes the merged worktrees, printing each removed and kept
           k hold <id> --why "..." | k resume <id>
+          k step stop <id> S-n --why "...": ends a running step the owner stops; counts no failure, the next brief reads why
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
           k queue remove <id>: parks the task; k run starts none of its steps until k queue add puts it back
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
@@ -432,10 +433,10 @@ const VERBS = {
   },
 
   async step({ ws, pos, flags }) {
-    const sub = need(pos[0], 'step verb: brief|start|finish|fail');
+    const sub = need(pos[0], 'step verb: brief|start|finish|fail|stop');
     const id = need(pos[1], 'task id');
     const step = need(pos[2], 'the step, S-n');
-    if (!['brief', 'start', 'finish', 'fail'].includes(sub)) throw usage(`unknown step verb ${sub}`);
+    if (!['brief', 'start', 'finish', 'fail', 'stop'].includes(sub)) throw usage(`unknown step verb ${sub}`);
     if (flags['dry-run']) return { text: `would ${sub} ${id} ${step}` };
     if (sub === 'brief') {
       const r = await steps.brief({ ws, id, step, session: session(flags) });
@@ -451,6 +452,13 @@ const VERBS = {
       return { text: `${id} ${step}: done` };
     }
     const why = need(flags.why, '--why "<why>"');
+    // The owner's stop (gulnya/escalation-counts-non-work-failures): no failure counted; the freeze hook refuses it
+    // from an agent's Bash tool.
+    if (sub === 'stop') {
+      const r = steps.stop({ ws, id, step, why });
+      return { ...r, text: `${id} ${step}: stopped by the owner, no failure counted, ${taskPaths(ws, id).rel(`steps/${step}/${r.report.split('/').at(-1)}`)}` };
+    }
+    if (steps.isOwnerStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is the owner's stop: only \`k step stop\`, the owner's, writes it; say what went wrong`);
     // A stop's words, and an unfinished run's, are k run's own: such a failure would not count, a way around the two
     // failures.
     if (steps.isStop(steps.reasonOf(why)) || steps.isUnfinished(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is k run's own reason for a stop; say what went wrong`);
