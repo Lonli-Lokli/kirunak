@@ -266,7 +266,13 @@ with `KIRUNAK_ACCEPTING`, removes the task from the queue. A task is already acc
 `done.json`; a `done.json` or `cost.md` on disk or staged that git does not hold, left by an accept refused before
 the fix of bug gulnya/accept-refused-by-slap, is written over and committed. When the commit is refused, `done.json`
 and `cost.md` are put back as they were, on disk and in the index, so the retry meets nothing of the refused try;
-`k hold` and `k resume` do the same with `hold.md` (`lib/git.mjs` `writeAndCommit`). It is what the `k-done` skill asks the owner to type
+`k hold` and `k resume` do the same with `hold.md` (`lib/git.mjs` `writeAndCommit`). It commits on the branch the main checkout has, and so do `k approve`, `k hold` and `k resume`;
+when that is not the repo's main line (`lib/worktrees.mjs` `mainLine`: origin's HEAD branch, else `main`, else
+`master`, when a local branch has that name), each of the four adds a line after its own saying so, `committed on
+settings, not master: master has it only once settings is merged into it`, or from a detached HEAD `committed on a
+detached HEAD, not master: master has it only once that commit is merged into it`, and commits all the same; `k
+accept --dry-run` adds it under its `would accept` line. On the main line, or in a repo with none, nothing is added
+(gulnya/kirunak-accept-default-branch AC-1 to AC-5, E-1). It is what the `k-done` skill asks the owner to type
 (`review.md` §4).
 
 In another repo (gulnya/kirunak-review-base AC-10), `k accept` judges the task's change against the head its latest
