@@ -276,6 +276,28 @@ task is started by hand, one task per session:
    the task that commit names, and the way out is a new review. Once the task is accepted, the git hook refuses a
    commit that names it unless it touches only kirunak's records: new work on it is a new task.
 
+### Cheaper steps: `verify:` and `tools: all`
+
+A plan puts a step on Sonnet when a check can prove its work: a finished change repeated in another repo, a scripted
+measurement, or a survey of code. Such a step names a light command in a `verify:` line:
+
+```markdown
+### S-4 The same fix in the web repo [agent, sonnet]
+verify: npm run lint && node --test test/cache.test.mjs
+```
+
+`k run` runs the command in the task's repo as the step ends. If it exits non-zero or cannot start, the step fails,
+and the failure report has the command's last lines. That failure counts like any other, so a step that fails twice
+on Sonnet goes up to Opus. `k plan check` refuses an agent step on Sonnet that has no `verify:` line. A task approved
+before 2026-11-05 gets a warning instead and keeps running. Keep the command light, such as a type check, a lint or a
+few tests that need no build. A check that needs a build or a device stays a `heavy` step after it.
+
+Agent and review steps start with only Read, Edit, Write, Bash, Glob, Grep and Skill, and no MCP servers, so each call
+carries fewer tool definitions. A step that needs more (the web, an MCP server, a deferred tool) says `tools: all`.
+A step with `device:` gets every tool without it. A resumed step keeps the tools it started with. The weekly usage
+review compares Sonnet's steps with Opus's: their failures, climbs and review findings. If one kind of step does
+worse on Sonnet, move it back to Opus. `design/orchestrator.md` §1 to §3.
+
 ### Escalation: a step that keeps failing goes one model up
 
 kirunak counts failures and hands a step up a **ladder** of models; a session's own opinion of its depth is not the

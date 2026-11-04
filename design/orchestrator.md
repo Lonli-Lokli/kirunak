@@ -19,6 +19,7 @@ inputs: task, src/forecast/cache.ts
 outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv
 budget: 100 calls, 40 minutes, 3 USD
 brief: steps/S-1/brief.md
+verify: npx tsc --noEmit && test -s evidence/S-1-cache-sizes.tsv
 
 ### S-2 Unit tests [heavy]
 needs: S-1
@@ -44,6 +45,30 @@ outputs: review.md
   That is the model of the step's own attempts. After two failures the step runs on the rungs of the workspace's
   `ladder` (§2), each on the model and effort the rung names, whatever the plan line says; the plan line is never
   rewritten for a climb. A review step climbs the same way, always in build mode.
+- **Which steps a plan puts on Sonnet** (gulnya/k-run-step-models D-1): a step a check can prove. Three kinds: a
+  finished change repeated in another repo (the first repo's commits are the pattern), a scripted measurement (a
+  script writes the numbers, the step runs it and files them), and a survey of code (where something is, what calls
+  what, written to a file). Design, a review, costly architecture and anything already got wrong stay on the
+  workspace's model or above. No new role: the plan line's model puts the step there, and the ladder (§2) takes it
+  to Opus when it fails twice. Judgement: Sonnet costs less per call, and a step whose result a command can check
+  loses nothing by starting there, since a wrong result fails the check and climbs.
+- **`verify: <command>`**: every `agent` step on Sonnet names one (the plan line's model, else the workspace's
+  `models.agent`, matched by family). `k plan check` refuses such a step without it, naming the step, and every step
+  start runs the same check (gulnya/k-run-step-models AC-2). A task first approved before 2026-11-05 (its approval
+  record's first `approved`, so a later amendment changes nothing) gets a warning instead: `k plan check` exits 0 and
+  prints `warning, line n: …` after "check passes", and `k run` starts the step (E-3). The command is light (D-2): a
+  type check, a lint, a script that reads the step's outputs, a few unit tests that need no build. A check that needs
+  a build, a device or a long test run stays the `heavy` step after it, as S-2 above. k run runs it as the step ends
+  (§2 `running`). A step on another model may name one too, and it runs the same way.
+- **`tools: all`** starts an `agent` or `review` step with every tool and the MCP servers. Without it such a step
+  gets only Read, Edit, Write, Bash, Glob, Grep and Skill and no MCP server (§3; gulnya/k-run-step-models AC-4); a
+  step with `device:` gets every tool by itself. `all` is the field's only value: any other is a plan problem.
+  Judgement: a list per step could leave out the one tool the step needs; one way out keeps the choice to "this step
+  needs the web, a device or an MCP server", which the planner knows.
+- **Quality is compared in the weekly usage review** (D-3): per step, its failures, its climbs and the review findings
+  that name it, Sonnet's steps against Opus's of the same kind. When a kind of step climbs or draws findings more
+  often on Sonnet, the owner moves that kind back to Opus by changing the rule above. Measuring each user's own
+  transcripts this way waits for `k usage` (gulnya/k-usage; gulnya/k-run-step-models D-4).
 - The text between the front matter and the first `### `, the plan's header, is the planner's rules for every step
   (build at the lock, touch only your own files); a step's `what:` line says what that step does and how. Each step's
   brief quotes both (§3), never a review's (gulnya/brief-what-and-header).
@@ -75,7 +100,7 @@ outputs: review.md
 pending  →  ready  →  running  →  done
                         │  ↘ waiting-heavy → (heavy job runs, no agent) → running (resumed)
                         │  ↘ waiting-owner
-                        └→ failed (exit ≠ 0, timeout, budget, missing outputs)
+                        └→ failed (exit ≠ 0, timeout, budget, missing outputs, verify failed)
 ```
 
 - `pending`: an input is missing or a `needs:` step is not done. `ready`: every input exists, every `needs:` is
@@ -83,7 +108,13 @@ pending  →  ready  →  running  →  done
   but what happened (`progress.md`, `steps/<step>/run-<k>.json`).
 - `running`: `k step start <id> S-n` appends to `progress.md`, writes `running/<pid>.json` (machine guard), and
   the runner starts. The process is the only thing alive. When it exits, the orchestrator checks `outputs:`; all
-  present and exit 0 → `done` (`k step finish`), else `failed` with the reason. A `k run` that takes a task's lock
+  present and exit 0 → `done` (`k step finish`), else `failed` with the reason. An `agent` step with a `verify:`
+  line (§1) runs it first, once its outputs (and a review's grammar) pass: `/bin/sh -c <command>` in the task's repo,
+  limited to the step's budget minutes; a design run does not. A non-zero exit, a signal, sh's 126 or 127 (a command
+  that cannot run or is not there) or a shell that cannot start fails the step (`its verify command exited 3:
+  <command>`, or `could not start …`), and the failure report gives the command, its folder, its exit or error and
+  its last 20 lines. The failure is the step's own, so the ladder counts it as any other and a Sonnet step climbs to
+  Opus after its second (gulnya/k-run-step-models AC-3, E-1). A `k run` that takes a task's lock
   and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that no longer
   runs (dead, or its pid now another process than the one that started at the record's `krunStart`; a heavy step's
   line records no start, so its `k run` counts as gone) kills that step's claude if it still runs (nobody will
@@ -220,6 +251,7 @@ claude -p
   --max-turns <calls>                        cli-reference.md ("No limit by default")
   --max-budget-usd <usd>                     cli-reference.md (print mode only)
   --disallowedTools Agent                    cli-reference.md: "A bare tool name removes the matching tools"; sub-agents.md
+  [--tools Read,Edit,Write,Bash,Glob,Grep,Skill --strict-mcp-config]   cli-reference.md; omitted for a step with every tool (below)
   --session-id <uuid>                        cli-reference.md ("must be a valid UUID"): the orchestrator mints it, so the record exists before the run
   --add-dir <other workspace repos the step reads>   cli-reference.md; passed again on resume (sessions.md)
   [--resume <session_id>]                    headless.md: `claude -p "..." --resume "$session_id"`
@@ -242,6 +274,18 @@ claude -p
   plan allows it with `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=<maxAgents − running>` and
   `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` ("Set 1 to turn nesting off", sub-agents.md), and the machine guard
   counts the step as 1 + that number.
+- **The narrow tool list** (gulnya/k-run-step-models AC-4, E-2): an `agent` or `review` step, its review runs
+  included, starts with `--tools Read,Edit,Write,Bash,Glob,Grep,Skill` (one comma-joined value, so the variadic flag
+  cannot take a later argument) and `--strict-mcp-config` with no `--mcp-config`, so no MCP server loads. A step with
+  `device:` or `tools: all` (§1) gets neither flag and so every tool and the workspace's MCP servers. The list has no
+  ToolSearch, so a narrow step has no deferred tool either (WebFetch, WebSearch, Monitor): a step that needs one says
+  `tools: all`. The run record keeps the list it started with as `kirunak.tools`, and every resume, keep-alive and
+  answer of that conversation takes the list from its first record, so a plan line changed meanwhile does not change
+  a conversation's tools, as it does not change its model; a record written before this change has no list, and its
+  conversation keeps every tool. A session that names no tools (a bug's fixing session, a bug review) gets no
+  `--tools` and keeps its MCP servers (gulnya/headless-tools AC-1). Judgement: every tool's definition and every MCP
+  server's are read on every call; a step that uses seven tools pays for those seven. Steps with the narrow list
+  share one prompt prefix with each other, not with a step that has every tool.
 - The environment also carries `KIRUNAK_TASK=<id>` and `KIRUNAK_STEP=S-n`, so the hooks and `k` verbs inside the
   run know the step (used by `k step note`, by the freeze hook's log, and by the token records). Every commit the
   step makes carries a `Task: <id>` trailer from `KIRUNAK_TASK`, written by the prepare-commit-msg hook, so `k accept`
