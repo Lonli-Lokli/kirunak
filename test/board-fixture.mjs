@@ -112,3 +112,29 @@ export function bugsAt(w) {
   write(w.hub, 'hub', 'queue-stuck', 'The queue keeps a finished job', '2026-11-06', 'bug-of: weather/recent\n');
   sh(w.hub, 'git', ['branch', 'bug/queue-stuck', sh(w.hub, 'git', ['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'the fix']).trim()]);
 }
+
+// A resourceGuard seam that answers as given, for what the boards show of the lock, its queue and the claims
+// (gulnya/one-machine-lock AC-2, AC-4: they read the seam, never a guard's files).
+export function guardStub(ws, { held = null, queued = [], resources = [] } = {}) {
+  ws.seams.resourceGuard = { ...ws.seams.resourceGuard, status: () => ({ held, queued, estimateMinutes: 0 }), resources: () => resources };
+}
+
+// Jobs run through the workspace's own guard (kirunak's default one in these fixtures), the first holding the lock and
+// the rest queued behind it in order, each a shell that waits until free() is called. → { free, ended }: free() lets
+// them all end, ended their runs' promise.
+export async function guardJobs(ws, jobs) {
+  const g = ws.seams.resourceGuard;
+  const flag = join(ws.home, `free-${process.pid}-${Date.now()}`);
+  const runs = [];
+  const until = async (ok) => {
+    for (let i = 0; i < 400 && !(await ok()); i++) await new Promise((r) => setTimeout(r, 25));
+  };
+  for (const [i, j] of jobs.entries()) {
+    runs.push(g.run({ ...j, maxMinutes: 2, cwd: ws.home, command: ['/bin/sh', '-c', `while [ ! -f '${flag}' ]; do sleep 0.05; done`] }));
+    await until(async () => {
+      const st = await g.status();
+      return i === 0 ? st.held?.session === j.session : (st.queued ?? []).length === i;
+    });
+  }
+  return { free: () => writeFileSync(flag, ''), ended: Promise.all(runs) };
+}

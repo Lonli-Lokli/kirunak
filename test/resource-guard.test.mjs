@@ -162,7 +162,7 @@ test('claims: one holder at a time, released by its holder, every resource ever 
   const { g } = guard();
   g.claim('phone', 'kirunak:a', 'smoke test', 1);
   assert.throws(() => g.claim('phone', 'kirunak:b', 'other test'), /phone is claimed by kirunak:a until .*: smoke test/);
-  assert.deepEqual(g.resources(), [{ id: 'phone', name: 'phone', state: 'claimed by kirunak:a' }]);
+  assert.deepEqual(g.resources(), [{ id: 'phone', name: 'phone', state: 'claimed by kirunak:a', by: 'kirunak:a', why: 'smoke test' }]);
   assert.equal(g.release('phone', 'kirunak:b'), false);
   assert.equal(g.release('phone', 'kirunak:a'), true);
   assert.deepEqual(g.resources(), [{ id: 'phone', name: 'phone', state: 'free' }]);

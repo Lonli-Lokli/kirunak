@@ -10,10 +10,10 @@ import { renderBrief } from '../lib/board-brief.mjs';
 import { entry, lastStepShort, metLine } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
 import { STATES } from '../lib/state.mjs';
-import { addTask, bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, bugsAt, draftsAt, fixture, guardStub, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
-const brief = async (w) => renderBrief(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+const brief = async (w) => renderBrief(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
 
 // The fixture's brief board, word for word: the text of the mod's /k-board dialog (kirunak-phone A-7).
 const EXPECTED = `Made at 2026-11-07 12:00.
@@ -110,11 +110,12 @@ test('an entry: the queue place and the last step only when there are, a done ta
 
 test('the machine\'s line: the lock, the heavy jobs waiting, the running steps and the device claims', async () => {
   const w = await fixture();
-  mkdirSync(join(w.home, 'guard', 'lock'), { recursive: true });
   mkdirSync(join(w.home, 'running'), { recursive: true });
-  writeFileSync(join(w.home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', pid: 1, since: '2026-11-07T11:50:00Z' }));
-  writeFileSync(join(w.home, 'guard', 'queue'), '{"session":"s2","what":"hub build"}\n{"session":"s3","what":"hub tests"}\n');
-  writeFileSync(join(w.home, 'guard', 'claims.json'), JSON.stringify([{ resource: 'phone-1', by: 's1' }]));
+  guardStub(w.ws, {
+    held: { session: 's1', what: 'weather unit tests', since: '2026-11-07T11:50:00Z' },
+    queued: [{ session: 's2', what: 'hub build' }, { session: 's3', what: 'hub tests' }],
+    resources: [{ id: 'phone-1', name: 'Phone', state: 'claimed by s1' }, { id: 'phone-2', name: 'Phone 2', state: 'free' }],
+  });
   writeFileSync(join(w.home, 'running', '1.json'), JSON.stringify({ task: 'weather/hourly-chart', step: 'S-2', session: 's1' }));
   const last = (await brief(w)).text.split('\n').pop();
   assert.equal(last, 'Lock: weather unit tests (session s1, since 2026-11-07 11:50), 2 heavy jobs waiting, 1 of 2 steps running, 1 device claim.');
@@ -183,7 +184,7 @@ test('a step k run stopped for the owner: the brief board opens with Stopped for
   const list = await rows(w.ws, { all: true });
   const stop = { step: 'S-2', kind: 'escalated', what: 'stopped, failed on every rung', why: 'exit 1', dir: 'kirunak/tasks/hourly-chart/steps/S-2/', reports: ['steps/S-2/failure-1.md', 'steps/S-2/failure-2.md', 'steps/S-2/failure-3.md', 'steps/S-2/failure-4.md'] };
   const r = list.find((x) => x.id === 'weather/hourly-chart');
-  const b = renderBrief(list.map((x) => (x === r ? { ...x, stops: [stop] } : x)), snapshot(w.ws), NOW);
+  const b = renderBrief(list.map((x) => (x === r ? { ...x, stops: [stop] } : x)), (await snapshot(w.ws)), NOW);
   const [first] = b.groups;
   assert.deepEqual([first.name, first.count, first.ids], ['Stopped for you', 1, ['weather/hourly-chart']]);
   // The title and id fill the first line, so what happened opens the second, before why.
@@ -192,7 +193,7 @@ test('a step k run stopped for the owner: the brief board opens with Stopped for
   assert.ok(b.text.startsWith(`Made at 2026-11-07 12:00.\n\nStopped for you (1)\n${first.lines.join('\n')}\n\nWorking on now (`), b.text);
   assert.equal(b.ids[0], 'weather/hourly-chart');
   // With nothing stopped the board is as it was.
-  assert.ok(!renderBrief(list, snapshot(w.ws), NOW).groups.some((g) => g.name === 'Stopped for you'));
+  assert.ok(!renderBrief(list, (await snapshot(w.ws)), NOW).groups.some((g) => g.name === 'Stopped for you'));
 });
 
 test('the bugs before the drafts: a group Bugs, k waiting\'s line first, then one line a bug with its fix, its task and its date, its ids before the drafts\'; no group when none waits (gulnya/kirunak-bugs AC-7)', async () => {

@@ -10,10 +10,10 @@ import { renderMarkdown } from '../lib/board-md.mjs';
 import { fixLine, quadDamagePath } from '../lib/bugs.mjs';
 import { rows } from '../lib/list.mjs';
 import { STATES } from '../lib/state.mjs';
-import { bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { bugAt, bugsAt, draftsAt, fixture, guardJobs, guardStub, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
-  return renderHtml(await rows(w.ws, { all: true }), snapshot(w.ws), NOW, opts);
+  return renderHtml(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW, opts);
 }
 
 const h2s = (html) => [...html.matchAll(/<h2>([^<]*?)(?: <span class="n">\((\d+)\)<\/span>)?<\/h2>/g)].map((m) => m[1]);
@@ -176,13 +176,16 @@ test('the last section: no lock, then the lock, its queue, the running steps, th
   assert.match(html, /<h3>Task queue<\/h3>\n<ol><li>weather\/hourly-chart \(in progress\)<\/li><\/ol>/);
   assert.match(html, /<p class="made">Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}<\/p>/);
   assert.match(html, /To make it again: k board\./);
-  mkdirSync(join(w.home, 'guard', 'lock'), { recursive: true });
+  // A job held and one queued through kirunak's default guard, and a claim of its: the page shows them as it did
+  // when it read the guard's files (gulnya/one-machine-lock AC-2, AC-4).
+  assert.ok(w.ws.seams.loaded.some((p) => p.seam === 'resourceGuard' && /resource-guard-local/.test(p.module ?? p.plugin)), 'the default guard is loaded');
   mkdirSync(join(w.home, 'running'), { recursive: true });
-  writeFileSync(join(w.home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', pid: 1, since: '2026-11-07T11:50:00Z' }));
-  writeFileSync(join(w.home, 'guard', 'queue'), '{"session":"s2","what":"hub build"}\n');
-  writeFileSync(join(w.home, 'guard', 'claims.json'), JSON.stringify([{ resource: 'phone-1', by: 's1', why: 'smoke run' }]));
+  const jobs = await guardJobs(w.ws, [{ session: 's1', what: 'weather unit tests' }, { session: 's2', what: 'hub build' }]);
+  w.ws.seams.resourceGuard.claim('phone-1', 's1', 'smoke run');
   writeFileSync(join(w.home, 'running', '123.json'), JSON.stringify({ task: 'weather/hourly-chart', step: 'S-2', session: 's1', since: '2026-11-07T11:40:00Z' }));
   html = await page(w);
+  jobs.free();
+  await jobs.ended;
   assert.match(html, /<p>lock: weather unit tests \(session s1, since \d{4}-\d{2}-\d{2} \d{2}:\d{2}\)<\/p>/);
   assert.match(html, /<h3>Heavy-job queue<\/h3>\n<ol><li>hub build \(session s2\)<\/li><\/ol>/);
   assert.match(html, /<h3>Device claims<\/h3>\n<ul><li>phone-1 by s1 \(smoke run\)<\/li><\/ul>/);
@@ -256,8 +259,8 @@ test('each task a brief row, closed at first, that opens its card in place: nati
   sessionsAt(w);
   queuedAndParked(w);
   const list = await rows(w.ws, { all: true });
-  const html = renderHtml(list, snapshot(w.ws), NOW);
-  const brief = renderBrief(list, snapshot(w.ws), NOW);
+  const html = renderHtml(list, (await snapshot(w.ws)), NOW);
+  const brief = renderBrief(list, (await snapshot(w.ws)), NOW);
   const entries = brief.text.split('\n').filter((l) => /^[a-z]+\/[a-z-]+: /.test(l));
   assert.deepEqual(tasks(html).map((t) => t.summary), entries, 'each summary the brief entry, in the same order');
   assert.deepEqual(tasks(html).map((t) => t.id), brief.ids);
@@ -382,7 +385,7 @@ test('Quad Damage\'s run in the Bugs group, as k waiting says it, first, on the 
   };
   const all = async () => {
     const list = await rows(w.ws, { all: true });
-    const st = snapshot(w.ws);
+    const st = (await snapshot(w.ws));
     return { m: model(list, st, NOW), html: renderHtml(list, st, NOW), text: renderMarkdown(list, st, NOW), brief: renderBrief(list, st, NOW) };
   };
   let b = await all();
@@ -408,4 +411,16 @@ test('Quad Damage\'s run in the Bugs group, as k waiting says it, first, on the 
   assert.equal(b.m.bugs[0].fix, 'Quad Damage: waiting for the 5-hour window until 13:15');
   const style = /<style>([\s\S]*)<\/style>/.exec(b.html)[1];
   assert.doesNotMatch(style, /\.bugs[^{]*\{[^}]*\bcolor:/, 'the line is text on the page\'s ground, a pair BUG_PAIRS holds at 4.5:1');
+});
+
+test('a resource guard that does not answer leaves no lock, queue or claim invented, and the board says so', async () => {
+  const w = await fixture();
+  w.ws.seams.resourceGuard = { ...w.ws.seams.resourceGuard, status: () => { throw new Error('heavy-lock unreadable'); }, resources: () => { throw new Error('devices.mjs list failed'); } };
+  const st = await snapshot(w.ws);
+  assert.equal(st.lock, null);
+  assert.deepEqual([st.queue, st.claims], [[], []]);
+  assert.equal(st.unanswered, 'the resource guard did not answer: status(): heavy-lock unreadable; resources(): devices.mjs list failed');
+  assert.match(await page(w), /<p>the resource guard did not answer: status\(\): heavy-lock unreadable; resources\(\): devices\.mjs list failed<\/p>/);
+  guardStub(w.ws, { held: { session: 'kirunak:weather/x', what: 'S-3: unit tests (max 10 min)', since: '2026-11-07T11:50:00Z' } });
+  assert.match(await page(w), /<p>lock: S-3: unit tests \(max 10 min\) \(session kirunak:weather\/x, since/, 'a step shows as itself');
 });

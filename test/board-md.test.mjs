@@ -8,10 +8,10 @@ import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
 import { bugBullet, bullet, counts, cut, draftBullet, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
-import { addTask, bugAt, bugsAt, draftsAt, fixture, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, bugsAt, draftsAt, fixture, guardStub, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
-const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
 
 // No hard line break inside a paragraph or a list item (kirunak-phone S-10): no line goes on from the one before (an
 // indented line, or text straight after a list item or a paragraph), so each is a heading, a list item, a paragraph
@@ -33,8 +33,7 @@ test('headings, lists and paragraphs, no table, and no line broken inside a para
   sessionsAt(w);
   const long = 'a-task-slug-that-runs-to-forty-letters-x';
   addTask(w.weather, `weather/${long}`, `A title of many words ${'that goes on and on '.repeat(5)}until it ends`);
-  mkdirSync(join(w.home, 'guard'), { recursive: true });
-  writeFileSync(join(w.home, 'guard', 'queue'), `{"session":"s2","what":"a heavy job named ${'at great length '.repeat(6)}"}\n`);
+  guardStub(w.ws, { queued: [{ session: 's2', what: `a heavy job named ${'at great length '.repeat(6)}` }] });
   const text = await board(w);
   noHardBreak(text);
   for (const line of text.split('\n')) assert.ok(!line.trimStart().startsWith('|'), 'no table');
@@ -219,7 +218,8 @@ test('a task\'s card alone, as the board draws it, for a task worked on, one in 
   sessionsAt(w);
   addTask(w.weather, 'weather/long-title', `A title ${'that goes on and on '.repeat(8)}`);
   const list = await rows(w.ws, { all: true });
-  const card = (id) => renderCard(list, snapshot(w.ws), id, NOW);
+  const snap = await snapshot(w.ws);
+  const card = (id) => renderCard(list, snap, id, NOW);
   assert.equal(card('hub/reviewed'), REVIEWED);
   assert.ok(EXPECTED.includes(`\n${REVIEWED}\n`), 'the same card as on the board');
   assert.match(card('weather/recent'), /^### weather\/recent\n\nDone this week\n\n- state: done\n/);

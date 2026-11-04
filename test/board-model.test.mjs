@@ -9,7 +9,7 @@ async function board({ more = () => {} } = {}) {
   const w = await fixture();
   sessionsAt(w);
   more(w);
-  return model(await rows(w.ws, { all: true }), { ...status(w.ws), sessions: sessions(w.ws) }, NOW);
+  return model(await rows(w.ws, { all: true }), { ...(await status(w.ws)), sessions: sessions(w.ws) }, NOW);
 }
 
 test('the session records that name a task, by session id; a record with no task is left out', async () => {
@@ -56,7 +56,7 @@ test('a bug among the drafts names its task before the date, "bug of <task>"; a 
   const w = await fixture();
   draftsAt(w);
   bugAt(w);
-  const m = model(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+  const m = model(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
   assert.deepEqual(m.drafts.map((d) => [d.id, d.bugOf]), [['weather/wind-alerts', null], ['hub/short-jobs', null], ['hub/midnight-gap', 'weather/recent']]);
   assert.deepEqual(m.drafts.map(draftEntry), [
     'weather/wind-alerts: Wind alerts <for> cyclists, written 2026-11-05',
@@ -71,10 +71,10 @@ test('a bug among the drafts names its task before the date, "bug of <task>"; a 
 test('the bugs that wait, before the drafts: k bugs\' order, a fix ready first, each line with its fix, its task and its date, and k waiting\'s line for them; none and no line when none waits (gulnya/kirunak-bugs AC-7)', async () => {
   const w = await fixture();
   draftsAt(w);
-  let m = model(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+  let m = model(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
   assert.deepEqual([m.bugs, m.bugsLine], [[], '']);
   bugsAt(w);
-  m = model(await rows(w.ws, { all: true }), snapshot(w.ws), NOW);
+  m = model(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
   assert.deepEqual(Object.keys(m).slice(Object.keys(m).indexOf('bugs'), Object.keys(m).indexOf('bugs') + 3), ['bugs', 'bugsLine', 'drafts']);
   assert.deepEqual(m.bugs.map((b) => [b.id, b.fixReady, b.fix, b.bugOf]), [['hub/queue-stuck', true, 'fix ready', 'weather/recent'], ['weather/rain-icon', false, 'no fix', null]]);
   assert.equal(m.bugsLine, '2 bugs wait, 1 with a fix ready: /k-bugs');

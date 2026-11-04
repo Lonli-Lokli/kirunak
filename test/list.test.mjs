@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { hashBytes } from '../lib/approval.mjs';
 import { format, rows } from '../lib/list.mjs';
+import { guardJobs, guardStub } from './board-fixture.mjs';
 import { k, makeWorkspace, reviewsRan } from './helpers.mjs';
 
 const taskText = (id, title, { q = false } = {}) => `---
@@ -144,29 +145,35 @@ test('two repos in one workspace, and --repo narrows to one', async () => {
   await assert.rejects(rows(ws, { repo: 'nowhere' }), /unknown repo nowhere/);
 });
 
-test('the lock comes from the default guard when it is held', async () => {
-  const { ws, home } = await fixture();
-  mkdirSync(join(home, 'guard', 'lock'), { recursive: true });
-  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', pid: 1, since: '2026-11-03T14:00:00Z' }));
+test('the lock comes from the workspace\'s resource guard when it is held', async () => {
+  const { ws } = await fixture();
+  guardStub(ws, { held: { session: 's1', what: 'weather unit tests', since: '2026-11-03T14:00:00Z' } });
   const list = await rows(ws);
   assert.equal(list[0].lock, 'weather unit tests');
   assert.match(format(list).split('\n')[0], /lock: weather unit tests/);
 });
 
-test('k status: the lock, the guard queue parsed, the home, and the session\'s task once k start recorded it', async () => {
-  const { home } = await fixture();
+test('k status: the lock, its queue and the claims from the default guard, the home, and the session\'s task once k start recorded it', async () => {
+  const { ws, home } = await fixture();
   const status = (args) => JSON.parse(k(home, ['status', '--json', ...args], { CLAUDE_CODE_SESSION_ID: '' }).stdout);
   assert.deepEqual(status([]), { lock: null, queue: [], claims: [], running: [], maxAgents: 2, home, session: null });
-  mkdirSync(join(home, 'guard', 'lock'), { recursive: true });
-  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 's1', what: 'weather unit tests', since: '2026-11-03T14:00:00Z' }));
-  writeFileSync(join(home, 'guard', 'queue'), '{"session":"s2","what":"hub build"}\nnot json\n');
+  // A job held and two queued through kirunak's default guard, the jobs k status's own process did not start
+  // (gulnya/one-machine-lock AC-2), and a claim (AC-4).
+  const jobs = await guardJobs(ws, [{ session: 's1', what: 'weather unit tests' }, { session: 's2', what: 'hub build' }, { session: 's4', what: 'hub tests' }]);
+  ws.seams.resourceGuard.claim('phone-1', 's1', 'smoke run');
   const s = status(['--session', 's3']);
   assert.equal(s.lock.what, 'weather unit tests');
-  assert.deepEqual(s.queue, [{ session: 's2', what: 'hub build' }, { line: 'not json' }]);
+  assert.deepEqual(s.queue.map((q) => [q.session, q.what]), [['s2', 'hub build'], ['s4', 'hub tests']]);
+  assert.deepEqual(s.claims, [{ resource: 'phone-1', name: 'phone-1', state: 'claimed by s1', by: 's1', why: 'smoke run' }]);
+  const since = s.lock.since;
   assert.deepEqual(s.session, { id: 's3', task: null, step: null, since: null });
   assert.equal(k(home, ['start', 'weather/offline-forecast', '--session', 's3']).status, 0);
   assert.equal(status(['--session', 's3']).session.task, 'weather/offline-forecast');
-  assert.match(k(home, ['status', '--session', 's3']).stdout, /^lock: weather unit tests \(session s1, since 2026-11-03T14:00:00Z\), 2 waiting\nrunning steps: 0 of 2\nsession s3: weather\/offline-forecast\n$/);
+  assert.equal(k(home, ['status', '--session', 's3']).stdout, `lock: weather unit tests (session s1, since ${since}), 2 waiting\nclaim: phone-1 by s1 (smoke run)\nrunning steps: 0 of 2\nsession s3: weather/offline-forecast\n`);
+  jobs.free();
+  await jobs.ended;
+  ws.seams.resourceGuard.release('phone-1', 's1');
+  assert.equal(k(home, ['status'], { CLAUDE_CODE_SESSION_ID: '' }).stdout, 'no lock\nrunning steps: 0 of 2\n', 'once they end, as before');
 });
 
 test('an approved task with no step started reads queued in the queue and parked out of it, in k list, k waiting and k board; held, it keeps its place', async () => {

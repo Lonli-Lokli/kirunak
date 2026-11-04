@@ -238,7 +238,7 @@ test('a step that fails twice climbs to opus and k run goes on by itself: an eve
   ]);
   const list = await rows(w.ws, { all: true });
   assert.deepEqual(stoppedFor(list), [], 'k waiting shows nothing');
-  assert.ok(!renderBrief(list, snapshot(w.ws)).groups.some((g) => g.name === 'Stopped for you'), 'nor does the brief board');
+  assert.ok(!renderBrief(list, (await snapshot(w.ws))).groups.some((g) => g.name === 'Stopped for you'), 'nor does the brief board');
   assert.match(await card(w.ws, w.id), /\nClimbs:\n\n- \d{4}-\d\d-\d\d \d\d:\d\d S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n/);
 });
 
@@ -280,7 +280,7 @@ test('a Sonnet step whose Opus attempt fails: Fable designs it (design-1.md its 
   // The notices (R7.1, R7.3): at most 3 lines of at most 80 characters, the task's title and id first, the one thing
   // to do last; k waiting indents its lines two spaces.
   const list = await rows(w.ws, { all: true });
-  const brief = renderBrief(list, snapshot(w.ws)).groups[0];
+  const brief = renderBrief(list, (await snapshot(w.ws))).groups[0];
   // The title and id fill the first line, so what happened opens the second.
   assert.deepEqual(brief.lines, [
     'The last forecast stays readable offline (weather/offline-forecast)',
@@ -467,7 +467,8 @@ test('needs.json heavy: the guard runs the job while running/ holds no pid of th
   assert.equal(jobs.length, 1);
   assert.deepEqual(jobs[0].running, [], 'no process of the step while the job runs');
   const { say, ...job } = jobs[0].job;
-  assert.deepEqual(job, { session: 'kirunak:weather/offline-forecast', what: 'weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
+  // The guard's label carries the step, so the lock's status shows it as itself (gulnya/one-machine-lock AC-2).
+  assert.deepEqual(job, { session: 'kirunak:weather/offline-forecast', what: 'S-1: weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
   assert.equal(typeof say, 'function', 'the guard may say through k run');
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.equal(calls[1].prompt, 'the job ended; read kirunak/tasks/offline-forecast/steps/S-1/heavy-1.json and continue');
@@ -555,7 +556,8 @@ test('a k run --once whose step asks the owner ends with the push of the questio
 });
 
 // A guard whose job only records what it was asked to run.
-const jobGuard = (jobs) => ({ run: (job) => (jobs.push(job.what), { exitCode: 0, log: 'ok\n' }), status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [] });
+// Each job's what without the step its label starts with (the label itself: the heavy-job test above).
+const jobGuard = (jobs) => ({ run: (job) => (jobs.push(job.what.replace(/^S-[\w-]+: /, '')), { exitCode: 0, log: 'ok\n' }), status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [] });
 const HEAVY = (what) => JSON.stringify({ heavy: { what, command: ['npm', 'test'], maxMinutes: 10 }, then: 'resume' });
 const stepFile = (w, f) => join(w.p.dir, 'steps', 'S-1', f);
 
@@ -684,7 +686,7 @@ test('a step started by hand that asks for a job: k run runs it and starts no cl
   const byHand = 'answer in the session that started it, or in notes.md';
   assert.equal(lines.at(-1), PUSHED(`S-1 waits for your answer. why: Three days or a week? ${byHand}`));
   const list = await rows(w.ws, { all: true });
-  const notices = [stoppedFor(list)[0].lines, renderBrief(list, snapshot(w.ws)).groups[0].lines];
+  const notices = [stoppedFor(list)[0].lines, renderBrief(list, (await snapshot(w.ws))).groups[0].lines];
   for (const ls of notices) {
     assert.ok(ls.length <= 3 && ls.every((l) => l.length <= 80), ls.join('\n'));
     assert.deepEqual([ls[0], ls.at(-1)], ['The last forecast stays readable offline (weather/offline-forecast)', byHand]);
@@ -1029,7 +1031,7 @@ test('a heavy step a dead k run left running is failed and run again; its starte
   const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
   assert.ok(lines.includes(`${w.id} S-2 failed: the k run that started it (pid ${dead}) stopped`), lines.join('\n'));
   assert.ok(lines.includes(`${w.id} S-2 waits: a line of the guard's`), 'the guard says through k run');
-  assert.deepEqual(jobs, ['Restart keeps it']);
+  assert.deepEqual(jobs, ['S-2: Restart keeps it'], 'its label carries the step');
   assert.equal(r.states['S-2'], 'done');
   assert.match(progress(w), new RegExp(`S-2 started \\(heavy: Restart keeps it, k run ${process.pid}\\)`));
 });
