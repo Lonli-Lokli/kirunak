@@ -14,7 +14,9 @@ covers the one that just ended. Run it in a fresh session and keep its context s
    `reviews: <folder>`: the workspace's `usage.reviews`, where every review is kept. If it says `none named`, ask the
    owner for a folder to name there, and until then give the review in the reply only. Read the summary,
    `report.txt` and `tasks.txt`; open `carry.txt`, `ttl.txt`, `escalations.txt`, `quality.txt`, `compact.txt` or
-   `replay.txt` only for the item a question is about.
+   `replay.txt` only for the item a question is about. If it also printed `heavy jobs: <command>` (the workspace's
+   `usage.heavyReport`, the week filled in), run that command: its table of the week's slowest jobs and suites per
+   repo, the jobs of 50 minutes or more and the minutes lost to failed jobs goes into the review as it prints.
 2. **Compare.** Read the newest review in the folder (the files are named by date) and set this week beside it: the
    weight, cache read : output, the average context per call (main sessions and agents), when the weekly limit
    reached 100% (the summary's `weekly limit` line, from the rate-limit log), the heaviest tasks and steps, and
@@ -29,8 +31,9 @@ covers the one that just ended. Run it in a fresh session and keep its context s
    (the summary); the auto-mode classifier writes no transcript at all.
 5. **Write** `<date>.md` in the folder: the numbers beside last week's, what moved and why, the three largest levers
    with their measured share of the week, each with its quality risk; the escalations per trigger from
-   `escalations.txt` and whether each step then passed; the answers to the standing questions; and a "Started this
-   week" section naming what next week's review measures.
+   `escalations.txt` and whether each step then passed; the answers to the standing questions; under "Slowest suites
+   and jobs", the heavy-job report's table when step 1 ran one, beside last week's totals; and a "Started this week"
+   section naming what next week's review measures.
 6. **Changes.** What costs no quality (a measurement, a tool list, a cache setting the replay proves) goes to the owner
    as a one-line question with its measured saving. A change to the owner's rules or to Claude Code's settings is the
    owner's decision, never this session's. Anything larger is a kirunak draft (the k-draft skill).

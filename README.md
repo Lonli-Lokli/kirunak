@@ -136,7 +136,8 @@ You need Node 22 or later, git and Claude Code.
 
    Optional `usage` and `cache` settings (`design/plugins.md` §3): `usage.weekStart` your plan's limit week (default
    Sunday 00:00 UTC), `usage.reviews` the folder your weekly reviews live in, `usage.limitsLog` the rate-limit log,
-   `usage.stale` the stale hook's minutes and context; `cache` the values of `promptCacheTtl`,
+   `usage.stale` the stale hook's minutes and context, `usage.heavyReport` a command that reports your machine's heavy
+   jobs for the week (`<from>` and `<to>` filled in; the usage-review skill runs it); `cache` the values of `promptCacheTtl`,
    `subagentPromptCacheTtl` and `syncClaudeAiSkills` you want in `~/.claude/settings.json` (`null`: absent), one
    `k doctor` line each, failing a difference. kirunak never sets them for you.
 

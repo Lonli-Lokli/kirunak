@@ -197,9 +197,12 @@ export default {
   the log back) and the summary counting a rise only above the highest point so far in the week, from a new week's
   first line again (gulnya/limits-log-flaps); and `stale`, the
   stale-session hook's `minutes` since the last call and `context` in tokens, both past which it says once to hand
-  over or start fresh. Paths resolve against the module or `~/...`. A bad day, time, zone, path or number is refused
-  at load. `k install` copies `stale` and `limitsLog` into `escalate/config.json`, so a change needs `k install`
-  again.
+  over or start fresh. Optional `heavyReport` is the workspace's own command reporting its heavy jobs (builds, test
+  suites, devices) for a window, `<from>` and `<to>` in it: `k usage` prints it filled in with the week's, as
+  `heavy jobs: <command>` before the reviews' line, and the usage-review skill runs it and puts its table in the
+  review (niva/android-host-tests-prefs AC-15). Paths resolve against the module or `~/...`. A bad day, time, zone,
+  path, number or command is refused at load. `k install` copies `stale` and `limitsLog` into `escalate/config.json`,
+  so a change needs `k install` again.
 - **`cache`** names the prompt-cache settings `~/.claude/settings.json` should hold (D-6): `promptCacheTtl`,
   `subagentPromptCacheTtl` (strings) and `syncClaudeAiSkills` (a boolean), each a value or `null` for a key that must
   be absent. `k doctor` prints one line for each key named, ok or a failure naming both values; a key not named, and
