@@ -393,9 +393,9 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           return true;
         },
 
-        // What was ever claimed, free or held.
+        // What was ever claimed, free or held; a held one with who claimed it and why.
         resources() {
-          return claimsOf(at()).map((c) => ({ id: c.resource, name: c.resource, state: held(c) ? `claimed by ${c.by}` : 'free' }));
+          return claimsOf(at()).map((c) => (held(c) ? { id: c.resource, name: c.resource, state: `claimed by ${c.by}`, by: c.by, ...(c.why ? { why: c.why } : {}) } : { id: c.resource, name: c.resource, state: 'free' }));
         },
       },
     },

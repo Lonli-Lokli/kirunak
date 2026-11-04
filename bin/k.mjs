@@ -755,12 +755,14 @@ const VERBS = {
     return { quadDamage, bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
   },
 
-  // What the mod's pane and band read beside k list (boards.md §4): board.status, the guard queue's lines parsed, the
-  // home the events are in, and the session's task from sessions/<id>.json.
+  // What the mod's pane and band read beside k list (boards.md §4): board.status (the lock, queue and claims as the
+  // workspace's resourceGuard seam gives them), the home the events are in, and the session's task from
+  // sessions/<id>.json. A claim gets a line of its own; a guard that did not answer says so in place of the lock.
   async status({ ws, flags }) {
-    const st = board.status(ws);
+    const st = await board.status(ws);
     const home = ws.home || kirunakHome();
     const parse = (l) => {
+      if (l && typeof l === 'object') return l;
       try {
         return JSON.parse(l);
       } catch {
@@ -770,9 +772,10 @@ const VERBS = {
     const s = session(flags);
     const rec = s ? keeper.readSession(home, s) : null;
     const out = { ...st, queue: st.queue.map(parse), home, session: s ? { id: s, task: rec?.task ?? null, step: rec?.step ?? null, since: rec?.since ?? null } : null };
-    const lock = st.lock ? `lock: ${st.lock.what} (session ${st.lock.session}, since ${st.lock.since})` : 'no lock';
+    const lock = st.unanswered ?? (st.lock ? `lock: ${st.lock.what} (session ${st.lock.session}, since ${st.lock.since})` : 'no lock');
     const text = [
       `${lock}${st.queue.length ? `, ${st.queue.length} waiting` : ''}`,
+      ...st.claims.map((c) => `claim: ${c.resource}${c.by ? ` by ${c.by}${c.why ? ` (${c.why})` : ''}` : `, ${c.state}`}`),
       `running steps: ${st.running.length} of ${st.maxAgents}`,
       ...(out.session ? [`session ${s}: ${out.session.task ?? 'no task'}`] : []),
     ].join('\n');
