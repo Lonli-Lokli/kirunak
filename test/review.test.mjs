@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkReview, evidenceWords, parseEvidence, verdictOf, verdictText } from '../lib/review.mjs';
 import { parseTask } from '../lib/task.mjs';
@@ -106,6 +107,15 @@ test('a file:line past the file, a test name not in the named file, a path not a
   rows[1] = '| AC-2 | met | file src/cache.ts:90 |';
   rows[0] = '| AC-1 | met | test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:4) |';
   assert.deepEqual(problems(w.check(review(w.head, rows))).slice(0, 2), ["AC-1: test/forecast.test.ts:4 is past the file's length (3 lines at head)", 'E-1: evidence/S-4-age.png does not exist at head']);
+});
+
+// A cited file with a trailing slash is not a file at head, as before the tree lookup (review-1 of
+// gulnya/k-waiting-cat-file-per-word): a problem, never a throw.
+test('a cited file with a trailing slash does not exist at head, and the check does not throw', async () => {
+  const w = await reviewed();
+  const rows = [...ROWS];
+  rows[3] = '| E-1 | met | measure evidence/S-1-cache-sizes.tsv/ row 2 |';
+  assert.deepEqual(problems(w.check(review(w.head, rows))), ['E-1: evidence/S-1-cache-sizes.tsv/ does not exist at head']);
 });
 
 test('the verdict line: from the rows, the last line, and only there', async () => {
@@ -300,4 +310,33 @@ test('k review check reads the last review from given.json and refuses a carry i
 test('the words of a row\'s evidence that may name a path', () => {
   assert.deepEqual(evidenceWords('test A.b c (t/x.test.ts:41), `src/a.ts:3-9`; ~/x/y.md.'), ['A.b', 'c', 't/x.test.ts', 'src/a.ts', '~/x/y.md']);
   assert.deepEqual(evidenceWords('measure evidence/x.tsv row 2 [docs/a.md]'), ['evidence/x.tsv', 'row', '2', 'docs/a.md']);
+});
+
+// gulnya/k-waiting-cat-file-per-word: k waiting checks every accept row's review, and a carried row's check asked git
+// once per word of its evidence, for each head, so a long kirunak took two minutes and the mod's /k-approve failed.
+test('a carried row\'s check reads each head\'s paths once, however many words its evidence has', async () => {
+  const w = await rereviewed();
+  const bin = mkdtempSync(join(tmpdir(), 'kirunak-git-count-'));
+  const log = join(bin, 'calls.log');
+  const real = sh(w.weather, 'sh', ['-c', 'command -v git']).trim();
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> '${log}'\nexec '${real}' "$@"\n`);
+  chmodSync(join(bin, 'git'), 0o755);
+  const calls = (evidence) => {
+    writeFileSync(join(w.p.dir, 'review-2.md'), readFileSync(join(w.p.dir, 'review-2.md'), 'utf8').replace(/^\| AC-1 \| met \|.*$/m, `| AC-1 | met | ${evidence} |`));
+    const rows = CARRIED_ROWS(w);
+    rows[0] = `| AC-1 | met | carried from review-2: ${evidence} |`;
+    writeFileSync(log, '');
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      assert.deepEqual(problems(w.carry(rows)), []);
+    } finally {
+      process.env.PATH = path;
+    }
+    return readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+  };
+  const short = calls('test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2)');
+  const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  const long = calls(`test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2), ${words}`);
+  assert.ok(long - short < 5, `40 more words cost ${long - short} more git calls (${short} for the short row, ${long} for the long one)`);
 });
