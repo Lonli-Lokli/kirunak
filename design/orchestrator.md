@@ -195,8 +195,12 @@ pending  →  ready  →  running  →  done
     that started it stopped` after a crash) is not one of them (nothing went wrong in the step; a person starts every
     `k run` again, so this does not loop). A stop writes no failure report, its `failed` line the whole record, and
     the attempt after a stop reads the step's last own report, if it has one since the last climb. A review's `not
-    met` verdict is the review's result, never a failure. `k step fail --why` refuses a stop's words: a failure given
-    by hand is the step's own and counts. Nor is a refusal by kirunak's own commit check (its message starts
+    met` verdict is the review's result, never a failure. Nor is a stop the owner orders: `k step stop <id> S-n --why`,
+    the owner's verb (the freeze hook refuses it from an agent's Bash tool), ends the running step with
+    `failed: stopped by the owner: <why>` and `steps/S-n/stop-<k>.md`, which counts nothing and which the next
+    attempt's brief names among its inputs to read first (gulnya/escalation-counts-non-work-failures). A progress.md
+    written before it reads as it did: a stop given then with `k step fail` stays a failure. `k step fail --why`
+    refuses a stop's words, k run's and the owner's: a failure given by hand is the step's own and counts. Nor is a refusal by kirunak's own commit check (its message starts
     `kirunak: `: a binary file `.slapignore` does not list, a frozen file) of a finished step's evidence: the step
     waits for the owner, its `needs.json` and `waiting for the owner:` line naming the refusal, and `k step finish`
     commits it once that is fixed, nothing run again (gulnya/finish-refused-commit-waits).
