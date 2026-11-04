@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
-import { run, timed } from '../lib/run.mjs';
+import { run, timed, verifyStep } from '../lib/run.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { snapshot } from '../lib/board.mjs';
 import { card } from '../lib/board-md.mjs';
@@ -1367,4 +1367,36 @@ setTimeout(() => {}, 60000);`;
   const end = Date.now() + 2000;
   while (groupAlive(job) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
   assert.equal(groupAlive(job), false, 'the background job is gone with its step');
+});
+
+// gulnya/k-run-step-models: S-1 proves its work with a verify command, run in the task's repo as its agent ends.
+const VERIFIED = (command) => PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', `outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nverify: ${command}\n`);
+
+test('a verify command that fails fails the step, its command, exit and last lines in the report; twice, and the step climbs to opus, where it passes (AC-3)', async () => {
+  const w = await approvedWorkspace(VERIFIED('test -f checked || { echo "first line"; echo "2 of 5 tests fail"; exit 3; }'));
+  const lines = [];
+  const calls = fakeRunner(w, (step, n) => {
+    if (n === 3) writeFileSync(join(w.p.root, 'checked'), '');
+    return 'write';
+  });
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(r.states, BOTH);
+  assert.deepEqual(calls.map((c) => [c.env.KIRUNAK_STEP, c.model]), [['S-1', null], ['S-1', null], ['S-1', 'opus'], ['S-2', null]]);
+  assert.equal((progress(w).match(/S-1 failed: its verify command exited 3: test -f checked/g) || []).length, 2);
+  assert.match(progress(w), /S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n/);
+  const report = readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8');
+  assert.match(report, /The verify command: `test -f checked \|\| \{ echo "first line"; echo "2 of 5 tests fail"; exit 3; \}`, in /);
+  assert.match(report, /It exited 3\.\n\nIts last lines:\n\n```\nfirst line\n2 of 5 tests fail\n```/);
+});
+
+test('a verify command that cannot start is the step\'s failure, with its error in the report (E-1)', async () => {
+  const w = await approvedWorkspace(VERIFIED('./no-such-check --all'));
+  fakeRunner(w, () => 'write');
+  await run({ ws: w.ws, id: w.id });
+  assert.match(progress(w), /S-1 failed: its verify command could not start \(exit 127\): \.\/no-such-check --all\n$/);
+  assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8'), /It exited 127\.\n\nIts last lines:\n\n```\n.*no-such-check.*\n```/);
+  // A shell that cannot be spawned at all (here, in a folder that is gone) says its own error.
+  const gone = await verifyStep('true', join(w.p.root, 'no-such-folder'));
+  assert.deepEqual([gone.ok, gone.why], [false, 'its verify command could not start: spawn /bin/sh ENOENT: true']);
+  assert.match(gone.detail, /It could not start: spawn \/bin\/sh ENOENT\.\n\nIt printed nothing\./);
 });

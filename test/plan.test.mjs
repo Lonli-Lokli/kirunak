@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkPlan, parseBudget, parsePlan } from '../lib/plan.mjs';
+import { checkPlan, parseBudget, parsePlan, VERIFY_SINCE } from '../lib/plan.mjs';
+import { gate, load } from '../lib/steps.mjs';
 import { parseTask } from '../lib/task.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
 import { approvedWorkspace, k, makeWorkspace } from './helpers.mjs';
@@ -21,6 +22,7 @@ inputs: task, docs/offline.md
 outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv
 budget: 100 calls, 40 minutes, 3 USD
 brief: steps/S-1/brief.md
+verify: npm test
 
 ### S-2 Unit tests [heavy]
 needs: S-1
@@ -128,11 +130,11 @@ test('an input naming a step\'s needs.json fails, there or not, naming the needs
   writeFileSync(join(w.p.dir, 'plan.md'), naming('steps/S-1/needs.json'));
   const r = k(w.home, ['plan', 'check', ID]);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /line 20: S-3 input steps\/S-1\/needs\.json: a needs\.json is S-1's request/);
+  assert.match(r.stderr, /line 21: S-3 input steps\/S-1\/needs\.json: a needs\.json is S-1's request/);
   const a = await approvedWorkspace(naming('steps/S-1/needs.json'));
   const start = k(a.home, ['step', 'start', ID, 'S-1']);
   assert.equal(start.status, 1);
-  assert.match(start.stderr, /cannot run a step:\n {2}plan\.md line 20: S-3 input steps\/S-1\/needs\.json/);
+  assert.match(start.stderr, /cannot run a step:\n {2}plan\.md line 21: S-3 input steps\/S-1\/needs\.json/);
 });
 
 test('the grammar: a bad header, an unknown kind, effort or field, a needs no step has, a heavy step with no command', async () => {
@@ -190,4 +192,43 @@ test('k plan check reports the problems and exits 1, and passes a good plan', as
   const good = k(w.home, ['plan', 'check', ID]);
   assert.equal(good.status, 0, good.stderr);
   assert.match(good.stdout, /plan: check passes/);
+});
+
+// gulnya/k-run-step-models AC-2: an agent step on Sonnet names the check that proves it.
+const UNVERIFIED = PLAN.replace('verify: npm test\n', '');
+const NO_VERIFY = 'S-1 is an agent step on Sonnet with no verify line: add `verify: <command>`, the check k run runs as it ends';
+
+test('an agent step on Sonnet with no verify line is refused, naming the step; its plan line\'s model, else models.agent; one with a verify line, or on Opus, passes (AC-2)', async () => {
+  const w = await fixture();
+  assert.equal(parsePlan(PLAN).steps[0].verify, 'npm test');
+  assert.deepEqual(problemsOf(w, PLAN), []);
+  assert.deepEqual(checkPlan(parsePlan(UNVERIFIED), w.task, w.p), [{ line: 6, problem: NO_VERIFY }]);
+  assert.deepEqual(problemsOf(w, UNVERIFIED.replace('[agent, sonnet, high]', '[agent, opus, high]')), []);
+  // No model on the line: the workspace's models.agent decides.
+  const bare = UNVERIFIED.replace('[agent, sonnet, high]', '[agent]');
+  assert.deepEqual(checkPlan(parsePlan(bare), w.task, w.p, { models: { agent: { model: 'claude-sonnet-5-5' } } }).map((x) => x.problem), [NO_VERIFY]);
+  assert.deepEqual(checkPlan(parsePlan(bare), w.task, w.p, { models: { agent: { model: 'opus' } } }), []);
+  writeFileSync(join(w.p.dir, 'plan.md'), UNVERIFIED);
+  const r = k(w.home, ['plan', 'check', ID]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /line 6: S-1 is an agent step on Sonnet with no verify line/);
+});
+
+test('a task first approved before the rule gets the same finding as a warning: k plan check passes and the gate runs it; one approved since is refused (E-3)', async () => {
+  const w = await approvedWorkspace(UNVERIFIED);
+  const record = JSON.parse(readFileSync(w.p.record, 'utf8'));
+  const approvedOn = (day) => {
+    const at = `${day}T10:00:00+00:00`;
+    writeFileSync(w.p.record, JSON.stringify({ ...record, approved: '2099-01-01T10:00:00+00:00', history: [{ ...record.history[0], approved: at }] }));
+  };
+  approvedOn('2026-10-28');
+  const old = k(w.home, ['plan', 'check', ID]);
+  assert.equal(old.status, 0, old.stderr);
+  assert.match(old.stdout, /plan: check passes\n {2}warning, line 6: S-1 is an agent step on Sonnet with no verify line: .* \(a warning: weather\/offline-forecast was approved before 2026-11-05\)/);
+  assert.deepEqual(gate(load(w.ws, ID)).filter((x) => x.startsWith('plan.md')), []);
+  approvedOn(VERIFY_SINCE);
+  const since = k(w.home, ['plan', 'check', ID]);
+  assert.equal(since.status, 1);
+  assert.match(since.stderr, /line 6: S-1 is an agent step on Sonnet with no verify line/);
+  assert.deepEqual(gate(load(w.ws, ID)).filter((x) => x.startsWith('plan.md')), [`plan.md line 6: ${NO_VERIFY}`]);
 });
