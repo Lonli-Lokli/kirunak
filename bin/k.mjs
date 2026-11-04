@@ -126,6 +126,8 @@ function place(flags) {
   return { last: true };
 }
 
+// The line an owner's verb adds when it commits off the repo's main line (approval.md §4), or nothing.
+const offMain = (r) => (r.offMain ? `\n${r.offMain}` : '');
 const session = (flags) => flags.session || process.env.CLAUDE_CODE_SESSION_ID || null;
 const baselineOf = (ws) => (ws.baseline && existsSync(ws.baseline) ? JSON.parse(readFileSync(ws.baseline, 'utf8')) : null);
 
@@ -510,14 +512,14 @@ const VERBS = {
     const r = await approval.approve({
       ws, id, amendment: flags.amendment, via: flags.via || 'shell', queuePlace: place(flags), noQueue: !!flags['no-queue'],
     });
-    return { ...r, text: `${id}: ${r.state}${r.queuePlace ? `, queue place ${r.queuePlace}` : ''} (${r.hash.slice(0, 19)}…, commit ${r.commit})` };
+    return { ...r, text: `${id}: ${r.state}${r.queuePlace ? `, queue place ${r.queuePlace}` : ''} (${r.hash.slice(0, 19)}…, commit ${r.commit})${offMain(r)}` };
   },
 
   async accept({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
     if (flags['dry-run']) {
       const r = approval.accept({ ws, id, checklistOpen: flags['checklist-open'], dryRun: true });
-      return { ...r, text: `would accept ${id} (${r.review}, verdict: ${r.verdict})${r.openItems.length ? `, with ${r.openItems.length} checklist item(s) open` : ''}` };
+      return { ...r, text: `would accept ${id} (${r.review}, verdict: ${r.verdict})${r.openItems.length ? `, with ${r.openItems.length} checklist item(s) open` : ''}${offMain(r)}` };
     }
     // The task's cost, read before the accept, which records it in done.json and commits cost.md rendered from it; a
     // cost that cannot be read (the records, or a baseline that does not parse) is recorded as why and never stops
@@ -533,7 +535,7 @@ const VERBS = {
     const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: taskCost });
     // Once the acceptance is committed, the merged worktrees go (approval.md §4); nothing there undoes or fails it.
     const w = await worktrees.worktrees({ ws, closing: id, remove: true });
-    const text = `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}`;
+    const text = `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}${offMain(r)}`;
     return { ...r, worktrees: w, text: [text, ...worktrees.lines(w)].join('\n') };
   },
 
@@ -553,15 +555,15 @@ const VERBS = {
       approval.hold({ ws, id, dryRun: true });
       return { text: `would hold ${id}` };
     }
-    await approval.hold({ ws, id, why: need(flags.why, '--why') });
-    return { text: `${id}: on hold` };
+    const r = await approval.hold({ ws, id, why: need(flags.why, '--why') });
+    return { text: `${id}: on hold${offMain(r)}` };
   },
 
   async resume({ ws, pos, flags }) {
     const id = need(pos[0], 'task id');
     if (flags['dry-run']) return { text: `would resume ${id}` };
-    await approval.resume({ ws, id });
-    return { text: `${id}: resumed` };
+    const r = await approval.resume({ ws, id });
+    return { text: `${id}: resumed${offMain(r)}` };
   },
 
   async amend({ ws, pos, flags }) {
