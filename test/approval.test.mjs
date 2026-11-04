@@ -514,6 +514,55 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   assert.notEqual(headOf(weather), head);
 });
 
+test('accept off the main line says where it committed, in the dry run and the accept; on the main line it says nothing (draft gulnya/kirunak-accept-default-branch)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  assert.equal(accept({ ws, id: ID, dryRun: true }).offMain, undefined, 'on master, nothing to say');
+  const said = 'committed on settings, not master: master has it only once settings is merged into it';
+  sh(weather, 'git', ['checkout', '-q', '-b', 'settings']);
+  assert.equal(k(home, ['accept', ID, '--dry-run'], { CLAUDE_CODE_SESSION_ID: '' }).stdout, `would accept ${ID} (review.md, verdict: met)\n${said}\n`);
+  sh(weather, 'git', ['checkout', '-q', '--detach']);
+  assert.equal(accept({ ws, id: ID, dryRun: true }).offMain, 'committed on a detached HEAD, not master: master has it only once that commit is merged into it');
+  sh(weather, 'git', ['checkout', '-q', 'settings']);
+  const r = accept({ ws, id: ID, now: NOV7 });
+  assert.deepEqual([r.state, r.offMain, subject(weather)], ['done', said, `kirunak: accept ${ID}`]);
+  assert.equal(sh(weather, 'git', ['branch', '--contains', 'HEAD', '--format=%(refname:short)']).trim(), 'settings', 'the accept is on settings alone');
+});
+
+const ON_SETTINGS = 'committed on settings, not master: master has it only once settings is merged into it';
+const DETACHED = 'committed on a detached HEAD, not master: master has it only once that commit is merged into it';
+
+test('approve off the main line says where it committed, on settings and from a detached HEAD; on master it says nothing (gulnya/kirunak-accept-default-branch AC-5)', async () => {
+  const onMaster = await makeWorkspace();
+  assert.equal((await approve({ ws: onMaster.ws, id: ID, now: NOV5 })).offMain, undefined, 'on master, nothing to say');
+  const onSettings = await makeWorkspace();
+  sh(onSettings.weather, 'git', ['checkout', '-q', '-b', 'settings']);
+  const r = k(onSettings.home, ['approve', ID], { CLAUDE_CODE_SESSION_ID: '' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`^${ID}: queued, queue place \\d+ \\(sha256:[0-9a-f]+…, commit [0-9a-f]+\\)\\n${ON_SETTINGS}\\n$`));
+  assert.equal(sh(onSettings.weather, 'git', ['branch', '--contains', 'HEAD', '--format=%(refname:short)']).trim(), 'settings', 'the approval is on settings alone');
+  const detached = await makeWorkspace();
+  sh(detached.weather, 'git', ['checkout', '-q', '--detach']);
+  assert.equal((await approve({ ws: detached.ws, id: ID, now: NOV5 })).offMain, DETACHED);
+});
+
+test('hold and resume off the main line say where they committed, on settings and from a detached HEAD; on master they say nothing (gulnya/kirunak-accept-default-branch AC-5)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  assert.equal(hold({ ws, id: ID, why: 'waiting for the provider', now: NOV6 }).offMain, undefined, 'on master, nothing to say');
+  assert.equal(resume({ ws, id: ID }).offMain, undefined, 'on master, nothing to say');
+  sh(weather, 'git', ['checkout', '-q', '-b', 'settings']);
+  assert.deepEqual([run(['hold', ID, '--why', 'waiting for the provider'])].map((x) => [x.status, x.stdout]), [[0, `${ID}: on hold\n${ON_SETTINGS}\n`]]);
+  assert.deepEqual([run(['resume', ID])].map((x) => [x.status, x.stdout]), [[0, `${ID}: resumed\n${ON_SETTINGS}\n`]]);
+  sh(weather, 'git', ['checkout', '-q', '--detach']);
+  assert.equal(hold({ ws, id: ID, why: 'waiting for the provider', now: NOV7 }).offMain, DETACHED);
+  assert.equal(resume({ ws, id: ID }).offMain, DETACHED);
+  assert.equal(sh(weather, 'git', ['rev-list', '--count', 'master..settings']).trim(), '2', 'the hold and the resume are on settings alone');
+});
+
 test('accept refuses a not met verdict, --checklist-open or not: the way out is an amendment or a new review', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
