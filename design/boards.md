@@ -32,7 +32,11 @@ command except `git show` for a staged hash when asked).
 ## 2. The page: `k board` and `k board --html` (D10)
 
 - `k board` writes `$KIRUNAK_HOME/board.html` from `k list --json` and `k status --json` (the lock, the device
-  claims, the running steps, the keeper's last lines) and opens it (`open` on macOS, `xdg-open` elsewhere). No
+  claims, the running steps, the keeper's last lines) and opens it. The lock, its queue and the claims are what the
+  workspace's `resourceGuard` seam answers (`status()` for the holder and the queue, `resources()` for the claims not
+  free; `lib/guard-view.mjs`), whichever guard is loaded, never a guard's own files; a seam that does not answer gives
+  no lock, queue or claim, and the lock line says which call failed (`unanswered`). k run labels a step's job
+  `<step>: <what>` under the session `kirunak:<task id>`, so a guard's own status shows the step as itself (`open` on macOS, `xdg-open` elsewhere). No
   server: a static page, inline CSS. `k board --html <file>` writes the same page where it is told, with `--no-open`
   when nothing should open it; this is what the skill of §3 publishes.
 - **One order for every surface** (`lib/board-model.mjs`, built 2026-10-21, kirunak-phone S-8; the page,

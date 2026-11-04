@@ -64,7 +64,7 @@ own implementations live in the workspace's repo, beside its config (D2).
   whose start `ps` cannot tell is waited for, and said once: a `wait` line in `guard/log.jsonl` (it has no minutes, so
   no estimate reads it) and the job's `say`, if it has one. While such a job runs, or `ps` cannot tell, `status()`
   shows it as `held`, marked `orphan`, since it holds the lock for every waiter. `claim` and `release` record claims in `guard/claims.json` (resource,
-  by, why, until); `resources()` lists what was ever claimed. Every job appends one line to `guard/log.jsonl` (what,
+  by, why, until); `resources()` lists what was ever claimed, a held claim with its `by` and `why`. Every job appends one line to `guard/log.jsonl` (what,
   session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected
   wait, and only the guard knows the queue. The default estimates from its own log: the median length of the last
