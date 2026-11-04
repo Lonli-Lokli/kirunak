@@ -372,8 +372,11 @@ const VERBS = {
     if (!existsSync(p.task)) throw new KError(`unknown task ${id}: ${p.task} does not exist`, 1);
     const plan = join(p.dir, 'plan.md');
     if (!existsSync(plan)) throw new KError(`${id} has no plan: ${p.rel('plan.md')}`, 1);
-    const problems = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p);
-    return report(`${id} plan`, problems, '');
+    const found = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p, ws);
+    // A warning refuses nothing (gulnya/k-run-step-models E-3): printed after the result, the exit still 0.
+    const warnings = found.filter((x) => x.warning).map((x) => `  warning, line ${x.line}: ${x.problem}`);
+    const r = report(`${id} plan`, found.filter((x) => !x.warning), '');
+    return warnings.length ? { ...r, warnings: found.filter((x) => x.warning), text: `${r.text}\n${warnings.join('\n')}` } : r;
   },
 
   async cost({ ws, pos, flags }) {
