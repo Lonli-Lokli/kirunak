@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
-import { reason } from './commands'
+import { firstLine, reason } from './commands'
+import { appendDialogLog } from './log'
 
 // The turns of its own the mod gives the session after an owner's verb (gulnya/kirunak-bugs AC-11 to AC-14): a prompt
 // it submits once the command has answered, as Start intake's and Start fix's are, that says what the owner did and
@@ -18,12 +19,32 @@ import { reason } from './commands'
 
 // The engine refuses a submit from inside a command.run hook (it would wait on the turn the hook holds: measured under
 // `claude plugin test`), so a timer of the clock's submits it once the hook has answered; the prompt then waits for the
-// session to be idle. One the engine refuses toasts why, after `failed`.
+// session to be idle. One the engine refuses, or a prompt.submit hook drops (the submit answers `{ drop: <why> }`, measured
+// under `claude plugin test`), toasts why, after `failed`, and, for an owner's command (`command`), leaves a row in
+// dialogs.jsonl too: the toast shows only in the terminal, never on the phone (gulnya/approval-turn-missing AC-3).
 const SUBMIT_AFTER_MS = 1
-export function submitLater($: EngineInterface, text: string, failed: string): void {
+export function submitLater($: EngineInterface, text: string, failed: string, command?: string): void {
   $.clock.after(SUBMIT_AFTER_MS, () => {
-    void $.prompt.submit({ text }).catch(err => $.ui.toast(`${failed}: ${reason(err)}`))
+    void submitOrSay($, text, failed, command)
   })
+}
+async function submitOrSay($: EngineInterface, text: string, failed: string, command: string | undefined): Promise<void> {
+  let why: string
+  try {
+    const drop = ((await $.prompt.submit({ text })) as { drop?: unknown } | null | undefined)?.drop
+    if (drop === undefined) return
+    why = `dropped: ${String(drop)}`
+  } catch (err) {
+    why = reason(err)
+  }
+  await $.ui.toast(`${failed}: ${why}`)
+  if (command !== undefined) await logNoTurn($, command, why)
+}
+
+// A turn due that did not start, as a row of the dialog log in a dialog's shape (no choices, no tap, `end` "no turn"),
+// so the owner, and kirunak-docs-promo's reader, see why (gulnya/approval-turn-missing AC-3).
+async function logNoTurn($: EngineInterface, command: string, why: string): Promise<void> {
+  await appendDialogLog($, (session, now) => ({ t: now, session, command, header: 'No turn', text: [why], question: `The turn after /${command} did not start`, choices: [], tap: null, tAnswer: now, end: 'no turn' }))
 }
 
 // The tasks whose intake this session ran, or an amendment of: its own Bash calls of `k intake <verb> <id>` and `k amend
@@ -44,14 +65,28 @@ export const forgetRan = (): void => ran.clear()
 // whether k took it, and what k said (its state line, or its reason).
 export type Told = { name: string; k: string; argv: readonly string[]; tapped: boolean; ok: boolean; said: string }
 
-// The turn after the verb, if it gets one; it never changes the command's answer.
-export async function told($: EngineInterface, t: Told): Promise<void> {
+// The turn after the verb, if it gets one. A turn due that cannot start (k status failed, the session's id unread) is
+// never swallowed: told answers why, for the command's answer, and leaves a row in dialogs.jsonl; null when the turn
+// was submitted or none is due (gulnya/approval-turn-missing AC-3).
+export async function told($: EngineInterface, t: Told): Promise<string | null> {
   try {
     const text = await turnText($, t)
-    if (text !== null) submitLater($, text, `The turn after /${t.name} did not start`)
-  } catch {
-    // No turn: the answer the owner reads already says what k did.
+    if (text !== null) submitLater($, text, `The turn after /${t.name} did not start`, t.name)
+    return null
+  } catch (err) {
+    const why = reason(err)
+    await logNoTurn($, t.name, why)
+    return why
   }
+}
+
+// What a verb k took did, ahead of k's state line in the command's answer, so the owner on the phone knows it took
+// without the turn (gulnya/approval-turn-missing AC-2); null for a verb without one, and a dry run.
+export function doneLine(argv: readonly string[]): string | null {
+  const [verb, id = ''] = argv
+  if (argv.includes('--dry-run') || (verb !== 'approve' && verb !== 'accept' && verb !== 'resume')) return null
+  const { did } = deedOf(verb, id, argv)
+  return `${did.charAt(0).toUpperCase()}${did.slice(1)}.`
 }
 
 async function turnText($: EngineInterface, { name, k, argv, tapped, ok, said }: Told): Promise<string | null> {
@@ -77,7 +112,9 @@ async function turnText($: EngineInterface, { name, k, argv, tapped, ok, said }:
 async function mine($: EngineInterface, k: string, id: string): Promise<boolean> {
   if (ran.has(id)) return true
   const r = await $.process.run(['node', k, 'status', '--json', '--session', await $.session.id()])
-  return r.exitCode === 0 && (JSON.parse(r.stdout) as { session?: { task?: string | null } | null }).session?.task === id
+  // A k status that failed cannot tell: told says so, never a silent "not mine" (gulnya/approval-turn-missing AC-3).
+  if (r.exitCode !== 0) throw new Error(`k status failed: ${firstLine(r)}`)
+  return (JSON.parse(r.stdout) as { session?: { task?: string | null } | null }).session?.task === id
 }
 
 function deedOf(verb: 'approve' | 'accept' | 'resume', id: string, argv: readonly string[]): { did: string; tried: string; again: string; next: string } {

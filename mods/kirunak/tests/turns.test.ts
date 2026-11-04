@@ -179,4 +179,52 @@ describe('the turn after an owner\'s verb (kirunak-bugs AC-11 to AC-14)', () => 
     expect(await turns(w)).toEqual([])
     expect(verbs(w.runs)).toEqual([['approve', ID, '--amendment', 'A-3', '--via', 'mod']])
   })
+
+  // gulnya/approval-turn-missing: an approval tapped from the phone gave no turn, and the answer named only k's state
+  // line, so the owner could not tell it took, nor why no turn followed.
+  const LOG = '/home/dev/.kirunak/dialogs.jsonl'
+  const logged = (files: Record<string, string>) => (files[LOG] ?? '').trimEnd().split('\n').filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>)
+
+  test('the answer of an approve, accept or resume k took names the verb, the task and the amendment ahead of k\'s state line; a dry run\'s and a refused one\'s do not (gulnya/approval-turn-missing AC-2)', async ($, on) => {
+    const mine = { ...WAITING, amendments: AMENDMENTS.map(a => ({ ...a, by: 'session sess-1' })) }
+    world(on, { task: null, waiting: [mine], taps: [`${ID} A-3`, `Approve ${ID} A-3`] })
+    expect(await run($, 'k-amendments', '', { kind: 'bridge' } as PromptOrigin)).toBe(`Approved the amendment A-3 of ${ID}.\n${ID}: done\n\n(typed in Remote Control)`)
+    expect(await run($, 'k-approve', ID)).toBe(`Approved ${ID}.\n${ID}: done`)
+    expect(await run($, 'k-accept', ID)).toBe(`Accepted ${ID} as done.\n${ID}: done`)
+    expect(await run($, 'k-resume', ID)).toBe(`Took ${ID} off hold.\n${ID}: done`)
+    expect(await run($, 'k-approve', `${ID} --dry-run`)).toBe(`${ID}: done`)
+    await end($)
+  })
+
+  test('a refused verb\'s answer is k\'s reason alone, as before (gulnya/approval-turn-missing AC-2)', async ($, on) => {
+    world(on, { verb: REFUSED })
+    expect(await run($, 'k-approve', ID)).toBe(`/k-approve refused:\nk: ${ID}: the latest review is not met (AC-2)`)
+  })
+
+  test('a turn that cannot start because k status failed says so in the answer and in a dialogs.jsonl row, never silently (gulnya/approval-turn-missing AC-3)', async ($, on) => {
+    const w = world(on, { task: null, statusFails: 'k: the workspace did not load' })
+    const text = await run($, 'k-approve', `${ID} --amendment A-3`)
+    expect(text).toBe(`Approved the amendment A-3 of ${ID}.\n${ID}: done\nNo turn followed in this session: k status failed: k: the workspace did not load`)
+    expect(await turns(w)).toEqual([])
+    expect(logged(w.files)).toEqual([{ t: Date.UTC(2026, 10, 7, 12, 0), session: 'sess-1', command: 'k-approve', header: 'No turn', text: ['k status failed: k: the workspace did not load'], question: 'The turn after /k-approve did not start', choices: [], tap: null, tAnswer: Date.UTC(2026, 10, 7, 12, 0), end: 'no turn' }])
+  })
+
+  test('a turn the engine drops after the answer toasts why and leaves a dialogs.jsonl row, never only the toast (gulnya/approval-turn-missing AC-3)', async ($, on) => {
+    const w = world(on, { submitRefused: 'the session is closing' })
+    expect(await run($, 'k-approve', ID)).toBe(`Approved ${ID}.\n${ID}: done`)
+    await w.clock.advance(10)
+    expect(w.submitted).toEqual([])
+    const [row, ...more] = logged(w.files)
+    expect(more).toEqual([])
+    expect(row).toMatchObject({ session: 'sess-1', command: 'k-approve', header: 'No turn', question: 'The turn after /k-approve did not start', choices: [], tap: null, end: 'no turn' })
+    expect(row?.text).toEqual(['dropped: the session is closing'])
+    expect(w.toasts).toEqual(['The turn after /k-approve did not start: dropped: the session is closing'])
+  })
+
+  test('another session\'s task gets no turn and no line about one: no turn is due (gulnya/approval-turn-missing E-3)', async ($, on) => {
+    const w = world(on, { task: 'weather/was-reviewed' })
+    expect(await run($, 'k-approve', ID)).toBe(`Approved ${ID}.\n${ID}: done`)
+    expect(await turns(w)).toEqual([])
+    expect(logged(w.files)).toEqual([])
+  })
 })

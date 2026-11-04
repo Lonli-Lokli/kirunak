@@ -211,7 +211,7 @@ What it shows and does, each from the skill's table of shapes:
   task's rows from a `k list --json` fixture on the terminal and the desktop; `/k-approve` and the other four with
   origin `sdk`, `plugin`, `peer`, `unclassified`, `peer-send-message`, `task-notification`, `scheduled-trigger` or
   `auto-continuation` are refused with a line and run nothing; with `composer` or `bridge` each runs its verb and the
-  state line prints; a `build-ended` event line toasts; `/k-done` is not registered; a `-p` run reads nothing.
+  state line prints, under a line naming what an approve, accept or resume took (gulnya/approval-turn-missing AC-2); a `build-ended` event line toasts; `/k-done` is not registered; a `-p` run reads nothing.
 
 ### The phone commands and the dialog (kirunak-phone, built 2026-10-21)
 
