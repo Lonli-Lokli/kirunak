@@ -34,7 +34,7 @@ const BLOCKED = {
 describe('picking by touch', () => {
   test('/k-approve: a one-line question, the ids as choices, each its state as its line, then the task in its own words above "Approve <id>", which runs k approve by id (gulnya/mobile-dialogs AC-23)', async ($, on) => {
     const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed'], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
-    expect(await run($, 'k-approve')).toBe('hub/proposed: queued, place 3')
+    expect(await run($, 'k-approve')).toBe('Approved hub/proposed.\nhub/proposed: queued, place 3')
     expect(w.asked).toEqual([
       { header: 'Approve', question: 'Waiting for you to approve: Which task?', labels: ['hub/proposed', 'Cancel'] },
       { header: 'Approve', question: 'hub/proposed: Asks for approval.\nState: proposed.\nk would approve it now.\nApprove it?', labels: ['Approve hub/proposed', 'Back'] },
@@ -139,8 +139,8 @@ describe('picking by touch', () => {
   test('from Remote Control, /k-approve\'s and /k-amendments\' dialogs run their verb by id, and every answer says it came from the phone', async ($, on) => {
     const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed', `${ID} A-3`, `Approve ${ID} A-3`, `${ID} A-4`, SKIP], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
     const bridge: PromptOrigin = { kind: 'bridge' }
-    expect(await run($, 'k-approve', '', bridge)).toBe('hub/proposed: queued, place 3\n(typed in Remote Control)')
-    expect(await run($, 'k-amendments', '', bridge)).toBe('hub/proposed: queued, place 3\n\n(typed in Remote Control)')
+    expect(await run($, 'k-approve', '', bridge)).toBe('Approved hub/proposed.\nhub/proposed: queued, place 3\n(typed in Remote Control)')
+    expect(await run($, 'k-amendments', '', bridge)).toBe(`Approved the amendment A-3 of ${ID}.\nhub/proposed: queued, place 3\n\n(typed in Remote Control)`)
     const skipped = await run($, 'k-amendments', '', bridge)
     expect(skipped).toMatch(/^Nothing ran: skipped\.\n\n2 amendments wait for your approval:\n/)
     expect(skipped).toMatch(/\n\n\(typed in Remote Control\)$/)
@@ -334,7 +334,7 @@ describe('the dialog log', () => {
 
   test('an unwritable state folder records nothing and changes no answer', async ($, on) => {
     const w = world(on, { unwritable: true, taps: ['hub/proposed', 'Approve hub/proposed'], verb: { exitCode: 0, stdout: 'hub/proposed: queued, place 3\n', stderr: '' } })
-    expect(await run($, 'k-approve')).toBe('hub/proposed: queued, place 3')
+    expect(await run($, 'k-approve')).toBe('Approved hub/proposed.\nhub/proposed: queued, place 3')
     expect(w.files).toEqual({})
     expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
   })

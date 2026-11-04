@@ -66,7 +66,7 @@ describe('the owner-only rule (kirunak-phone AC-4)', () => {
     const w = world(on, { taps: [...typed('approve hub/proposed'), ...typed('Approve hub/proposed '), ...typed('Approve  hub/proposed'), ...typed('Approve hub/proposed')] })
     for (let i = 0; i < 3; i++) expect((await run($, 'k-approve')).split('\n')[0]).toBe('Nothing ran: the answer was none of the choices.')
     expect(w.runs).toEqual([])
-    expect(await run($, 'k-approve')).toBe(`${ID}: done`)
+    expect(await run($, 'k-approve')).toBe(`Approved hub/proposed.\n${ID}: done`)
     expect(w.runs.map(argv => argv.slice(2))).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
   })
 

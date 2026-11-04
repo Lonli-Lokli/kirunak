@@ -71,7 +71,7 @@ describe('the lists as answers', () => {
     expect(await run($, 'k-approve-amendment', '1 --first')).toBe('/k-approve-amendment 1 --first: unexpected --first. Nothing ran.')
     expect(await run($, 'k-approve-amendment', `${ID} A-3`)).toBe(`/k-approve-amendment ${ID} A-3: which one? give its number from /k-amendments. Nothing ran.`)
     expect(w.runs).toEqual([])
-    expect(await run($, 'k-approve-amendment', '2', { kind: 'bridge' })).toBe(`${ID}: done\n(typed in Remote Control)`)
+    expect(await run($, 'k-approve-amendment', '2', { kind: 'bridge' })).toBe(`Approved the amendment A-4 of ${ID}.\n${ID}: done\n(typed in Remote Control)`)
     expect(w.runs.map(argv => argv.slice(2))).toEqual([['approve', ID, '--amendment', 'A-4', '--via', 'mod']])
   })
 

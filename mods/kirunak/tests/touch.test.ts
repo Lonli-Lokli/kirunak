@@ -85,7 +85,7 @@ const RESUMED = { exitCode: 0, stdout: 'hub/paused: resumed\n', stderr: '' }
 describe('resuming by touch (A-12, AC-18)', () => {
   test('/k-resume with no id: the tasks on hold, each its id and state; the one picked shows its title and state above "Resume <id>", which runs k resume by id as the last tap', async ($, on) => {
     const w = world(on, { rows: [...ROWS, ...HELD], taps: ['hub/paused', 'Resume hub/paused'], verb: RESUMED })
-    expect(await run($, 'k-resume', '', { kind: 'bridge' })).toBe('hub/paused: resumed\n(typed in Remote Control)')
+    expect(await run($, 'k-resume', '', { kind: 'bridge' })).toBe('Took hub/paused off hold.\nhub/paused: resumed\n(typed in Remote Control)')
     expect(w.asked).toEqual([
       { header: 'Resume', question: 'Tasks on hold: Which task?', labels: ['hub/paused', 'weather/held'] },
       { header: 'Resume', question: `${PAUSED}\nTake it off hold?`, labels: ['Resume hub/paused', 'Back'] },
@@ -96,7 +96,7 @@ describe('resuming by touch (A-12, AC-18)', () => {
 
   test('/k-resume <id> typed runs k resume at once, with no --via and no reason; anything after the id runs nothing', async ($, on) => {
     const w = world(on, { rows: [...ROWS, ...HELD], verb: RESUMED })
-    expect(await run($, 'k-resume', 'hub/paused')).toBe('hub/paused: resumed')
+    expect(await run($, 'k-resume', 'hub/paused')).toBe('Took hub/paused off hold.\nhub/paused: resumed')
     expect(await run($, 'k-resume', 'hub/paused the parts came')).toBe('/k-resume: unexpected the parts came. Nothing ran. Usage: /k-resume [<id>]')
     expect(await run($, 'k-resume', 'hub/paused --why x')).toBe('/k-resume: /k-resume takes no --why. Nothing ran. Usage: /k-resume [<id>]')
     expect([w.asked, verbs(w.runs)]).toEqual([[], [['resume', 'hub/paused']]])
