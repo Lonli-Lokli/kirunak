@@ -42,7 +42,8 @@ lib/git.mjs                 show(root, ':path') ; commit(root, paths, message, e
 plugins/storage-git.mjs     the `storage` seam over lib/git.mjs and the filesystem (plugins.md §2)
 plugins/handoff-notes.mjs   the default `handoff`: handoff.md in the task folder; releases the session file (review.md §4)
 hooks/kirunak-freeze.mjs    PreToolUse: export decide(input) → reason | null; main reads stdin (approval.md §2)
-hooks/git-pre-commit.mjs    export check({ staged: [path], show: fn, env }) → [problems]; main runs in the repo
+hooks/git-pre-commit.mjs    export check({ staged: [path], show: fn, env, merging, base }) → [problems]; show answers
+                            :path, HEAD:path and, while merging, MERGE_HEAD:path and <base>:path; main runs in the repo
 skills/k-intake/SKILL.md    the interview (intake.md §1, §2), under 120 lines, its own method, loads no other skill
 skills/k-done/SKILL.md      closing (review.md §4), under 60 lines
 templates/task.md           the skeleton `k intake start` writes

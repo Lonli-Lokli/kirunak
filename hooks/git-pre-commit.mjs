@@ -12,9 +12,10 @@ import { costMarkdown } from '../lib/cost-md.mjs';
 // 3. a staged intake.md is not an append of the committed one (or, removed, of the one `k bug from` moved);
 // 4. a staged cost.md is not the rendering of its done.json's cost (`k cost <id> --write` writes it again).
 // The owner's commands set those variables on the one `git commit` they run. A mistake guard, not a lock.
-// While a merge is under way, a record of 2 staged exactly as the merged-in commit (MERGE_HEAD) holds it passes: that
-// commit put it there through this hook, so the merge only takes it (bug gulnya/merge-refuses-owner-records). A removal
-// passes only as git's own merge makes it: MERGE_HEAD has no such record and HEAD's is the merge base's, unchanged.
+// While a merge is under way, a record of 2 passes when HEAD holds it as at the merge base, untouched on this branch,
+// and it is staged exactly as the merged-in commit (MERGE_HEAD) holds it, or removed where MERGE_HEAD has none: that
+// commit wrote it through this hook, so the merge only takes it (bug gulnya/merge-refuses-owner-records). A record the
+// branch changed is never rolled back to the other side's copy by a merge.
 // `ownerRecord` tells the SLAP hook (git-prepare-commit-msg.mjs) which paths are those records, from the same patterns.
 
 const TASK = /^kirunak\/tasks\/([^/]+)\/task\.md$/;
@@ -60,8 +61,9 @@ export function check({ staged, show, env = process.env, merging = false, base =
     if (!merging) return false;
     const ours = read(`:${path}`);
     const theirs = read(`MERGE_HEAD:${path}`);
-    if (ours != null) return same(ours, theirs);
-    return theirs == null && base != null && same(read(`HEAD:${path}`), read(`${base}:${path}`));
+    // HEAD must hold the record as at the merge base: else the merge would roll back what the branch wrote.
+    const kept = base != null && same(read(`HEAD:${path}`), read(`${base}:${path}`));
+    return kept && (ours != null ? same(ours, theirs) : theirs == null);
   };
   const byOwner = (slug) => OWNER_VARS.some((v) => names(env[v], slug));
   const problems = [];

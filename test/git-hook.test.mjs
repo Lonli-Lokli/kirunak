@@ -951,3 +951,24 @@ test('a merge of master that takes a record master removed passes (bug gulnya/me
   const r = spawnSync('git', ['commit', '-q', '--no-edit'], { cwd: dir, env: cleanEnv(), encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
 });
+
+// A record staged as MERGE_HEAD holds it passes only when the branch left it as at the merge base: a merge that rolls
+// back what the owner's command wrote on the branch is refused (review-2 of bug gulnya/merge-refuses-owner-records).
+test('a merge that rolls a record the branch changed back to master\'s is refused (bug gulnya/merge-refuses-owner-records)', () => {
+  const dir = makeRepo();
+  const OTHER = 'kirunak/approvals/radar-tiles.json';
+  put(dir, OTHER, '{"task":"weather/radar-tiles","hash":"old"}\n');
+  assert.equal(commit(dir, { KIRUNAK_APPROVING: 'weather/radar-tiles' }).status, 0);
+  git(dir, ['checkout', '-q', '-b', 'task-branch']);
+  put(dir, OTHER, '{"task":"weather/radar-tiles","hash":"new"}\n');
+  assert.equal(commit(dir, { KIRUNAK_APPROVING: 'weather/radar-tiles' }).status, 0);
+  git(dir, ['checkout', '-q', 'master']);
+  put(dir, 'src.txt', 'master work\n');
+  assert.equal(commit(dir).status, 0);
+  git(dir, ['checkout', '-q', 'task-branch']);
+  git(dir, ['merge', '-q', '--no-ff', '--no-commit', 'master']);
+  git(dir, ['checkout', 'MERGE_HEAD', '--', OTHER]);
+  const r = spawnSync('git', ['commit', '-q', '--no-edit'], { cwd: dir, env: cleanEnv(), encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /radar-tiles\.json: written by the owner's command only/);
+});
