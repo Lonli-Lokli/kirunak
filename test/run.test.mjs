@@ -146,7 +146,9 @@ test('a step compacts where it did before the handover: the user\'s own window f
 });
 
 test('no --model or --effort when neither the plan nor the config names one; the plan line, then models.<kind>', async () => {
-  const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]', '### S-2 Restart keeps it [agent, opus, high]'));
+  // S-1 runs on Sonnet once models.agent names it, and a Sonnet step needs its verify line (VERIFY_SINCE).
+  const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]', '### S-2 Restart keeps it [agent, opus, high]')
+    .replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nverify: true\n'));
   const fake = fakeClaude();
   w.ws.seams.runner = runnerClaude(w.ws, { bin: fake.bin }).provides.runner;
   await run({ ws: w.ws, id: w.id });
