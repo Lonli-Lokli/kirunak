@@ -119,9 +119,14 @@ describe('the lists as answers', () => {
     expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**: Age line in words'])
   })
 
+  test('/k-amendments lists what waits when k waiting takes minutes on a loaded Mac, as long as the verbs may (bug gulnya/mod-waiting-timeout-under-load)', async ($, on) => {
+    world(on, { waitingMs: 599_000 })
+    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**: Age line in words'])
+  })
+
   test('a k waiting that never answers is named, with the host\'s words, in every list that reads it, never the generic failure', async ($, on) => {
     world(on, { waitingMs: Number.POSITIVE_INFINITY })
-    const gave = 'k waiting gave no answer in 60 s: aborted: still running after 60000ms'
+    const gave = 'k waiting gave no answer in 600 s: aborted: still running after 600000ms'
     expect(await run($, 'k-amendments')).toBe(gave)
     for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start']) expect(await run($, command)).toContain(gave)
   })

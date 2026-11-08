@@ -297,9 +297,10 @@ more` in place of the rest (A-1; `k accept` and `k waiting` in the terminal show
 `blocking` shows none. `k approve`
 and `k hold` take `--dry-run`, which makes every check and writes nothing. A row says "can approve" or "can accept"
 where it said "ready". The mod's lists (`/k-amendments`, and `/k-approve`, `/k-accept`, `/k-hold` and `/k-start` with
-no id) give `k waiting --json` 60 s, past the host's default of 30 s, and one that times out or throws answers `k
-waiting gave no answer in 60 s: <the host's first line>`, never the generic failure (bug
-gulnya/k-amendments-waiting-timeout; `mods/kirunak/tests/answers.test.ts`). Evidence: `test/waiting.test.mjs`. Known gap:
+no id) give `k waiting --json` 600 s, as long as the verbs they lead to, past the host's default of 30 s, so a slow Mac
+delays an approval instead of refusing it, and one that times out or throws answers `k waiting gave no answer in 600 s:
+<the host's first line>`, never the generic failure (bugs gulnya/k-amendments-waiting-timeout and
+gulnya/mod-waiting-timeout-under-load; `mods/kirunak/tests/answers.test.ts`). Evidence: `test/waiting.test.mjs`. Known gap:
 `k start` refuses no state, so the start list is narrower than the verb, and `k approve` does not refuse an amendment
 to a done task.
 
