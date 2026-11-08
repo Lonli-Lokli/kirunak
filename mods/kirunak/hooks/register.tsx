@@ -39,9 +39,11 @@ const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
 // shows no such list (review G25).
 const offered: Partial<Record<'approve' | 'accept', string[]>> & { amendments?: AmendmentRow[] } = {}
 
-// How long a list waits for `k waiting --json`: it took 9 to 10 s on a loaded Mac, and the host gives a call that names
-// no timeout 30 s (bug gulnya/k-amendments-waiting-timeout).
-const WAITING_MS = 60_000
+// How long a list waits for `k waiting --json`: as long as the verbs it leads to (owner.ts's COMMIT_MS, the host's
+// most), so a slow Mac delays an approval instead of refusing it. The host gives a call that names no timeout 30 s, and
+// k waiting took 9 to 10 s on a loaded Mac (bug gulnya/k-amendments-waiting-timeout), then over 60 s under memory
+// pressure, 28 s once it eased (bug gulnya/mod-waiting-timeout-under-load).
+const WAITING_MS = 600_000
 
 // What `k waiting --json` says, or why it said nothing: a call that timed out or threw is named with the host's first
 // line, never left to the hook's generic failure (bug gulnya/k-amendments-waiting-timeout).
