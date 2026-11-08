@@ -73,7 +73,9 @@ function fakeRunner(w, act = () => 'write') {
         child.on('exit', (code, signal) => {
           const what = act(step, n, w, child.pid);
           if (what === 'write') for (const o of OUTPUTS[step.env.KIRUNAK_STEP]) put(w, o);
-          resolve({ exitCode: what === 'exit 1' ? 1 : signal ? 143 : 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: sessionId, total_cost_usd: 0.1, usage: RUN_USAGE } });
+          // 'cap <subtype>': claude's own cap cut the run off (--max-budget-usd, --max-turns), as claude -p ends then.
+          const cap = typeof what === 'string' && what.startsWith('cap ') ? what.slice(4) : null;
+          resolve({ exitCode: what === 'exit 1' || cap ? 1 : signal ? 143 : 0, result: { type: 'result', subtype: cap || 'success', is_error: !!cap, num_turns: 3, session_id: sessionId, total_cost_usd: 0.1, usage: RUN_USAGE } });
         }),
       );
       return { pid: child.pid, sessionId, done };
@@ -300,16 +302,18 @@ test('a Sonnet step whose Opus attempt fails: Fable designs it (design-1.md its 
   assert.ok(waiting.one.length <= 200 && !waiting.one.includes('\n'));
 });
 
-test('a timeout counts as a failure, so the step climbs (E-2)', async () => {
+test('a timeout is the budget\'s minutes running out: the step resumes once in its own conversation with half more minutes, and climbs nothing (gulnya/budget-cap-counts-as-failure)', async () => {
   const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nbudget: 0.005 minutes\n'));
-  const calls = fakeRunner(w, (step, n) => (n <= 2 ? 'nothing' : 'write'));
+  const calls = fakeRunner(w, (step, n) => (n === 1 ? 'nothing' : 'write'));
   const original = w.ws.seams.runner.start;
   let n = 0;
-  w.ws.seams.runner.start = (step) => original({ ...step, sleep: ++n <= 2 ? '30' : '0.05' });
-  await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
-  assert.deepEqual(calls.slice(0, 3).map((c) => c.model), [null, null, 'opus']);
-  assert.equal((progress(w).match(/S-1 failed: no end within the budget's 0\.005 minutes\n/g) || []).length, 2);
-  assert.match(progress(w), /S-1 escalated: to opus \(high, build\) after 2 failures on sonnet\n.*S-1 started .*\n.*S-1 finished\n/);
+  w.ws.seams.runner.start = (step) => original({ ...step, sleep: ++n === 1 ? '30' : '0.05' });
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.deepEqual(r.states, BOTH);
+  assert.deepEqual([calls[1].model, calls[1].resume], [null, calls[0].sessionId], 'the same conversation, on its own rung');
+  assert.match(calls[1].prompt, /^no end within the budget's 0\.005 minutes cut your run off; your budget is raised by half/);
+  assert.match(progress(w), /S-1 failed: unfinished: no end within the budget's 0\.005 minutes\n.*S-1 resumed \(session [0-9a-f-]{36}\): unfinished, half more budget\n.*S-1 finished\n/);
+  assert.ok(!/escalated/.test(progress(w)), 'a timeout climbs nothing');
 });
 
 test('a stop is not a failure: after an own failure and a stop the step retries on its own rung, and climbs after its second own failure (E-3)', async () => {
@@ -432,7 +436,7 @@ test('a start whose fault is fixed while it waits for its next try goes on by it
   assert.match(r.stopped, /^S-3 waits for the owner/);
 });
 
-test('a run past its budget minutes is killed and fails, rather than hanging', async () => {
+test('a run past its budget minutes is killed, rather than hanging; killed again after its one resume, it stops for the owner', async () => {
   const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\n', 'outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv\nbudget: 0.005 minutes\n'));
   fakeRunner(w, () => 'nothing');
   const original = w.ws.seams.runner.start;
@@ -440,7 +444,7 @@ test('a run past its budget minutes is killed and fails, rather than hanging', a
   const t0 = Date.now();
   await run({ ws: w.ws, id: w.id });
   assert.ok(Date.now() - t0 < 10000);
-  assert.match(progress(w), /S-1 failed: no end within the budget's 0\.005 minutes\n$/);
+  assert.match(progress(w), /S-1 failed: unfinished: no end within the budget's 0\.005 minutes\n.*S-1 resumed .*\n.*S-1 failed: unfinished: no end within the budget's 0\.0075 minutes\n.*S-1 escalated: stopped for the owner, stopped unfinished after its resume with half more budget\n$/);
 });
 
 test('needs.json heavy: the guard runs the job while running/ holds no pid of the step, then the same conversation resumes', async () => {
@@ -598,6 +602,31 @@ test('a step that stops unfinished again after its one resume stops for the owne
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
   assert.ok(!/escalated: to /.test(progress(w)), 'no climb');
   assert.equal(pushes(lines).length, 1, 'the owner gets a push');
+});
+
+test('a run cut off by claude\'s budget cap takes the unfinished path: one resume in its own conversation with half more budget, no failure of its own, no climb (gulnya/budget-cap-counts-as-failure)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, (step, n) => (n === 1 ? 'cap error_max_budget_usd' : 'write'));
+  const r = await watch(w);
+  assert.deepEqual(r.states, BOTH);
+  assert.equal(calls[1].resume, calls[0].sessionId, 'the resume is the same conversation');
+  assert.deepEqual([calls[1].maxTurns, calls[1].maxBudgetUsd], [147, 4.4], 'half more calls and money');
+  assert.match(calls[1].prompt, /^claude's budget cap \(error_max_budget_usd\) cut your run off; your budget is raised by half for this one resume: finish what is left/);
+  assert.match(progress(w), /S-1 failed: unfinished: cut off by claude's budget cap \(error_max_budget_usd\)\n.*S-1 resumed \(session [0-9a-f-]{36}\): unfinished, half more budget\n.*S-1 finished\n.*S-2 started/);
+  assert.doesNotMatch(progress(w), /failed: exit 1/);
+  assert.ok(!/escalated/.test(progress(w)), 'a cap climbs nothing');
+});
+
+test('a run cut off by claude\'s turn cap again after its one resume stops for the owner, with no climb (gulnya/budget-cap-counts-as-failure)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const calls = fakeRunner(w, () => 'cap error_max_turns');
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(calls.length, 2, 'one resume, no more');
+  assert.equal(calls[1].resume, calls[0].sessionId);
+  assert.equal(r.stopped, 'S-1 stopped unfinished after its resume with half more budget; the owner decides: read steps/S-1/failure-2.md');
+  assert.deepEqual([r.states['S-1'], r.states['S-2']], ['escalated', 'pending']);
+  assert.match(progress(w), /S-1 failed: unfinished: cut off by claude's turn cap \(error_max_turns\)\n/);
+  assert.ok(!/escalated: to /.test(progress(w)), 'no climb');
 });
 
 test('a step that ends cleanly after its last heavy job failed is not done: it fails naming the job (gulnya/budget-stop-marked-done)', async () => {
