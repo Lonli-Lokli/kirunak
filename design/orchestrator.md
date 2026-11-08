@@ -100,7 +100,7 @@ outputs: review.md
 pending  →  ready  →  running  →  done
                         │  ↘ waiting-heavy → (heavy job runs, no agent) → running (resumed)
                         │  ↘ waiting-owner
-                        └→ failed (exit ≠ 0, timeout, budget, missing outputs, verify failed)
+                        └→ failed (exit ≠ 0, missing outputs, verify failed; unfinished: budget, its caps, timeout)
 ```
 
 - `pending`: an input is missing or a `needs:` step is not done. `ready`: every input exists, every `needs:` is
@@ -149,7 +149,12 @@ pending  →  ready  →  running  →  done
   unfinished, half more budget`, its budget's calls, minutes and USD raised by half for every later run of that
   conversation (`budgetOf` is the conversation's total, so a resume without a raise would have almost nothing left).
   Running out of budget means the job was bigger than planned, not that the model was wrong: it is not one of the
-  step's own failures and climbs nothing. Stopped unfinished again, the step stops for the owner, marked
+  step's own failures and climbs nothing. A run cut off by the budget's own caps before it could write `needs.json`
+  takes the same path (gulnya/budget-cap-counts-as-failure): claude's `--max-budget-usd` (`error_max_budget_usd`)
+  fails it with `unfinished: cut off by claude's budget cap (error_max_budget_usd)`, its `--max-turns`
+  (`error_max_turns`) with `unfinished: cut off by claude's turn cap (error_max_turns)`, and the orchestrator's kill
+  at the budget's minutes with `unfinished: no end within the budget's <n> minutes`; the resume's prompt names the cap
+  in place of what is left. Stopped unfinished again, the step stops for the owner, marked
   `[escalate]` as past the top rung: "S-n stopped unfinished after its resume with half more budget; the owner
   decides". Kirunak also catches a run that forgets: one that ends cleanly while the last heavy job its conversation
   ran since its `started` line ended non-zero fails with `its last check failed (steps/S-n/heavy-<k>.json)`, an own
