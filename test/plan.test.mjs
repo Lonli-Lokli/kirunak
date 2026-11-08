@@ -107,6 +107,19 @@ test('a review step reading more than task, diff and evidence/ fails k plan chec
   assert.deepEqual(problemsOf(w, PLAN), []);
 });
 
+// The brief's other refusal (review-1 of gulnya/plan-check-review-inputs): a review whose outputs name no review file.
+test('a review step whose outputs name no review file fails k plan check, as its brief would', async () => {
+  const w = await fixture();
+  writeFileSync(join(w.p.dir, 'review.md'), 'an earlier review\n');
+  const none = PLAN.replace('inputs: task, diff, evidence/\noutputs: review.md', 'inputs: task, diff, evidence/\noutputs: report.md');
+  assert.notEqual(none, PLAN);
+  assert.deepEqual(problemsOf(w, none), ['S-3 is a review: its outputs name no review file (review.md, review-2.md, ...)']);
+  const both = PLAN.replace('inputs: task, diff, evidence/\noutputs: review.md', 'inputs: task, diff, evidence/, review.md\noutputs: report.md');
+  assert.deepEqual(problemsOf(w, both), [
+    'S-3 is a review: review.md is outside its three inputs (task, diff, evidence/); its outputs name no review file (review.md, review-2.md, ...)',
+  ]);
+});
+
 test('an unknown id fails', async () => {
   const w = await fixture();
   assert.deepEqual(problemsOf(w, PLAN.replace('AC-2, E-1', 'AC-2, E-1, E-3')), ['S-1 covers E-3, which the task does not have']);
