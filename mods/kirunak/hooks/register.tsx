@@ -39,14 +39,32 @@ const board = atom({ plugin: 'kirunak', key: 'board' } as const, null)
 // shows no such list (review G25).
 const offered: Partial<Record<'approve' | 'accept', string[]>> & { amendments?: AmendmentRow[] } = {}
 
+// How long a list waits for `k waiting --json`: it took 9 to 10 s on a loaded Mac, and the host gives a call that names
+// no timeout 30 s (bug gulnya/k-amendments-waiting-timeout).
+const WAITING_MS = 60_000
+
+// What `k waiting --json` says, or why it said nothing: a call that timed out or threw is named with the host's first
+// line, never left to the hook's generic failure (bug gulnya/k-amendments-waiting-timeout).
+async function readWaiting($: EngineInterface, k: string): Promise<Waiting | string> {
+  let r
+  try {
+    r = await $.process.run(['node', k, 'waiting', '--json'], { timeoutMs: WAITING_MS })
+  } catch (err) {
+    const words = (reason(err).split('\n')[0] ?? '').replace(/^.*?\$\.process\.run\([^)]*\) /, '')
+    return `k waiting gave no answer in ${WAITING_MS / 1000} s: ${words}`
+  }
+  if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
+  return JSON.parse(r.stdout) as Waiting
+}
+
 // `/k-approve` or `/k-accept` with no id: what waits for that verb, kept for a number, as the dialog's choices
 // (kirunak-phone AC-3); when nothing ran, the answer says why and shows the list as a number takes it.
 async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept'): Promise<string | Outcome> {
-  const r = await $.process.run(['node', turn.k, 'waiting', '--json'])
   // A list that could not be read leaves none to pick from, never the one before it (review G27).
   delete offered[verb]
-  if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
-  const rows = (JSON.parse(r.stdout) as Waiting)[verb]
+  const w = await readWaiting($, turn.k)
+  if (typeof w === 'string') return w
+  const rows = w[verb]
   offered[verb] = rows.map(row => row.id)
   if (!rows.length) return offerText(verb, rows)
   const out = await turn.dialog(verb === 'approve' ? approveScreen(rows) : acceptScreen(rows))
@@ -57,9 +75,9 @@ async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept')
 // (kirunak-phone AC-10, AC-11). k start records this session as the task's, so its id is read before the dialog opens,
 // and the pane opens once k took it, as after the typed /k-start.
 async function pickTask($: EngineInterface, turn: Turn, verb: 'hold' | 'start'): Promise<string | Outcome> {
-  const r = await $.process.run(['node', turn.k, 'waiting', '--json'])
-  if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
-  const rows = (JSON.parse(r.stdout) as Waiting)[verb] ?? []
+  const w = await readWaiting($, turn.k)
+  if (typeof w === 'string') return w
+  const rows = w[verb] ?? []
   if (!rows.length) return verb === 'hold' ? 'No task can be put on hold now.' : 'No task to start: every task is done or on hold.'
   const first = verb === 'hold'
     ? holdScreen(rows)
@@ -145,9 +163,9 @@ async function amendments($: EngineInterface, turn: Turn): Promise<string | Outc
   if (args.trim() === '') {
     // A list that could not be read leaves none to pick from, never the one before it (review G27).
     delete offered.amendments
-    const r = await $.process.run(['node', k, 'waiting', '--json'])
-    if (r.exitCode !== 0) return `k waiting did not answer: ${firstLine(r)}`
-    const rows = (offered.amendments = (JSON.parse(r.stdout) as Waiting).amendments)
+    const w = await readWaiting($, k)
+    if (typeof w === 'string') return w
+    const rows = (offered.amendments = w.amendments)
     if (!rows.length) return amendmentsText(rows)
     // The ones this session wrote: their approval, or its refusal, gets a turn here (turns.ts).
     noteAuthors(rows, await $.session.id().catch(() => ''))

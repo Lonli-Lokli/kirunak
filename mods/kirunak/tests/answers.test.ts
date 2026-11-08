@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { KirunakRow } from '../types'
 
-import { ID, ROWS, WAITING, world } from './world'
+import { HOST_RUN_MS, ID, ROWS, WAITING, world } from './world'
 
 const run = async ($: Engine, command: string, args = '', origin: PromptOrigin = { kind: 'composer' }): Promise<string> =>
   (await $.command.run({ command, args, origin, presentation: { isFullscreen: false, columns: 120 } })).text ?? ''
@@ -112,6 +112,18 @@ describe('the lists as answers', () => {
     world(on, { verbFails: 'timed out after 600000 ms' })
     await run($, 'k-amendments')
     expect(await run($, 'k-approve-amendment', '1')).toMatch(/^\/k-approve-amendment: k did not finish \((?!kirunak)[^]*timed out after 600000 ms\); `k list --all` says whether it took\.$/)
+  })
+
+  test('/k-amendments lists what waits when k waiting takes longer than the host\'s default 30 s (bug gulnya/k-amendments-waiting-timeout)', async ($, on) => {
+    world(on, { waitingMs: HOST_RUN_MS + 1_000 })
+    expect((await run($, 'k-amendments')).split('\n').slice(0, 5)).toEqual(['Nothing ran: dismissed.', '', '2 amendments wait for your approval:', '', '1. **weather/offline-forecast A-3**: Age line in words'])
+  })
+
+  test('a k waiting that never answers is named, with the host\'s words, in every list that reads it, never the generic failure', async ($, on) => {
+    world(on, { waitingMs: Number.POSITIVE_INFINITY })
+    const gave = 'k waiting gave no answer in 60 s: aborted: still running after 60000ms'
+    expect(await run($, 'k-amendments')).toBe(gave)
+    for (const command of ['k-approve', 'k-accept', 'k-hold', 'k-start']) expect(await run($, command)).toContain(gave)
   })
 
   test('a list whose hook fails says so in the mod\'s own line', async ($, on) => {

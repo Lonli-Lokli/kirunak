@@ -149,6 +149,9 @@ export const status = (task: string | null): KirunakStatus => ({
 
 type Answer = { exitCode: number; stdout: string; stderr: string }
 
+// How long the host lets $.process.run take when the call names no timeout (claude 2.1.319: 30 s, at most 600 s).
+export const HOST_RUN_MS = 30_000
+
 // A dialog the mod opened: its question, choices and chip.
 export type Asked = { question: string; labels: string[]; header: string }
 
@@ -165,11 +168,12 @@ export type Asked = { question: string; labels: string[]; header: string }
 // left dismisses it; each dialog's choices' lines by label, as the call reached the engine (`lines`, gulnya/mobile-dialogs
 // AC-17); the environment (`env`: KIRUNAK_HOME unset, HOME /home/dev unless a test gives its own) and the
 // files the mod wrote (`files`, read back by fs.read; `unwritable` refuses every write); `statusFails`, k status
-// failing with those words, and `submitRefused`, a prompt.submit hook dropping every prompt the mod submits with them.
+// failing with those words, `submitRefused`, a prompt.submit hook dropping every prompt the mod submits with them,
+// and `waitingMs`, how long each `k waiting` takes (refused past the call's timeout).
 // A tap that looks first: given the dialog's questions, it answers as a tap of `taps` does.
 export type Tap = (questions: unknown[]) => Promise<string | null>
 
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null | Tap)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[], statusFails = null as string | null, submitRefused = null as string | null } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null | Tap)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[], statusFails = null as string | null, submitRefused = null as string | null, waitingMs = 0 } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], lines: [] as Record<string, string>[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, bugReads: 0, quadReads: 0, described: {} as Record<string, string>, submitted: [] as { text: string; origin: PromptOrigin }[] }
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e) => {
@@ -240,6 +244,10 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
     } else if (what === 'waiting') {
       w.waits++
+      // `waitingMs`: how long k waiting takes; past the call's timeout (the host's 30 s when the call gives none) the
+      // host gives up on it, as $.process.run rejects.
+      const limit = e.init?.timeoutMs ?? HOST_RUN_MS
+      if (waitingMs > limit) return { deny: `$.process.run(node) aborted: still running after ${limit}ms` }
       // Each `k waiting` takes the next answer, the last one again once they run out; null is a k that failed.
       const next = waiting.length > 1 ? waiting.shift() : waiting[0]
       answer = next ? { exitCode: 0, stdout: JSON.stringify(next), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'k: the workspace did not load\n' }
