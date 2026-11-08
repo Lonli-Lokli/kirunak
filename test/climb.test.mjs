@@ -18,6 +18,7 @@ blocked-by: []
 covers: AC-1, AC-2, E-1, D-1
 inputs: task, docs/offline.md
 outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv
+verify: true
 ${extra}
 ### S-2 Review [review]
 needs: S-1
