@@ -54,7 +54,10 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   tree when one is a root commit), over their paths besides kirunak's records, each diffed once. `<name>` is the
   workspace's name for the repo or its folder's, `-2` for a second of the same name; a repo where the task's commits
   touch only records gets no patch. A `repos.md` line naming the task's own repo adds its commits' files to
-  `diff.patch`, whatever task they name. A `repos.md` line kirunak cannot read stops the brief and the review step's
+  `diff.patch`, whatever task they name, and gives them a patch of their own, `in/repos/<own repo>.patch`, read at
+  the tip holding the most of them as another repo's is: `diff.patch` is read on the branch holding the task's
+  folder, which may never hold that work (the bug gulnya/review-own-repo-range-empty). It is written even when that
+  branch holds the range too, and its commits naming no task are listed once, with the own change's. A `repos.md` line kirunak cannot read stops the brief and the review step's
   start (E-6), and so does a branch line whose start it cannot tell, rather than adding nothing (`task-files.md` §3).
 - **What the brief says of them** (`templates/review-brief.md`): `diff.patch` is the own change from the first
   approval to head. When the task was amended, it names the last amendment and its approval, the newest commit of

@@ -188,3 +188,29 @@ test('a repos.md branch line whose start kirunak cannot tell refuses rather than
   hand(w, 'hub merged');
   await assert.rejects(brief(w), /line 4, "- hub merged": kirunak cannot tell where merged began, .* having no default branch of its own/);
 });
+
+test('a range of the task\'s own repo on a branch other than the folder\'s comes as its own patch, not an empty diff.patch (bug gulnya/review-own-repo-range-empty)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const from = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  sh(w.weather, 'git', ['checkout', '-qb', 'code']);
+  work(w.weather, 'src/cache.txt', 'three days\n', 'src/cache.txt: names nothing');
+  const to = work(w.weather, 'src/zoom.txt', 'zoom\n', 'src/zoom.txt: names nothing');
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  hand(w, `weather ${from}..${to}`);
+  const { text } = await brief(w);
+  assert.equal(readFileSync(join(inDir(w), 'diff.patch'), 'utf8'), '', 'the folder\'s branch never changed those files');
+  assert.deepEqual(files(patchOf(w, 'weather')), ['src/cache.txt', 'src/zoom.txt']);
+  assert.ok(text.includes(`\`kirunak/tasks/offline-forecast/steps/S-2/in/repos/weather.patch\`: repos.md's lines in the task's own repo, weather`), 'the brief names the patch');
+  assert.ok(text.includes(`from ${from} to ${to} (${to})`));
+  assert.deepEqual(given(w).repos, [], 'given.json\'s repos stay the other repos');
+});
+
+test('an own-repo range already merged into the folder\'s branch still comes as its own patch (bug gulnya/review-own-repo-range-empty, edge case)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const from = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const to = work(w.weather, 'src/cache.txt', 'three days\n', 'src/cache.txt: names nothing');
+  hand(w, `weather ${from}..${to}`);
+  await brief(w);
+  assert.deepEqual(files(readFileSync(join(inDir(w), 'diff.patch'), 'utf8')), ['src/cache.txt']);
+  assert.deepEqual(files(patchOf(w, 'weather')), ['src/cache.txt']);
+});
