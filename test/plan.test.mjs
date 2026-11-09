@@ -46,6 +46,21 @@ async function fixture() {
 
 const problemsOf = (w, text) => checkPlan(parsePlan(text), w.task, w.p).map((x) => x.problem);
 
+test('a [heavy] step may state expect-minutes; none is null; one that is no number or is over the step\'s max is refused (gulnya/heavy-queue-nearest-done E-1, E-3)', () => {
+  const stated = parsePlan(PLAN.replace('max-minutes: 10\n', 'max-minutes: 10\nexpect-minutes: 4\n'));
+  assert.deepEqual(stated.problems, []);
+  assert.equal(stated.steps[1].expectMinutes, 4);
+  assert.equal(parsePlan(PLAN).steps[1].expectMinutes, null, 'none stated: the guard reads the max');
+  const over = parsePlan(PLAN.replace('max-minutes: 10\n', 'max-minutes: 10\nexpect-minutes: 12\n'));
+  assert.deepEqual(over.problems.map((x) => x.problem), ['S-2: expect-minutes 12 is larger than its max of 10 minutes']);
+  const noMax = parsePlan(PLAN.replace('max-minutes: 10\n', 'budget: 30 minutes\nexpect-minutes: 31\n'));
+  assert.deepEqual(noMax.problems.map((x) => x.problem), ['S-2: expect-minutes 31 is larger than its max of 30 minutes'], 'with no max-minutes, the budget\'s minutes are the max');
+  for (const bad of ['0', 'soon', '-3']) {
+    const r = parsePlan(PLAN.replace('max-minutes: 10\n', `max-minutes: 10\nexpect-minutes: ${bad}\n`));
+    assert.deepEqual(r.problems.map((x) => x.problem), ['S-2: expect-minutes is a number of minutes'], bad);
+  }
+});
+
 test('the plan of the design parses: kinds, model, effort, lists, budget', () => {
   const { front, steps, problems } = parsePlan(PLAN);
   assert.deepEqual(problems, []);

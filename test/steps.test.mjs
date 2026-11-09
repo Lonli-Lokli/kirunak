@@ -262,6 +262,21 @@ test('needs.json: heavy, owner and unfinished requests parse, anything else is a
   assert.match(needs({}).error, /none of heavy, owner and unfinished/);
 });
 
+test('needs.json heavy: expectMinutes is optional; one that is no number or is over maxMinutes is an error (gulnya/heavy-queue-nearest-done E-1, E-3)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const dir = join(w.p.dir, 'steps', 'S-1');
+  const needs = (heavy) => {
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 10, ...heavy }, then: 'resume' }));
+    return steps.readNeeds(dir);
+  };
+  assert.equal(needs({ expectMinutes: 4 }).heavy.expectMinutes, 4);
+  assert.equal(needs({ expectMinutes: 10 }).heavy.expectMinutes, 10, 'the max itself is allowed');
+  assert.equal(needs({}).heavy.expectMinutes, undefined, 'none stated');
+  assert.equal(needs({ expectMinutes: null }).heavy.maxMinutes, 10, 'null is none');
+  assert.deepEqual(needs({ expectMinutes: 11 }), { error: 'needs.json heavy expectMinutes 11 is larger than its maxMinutes 10' });
+  for (const bad of [0, -1, '4']) assert.deepEqual(needs({ expectMinutes: bad }), { error: 'needs.json heavy expectMinutes is a number of minutes' }, String(bad));
+});
+
 test('k step finish commits the evidence the step wrote and nothing else; a review then cites it at head; no evidence, no commit', async () => {
   const w = await approvedWorkspace(PLAN);
   const git = (...args) => sh(w.weather, 'git', args).trim();
