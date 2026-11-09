@@ -1503,3 +1503,115 @@ test('a resumed step keeps the tool list it started with, whatever its plan line
   assert.equal(steps.toolsFor(w.p, { id: 'S-1' }, calls[0].sessionId), null);
   assert.deepEqual(steps.toolsFor(w.p, { id: 'S-1' }, 'a-new-session'), steps.NARROW_TOOLS);
 });
+
+// Two owner steps ready from the start, before an agent step that runs at once and one that needs the first owner step
+// (gulnya/owner-step-halts-watch). Each agent step writes its own report.
+const OWNERS = `---
+task: weather/offline-forecast
+blocked-by: []
+---
+
+### S-1 Restart offline on a phone [owner]
+
+### S-2 Check the widget on a tablet [owner]
+
+### S-3 Keep the last forecast on disk [agent]
+covers: AC-1, AC-2, E-1
+inputs: task, docs/offline.md
+outputs: steps/S-3/report.md
+
+### S-4 Restart keeps it [agent]
+needs: S-1
+covers: AC-3
+inputs: task
+outputs: steps/S-4/report.md
+
+### S-5 Review [review]
+needs: S-2, S-4
+covers: all
+inputs: task, diff
+outputs: review.md
+`;
+const writeOwn = (w, also = () => {}) => fakeRunner(w, (step, n) => (also(step, n), put(w, `steps/${step.env.KIRUNAK_STEP}/report.md`), 'own'));
+const BOTH_OWNERS = 'S-1 and S-2 wait for the owner: S-1 Restart offline on a phone; S-2 Check the widget on a tablet';
+// Past a push's 200 characters, so the title is the part cut (lib/notice.mjs), never a step or the thing to do.
+const BOTH_PUSHED = 'kirunak-push: The last forecast… (weather/offline-forecast): S-1 and S-2 are yours: S-1 Restart offline on a phone; S-2 Check the widget on a tablet. once each is done: k step finish weather/offline-forecast <step>';
+const S2_ALONE = PUSHED('S-2 is yours: Check the widget on a tablet. once it is done: k step finish weather/offline-forecast S-2');
+
+test('an owner step ready and an agent step the machine guard refuses on the first pass: --watch starts the agent step once a slot frees (gulnya/owner-step-halts-watch AC-1)', async () => {
+  const w = await approvedWorkspace(OWNERS);
+  let looks = 0;
+  const other = { pid: 1, task: 'other/task', step: 'S-1', session: 'x', since: '2026-11-03T12:05:00.000Z' };
+  w.ws.seams.machineGuard = { limits: () => ({ maxAgents: 1, maxHeavy: 1 }), running: () => (++looks === 1 ? [other] : []) };
+  const lines = [];
+  const startedAt = [];
+  const calls = writeOwn(w, () => startedAt.push(looks));
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-3'], lines.join('\n'));
+  assert.ok(startedAt[0] >= 2, 'S-3 started on a later pass than the one refused');
+  assert.deepEqual(r.states, { 'S-1': 'ready', 'S-2': 'ready', 'S-3': 'done', 'S-4': 'pending', 'S-5': 'pending' });
+  assert.deepEqual(r.refused, []);
+  assert.deepEqual(pushes(lines), [BOTH_PUSHED]);
+});
+
+test('two owner steps ready and nothing else to run: the watch ends with one stop line and one push naming both, and the step that needs one stays pending (gulnya/owner-step-halts-watch AC-2, E-1, E-2)', async () => {
+  const w = await approvedWorkspace(OWNERS);
+  const lines = [];
+  const calls = writeOwn(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-3'], lines.join('\n'));
+  assert.deepEqual(r.states, { 'S-1': 'ready', 'S-2': 'ready', 'S-3': 'done', 'S-4': 'pending', 'S-5': 'pending' });
+  assert.equal(r.stopped, BOTH_OWNERS);
+  assert.deepEqual(lines.filter((l) => l.includes('stopped:')), [`${w.id} stopped: ${BOTH_OWNERS}`]);
+  assert.deepEqual([pushes(lines), lines.at(-1)], [[BOTH_PUSHED], BOTH_PUSHED]);
+});
+
+test('an owner step finished while an agent step runs is in neither line; with none left there is no stop and no push (gulnya/owner-step-halts-watch AC-3, D-4)', async () => {
+  // --watch: S-1 finished while S-3 runs, so S-4 starts after it and only S-2 is left, named as one owner step is.
+  const w = await approvedWorkspace(OWNERS);
+  const lines = [];
+  const calls = writeOwn(w, (step) => step.env.KIRUNAK_STEP === 'S-3' && steps.finish({ ws: w.ws, id: w.id, step: 'S-1' }));
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-3', 'S-4'], lines.join('\n'));
+  assert.equal(r.stopped, 'S-2 waits for the owner: Check the widget on a tablet');
+  assert.deepEqual(pushes(lines), [S2_ALONE]);
+  assert.ok(!lines.some((l) => /S-1 (and|waits|is yours)/.test(l)), lines.join('\n'));
+
+  // --once: both finished while S-3 runs, with no pass after it to read the states again but the end's own.
+  const w2 = await approvedWorkspace(OWNERS);
+  const lines2 = [];
+  writeOwn(w2, () => ['S-1', 'S-2'].forEach((step) => steps.finish({ ws: w2.ws, id: w2.id, step })));
+  const r2 = await run({ ws: w2.ws, id: w2.id, out: (l) => lines2.push(l) });
+  assert.deepEqual([r2.states['S-1'], r2.states['S-2'], r2.states['S-3'], r2.stopped, r2.push], ['done', 'done', 'done', null, null], lines2.join('\n'));
+  assert.deepEqual(pushes(lines2), []);
+  assert.ok(!lines2.some((l) => l.includes('stopped:')), lines2.join('\n'));
+});
+
+test('a question waiting for the owner and a step marked [escalate] still stop the watch, with owner steps also ready (gulnya/owner-step-halts-watch AC-4)', async () => {
+  const w = await approvedWorkspace(OWNERS);
+  const lines = [];
+  const calls = fakeRunner(w, () => (put(w, 'steps/S-3/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-3'], lines.join('\n'));
+  assert.equal(r.stopped, 'S-3 waits for the owner: Three days or a week?');
+  assert.deepEqual(pushes(lines), [PUSHED('S-3 waits for your answer. why: Three days or a week? answer in a session or in notes.md, then start k run again')]);
+
+  const e = await approvedWorkspace(OWNERS.replace('[agent]\ncovers: AC-1, AC-2, E-1', '[agent] [escalate]\ncovers: AC-1, AC-2, E-1'));
+  const elines = [];
+  const ecalls = fakeRunner(e);
+  const er = await run({ ws: e.ws, id: e.id, watch: true, intervalMs: 20, out: (l) => elines.push(l) });
+  assert.deepEqual([ecalls.length, er.stopped], [0, 'S-3 is marked [escalate] in plan.md: the owner\'s session decides'], elines.join('\n'));
+  assert.ok(!pushes(elines).some((l) => l.includes('are yours') || l.includes('is yours')), elines.join('\n'));
+});
+
+test('k run --once with an owner step and an agent step ready starts the agent step and ends as before (gulnya/owner-step-halts-watch AC-5)', async () => {
+  const w = await approvedWorkspace(OWNER_FIRST);
+  const lines = [];
+  const calls = fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1'], lines.join('\n'));
+  assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'ready', 'S-3': 'ready', 'S-4': 'pending' });
+  assert.equal(r.stopped, 'S-3 waits for the owner: Restart offline on a phone');
+  const yours = PUSHED('S-3 is yours: Restart offline on a phone. once it is done: k step finish weather/offline-forecast S-3');
+  assert.deepEqual([pushes(lines), lines.at(-1)], [[yours], yours]);
+});
