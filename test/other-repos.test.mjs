@@ -58,7 +58,7 @@ test('a commit naming the task in another workspace repo, on a side branch, is f
   assert.deepEqual(given(w).repos, [{ name: 'hub', root: realpathSync(w.hub), ref: 'side', base, head, files: ['tools/cache.txt'] }]);
   assert.ok(text.includes(`\`kirunak/tasks/offline-forecast/steps/S-2/in/repos/hub.patch\`: the task's change in hub`), 'the brief names the patch');
   assert.ok(text.includes(`from ${base} to ${head} (side)`));
-  assert.ok(text.includes('So is each other repo, at the head its patch names.'));
+  assert.ok(text.includes('So is each other repo, at the head its patch names. A `met` row cites a file there under the root its patch line names, `file <root>/<path>:<line>`, and it must exist at that head.'));
 });
 
 test('the queue\'s own commit naming the task in another repo brings no patch: records are never a change (E-2)', async () => {

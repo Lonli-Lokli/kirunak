@@ -159,7 +159,11 @@ verdict: not met (AC-2)
   `met | not met | needs device | needs owner`; a `met` row's evidence starts with `test <Name>`, `file
   <path>:<line>`, `measure <path>`, or `screenshot <path>`, and the path exists at `head` (a test name must appear
   in the file named in parentheses; a `file` line must be within the file's length; `k step finish` commits the
-  evidence a step writes, `task-files.md` §1, so a path under `evidence/` is there). A `not met` row names what is
+  evidence a step writes, `task-files.md` §1, so a path under `evidence/` is there). A path is from the repo root
+  or the task folder; an absolute or `~/` path may cite a file of another repo of the review, under its root as
+  `given.json` writes it (or a git worktree of it), and is read there at the head `given.json` records for that
+  repo, its problems naming the repo; one under no repo of `given.json`, or in one with no head recorded or a head
+  that is not a commit there, is refused (gulnya/review-met-other-repo). A `not met` row names what is
   wrong, and every place the same fault holds that the reviewer can find (the same element in each theme, on each
   ground, screen, platform and locale), and says where it looked, so one fix answers all of them (AC-3, the brief's
   sweep rule; the grammar cannot check it). A `needs device` or `needs owner` row names the files it concerns, so a
