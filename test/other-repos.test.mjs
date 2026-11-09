@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { accept } from '../lib/approval.mjs';
 import * as steps from '../lib/steps.mjs';
-import { approvedWorkspace, gitCommitAll, gitInit, k, sh } from './helpers.mjs';
+import { acceptRow } from '../lib/waiting.mjs';
+import { approvedWorkspace, gitCommitAll, gitInit, k, reviewsRan, sh } from './helpers.mjs';
 
 // A task's change in other repos (gulnya/kirunak-review-base): found by itself in the workspace's repos (AC-8, D-2),
 // added by repos.md (AC-9), and a repos.md line kirunak cannot read stopping the review (E-6).
@@ -339,4 +341,98 @@ test('a repos.md line beside the own repo\'s branch naming a repo kirunak does n
     return true;
   });
   assert.ok(!existsSync(join(inDir(w), 'repos')), 'nothing written');
+});
+
+// k accept on the own repo's branch (gulnya/review-own-repo-branch AC-3, E-5, E-7). The review of a brief just given,
+// met on every line, at the checkout's head now; accept's dry run, and its refusal with the rows it names.
+function reviewed(w) {
+  const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  const first = sh(w.weather, 'git', ['log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json']).trim();
+  const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file src/forecast.txt:1 |`).join('\n');
+  writeFileSync(join(w.p.dir, 'review.md'), `---\ntask: ${w.id}\nhead: ${head}\nbase: ${first}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`);
+  reviewsRan(w.p.dir);
+}
+const accepts = (w, why) => assert.equal(accept({ ws: w.ws, id: w.id, dryRun: true }).state, 'would accept', why);
+function refuses(w, rows, where) {
+  assert.throws(() => accept({ ws: w.ws, id: w.id, dryRun: true }), (e) => {
+    assert.match(e.message, new RegExp(`its work changed after review\\.md's head \\w+${where}, in \\d+ file\\(s\\) the review never saw`), e.message);
+    assert.deepEqual(e.blocking.map((x) => `${x.path}  ${x.commit}  ${x.task}`), rows);
+    for (const x of rows) assert.ok(e.message.includes(`\n  ${x}`), x);
+    return true;
+  });
+}
+const onBranch = ` \\(on weather's branch code, after the head it saw there\\)`;
+const back = (w) => sh(w.weather, 'git', ['reset', '-q', '--hard', 'HEAD~1']);
+
+// The branch code of weather, from master, holds a commit naming the task and one naming nothing, each its own file;
+// master, where the checkout stays, then a commit naming the task. Nothing conflicts, so code merges cleanly.
+function sideBranch(w) {
+  work(w.weather, 'kirunak/tasks/other-thing/task.md', '# another\n', 'kirunak: intake weather/other-thing');
+  sh(w.weather, 'git', ['checkout', '-qb', 'code']);
+  work(w.weather, 'src/zoom.txt', 'zoom\n', `src/zoom.txt (${w.id} S-1)`);
+  work(w.weather, 'src/cache.txt', 'three days\n', 'src/cache.txt: names nothing');
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  work(w.weather, 'src/forecast.txt', 'forecast\n', `src/forecast.txt (${w.id} S-1)`);
+  hand(w, 'weather code');
+}
+
+test('k accept refuses a task whose own-repo work on an unmerged branch changed after the review, naming the branch and the file; with no new commit it accepts (gulnya/review-own-repo-branch AC-3, AC-6)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  ownBranch(w, 'code');
+  hand(w, 'weather code');
+  await brief(w);
+  reviewed(w);
+  accepts(w, 'no new commit on the branch');
+  sh(w.weather, 'git', ['checkout', '-q', 'code']);
+  work(w.weather, 'kirunak/tasks/offline-forecast/notes.md', 'a note\n', `kirunak: notes (${w.id})`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  accepts(w, 'records only on the branch');
+  sh(w.weather, 'git', ['checkout', '-q', 'code']);
+  const a = work(w.weather, 'src/zoom.txt', 'zoom, wider\n', 'src/zoom.txt wider: names nothing');
+  const b = work(w.weather, 'src/new.txt', 'new\n', `src/new.txt (${w.id} S-1)`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  const rows = [`code:src/zoom.txt  ${a}  no task`, `code:src/new.txt  ${b}  ${w.id}`];
+  refuses(w, rows, onBranch);
+  const row = await acceptRow(w.ws, { id: w.id });
+  assert.deepEqual(row.blocking.map((x) => `${x.path}  ${x.commit}  ${x.task}`), rows, 'k waiting says the same');
+});
+
+test('the branch merged into the checked-out branch after the review: the commits the review saw never refuse, one it did not see does, whichever way it came (gulnya/review-own-repo-branch E-5)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sideBranch(w);
+  await brief(w);
+  assert.equal(given(w).own.branch, 'code');
+  reviewed(w);
+  accepts(w);
+  sh(w.weather, 'git', ['merge', '-q', '--no-ff', '-m', 'Merge code', 'code']);
+  accepts(w, 'merged with a merge commit');
+  back(w);
+  sh(w.weather, 'git', ['checkout', '-q', 'code']);
+  const late = work(w.weather, 'src/cache.txt', 'four days\n', 'src/cache.txt four days: names nothing');
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  refuses(w, [`code:src/cache.txt  ${late}  no task`], onBranch);
+  sh(w.weather, 'git', ['merge', '-q', '--no-ff', '-m', 'Merge code', 'code']);
+  refuses(w, [`src/cache.txt  ${late}  no task`], '');
+  back(w);
+  sh(w.weather, 'git', ['branch', '-qf', 'code', 'code~1']);
+  accepts(w, 'the late commit gone');
+  const other = work(w.weather, 'src/zoom.txt', 'zoom, theirs\n', 'src/zoom.txt (weather/other-thing)');
+  refuses(w, [`src/zoom.txt  ${other}  weather/other-thing`], '');
+});
+
+test('a review whose given.json has no own part is not refused for the own repo\'s branch, and a merge of it is judged as before (gulnya/review-own-repo-branch E-7)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sideBranch(w);
+  await brief(w);
+  const { own, ...before } = given(w);
+  assert.ok(own);
+  writeFileSync(join(w.p.dir, 'steps', 'S-2', 'given.json'), JSON.stringify(before, null, 2) + '\n');
+  reviewed(w);
+  sh(w.weather, 'git', ['checkout', '-q', 'code']);
+  work(w.weather, 'src/cache.txt', 'four days\n', 'src/cache.txt four days: names nothing');
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  accepts(w, 'no head recorded for the branch');
+  sh(w.weather, 'git', ['merge', '-q', '--no-ff', '-m', 'Merge code', 'code']);
+  const zoom = sh(w.weather, 'git', ['log', '-1', '--format=%h', '--', 'src/zoom.txt']).trim();
+  refuses(w, [`src/zoom.txt  ${zoom}  ${w.id}`], '');
 });
