@@ -63,7 +63,11 @@ Markdown would drift from the grammar; an interview run by a tool with no model 
    owner to confirm or correct it. `k intake question <id> --topic goal "<text>"` writes `Q-1`; the owner answers in
    the conversation; `k intake answer <id> Q-1 "<verbatim>" --ruling "→ Goal"` records it. Every question and answer
    goes through these two verbs. The model copies the owner's words as typed, never a summary (R4: the source is the
-   owner's answer).
+   owner's answer). Right after the goal, and again before `k check` (step 7), the model asks "Anything else you want
+   to mention for this task?" as its own question (`--topic other`), records the reply word for word, and turns each
+   point into its own questions asked one at a time (a clear ruling is recorded as it stands; "no", or nothing, is
+   recorded and the interview goes on); from a draft the first ask comes after the draft's own questions, from a bug
+   after its first question and open questions. Only the skill says it; `k check` does not.
 3. **Acceptance criteria**: from the goal, the model drafts AC lines, each with the source it has (research link,
    openspec line as background, or none), and asks the owner for each one it cannot source: "AC-3 says X; is that
    what you want, or a default?" An accepted default is recorded as `[default <date>]` through `k intake answer ...
