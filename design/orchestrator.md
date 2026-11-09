@@ -232,9 +232,16 @@ pending  →  ready  →  running  →  done
   - **In a session the same rung rule** is held by the escalation hook (`approval.md` §7), which counts a session's
     repeated build and test failures; inside a `k run` step it stays quiet, because `k run` counts that step itself.
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
-  as a background command of their session. `--watch` passes every 30 s and exits when no step is ready, nothing
-  runs and no step is left undecided because `ps` could not answer (above; with `ps` broken for good it waits in
-  view, and Ctrl-C ends it). A launch that ends in an error leaves its step as it was (a start the plan's gate
+  as a background command of their session. `--watch` passes every 30 s and exits when nothing runs, no step is
+  left undecided because `ps` could not answer (above; with `ps` broken for good it waits in view, and Ctrl-C ends
+  it), no step waits for a machine slot and nothing but `owner` steps is ready. A ready `owner` step does not stop
+  the passes: the watch goes on starting the task's other ready steps as slots free, a step the machine guard
+  refused a slot included, and only once it would end does it stop for the owner. Then it reads the plan again and
+  prints one stop line and one push naming every `owner` step still ready, in plan order; an `owner` step the owner
+  finished meanwhile (`k step finish`) is named in neither, and with none left there is no stop and no push, as the
+  push for a question is read again before it is sent. Judgement: an `owner` step blocks only the steps that need
+  it, so the rest of the task goes on, and the owner is told once, with everything that waits for them. An owner's
+  question (`waiting-owner`) and a step marked `[escalate]` still stop the task at once, as above. A launch that ends in an error leaves its step as it was (a start the plan's gate
   refuses, a resume that throws), so it is tried again only after a wait that doubles from the interval to at most
   ten intervals (30 s, 1, 2, 4, then 5 minutes), and its tenth error in a row stops `k run` for the owner with the
   error and a push; a pass that finds the step started by hand, done or no longer in the plan drops its count. Before
