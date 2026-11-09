@@ -362,6 +362,37 @@ test('a heavy step has no rung: its second failure stops the task with every rep
   assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map((e) => [e.kind, e.to, e.stopped]), [['escalate', null, true]]);
 });
 
+test('the guard gets the expected minutes a [heavy] step or a needs.json states, null when none; one over the max never queues (gulnya/heavy-queue-nearest-done E-1, E-3)', async () => {
+  const guard = (w, jobs) => (w.ws.seams.resourceGuard = {
+    run: (job) => (jobs.push(job), put(w, 'steps/S-1/report.md'), put(w, 'evidence/S-1-cache-sizes.tsv'), { exitCode: 0, log: '' }),
+    status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [],
+  });
+  const heavyPlan = (extra) => PLAN.replace('### S-1 Keep the last forecast on disk [agent]\ncovers: AC-1, AC-2, E-1\ninputs: task, docs/offline.md\n', `### S-1 Keep the last forecast on disk [heavy]\ncovers: AC-1, AC-2, E-1\ncommand: npm test\nmax-minutes: 10\n${extra}`);
+  for (const [extra, want] of [['expect-minutes: 4\n', 4], ['', null]]) {
+    const w = await approvedWorkspace(heavyPlan(extra));
+    const jobs = [];
+    guard(w, jobs);
+    fakeRunner(w);
+    await run({ ws: w.ws, id: w.id });
+    assert.deepEqual(jobs.map((j) => [j.maxMinutes, j.expectMinutes]), [[10, want]], `a [heavy] step with ${extra || 'no expect-minutes'}`);
+  }
+  for (const [expectMinutes, want] of [[4, 4], [undefined, null]]) {
+    const w = await approvedWorkspace(PLAN);
+    const jobs = [];
+    guard(w, jobs);
+    fakeRunner(w, (step, n) => (n === 1 ? (put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 10, expectMinutes }, then: 'resume' })), 'nothing') : 'write'));
+    await run({ ws: w.ws, id: w.id });
+    assert.deepEqual(jobs.map((j) => [j.maxMinutes, j.expectMinutes]), [[10, want]], `a needs.json with expectMinutes ${expectMinutes}`);
+  }
+  const w = await approvedWorkspace(PLAN);
+  const jobs = [];
+  guard(w, jobs);
+  fakeRunner(w, (step, n) => (n === 1 ? (put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 10, expectMinutes: 20 }, then: 'resume' })), 'nothing') : 'write'));
+  await run({ ws: w.ws, id: w.id });
+  assert.deepEqual(jobs, [], 'a length over the max never reaches the guard');
+  assert.match(progress(w), /S-1 failed: needs\.json heavy expectMinutes 20 is larger than its maxMinutes 10/);
+});
+
 test('exit 1 fails the step with its exit code', async () => {
   const w = await approvedWorkspace(PLAN);
   fakeRunner(w, () => 'exit 1');
@@ -474,7 +505,7 @@ test('needs.json heavy: the guard runs the job while running/ holds no pid of th
   assert.deepEqual(jobs[0].running, [], 'no process of the step while the job runs');
   const { say, ...job } = jobs[0].job;
   // The guard's label carries the step, so the lock's status shows it as itself (gulnya/one-machine-lock AC-2).
-  assert.deepEqual(job, { session: 'kirunak:weather/offline-forecast', what: 'S-1: weather unit tests', maxMinutes: 10, command: ['npm', 'test'], cwd: w.p.root });
+  assert.deepEqual(job, { session: 'kirunak:weather/offline-forecast', what: 'S-1: weather unit tests', maxMinutes: 10, expectMinutes: null, command: ['npm', 'test'], cwd: w.p.root });
   assert.equal(typeof say, 'function', 'the guard may say through k run');
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.equal(calls[1].prompt, 'the job ended; read kirunak/tasks/offline-forecast/steps/S-1/heavy-1.json and continue');

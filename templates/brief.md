@@ -28,7 +28,9 @@ You run one step of a task whose file the owner approved and froze. Do this step
 - No heavy job here (a build, a test run, an emulator or a simulator). When the step needs one, write
   `{{stepDir}}/needs.json` as
   `{ "heavy": { "what": "<what it is>", "command": ["<program>", "<argument>"], "maxMinutes": <minutes> }, "then": "resume" }`
-  and end your turn. The job runs outside this conversation, which then resumes with its result.
+  and end your turn. The job runs outside this conversation, which then resumes with its result. When you have a
+  measured length of the same job (a past run's minutes), add `"expectMinutes": <minutes>`, no more than
+  `maxMinutes`; without one, leave it out.
 - A question only the owner can answer: write `{{stepDir}}/needs.json` as `{ "owner": "<the question>" }` and end
   your turn.
 - No agents.
