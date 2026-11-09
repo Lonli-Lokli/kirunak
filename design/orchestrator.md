@@ -93,6 +93,11 @@ outputs: review.md
   calls is R9's bound, past which an agent's context has grown large and is re-read on every call; 40 minutes keeps a
   step well inside a 1-hour cache; 3 USD at list price is about 120k Opus input tokens with a modest context, enough
   for a bounded step and far under one runaway agent.
+- A `[heavy]` step's `max-minutes:` is its job's deadline (the budget's minutes when none is given). An optional
+  `expect-minutes:` states how long the job is expected to take, and the planner gives it only when it has a measured
+  length of the same job (a past run's minutes); otherwise it leaves it out and the guard reads the max. `k plan
+  check` refuses one that is not a positive number or is larger than the step's max. Judgement: a guard that serves
+  short jobs first needs an honest length, and a guess is worse than none.
 
 ## 2. The step lifecycle (R9)
 
@@ -127,7 +132,9 @@ pending  →  ready  →  running  →  done
   said once), for a later `k run` to decide; under `--watch`, for its next pass, which asks again about those steps
   alone and decides each as at a start once `ps` answers. A step started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
-  "maxMinutes" }, "then": "resume" }`) and ended its turn. The orchestrator runs the job (§4), writes
+  "maxMinutes", "expectMinutes"? }, "then": "resume" }`) and ended its turn. `expectMinutes` is optional, given when
+  the agent has a measured length of the same job and left out otherwise; one that is not a positive number or is
+  larger than `maxMinutes` is refused as an unreadable needs.json. The orchestrator runs the job (§4), writes
   `steps/S-n/heavy-<k>.json` (exit code, minutes, the report path, the last 60 lines), and resumes the same
   conversation (§3) with the prompt "the job ended; read steps/S-n/heavy-<k>.json and continue". Between the two,
   no process of the step exists (R9), and the cache keeper decides whether to keep its cache warm (§5). The
