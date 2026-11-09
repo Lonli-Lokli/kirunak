@@ -162,7 +162,7 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
   works it out (an amend's is HEAD's parent) and leaves it in the worktree's git folder as `KIRUNAK_COMMIT_BASE`,
   which commit-msg reads and removes. An amend given `-m` or `-F` reaches the hook as any commit does; git keeps
   HEAD's author date for it and gives it to the hook as `GIT_AUTHOR_DATE`, so a date equal to HEAD's and two seconds
-  old or more counts as an amend here (the SLAP gate measures as before).
+  old or more counts as an amend here, as the SLAP gate takes it, from the same function (`change-size.md` §3).
 - **The accepted set** (review-2.md of the task found a worktree, or a branch made before the accept, let through):
   whichever working tree commits, the hooks read the main checkout's `kirunak/tasks/*/done.json`, found from any
   worktree as the folder above `git rev-parse --git-common-dir`, and, when the main checkout is not on the default

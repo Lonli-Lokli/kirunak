@@ -69,7 +69,10 @@ committed by `k install`: the owner approves it first (§4), then it is committe
 - **What it measures**: the staged change against HEAD (`git diff --cached --raw --numstat -z -M HEAD`, one call:
   the raw part gives each file's status, the numstat part its lines), against the empty tree for a repo's first
   commit, and against HEAD's parent for `--amend` (the hook gets `commit HEAD` as its arguments; evidence, measured
-  on git 2.54). So an amend is measured as the whole commit it becomes.
+  on git 2.54). An amend given `-m` or `-F` gets `message`, as a new commit does, but git keeps HEAD's author date
+  for it: a `GIT_AUTHOR_DATE` equal to HEAD's and two seconds old or more is measured against HEAD's parent too, the
+  same sign and the same function AC-8's check reads (`approval.md` §3). So an amend is measured as the whole commit
+  it becomes.
 - **What it refuses**, each with what to do instead, all in one message:
   1. A `.slapignore` in the index that is not the approved one (R23): the hash of its bytes against the repo's
      record (§4). With none in the index, nothing is checked and nothing but whole deletions is left out: a repo
@@ -102,8 +105,9 @@ committed by `k install`: the owner approves it first (§4), then it is committe
 - **It fails closed**: if the hook cannot run (kirunak moved, git failed, the record unreadable), the commit is refused
   with the error. Judgement: R22 has no override, so a gate that silently lets everything through when broken would
   be one.
-- Known edge: `git commit -C HEAD` (a new commit reusing HEAD's message) also arrives as `commit HEAD` and is
-  measured as an amend.
+- Known edges: `git commit -C HEAD` (a new commit reusing HEAD's message) also arrives as `commit HEAD` and is
+  measured as an amend. An amend given `-m` or `-F` with `--reset-author`, or within two seconds of the commit it
+  amends, shows no sign of itself and is measured against HEAD, as a new commit.
 
 ## 4. The owner's `.slapignore` (R23), `k slap` and `k install`
 
@@ -145,8 +149,11 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   Markdown file counts; an approved `.slapignore` leaves out what it lists; an unlisted binary is refused naming its
   pattern; an unapproved or changed `.slapignore` is refused and the approved one passes; a removed one needs no
   approval; a worktree shares its repo's approval; a whole deletion of 1,000 lines scores 0 while 300 lines deleted
-  inside a kept file count; an amend is measured against the parent; a merge, a revert and a cherry-pick pass; a
-  first commit is measured against the empty tree. `test/slap-gate.test.mjs` also: a 600-line `done.json` and its
+  inside a kept file count; an amend is measured against the parent, one given `-m` or `-F` too (it gets the line
+  `--amend --no-edit` writes, and is refused once amends grow it past M), while one with `--reset-author` or within
+  two seconds, and a new commit given `-m`, are measured against HEAD, and `git commit -C HEAD` as an amend; a merge,
+  a revert and a cherry-pick pass; a first commit is measured against the empty tree.
+  `test/slap-gate.test.mjs` also: a 600-line `done.json` and its
   `cost.md` pass under `KIRUNAK_ACCEPTING` naming their task and are refused without it, under another task's id
   or with a 600-line source file beside them, and pass as `k accept` commits them, by path, with that file left
   staged; `hold.md` passes under `KIRUNAK_HOLDING`, and `task.md` with its approval only under `KIRUNAK_APPROVING`. `test/slapignore.test.mjs`: the starter's sections, `k install
