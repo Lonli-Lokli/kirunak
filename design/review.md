@@ -90,8 +90,8 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   checkout is not on it was read at or `null` for ranges only, and no `own` at all without that patch; and `last`, the
   review it follows (below), or `null`. The step's
   `.gitignore` does not name it, so it is committed with the step's folder. `k review check` holds the review's
-  `base` to it and takes a carried row only from its `last` (§2), and `k accept` reads each other repo's head from it
-  (`approval.md` §4).
+  `base` to it and takes a carried row only from its `last` (§2), and `k accept` reads each other repo's head from it,
+  and the own part's (`approval.md` §4).
 - **A review that follows a review** (gulnya/review-reruns-whole-task AC-1, D-1). The last review is the latest
   review file before the one this step writes, by number (`review.md` is 1, `review-2.md` is 2), that counts (§2):
   it passes the grammar and its review step finished with the file as it stands, so a review that failed its grammar

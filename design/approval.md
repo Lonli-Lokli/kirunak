@@ -292,7 +292,24 @@ names `<repo>:<path>`, its commit and its task, a repo's rows oldest first, and 
 `(in <repos>, after the head it saw there)`; `k waiting` and `/k-accept` print the path as given. A review whose step
 has no `given.json` was briefed before kirunak kept one and saw no other repo, so nothing is checked there, as its base
 is not (`review.md` §2). A `repos.md` line kirunak cannot read refuses the accept too (`task-files.md` §3). In the
-task's own repo the rules above are gulnya/kirunak-accept-shared-repo's, unchanged (gulnya/kirunak-review-base O-1).
+task's own repo the rules above are gulnya/kirunak-accept-shared-repo's (gulnya/kirunak-review-base O-1), but for
+the own repo's work on a branch the checkout is not on.
+
+That work (gulnya/review-own-repo-branch AC-3) is judged against the head the latest review recorded for it,
+`given.json`'s `own` (`review.md` §1), as another repo's is. The own repo's branches of the task are found again as
+the review's were, `repos.md`'s branch lines read again and the branches named after the task looked for again: a
+commit on one since it left the default branch, which neither that head nor the checkout's HEAD holds, blocks with its
+paths besides kirunak's records, and so does every such commit when git no longer has that head. When the part was read
+at a branch, each commit after that head on that branch (the default branch once it is gone) that HEAD does not hold
+blocks too, merges aside: with its paths when it names the task, with the files the review saw there that it touches
+when it does not. Each row names `<branch>:<path>`, its commit and its task, a branch's rows oldest first, after the
+other repos' rows, and the refusal's first line adds `(on <repo>'s branch <branches>, after the head it saw there)`.
+A commit HEAD holds is judged by the own repo's rules above, against the same head (E-5): one that head holds was in
+the review's patch of the branch, so the branch merged into the checked-out branch after the review never blocks with
+the commits the review saw, and the files the review saw on the branch are of the task's own change, so a commit it did
+not see blocks whether it came on the branch and was merged or was made on the checked-out branch. A `given.json` with
+no `own` (a review briefed before this, or with no own-repo work besides the checkout's branch) holds no head there:
+nothing is checked on the own repo's branches, and the own repo's rules stay as above (E-7).
 
 Once the acceptance is committed, `k accept` removes the worktrees the closed work left (`lib/worktrees.mjs`,
 gulnya/worktrees-on-close). A refusal or `--dry-run` removes nothing, and nothing in the removal undoes or fails the
