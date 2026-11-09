@@ -136,6 +136,105 @@ test('an amend is measured against the parent, and its line replaced', () => {
   assert.match(r.stderr, /XL/);
 });
 
+// An amend given -m or -F is known by its author date: git keeps HEAD's, and a date two seconds old or more counts.
+const dated = (at) => ({ ...env, GIT_AUTHOR_DATE: `@${at} +0000`, GIT_COMMITTER_DATE: `@${at} +0000` });
+const commitAt = (dir, msg, at) => spawnSync('git', ['commit', '-q', '-m', msg], { cwd: dir, encoding: 'utf8', env: dated(at) });
+const OLD = 1700000000;
+
+test('an amend given -m or -F gets the line --amend --no-edit writes for the same staged files', () => {
+  const dir = repo();
+  put(dir, 'README.md', '# r\n');
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'root']);
+  put(dir, 'src/a.mjs', lines(10));
+  git(dir, ['add', '-A']);
+  assert.equal(commitAt(dir, 'Add a', OLD).status, 0);
+  const head = sh(dir, 'git', ['rev-parse', 'HEAD']).trim();
+  put(dir, 'src/b.mjs', lines(10, 'b'));
+  git(dir, ['add', '-A']);
+  const file = join(mkdtempSync(join(tmpdir(), 'kirunak-slap-msg-')), 'msg');
+  writeFileSync(file, 'Add a and b\n');
+  const got = [];
+  for (const how of [['--no-edit'], ['-m', 'Add a and b'], ['-F', file]]) {
+    git(dir, ['reset', '-q', '--soft', head]);
+    const r = git(dir, ['commit', '-q', '--amend', ...how]);
+    assert.equal(r.status, 0, r.stderr);
+    got.push(message(dir).split('\n').at(-1));
+  }
+  // b alone would be SLAP 3; the whole commit, a and b, is 6.
+  assert.deepEqual(got, ['SLAP: 6 (S)', 'SLAP: 6 (S)', 'SLAP: 6 (S)']);
+  assert.equal(message(dir), 'Add a and b\n\nSLAP: 6 (S)');
+
+  // A new commit given -m is measured against HEAD.
+  put(dir, 'src/c.mjs', lines(10, 'c'));
+  git(dir, ['add', '-A']);
+  assert.equal(git(dir, ['commit', '-q', '-m', 'Add c']).status, 0);
+  assert.equal(message(dir), 'Add c\n\nSLAP: 3 (S)');
+});
+
+test('a commit grown past M by amends given -m is refused, as one grown by --amend --no-edit is', () => {
+  const dir = repo();
+  put(dir, 'README.md', '# r\n');
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'root']);
+  // Four files of 30 lines are M; two more stay M, 180 lines in 6 files; two more make 240 lines in 8 files, L.
+  for (let i = 0; i < 4; i++) put(dir, `src/g${i}.mjs`, lines(30, `g${i}_`));
+  git(dir, ['add', '-A']);
+  assert.equal(commitAt(dir, 'Add g', OLD).status, 0);
+  assert.equal(message(dir), 'Add g\n\nSLAP: 22 (M)');
+  for (let i = 4; i < 6; i++) put(dir, `src/g${i}.mjs`, lines(30, `g${i}_`));
+  git(dir, ['add', '-A']);
+  assert.equal(git(dir, ['commit', '-q', '--amend', '-m', 'Add more of g']).status, 0);
+  assert.equal(message(dir), 'Add more of g\n\nSLAP: 33 (M)');
+  for (let i = 6; i < 8; i++) put(dir, `src/g${i}.mjs`, lines(30, `g${i}_`));
+  git(dir, ['add', '-A']);
+  for (const how of [['-m', 'Add all of g'], ['--no-edit']]) {
+    const r = git(dir, ['commit', '-q', '--amend', ...how]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /this commit is L, SLAP 44: 240 lines of code in 8 files/);
+  }
+  assert.equal(message(dir), 'Add more of g\n\nSLAP: 33 (M)');
+});
+
+test('an amend with --reset-author, or within two seconds, shows no sign and is measured against HEAD', () => {
+  const dir = repo();
+  put(dir, 'README.md', '# r\n');
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'root']);
+  put(dir, 'src/a.mjs', lines(10));
+  git(dir, ['add', '-A']);
+  assert.equal(commitAt(dir, 'Add a', OLD).status, 0);
+  put(dir, 'src/b.mjs', lines(10, 'b'));
+  git(dir, ['add', '-A']);
+  assert.equal(git(dir, ['commit', '-q', '--amend', '--reset-author', '-m', 'Add a and b']).status, 0);
+  assert.equal(message(dir), 'Add a and b\n\nSLAP: 3 (S)');
+
+  // Within two seconds: HEAD's date is set a minute ahead, so a slow machine cannot age it past two seconds.
+  put(dir, 'src/c.mjs', lines(10, 'c'));
+  git(dir, ['add', '-A']);
+  const soon = Math.floor(Date.now() / 1000) + 60;
+  assert.equal(commitAt(dir, 'Add c', soon).status, 0);
+  assert.equal(sh(dir, 'git', ['log', '-1', '--format=%ad', '--date=raw']).trim(), `${soon} +0000`);
+  put(dir, 'src/d.mjs', lines(10, 'd'));
+  git(dir, ['add', '-A']);
+  assert.equal(git(dir, ['commit', '-q', '--amend', '-m', 'Add c and d']).status, 0);
+  assert.equal(message(dir), 'Add c and d\n\nSLAP: 3 (S)');
+});
+
+test('git commit -C HEAD, a new commit reusing HEAD\'s message, is still measured as an amend', () => {
+  const dir = repo();
+  put(dir, 'README.md', '# r\n');
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'root']);
+  put(dir, 'src/a.mjs', lines(10));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'Add a']);
+  put(dir, 'src/b.mjs', lines(10, 'b'));
+  git(dir, ['add', '-A']);
+  assert.equal(git(dir, ['commit', '-q', '-C', 'HEAD']).status, 0);
+  assert.equal(message(dir), 'Add a\n\nSLAP: 6 (S)');
+});
+
 test('a merge, a cherry-pick and a revert are not measured again', () => {
   const dir = repo();
   put(dir, 'README.md', '# r\n');
