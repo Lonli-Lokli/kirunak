@@ -18,20 +18,20 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
 - **Record every ruling as it is made**, never in a batch at the end.
 - **Copy the owner's words as typed** into `k intake answer`, never a summary: the answer is the source.
 - **Say plainly what is still open**: "the task cannot become ready: Q-7 is open".
-- **Keep it short.** An aspect that plainly cannot apply is one question ("large text: no screen changes, so n/a?"),
-  not a walk through its edge cases.
+- **Keep it short.** A plainly inapplicable aspect is one question ("large text: no screen changes, so n/a?"), not a walk.
 
 ## The steps
 
-1. **Start.** `k intake start <repo>/<slug> --title "..."`, or with an old record as background:
-   `k intake start <repo>/<slug> --from <path to the change>`, or from a kirunak draft (below):
-   `k intake start <repo>/<slug> --from kirunak/drafts/<slug>.md`, or from a bug (below). The slug is lower-case
-   letters, digits and hyphens, at most 40. This writes `kirunak/tasks/<slug>/task.md` (a draft), `intake.md`, and
-   with `--from` a `notes.md`.
+1. **Start.** `k intake start <repo>/<slug> --title "..."`, adding `--from <path to the change>` for an old record
+   as background, `--from kirunak/drafts/<slug>.md` for a kirunak draft (below), or `--from kirunak/bugs/<slug>.md`
+   for a bug (below). The slug is lower-case letters, digits and hyphens, at most 40. This writes
+   `kirunak/tasks/<slug>/task.md` (a draft), `intake.md`, and with `--from` a `notes.md`.
 2. **The goal.** Propose one paragraph from the owner's words or the background, then:
    `k intake question <id> --topic goal "<the question>"` → it prints `Q-n`. Ask the owner. Record:
    `k intake answer <id> Q-n "<their words, verbatim>" --ruling "→ Goal"`. Every question and answer goes
-   through these two commands.
+   through these two commands. Then ask "Anything else you want to mention for this task?" as its own question
+   (`--topic other`), the reply recorded verbatim. Each point in it becomes its own questions, asked one at a time;
+   a point that is already a clear ruling is recorded as it stands. "No", or nothing, is recorded: go on.
 3. **Acceptance criteria.** Draft `AC-n` lines from the goal. For each one you cannot source, ask: "AC-3 says X; is
    that what you want, or a default?" A default the owner accepts is recorded with
    `--ruling "default accepted → AC-3"` and tagged `[default <date>]`.
@@ -39,9 +39,9 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
    edge cases, its sources, and a guess whether it applies. Walk them in order. For each: does it apply? If yes,
    propose edge cases and record each ruling (in → `E-n`, out → `O-n`); if not, record `n/a: <why>`.
 5. **Decisions.** Anything decided along the way that is not a criterion (a number, a name, a date) is a `D-n` line.
-6. **Deferred questions.** A question the owner defers stays a `Q-n` line under Open questions. The task cannot
-   become ready while one is there.
-7. **Check.** `k check <id>` until it passes. Fix what it names; it gives a line number for each problem.
+6. **Deferred questions.** A deferred question stays a `Q-n` line under Open questions; the task cannot become ready.
+7. **Check.** Ask "Anything else you want to mention for this task?" once more (step 2), then `k check <id>` until
+   it passes. Fix what it names; it gives a line number for each problem.
 8. **Commit the intake**: `git add kirunak/tasks/<slug>` and `git commit -m "kirunak: intake <id>"`, in the
    task's repo, before asking for approval. From a kirunak draft or a bug, its staged move goes in the same commit.
 9. **Hand over.** Print the task once, whole. Then say: "Type `! k approve <id>` to freeze and queue it." Stop
@@ -86,9 +86,8 @@ from: <path of the old record, only when there is one>
 - **Every line ends with its source**: `[owner YYYY-MM-DD Q-n]` (the owner's answer; `Q-n` is its entry in
   `intake.md`), `[research <path or URL> §x]`, or `[default YYYY-MM-DD]`. `[from <path>]` may follow as background,
   never alone: a line from an old record is still the owner's to confirm.
-- Numbers start at 1 with no gap, and are never reused.
 - Short sentences. One criterion per line, testable by someone who did not do the work.
-- The sections stay in this order, all seven, even when empty.
+- The sections stay in this order, all seven, even when empty. Numbers start at 1 with no gap, never reused.
 
 ## Bringing in an openspec change (or any old plan)
 
@@ -102,25 +101,26 @@ record's folder.
 ## Starting from a kirunak draft
 
 A draft is an intake prepared ahead (`kirunak/drafts/<slug>.md`, the k-draft skill). Start from one only when the
-owner asks: Start intake in `/k-drafts`, or the owner naming it. `k intake start <id> --from kirunak/drafts/<slug>.md`
-moves it to `kirunak/tasks/<slug>/draft.md`, staged, and the task takes its title. `draft.md` is background, never a
-source: the owner's words quoted there are still asked. **After the goal, the first question holds every `Proposed:`
-answer**, each under its question, recorded once (`k intake question`) and asked as Start intake's prompt writes it:
-past 48 rows in parts "n of m" with Next and Back, Agree first (on the last alone), Not second, each with its line.
-Agree sources each `[owner <date> Q-n]`, `[from kirunak/tasks/<slug>/draft.md]` beside; Not asks each alone, as is a
-question with no proposal or one saying only what is missing. A `bug-of:` draft is refused: k names `k bug from`.
+owner asks: Start intake in `/k-drafts`, or the owner naming it. Step 1's `--from` moves it to
+`kirunak/tasks/<slug>/draft.md`, staged, and the task takes its title. `draft.md` is background, never a source: the
+owner's words quoted there are still asked. **After the goal, the first question holds every `Proposed:` answer**,
+each under its question, recorded once (`k intake question`) and asked as Start intake's prompt writes it: past 48
+rows in parts "n of m" with Next and Back, Agree first (on the last alone), Not second, each with its line. Agree
+sources each `[owner <date> Q-n]`, `[from kirunak/tasks/<slug>/draft.md]` beside; Not asks each alone, as is a
+question with no proposal or one saying only what is missing. Step 2's "anything else" comes after these, not
+straight after the goal. A `bug-of:` draft is refused: k names `k bug from`.
 
 ## Starting from a bug (Start fix)
 
-Only when the owner asks (Start fix in `/k-bugs`, or naming it): `k intake start <id> --from kirunak/bugs/<slug>.md`,
-its own id, refused while its Review & merge runs. The bug moves to `bug.md`, its records to `bug/`, staged.
+Only when the owner asks (Start fix in `/k-bugs`, or naming it): step 1's `--from kirunak/bugs/<slug>.md`, its own id,
+refused while its Review & merge runs. The bug moves to `bug.md`, its records to `bug/`, staged.
 `notes.md` lists its proposed answers (a `Proposed:` line under the question), its open questions, and for a bug of
 an accepted task that task's Edge cases, Out of scope and Aspects lines. **The first question holds every proposed
 answer, and each task line that still applies with its id, in its own text** for one yes or no: on the phone the
 dialog covers the text above it. A yes sources each `[owner <date> Q-1]` (a task's line renumbered, also `[from
 <repo>/<slug> <id>]`); anything else is a no, each asked alone, as is a `Proposed:` that only says what is missing.
-Then each open question alone, check and commit (steps 7, 8; a plan in `bug.md` stays for the plan), and hand over
-with the task whole and: "Type /k-approve to freeze and queue it."
+Then each open question alone, then step 2's "anything else" (step 7 asks again), check and commit (steps 7, 8; a
+plan in `bug.md` stays for the plan), and hand over with the task whole and: "Type /k-approve to freeze and queue it."
 
 ## After approval
 
