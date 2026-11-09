@@ -274,9 +274,10 @@ parser of about a hundred lines with no dependency.
   and by `k accept` once a review has `given.json` (`approval.md` §4). Each line starting `- ` is `- <repo>
   <branch>` or `- <repo> <from>..<to>`, such as `- ~/sources/forecast-api offline-cache`; any other line is prose.
   The repo is a workspace repo's name or a path (`/…` or `~/…`) to a git repository's top, and a path that is a
-  workspace repo's root is that repo. A branch adds its commits since it left the repo's default branch, as a branch
-  named after the task does; a range adds the commits `git log <from>..<to>` lists. A line naming the task's own repo
-  adds its commits' files to the review's `diff.patch`. A line naming a repo that is neither, a branch or range git
+  workspace repo's root, or a worktree of one, is that repo. A branch adds its commits since it left the repo's
+  default branch, as a branch named after the task does; a range adds the commits `git log <from>..<to>` lists. A
+  range naming the task's own repo adds its commits' files to the review's `diff.patch`; a branch there gives a patch
+  of its own, unless the checkout's HEAD holds its head (`review.md` §1). A line naming a repo that is neither, a branch or range git
   cannot read, a branch whose start kirunak cannot tell (the default branch itself, one merged with no reflog, or one
   in a repo with no default branch of its own: such a line takes a range instead), or a line that is not those two
   words stops the review's brief and its start, and `k accept` too, and kirunak names each such line by its number

@@ -53,11 +53,25 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   name, the first in that order on a tie), from the merge base of the parents of the commits it holds (the empty
   tree when one is a root commit), over their paths besides kirunak's records, each diffed once. `<name>` is the
   workspace's name for the repo or its folder's, `-2` for a second of the same name; a repo where the task's commits
-  touch only records gets no patch. A `repos.md` line naming the task's own repo adds its commits' files to
-  `diff.patch`, whatever task they name, and gives them a patch of their own, `in/repos/<own repo>.patch`, read at
-  the tip holding the most of them as another repo's is: `diff.patch` is read on the branch holding the task's
-  folder, which may never hold that work (the bug gulnya/review-own-repo-range-empty). It is written even when that
-  branch holds the range too, and its commits naming no task are listed once, with the own change's. A `repos.md` line kirunak cannot read stops the brief and the review step's
+  touch only records gets no patch. A `repos.md` path that is a worktree of a workspace repo is that repo
+  (gulnya/review-own-repo-branch E-3).
+- **The task's own repo besides the checkout's branch, `in/repos/<own repo>.patch`**. `diff.patch` is read on the
+  branch holding the task's folder, which may never hold the task's work there, so that work gets a patch of its
+  own, read at the tip holding the most of its commits as another repo's is, records left out:
+  - A `repos.md` range line naming the own repo adds its commits' files to `diff.patch`, whatever task they name, and
+    gives them that patch, written even when the checkout's branch holds the range too (the bug
+    gulnya/review-own-repo-range-empty).
+  - A `repos.md` branch line naming the own repo, and each branch there named after the task found by itself (its
+    id, or a name holding its slug as a whole word, the task of that slug there being this one; never the default
+    branch nor the branch the checkout is on), give that patch their commits since they left the default branch,
+    as in another repo, from where the branch left to its head (gulnya/review-own-repo-branch AC-1, AC-5). When the
+    checkout's HEAD holds the branch's head (the checkout on it, or the branch merged into it), the branch gives no
+    patch (E-4). `diff.patch` takes only those of a branch's commits that HEAD holds, so a file changed only on the
+    other branch is not in it, and a file changed on both is in both, each with its own commits' change (AC-2,
+    E-6).
+
+  The commits naming no task are listed once: those `diff.patch` takes with the own change's, the rest with that
+  patch's. A `repos.md` line kirunak cannot read stops the brief and the review step's
   start (E-6), and so does a branch line whose start it cannot tell, rather than adding nothing (`task-files.md` §3).
 - **What the brief says of them** (`templates/review-brief.md`): `diff.patch` is the own change from the first
   approval to head. When the task was amended, it names the last amendment and its approval, the newest commit of
@@ -65,11 +79,16 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   <head>` over the same files to see what changed since (AC-3); a task never amended names its first approval only
   (E-1). It names each other repo's patch with its base, its head and the ref it was read at, and each of the task's
   commits there that the patch does not hold, with the branches that hold it; those repos are readable at that head.
+  When the own repo's patch is read at a branch the checkout is not on, its line says the task's own-repo work is on
+  that branch and names the branch, where it left the default branch and its head, beside the checkout's branch and
+  head (gulnya/review-own-repo-branch AC-4).
   Under `## Commits that name no task` it lists, repo by repo, each commit in a diff whose message names no task,
   with its short hash, subject and files, so the reviewer knows it may be other work (AC-7).
 - **`given.json`**, in the review step's folder beside `in/` and written with it, records what kirunak gave the
   review: the base, the last amendment's approval, the head, and for each other repo its name, root, the ref its head
-  was read from, its base, head and files, and `last`, the review it follows (below), or `null`. The step's
+  was read from, its base, head and files; `own`, the own repo's patch the same way with `branch`, the branch the
+  checkout is not on it was read at or `null` for ranges only, and no `own` at all without that patch; and `last`, the
+  review it follows (below), or `null`. The step's
   `.gitignore` does not name it, so it is committed with the step's folder. `k review check` holds the review's
   `base` to it and takes a carried row only from its `last` (§2), and `k accept` reads each other repo's head from it
   (`approval.md` §4).
@@ -84,7 +103,8 @@ Design (R13, R14, R15, D12). Each choice is marked **evidence** (with its source
   - `in/last-review.md`: that review's text verbatim, its rows and findings.
   - `in/since.patch`: the same files as `diff.patch`, diffed from that review's `head` to the head now. For each other
     repo, `in/repos/<name>.since.patch` holds the same files as its `<name>.patch`, from the head that review's
-    `given.json` recorded for that repo to the head now. There is none when that review's step recorded no head
+    `given.json` recorded for that repo to the head now, and the own repo's from the head its `own` recorded. There
+    is none when that review's step recorded no head
     there (the repo had no part then, or the step kept no `given.json`), or when that head is no longer a commit.
 
   `given.json` records it as `last: { file, review: "review-<n>", head, repos: { <name>: <head> } }`. The whole diff
