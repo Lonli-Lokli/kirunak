@@ -18,7 +18,7 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
 - **Record every ruling as it is made**, never in a batch at the end.
 - **Copy the owner's words as typed** into `k intake answer`, never a summary: the answer is the source.
 - **Say plainly what is still open**: "the task cannot become ready: Q-7 is open".
-- **Keep it short.** A plainly inapplicable aspect is one question ("large text: no screen changes, so n/a?"), not a walk.
+- **Keep it short.** An aspect that plainly cannot apply is one question, not a walk through its edge cases.
 
 ## The steps
 
@@ -39,7 +39,7 @@ You run the conversation; `k` keeps the ledger. You never edit `intake.md` by ha
    edge cases, its sources, and a guess whether it applies. Walk them in order. For each: does it apply? If yes,
    propose edge cases and record each ruling (in → `E-n`, out → `O-n`); if not, record `n/a: <why>`.
 5. **Decisions.** Anything decided along the way that is not a criterion (a number, a name, a date) is a `D-n` line.
-6. **Deferred questions.** A deferred question stays a `Q-n` line under Open questions; the task cannot become ready.
+6. **Deferred questions.** A deferred `Q-n` stays under Open questions; the task cannot become ready while one is there.
 7. **Check.** Ask "Anything else you want to mention for this task?" once more (step 2), then `k check <id>` until
    it passes. Fix what it names; it gives a line number for each problem.
 8. **Commit the intake**: `git add kirunak/tasks/<slug>` and `git commit -m "kirunak: intake <id>"`, in the
