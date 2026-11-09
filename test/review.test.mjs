@@ -269,6 +269,42 @@ test('a re-review refuses a carried row naming another repo\'s file from that re
   assert.deepEqual(problems(v.carry(rows)), []);
 });
 
+// A met row may cite a file of another repo of the review, one given.json names, under that repo's root as given.json
+// writes it (or a git worktree of it); it is read there at the head given.json records for it (gulnya/review-met-other-repo).
+test('a met row citing another repo\'s file is checked there at the head given.json records; a path under no repo of the review, or in one with no head, is refused (gulnya/review-met-other-repo)', async () => {
+  const w = await rereviewed();
+  const at = (evidence, given) => {
+    const rows = CARRIED_ROWS(w);
+    rows[1] = `| AC-2 | met | ${evidence} |`;
+    return problems(w.carry(rows, given ? { given } : {})).filter((x) => x.startsWith('AC-2'));
+  };
+  // (a) a file:line within the file at hub's head; (c) a test whose name is in the file there.
+  assert.deepEqual(at(`file ${w.hub}/cache.txt:2: evicted`), []);
+  assert.deepEqual(at(`test evicted (${w.hub}/cache.txt:2)`), []);
+  // (b) past the file's length at hub's head (two lines; one at the head review-2 saw), or missing there: the repo named.
+  assert.deepEqual(at(`file ${w.hub}/cache.txt:3`), [`AC-2: ${w.hub}/cache.txt:3 is past the file's length (2 lines in hub at ${w.hubHead})`]);
+  assert.deepEqual(at(`file ${w.hub}/gone.txt:1`), [`AC-2: ${w.hub}/gone.txt does not exist in hub at ${w.hubHead}`]);
+  assert.deepEqual(at(`test kept (${w.hub}/cache.txt)`), [`AC-2: test kept is not in ${w.hub}/cache.txt`]);
+  // A file there now but not at the head given.json records is not met.
+  writeFileSync(join(w.hub, 'later.txt'), 'later\n');
+  gitCommitAll(w.hub, 'after the review');
+  assert.deepEqual(at(`file ${w.hub}/later.txt:1`), [`AC-2: ${w.hub}/later.txt does not exist in hub at ${w.hubHead}`]);
+  // A git worktree of hub is hub.
+  const tree = join(w.root, 'hub-tree');
+  sh(w.hub, 'git', ['worktree', 'add', '-q', '--detach', tree, w.hubSeen]);
+  assert.deepEqual(at(`file ${tree}/cache.txt:2`), []);
+  assert.deepEqual(at(`file ${tree}/cache.txt:3`), [`AC-2: ${tree}/cache.txt:3 is past the file's length (2 lines in hub at ${w.hubHead})`]);
+  // (d) a path under no repo of given.json is refused, hub's own when given.json does not name it.
+  const none = (path) => `AC-2: ${path} is in no repo of the review: a met row cites a file of the task's repo from its top, or of another repo given.json names under that repo's root`;
+  assert.deepEqual(at(`file ${w.root}/elsewhere.txt:1`), [none(`${w.root}/elsewhere.txt`)]);
+  assert.deepEqual(at(`file ${w.hub}/cache.txt:2`, { ...w.given, repos: [] }), [none(`${w.hub}/cache.txt`)]);
+  // A repo given.json names with no head, or a head that is not a commit there, refuses the row.
+  const headless = { ...w.given, repos: [{ ...w.given.repos[0], head: null }] };
+  assert.deepEqual(at(`file ${w.hub}/cache.txt:2`, headless), [`AC-2: ${w.hub}/cache.txt is in hub, whose head given.json does not record, so it cannot be read as met`]);
+  const bad = { ...w.given, repos: [{ ...w.given.repos[0], head: 'abcdef1' }] };
+  assert.deepEqual(at(`file ${w.hub}/cache.txt:2`, bad), [`AC-2: ${w.hub}/cache.txt is in hub, whose head abcdef1 given.json records is not a commit there, so it cannot be read as met`]);
+});
+
 test('a re-review refuses a carried row of a line amended since, with no path, from a review not given, or in other words (AC-2, E-2, E-4)', async () => {
   const w = await rereviewed();
   const rows = CARRIED_ROWS(w);
