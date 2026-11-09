@@ -369,6 +369,28 @@ test('a review that follows a review gets that review verbatim and the since pat
   assert.doesNotMatch(text, /\{\{/);
 });
 
+test('a review that follows one gets the own repo\'s branch since the head its step recorded there, as another repo\'s (gulnya/review-own-repo-branch)', async () => {
+  const w = await implemented(RERUN);
+  work(w.weather, 'docs/offline.md', 'the cache keeps three days\n', `docs/offline.md (${w.id} S-1)`);
+  sh(w.weather, 'git', ['checkout', '-qb', 'task/offline-forecast']);
+  const branchSeen = work(w.weather, 'src/cache.txt', 'cache\n', `src/cache.txt (${w.id} S-1)`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
+  assert.equal(givenOf(w, 'S-2').own.head, branchSeen);
+  put(w, 'review.md', reviewText(w, headOf(w.weather)));
+  assert.equal(k(w.home, ['step', 'finish', w.id, 'S-2']).status, 0);
+  sh(w.weather, 'git', ['checkout', '-q', 'task/offline-forecast']);
+  work(w.weather, 'src/cache.txt', 'cache\nevicted after a week\n', `src/cache.txt: eviction (${w.id} S-1)`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  const { text } = await steps.brief({ ws: w.ws, id: w.id, step: 'S-3', session: 'rev-2' });
+  const inDir = join(w.p.dir, 'steps', 'S-3', 'in');
+  assert.deepEqual(readdirSync(join(inDir, 'repos')).sort(), ['weather.patch', 'weather.since.patch']);
+  const since = readFileSync(join(inDir, 'repos', 'weather.since.patch'), 'utf8');
+  assert.match(since, /^ cache\n\+evicted after a week$/m);
+  assert.doesNotMatch(since, /^\+cache$/m);
+  assert.ok(text.includes(`\`kirunak/tasks/offline-forecast/steps/S-3/in/repos/weather.since.patch\`: the same files in weather, from ${branchSeen}, the head the last review saw there`), text);
+});
+
 test('a review follows only a review that counts and whose head is still behind: a failed grammar, an edit after its step, or a rebase give a whole review (E-3)', async () => {
   const w = await implemented(RERUN);
   work(w.weather, 'docs/offline.md', 'the cache keeps three days\n', `docs/offline.md (${w.id} S-1)`);

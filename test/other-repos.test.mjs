@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { approvedWorkspace, gitCommitAll, gitInit, k, sh } from './helpers.mjs';
@@ -213,4 +213,130 @@ test('an own-repo range already merged into the folder\'s branch still comes as 
   await brief(w);
   assert.deepEqual(files(readFileSync(join(inDir(w), 'diff.patch'), 'utf8')), ['src/cache.txt']);
   assert.deepEqual(files(patchOf(w, 'weather')), ['src/cache.txt']);
+});
+
+// The task's own-repo work on a branch the checkout is not on (gulnya/review-own-repo-branch): `branch` of weather, made
+// from master in the worktree `at` when given, holds a commit naming no task and one naming the task; then on master,
+// where the checkout stays, another task's commit changes one of the branch's files and a commit naming the task
+// another file. → { base, head, master, quiet }: where the branch left master, its head, master's head, the commit
+// naming no task
+function ownBranch(w, branch, at = null) {
+  work(w.weather, 'kirunak/tasks/other-thing/task.md', '# another\n', 'kirunak: intake weather/other-thing');
+  const base = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
+  if (at) sh(w.weather, 'git', ['worktree', 'add', '-q', '-b', branch, at, 'master']);
+  else sh(w.weather, 'git', ['checkout', '-qb', branch]);
+  const quiet = work(at ?? w.weather, 'src/cache.txt', 'three days\n', 'src/cache.txt: names nothing');
+  const head = work(at ?? w.weather, 'src/zoom.txt', 'zoom\n', `src/zoom.txt (${w.id} S-1)`);
+  if (!at) sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  work(w.weather, 'src/cache.txt', 'other\n', 'src/cache.txt (weather/other-thing)');
+  const master = work(w.weather, 'src/forecast.txt', 'forecast\n', `src/forecast.txt (${w.id} S-1)`);
+  return { base, head, master, quiet };
+}
+
+// What the review of ownBranch's task gets (AC-1, AC-2, AC-4, AC-6's first three checks).
+async function seesOwnBranch(w, branch, { base, head, master, quiet }) {
+  const { text } = await brief(w);
+  const own = patchOf(w, 'weather');
+  assert.deepEqual(files(own), ['src/cache.txt', 'src/zoom.txt'], 'in/ holds the branch\'s patch (AC-1)');
+  assert.match(own, /^\+three days$/m, 'up to the branch\'s head');
+  assert.doesNotMatch(own, /^\+other$/m);
+  assert.deepEqual(files(readFileSync(join(inDir(w), 'diff.patch'), 'utf8')), ['src/forecast.txt'], 'diff.patch holds none of the branch\'s files (AC-2)');
+  const files_ = ['src/cache.txt', 'src/zoom.txt'];
+  assert.deepEqual(given(w).own, { name: 'weather', root: realpathSync(w.weather), ref: branch, base, head, files: files_, branch });
+  assert.deepEqual(given(w).repos, [], 'given.json\'s repos stay the other repos');
+  for (const s of [`\`kirunak/tasks/offline-forecast/steps/S-2/in/repos/weather.patch\`: the task's own-repo work is on the branch ${branch} of weather, which the checkout is not on`,
+    `from ${base}, where it left master, to ${branch}'s head ${head}`, `The checkout is on master at ${master}, where \`diff.patch\` is read`,
+    `- weather \`${quiet}\` src/cache.txt: names nothing: src/cache.txt`]) assert.ok(text.includes(s), `${s}\n${text}`);
+  assert.equal(text.split(`\`${quiet}\``).length, 2, 'the commit naming no task is listed once');
+}
+
+test('the task\'s own-repo work on an unmerged branch named in repos.md comes as its own patch up to the branch\'s head, diff.patch holds none of its files, and the brief names the branch, its head and the checkout\'s (gulnya/review-own-repo-branch AC-1, AC-2, AC-4, AC-6)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const at = ownBranch(w, 'code');
+  hand(w, 'weather code');
+  await seesOwnBranch(w, 'code', at);
+});
+
+test('a branch of the task\'s own repo named after the task is found with no repos.md line (gulnya/review-own-repo-branch AC-5)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const at = ownBranch(w, 'task/offline-forecast');
+  await seesOwnBranch(w, 'task/offline-forecast', at);
+});
+
+test('a repos.md line naming a worktree of the task\'s own repo with its branch is the own repo\'s branch line (gulnya/review-own-repo-branch E-3)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const tree = join(w.root, 'weather-code');
+  const at = ownBranch(w, 'code', tree);
+  hand(w, `${tree} code`);
+  await seesOwnBranch(w, 'code', at);
+  assert.deepEqual(readdirSync(join(inDir(w), 'repos')), ['weather.patch'], 'no part of another repo for the worktree');
+});
+
+test('the checkout on the branch itself, or the branch merged before the review, gives no second patch; diff.patch is the branch\'s change (gulnya/review-own-repo-branch E-4)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sh(w.weather, 'git', ['checkout', '-qb', 'offline-forecast']);
+  work(w.weather, 'src/cache.txt', 'three days\n', 'src/cache.txt: names nothing');
+  hand(w, 'weather offline-forecast');
+  await brief(w);
+  assert.ok(!existsSync(join(inDir(w), 'repos')), 'the checkout on the branch');
+  assert.equal(given(w).own, undefined);
+  assert.deepEqual(files(readFileSync(join(inDir(w), 'diff.patch'), 'utf8')), ['src/cache.txt']);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  sh(w.weather, 'git', ['checkout', '-qb', 'code']);
+  work(w.weather, 'src/zoom.txt', 'zoom\n', 'src/zoom.txt: names nothing');
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  sh(w.weather, 'git', ['merge', '-q', '--no-ff', '-m', 'Merge offline-forecast', 'offline-forecast']);
+  sh(w.weather, 'git', ['merge', '-q', '--no-ff', '-m', 'Merge code', 'code']);
+  hand(w, 'weather code');
+  await brief(w);
+  assert.ok(!existsSync(join(inDir(w), 'repos')), 'both merged into the checkout\'s branch');
+  assert.equal(given(w).own, undefined);
+  assert.deepEqual(files(readFileSync(join(inDir(w), 'diff.patch'), 'utf8')), ['src/cache.txt', 'src/zoom.txt']);
+});
+
+test('a file the task changed on the checkout\'s branch and on the other branch is in both patches, each with its own commits\' change (gulnya/review-own-repo-branch E-6)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sh(w.weather, 'git', ['checkout', '-qb', 'code']);
+  work(w.weather, 'src/both.txt', 'on the branch\n', `src/both.txt (${w.id} S-1)`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  work(w.weather, 'src/both.txt', 'on master\n', `src/both.txt (${w.id} S-1)`);
+  hand(w, 'weather code');
+  await brief(w);
+  const diff = readFileSync(join(inDir(w), 'diff.patch'), 'utf8');
+  const own = patchOf(w, 'weather');
+  assert.deepEqual(files(diff), ['src/both.txt']);
+  assert.deepEqual(files(own), ['src/both.txt']);
+  assert.match(diff, /^\+on master$/m);
+  assert.doesNotMatch(diff, /^\+on the branch$/m);
+  assert.match(own, /^\+on the branch$/m);
+  assert.doesNotMatch(own, /^\+on master$/m);
+});
+
+test('kirunak\'s records on the own repo\'s branch are never in its patch: a branch of records only gives none (gulnya/review-own-repo-branch E-1)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sh(w.weather, 'git', ['checkout', '-qb', 'offline-forecast']);
+  work(w.weather, 'kirunak/tasks/offline-forecast/notes.md', 'notes\n', `kirunak: notes of ${w.id}`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  await brief(w);
+  assert.ok(!existsSync(join(inDir(w), 'repos')), 'records only');
+  assert.equal(given(w).own, undefined);
+  sh(w.weather, 'git', ['checkout', '-q', 'offline-forecast']);
+  work(w.weather, 'src/cache.txt', 'three days\n', `src/cache.txt (${w.id} S-1)`);
+  sh(w.weather, 'git', ['checkout', '-q', 'master']);
+  await brief(w);
+  assert.deepEqual(files(patchOf(w, 'weather')), ['src/cache.txt']);
+  assert.deepEqual(given(w).own.files, ['src/cache.txt']);
+});
+
+test('a repos.md line beside the own repo\'s branch naming a repo kirunak does not know, or a range git cannot read in the own repo, stops the review and is named (gulnya/review-own-repo-branch E-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  sh(w.weather, 'git', ['branch', 'code']);
+  hand(w, 'weather code', 'nowhere code', 'weather abc1234..def5678');
+  await assert.rejects(brief(w), (e) => {
+    assert.ok(e.message.includes('line 5, "- nowhere code": nowhere is neither a repo of the workspace nor a git repository'), e.message);
+    assert.ok(e.message.includes('line 6, "- weather abc1234..def5678": git cannot read the range abc1234..def5678'), e.message);
+    assert.ok(!e.message.includes('line 4'), e.message);
+    return true;
+  });
+  assert.ok(!existsSync(join(inDir(w), 'repos')), 'nothing written');
 });
