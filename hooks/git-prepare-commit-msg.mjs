@@ -35,8 +35,9 @@ function ownersRecords(base, env) {
   return paths.length > 0 && paths.every((p) => ownerRecord(p, env));
 }
 
-// Whether a commit given -m or -F amends HEAD, for AC-8: git passes such an amend `message` like any commit, but keeps
-// HEAD's author date for it, and a new commit's is now. A date of HEAD's two seconds old or more counts.
+// Whether a commit given -m or -F amends HEAD, for the SLAP gate and AC-8 alike: git passes such an amend `message`
+// like any commit, but keeps HEAD's author date for it, and a new commit's is now. A date of HEAD's two seconds old or
+// more counts.
 function amendsHead(env, head) {
   const at = /^@(\d+) /.exec(env.GIT_AUTHOR_DATE || '');
   if (!at || !head || Number(at[1]) > Date.now() / 1000 - 2) return false;
@@ -55,7 +56,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     head = null;
   }
   // An amend passes `commit HEAD`: git 2.54 passes the word; githooks(5) says a commit object name, so a sha counts too.
-  const amending = source === 'commit' && head && (sha === 'HEAD' || sha === head);
+  // One given -m or -F is known by its author date. Either is measured as the whole commit it becomes.
+  const amending = (source === 'commit' && head && (sha === 'HEAD' || sha === head)) || amendsHead(env, head);
   const base = amending ? parentOf(process.cwd(), 'HEAD') : head || EMPTY_TREE;
   const skipSlap = source === 'merge' || replaying(info.gitDir) || ownersRecords(base, env);
   let m = null;
@@ -67,21 +69,20 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     }
     m = g.m;
   }
-  const whole = !amending && amendsHead(env, head) ? parentOf(process.cwd(), 'HEAD') : base;
   const raw = readFileSync(msgFile, 'utf8');
   const state = replayState(info.gitDir);
   const replay = Boolean(state.mergeHeads || state.pick);
   const task = (env.KIRUNAK_TASK || '').trim();
   // git's pick keeps the message it carries, its own `Task:` among it (AC-3, S-16 design §3).
   const trailer = Boolean(task) && !(state.pick && sameAsGit(raw, state.gitMessage, commitConfig(info.top)));
-  const own = replay ? (cfg) => ownBase(info, raw, whole, cfg, state) : whole;
+  const own = replay ? (cfg) => ownBase(info, raw, base, cfg, state) : base;
   const done = await doneNamed(info, raw, own, env, trailer ? `\nTask: ${task}\n` : '');
   if (done) {
     console.error(doneRefusal(done));
     return 1;
   }
   // commit-msg judges the message the commit keeps against the same base: the second line asks it to redo the rule.
-  writeFileSync(baseFile, replay ? `${whole}\nreplay\n` : `${whole}\n`);
+  writeFileSync(baseFile, replay ? `${base}\nreplay\n` : `${base}\n`);
   const trailers = [...(m ? [line(m)] : []), ...(trailer ? [`Task: ${task}`] : [])];
   for (const t of trailers) execFileSync('git', ['interpret-trailers', '--in-place', '--if-exists', 'replace', '--trailer', t, msgFile], { stdio: 'ignore' });
   return 0;
