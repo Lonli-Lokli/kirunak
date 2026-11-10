@@ -180,6 +180,7 @@ test('k doctor --settings --agents prints the ladder lines', async () => {
   assert.match(out, /^ok {3}push to the phone: on \(agentPushNotifEnabled in .*settings\.json\)$/m);
   assert.match(out, /^WARN status line tracker: no statusLine command in .*settings\.json, so sessions' cost is not tracked/m);
   assert.match(out, /^ok {3}bugs' notice: wired on SessionStart startup\|clear$/m);
+  assert.match(out, /^ok {3}worktree lock release: wired on SessionEnd, every end$/m);
   assert.match(out, /^ok {3}hook kirunak-bugs\.mjs$/m);
 });
 

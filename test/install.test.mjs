@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { BUGS_MATCHER, FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
+import { unlockHookLine } from '../lib/doctor.mjs';
 import { DEFAULT_HOOK } from '../lib/ladder.mjs';
 import { gitInit, KIRUNAK } from './helpers.mjs';
 
@@ -58,9 +59,10 @@ test('the block is written with the absolute path, and every other hook and key 
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
   assert.ok(lstatSync(join(h.skillsDir, 'k-go-on')).isSymbolicLink(), 'the owner\'s override, /k-go-on, is linked (R5.4)');
-  // The PreToolUse block, the links, the escalation hook's 8 blocks, the stale-session hook's, the compact hook's 6, 2
-  // rung agents, config.json, the windows' line (no workspace yet), the bugs' notice, SessionStart, the tracker.
-  assert.equal(actions.length, 1 + SKILLS.length + 8 + 1 + 6 + 2 + 1 + 1 + 3);
+  // The PreToolUse block, the links, the escalation hook's 8 blocks, the stale-session hook's, the compact hook's 6, the
+  // lock release's, 2 rung agents, config.json, the windows' line (no workspace yet), the bugs' notice, SessionStart,
+  // the tracker.
+  assert.equal(actions.length, 1 + SKILLS.length + 8 + 1 + 6 + 1 + 2 + 1 + 1 + 3);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
   assert.match(actions.at(-2), /added the kirunak SessionStart hook/);
   assert.ok(actions.at(-1).endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
@@ -151,6 +153,35 @@ test('a block of its own whose timeout differs is rewritten to kirunak\'s, the n
   const task = after.SessionStart.filter((b) => b.hooks[0].command.endsWith('--part task'));
   assert.deepEqual([task.length, task[0].hooks[0].timeout, after.SessionEnd[0].hooks[0].timeout, after.Stop[0].hooks[0].timeout], [1, 20, 5, 10], 'rewritten, never added twice');
   assert.ok(!install(h).actions.some((a) => a.startsWith('updated the kirunak')), 'a second run finds every block as kirunak gives it');
+});
+
+test("AC-1: the worktree lock's release on every SessionEnd, no matcher, 5 s, beside the compact hook's; a block of ours with a matcher or another timeout is set back; k doctor reads it (approval.md §4)", () => {
+  const h = home();
+  const unlock = { type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-unlock.mjs')}`, timeout: 5 };
+  const printed = install({ ...h, print: true }).actions;
+  assert.ok(printed.includes(`would set in ${h.settingsPath} hooks.SessionEnd: ${JSON.stringify({ hooks: [unlock] })}`), printed.join('\n'));
+  assert.ok(install(h).actions.includes(`added the kirunak SessionEnd hook to ${h.settingsPath}`));
+  const read = () => JSON.parse(readFileSync(h.settingsPath, 'utf8'));
+  assert.deepEqual(read().hooks.SessionEnd[1], { hooks: [unlock] });
+  assert.match(read().hooks.SessionEnd[0].hooks[0].command, /kirunak-compact\.mjs$/);
+  assert.deepEqual(unlockHookLine(h), [true, 'worktree lock release: wired on SessionEnd, every end']);
+  const json = read();
+  Object.assign(json.hooks.SessionEnd[1], { matcher: 'clear' });
+  json.hooks.SessionEnd[1].hooks[0].timeout = 60;
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  assert.deepEqual(unlockHookLine(h), [false, "worktree lock release: wired on SessionEnd with matcher clear, kirunak's none (run k install)"]);
+  delete json.hooks.SessionEnd[1].matcher;
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  assert.deepEqual(unlockHookLine(h), [false, "worktree lock release: wired on SessionEnd (timeout 60 s, kirunak's 5 s) (run k install)"]);
+  json.hooks.SessionEnd[1].matcher = 'clear';
+  writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
+  assert.ok(install(h).actions.includes(`updated the kirunak SessionEnd hook in ${h.settingsPath} to ${unlock.command}, its timeout from 60 s to 5 s`));
+  assert.deepEqual(read().hooks.SessionEnd.slice(1), [{ hooks: [unlock] }], 'set back, never added twice');
+  assert.deepEqual(unlockHookLine(h), [true, 'worktree lock release: wired on SessionEnd, every end']);
+  const off = read();
+  off.hooks.SessionEnd = off.hooks.SessionEnd.slice(0, 1);
+  writeFileSync(h.settingsPath, JSON.stringify(off, null, 2) + '\n');
+  assert.deepEqual(unlockHookLine(h), [false, `worktree lock release: not wired on SessionEnd in ${h.settingsPath} (run k install)`]);
 });
 
 test('a foreign skill of the same name is refused by name, and nothing is written', () => {

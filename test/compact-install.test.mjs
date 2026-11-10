@@ -15,13 +15,14 @@ test('R8.1: the compact hook on PreCompact, SessionEnd and four SessionStart par
   const hooks = json(s.paths.settingsPath).hooks;
   const command = (part) => `node ${join(KIRUNAK, 'hooks', 'kirunak-compact.mjs')}${part ? ` --part ${part}` : ''}`;
   assert.deepEqual(hooks.PreCompact, [{ matcher: 'auto|manual', hooks: [{ type: 'command', command: command(), timeout: 10 }] }]);
-  assert.deepEqual(hooks.SessionEnd, [{ matcher: 'clear', hooks: [{ type: 'command', command: command(), timeout: 5 }] }]);
+  assert.deepEqual(hooks.SessionEnd[0], { matcher: 'clear', hooks: [{ type: 'command', command: command(), timeout: 5 }] });
+  assert.equal(hooks.SessionEnd.length, 2, "beside the worktree lock's release");
   const parts = hooks.SessionStart.filter((b) => b.hooks[0].command.includes('kirunak-compact.mjs'));
   assert.deepEqual(parts, ['state', 'task', 'plan', 'progress'].map((p) => ({ matcher: 'compact|clear', hooks: [{ type: 'command', command: command(p), timeout: 20 }] })));
   const evs = compactEvents();
   for (const e of evs) assert.deepEqual(evs.filter((x) => x.own.test(command(e.part))).map((x) => x.part), e.part ? [e.part] : [null, null], 'one pattern per part');
   const actions = s.go();
-  assert.equal(actions.filter((a) => /already has the kirunak (PreCompact|SessionEnd|SessionStart) hook/.test(a)).length, 9, 'the six, the escalation hook\'s, the session hook\'s and the bugs\' notice\'s');
+  assert.equal(actions.filter((a) => /already has the kirunak (PreCompact|SessionEnd|SessionStart) hook/.test(a)).length, 10, 'the six, the escalation hook\'s, the session hook\'s, the bugs\' notice\'s and the lock release\'s');
   const user = json(s.paths.settingsPath);
   user.hooks.SessionStart.find((b) => b.hooks[0].command.endsWith('--part plan')).hooks[0].command = 'node /old/kirunak/hooks/kirunak-compact.mjs --part plan';
   writeFileSync(s.paths.settingsPath, JSON.stringify(user, null, 2) + '\n');

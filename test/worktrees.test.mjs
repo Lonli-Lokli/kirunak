@@ -401,3 +401,55 @@ test('A-1: on win32 a worktree Windows moves aside but not back is kept, the lin
   assert.ok(existsSync(aside) && branchExists(weather, 'stuck'));
   renameSync(aside, stuck);
 });
+
+// A lock as a session's lease leaves it (lib/worktree-lock.mjs), or as a hand makes it.
+const lock = (repo, path, reason) => sh(repo, 'git', ['worktree', 'lock', ...(reason === undefined ? [] : ['--reason', reason]), path]);
+const lockOf = (repo, path) => {
+  let at = null;
+  for (const f of sh(repo, 'git', ['worktree', 'list', '--porcelain', '-z']).split('\0')) {
+    if (f.startsWith('worktree ')) at = f.slice(9);
+    else if (at === path && (f === 'locked' || f.startsWith('locked '))) return f.slice(7);
+  }
+  return null;
+};
+
+test('AC-2: a live lease keeps a merged worktree, any other lock keeps it as before, and a lease that ended is lifted and the worktree removed with its branch; a dry run lifts nothing', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const now = new Date('2026-11-10T09:00:00.000Z');
+  const live = add(weather, join(root, 'live'), 'live');
+  const stale = add(weather, join(root, 'stale'), 'stale');
+  const hand = add(weather, join(root, 'hand'), 'hand');
+  const bare = add(weather, join(root, 'bare'), 'bare');
+  const staleDirty = add(weather, join(root, 'stale-dirty'), 'stale-dirty');
+  writeFileSync(join(staleDirty, 'README.md'), 'changed\n');
+  lock(weather, live, 'kirunak s1 2026-11-10T10:30:00.000Z');
+  lock(weather, stale, 'kirunak s2 2026-11-10T08:59:59.000Z');
+  lock(weather, staleDirty, 'kirunak s2 2026-11-10T08:00:00.000Z');
+  lock(weather, hand, 'moving disks');
+  lock(weather, bare);
+  const until = new Date('2026-11-10T10:30:00.000Z');
+  const hhmm = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`;
+  const keeps = {
+    [bare]: 'locked: no reason given',
+    [hand]: 'locked: moving disks',
+    [live]: `locked: session s1 works in it until ${hhmm}`,
+  };
+
+  const look = await worktrees({ ws, processes: none, now });
+  assert.deepEqual(look.removed.map((w) => [w.path, w.why]), [[stale, 'would lift the lock of session s2: its lease ended 2026-11-10T08:59:59.000Z; stale merged into master']]);
+  assert.deepEqual(whys(look.kept), { ...keeps, [staleDirty]: 'would lift the lock of session s2: its lease ended 2026-11-10T08:00:00.000Z; 1 uncommitted change' });
+  assert.equal(lockOf(weather, stale), 'kirunak s2 2026-11-10T08:59:59.000Z', 'a dry run lifts nothing');
+
+  const r = await worktrees({ ws, remove: true, processes: none, now });
+  assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [[stale, 'lock of session s2 lifted: its lease ended 2026-11-10T08:59:59.000Z; stale merged into master', true]]);
+  assert.deepEqual(whys(r.kept), { ...keeps, [staleDirty]: 'lock of session s2 lifted: its lease ended 2026-11-10T08:00:00.000Z; 1 uncommitted change' });
+  assert.deepEqual(r.problems, []);
+  assert.equal(existsSync(stale), false);
+  assert.equal(branchExists(weather, 'stale'), false);
+  assert.equal(lockOf(weather, staleDirty), null, 'lifted, though kept for its change');
+  assert.deepEqual([lockOf(weather, live), lockOf(weather, hand), lockOf(weather, bare)], ['kirunak s1 2026-11-10T10:30:00.000Z', 'moving disks', '']);
+  for (const p of [live, hand, bare]) assert.ok(existsSync(p) && branchExists(weather, p.split('/').pop()));
+
+  const k2 = await worktrees({ ws, remove: true, processes: none, now: new Date('2026-11-10T10:30:00.000Z') });
+  assert.deepEqual(k2.removed.map((w) => [w.path, w.branchDeleted]), [[live, true]], 'once its lease ends, the live one goes too');
+});
