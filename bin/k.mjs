@@ -35,6 +35,7 @@ import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
 import * as checklist from '../lib/checklist.mjs';
 import * as waiting from '../lib/waiting.mjs';
+import * as heavy from '../lib/heavy.mjs';
 import * as drafts from '../lib/drafts.mjs';
 import * as bugs from '../lib/bugs.mjs';
 import * as bugReview from '../lib/bug-review.mjs';
@@ -73,6 +74,7 @@ Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] 
 Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [--markdown] | k verify [<id>] | k queue show
           k board --brief: a line per task and per draft, for the phone; k board --card <id>: one task's or draft's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
+          k heavy [--json]: the heavy queue, the job holding the lock and each waiting job in turn, as two tables
           k worktrees [--closing <id>]: the worktrees an acceptance would remove (what each holds besides build
             output) and keep, with why; it removes nothing
           k waiting: what waits for the owner (bugs, tasks and amendments to approve, tasks to accept, drafts) and what
@@ -733,6 +735,16 @@ const VERBS = {
   // that wait, in one line with how many have a fix ready, and first in --json: a count, that count and their ids; no
   // line at all when none waits (gulnya/kirunak-bugs AC-7). Before them, Quad Damage's run while one lives: its one
   // line, and in --json its run file and that line, null when none lives (gulnya/quad-damage AC-12).
+  // The heavy queue at a glance (gulnya/k-queue): the job holding the lock, then each waiting job in the guard's order.
+  async heavy({ ws }) {
+    if (typeof ws.seams.resourceGuard?.queue !== 'function') {
+      const why = 'the resource guard has no queue(), so k heavy cannot show its queue';
+      return { code: 1, json: { error: why }, text: why };
+    }
+    const r = heavy.rows(await ws.seams.resourceGuard.queue(), { ws });
+    return { json: r, text: heavy.text(r) };
+  },
+
   async waiting({ ws }) {
     const quadDamage = waiting.waitingRun(ws);
     const bugs = waiting.waitingBugs(ws);
