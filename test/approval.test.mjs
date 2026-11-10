@@ -480,7 +480,7 @@ test('k waiting and k accept --dry-run make every check of the owner\'s verbs an
   const first = waiting();
   const title = first.approve[0].title;
   const rows = { quadDamage: null, bugs: { count: 0, ready: 0, ids: [] }, amendments: [], hold: [{ id: ID, title, state: 'proposed' }], start: [{ id: ID, title, state: 'proposed' }], drafts: { count: 0, ids: [] }, stopped: [] };
-  assert.deepEqual(first, { approve: [{ id: ID, title, state: 'proposed', why: null }], accept: [], ...rows });
+  assert.deepEqual(first, { approve: [{ id: ID, title, state: 'proposed', why: null, fromBug: false }], accept: [], ...rows });
   await approve({ ws, id: ID, now: NOV5 });
   // A step that asked the owner a question, with no review yet: awaiting the owner, and nothing to accept (G26).
   writeFileSync(join(taskDir(weather), 'plan.md'), '### S-1 Build [agent]\ncovers: all\ninputs: task\noutputs: steps/S-1/report.md\n\n### S-2 Review [review]\nneeds: S-1\ncovers: all\ninputs: task, diff\noutputs: review.md\n');
