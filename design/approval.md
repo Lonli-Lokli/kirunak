@@ -319,11 +319,16 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 - its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`), by ancestry or
   with nothing left in `git cherry`;
 - it has no uncommitted or untracked change;
-- no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS in any case):
-  a task that still needs a worktree writes its path so. The files are read one at a time in one walk, so a task's
-  evidence costs time, never memory; one over 4 MB, a binary one (a NUL byte in its first 8,000 bytes, git's own
-  test, read no further) and one that cannot be read name nothing (gulnya/worktrees-read-oom);
-- no process works in it or runs a program from it (`lsof`'s cwd and txt; when lsof cannot tell, none goes);
+- no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS and Windows
+  in any case, on Windows with either slash): a task that still needs a worktree writes its path so. The files are
+  read one at a time in one walk, so a task's evidence costs time, never memory; one over 4 MB, a binary one (a NUL
+  byte in its first 8,000 bytes, git's own test, read no further) and one that cannot be read name nothing
+  (gulnya/worktrees-read-oom);
+- no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
+  Linux `/proc/<pid>/cwd` and `exe`, on Windows one PowerShell `Get-CimInstance Win32_Process` call, whose
+  ExecutablePath inside it is a process running from it and whose CommandLine naming it (as a task's file would) is a
+  process working in it. Windows gives no other process's current folder: one working in it makes the removal fail,
+  and the worktree is kept with git's error. When the reader cannot tell, none goes;
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
 
@@ -332,7 +337,7 @@ plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit
 plugin wins. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
 branch goes with `git branch -D`. It is never `--force` but for a removal cut short (killed partway, say by the
 phone's time limit): when its only changes are tracked files deleted, nothing of its own is left in it, and it goes
-with `--force`. Every git call but the removal has a time limit (two minutes; lsof one), and what one cannot tell in
+with `--force`. Every git call but the removal has a time limit (two minutes; the look at processes one), and what one cannot tell in
 time keeps the worktree. A failure is a kept line with git's error. `k accept` prints a line for each worktree removed
 and each kept, with why.
 
