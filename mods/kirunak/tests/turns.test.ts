@@ -29,13 +29,13 @@ const HANDOFF = 'go on with the k-done skill from its handoff, step 4 (load it w
 const APPROVED = 'go on with the work that waited for the approval.'
 
 describe('the turn after an owner\'s verb (kirunak-bugs AC-11 to AC-14)', () => {
-  test('Review & merge k took: once /k-bugs answered, a turn says the review started, waits for its process in one background command, then says its result (AC-11)', async ($, on) => {
+  test('Review & merge k took: once /k-bugs answered, a turn says the review started, waits for its process in one background command, asking node whether the pid lives, which Git Bash\'s kill -0 cannot on Windows, then says its result (AC-11, asilak/kirunak-review-wait-windows)', async ($, on) => {
     const w = world(on, { taps: ['hub/stale-tiles', 'Review & merge'], verb: { exitCode: 0, stdout: REVIEWED, stderr: '' } })
     await run($, 'k-bugs')
     expect(w.submitted).toEqual([])
     expect(await turns(w)).toEqual([[
       'The owner tapped Review & merge on the bug hub/stale-tiles in /k-bugs, and kirunak started it: a fresh Opus session reviews its fix as pid 4242, its log at /w/hub/kirunak/bugs/stale-tiles/review.log.',
-      'Say in one line that the review of hub/stale-tiles started. Then run this one command with Bash in the background (run_in_background), and do not poll it or sleep: `while kill -0 4242 2>/dev/null; do sleep 20; done; tail -n 5 /w/hub/kirunak/bugs/stale-tiles/review.log`',
+      'Say in one line that the review of hub/stale-tiles started. Then run this one command with Bash in the background (run_in_background), and do not poll it or sleep: `while node -e "process.kill(4242, 0)" 2>/dev/null; do sleep 20; done; tail -n 5 /w/hub/kirunak/bugs/stale-tiles/review.log`',
       'When it ends, read what it printed and `k bugs`, and tell the owner the result in plain words: the fix merged into master, not pushed, and the bug closed, with the merge\'s commit; or what the review found, with its review file; or the conflict, with its files. Never run `k bug review` yourself.',
     ].join('\n')])
     expect(w.toasts).toEqual([])
