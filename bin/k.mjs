@@ -239,10 +239,13 @@ async function reviewed(ws, id, flags) {
     conflict: () => `${id}: ${at} conflicts with master in ${r.conflict.join(', ') || 'files git does not name'}; nothing merged, written in ${r.review.rel}`,
     'merge-refused': () => `${id}: ${r.review.rel} clean, but the merge was refused: ${r.why}`,
   }[r.outcome]();
+  // What the merge's worktree cleanup removed and kept, with why, as `k accept` prints it (approval.md §4); only a
+  // merge runs it.
+  const cleanup = r.worktrees ? worktrees.lines(r.worktrees).map((l) => `  ${l}`) : [];
   const problems = r.problems.map((p) => `  ${p}`);
   // What the review's session spent (gulnya/headless-tools AC-3), in the detached run's log too.
   const cost = r.spent ? [`  the review's session: ${r.spent}`] : [];
-  return { ...r, code: r.outcome === 'merged' ? 0 : 1, text: [said, ...cost, ...problems].join('\n') };
+  return { ...r, code: r.outcome === 'merged' ? 0 : 1, text: [said, ...cleanup, ...cost, ...problems].join('\n') };
 }
 
 const VERBS = {
