@@ -241,9 +241,11 @@ test('AC-18: k bug review hands its --session to the detached run, which takes i
   git(w.fix, 'worktree', 'lock', '--reason', `kirunak s1 ${LIVE}`, w.tree);
   const d = k(w.home, ['bug', 'review', BUG, '--detach', '--json', '--via', 'mod', '--session', 's1'], { CLAUDE_CODE_SESSION_ID: '', FAKE_VERDICT: 'clean' });
   assert.equal(d.status, 0, d.stderr);
-  for (let i = 0; i < 300 && existsSync(reviewLockPath(w.home, BUG)); i++) await new Promise((r) => setTimeout(r, 50));
-  assert.ok(!existsSync(reviewLockPath(w.home, BUG)), 'the detached review ends');
-  assert.match(readFileSync(JSON.parse(d.stdout).log, 'utf8'), /merged into hub's master/);
+  // Waits for the run's own last line and its lock to go, up to 30 s: a loaded machine starts the child late.
+  const log = JSON.parse(d.stdout).log;
+  const ended = () => /merged into hub's master/.test(readFileSync(log, 'utf8')) && !existsSync(reviewLockPath(w.home, BUG));
+  for (let i = 0; i < 600 && !ended(); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(ended(), `the detached review merges and ends; its log:\n${readFileSync(log, 'utf8')}`);
   assert.equal(existsSync(w.tree), false);
   assert.equal(git(w.hub, 'branch', '--list', BRANCH), '');
 });
