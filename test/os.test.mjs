@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fold, insidePath, processPaths, readerName, samePath } from '../lib/os.mjs';
+import { fold, insidePath, inUse, processPaths, readerName, samePath } from '../lib/os.mjs';
 
 // A fake `run` that answers every call with `result` and records the calls.
 function fake(result) {
@@ -100,4 +100,18 @@ test('E-2: on win32 paths compare in any case with either slash, and a longer na
   assert.equal(samePath('/home/a/App', '/home/a/app', 'linux'), false, 'Linux does not');
   assert.equal(samePath('a\\b', 'a/b', 'darwin'), false, 'a backslash is a name on macOS');
   assert.equal(insidePath('/home/a/app-2', '/home/a/app', 'linux'), false);
+});
+
+test('A-1: inUse moves a folder aside and back only on win32, and names a refusal', () => {
+  const moves = [];
+  const rename = (from, to) => moves.push([from, to]);
+  assert.equal(inUse('/src/app', { platform: 'darwin', rename }), null);
+  assert.equal(inUse('/src/app', { platform: 'linux', rename }), null);
+  assert.deepEqual(moves, [], 'off Windows processPaths() tells');
+  assert.equal(inUse('D:\\src\\app', { platform: 'win32', rename }), null);
+  assert.deepEqual(moves, [['D:\\src\\app', 'D:\\src\\app.kirunak-removing'], ['D:\\src\\app.kirunak-removing', 'D:\\src\\app']]);
+  const busy = () => {
+    throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+  };
+  assert.equal(inUse('D:\\src\\app', { platform: 'win32', rename: busy }), 'Windows refuses to move it (EBUSY): a process works in it');
 });

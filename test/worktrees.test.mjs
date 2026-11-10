@@ -1,7 +1,7 @@
 // The worktrees an acceptance removes (approval.md §4), on fixture repos: lib/worktrees.mjs, `k worktrees`, `k accept`.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
@@ -353,21 +353,51 @@ test('AC-9: on win32, when PowerShell gives no answer every candidate stays', as
   assert.ok(existsSync(a) && existsSync(b));
 });
 
-test('AC-5: on win32 a removal git refuses (a folder that cannot be deleted, as a process working in it makes it) is kept with git\'s line', async () => {
+// A rename that refuses as Windows does while a process works in the folder.
+const refuses = (code) => () => {
+  throw Object.assign(new Error(`${code}: resource busy or locked`), { code });
+};
+
+test('AC-5 (A-1): on win32 a worktree Windows refuses to move aside is kept whole, still known to git with its branch; a later pass removes it', async () => {
   const { ws, root, weather } = await makeWorkspace();
-  const parent = join(root, 'held');
-  mkdirSync(parent);
-  const held = add(weather, join(parent, 'wt'), 'held');
-  chmodSync(parent, 0o555);
-  let r;
-  try {
-    r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]) });
-  } finally {
-    chmodSync(parent, 0o755);
-  }
+  const held = add(weather, join(root, 'held'), 'held');
+  let tried = 0;
+  const look = await worktrees({ ws, platform: 'win32', processes: powershell([]), rename: () => tried++ });
+  assert.deepEqual(paths(look.removed), [held]);
+  assert.equal(tried, 0, 'a look moves nothing');
+
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename: refuses('EBUSY') });
   assert.deepEqual(r.removed, []);
-  assert.equal(r.kept.length, 1);
-  assert.equal(r.kept[0].path, held);
-  assert.match(r.kept[0].why, /^git worktree remove failed: error: failed to delete '.*wt': Permission denied$/);
-  assert.ok(branchExists(weather, 'held'), 'its branch is not deleted');
+  assert.deepEqual(whys(r.kept), { [held]: 'Windows refuses to move it (EBUSY): a process works in it' });
+  assert.ok(existsSync(join(held, 'README.md')), 'whole');
+  assert.match(sh(weather, 'git', ['worktree', 'list', '--porcelain']), new RegExp(`^worktree ${held}$`, 'm'));
+  assert.ok(branchExists(weather, 'held'));
+
+  const moves = [];
+  const rename = (from, to) => {
+    renameSync(from, to);
+    moves.push([from, to, existsSync(held)]);
+  };
+  const later = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename });
+  const aside = `${held}.kirunak-removing`;
+  assert.deepEqual(moves, [[held, aside, false], [aside, held, true]], 'aside and straight back, at its own path before the removal');
+  assert.deepEqual(later.removed.map((w) => [w.path, w.branchDeleted]), [[held, true]]);
+  assert.equal(existsSync(held) || existsSync(aside), false);
+  assert.equal(branchExists(weather, 'held'), false);
+});
+
+test('A-1: on win32 a worktree Windows moves aside but not back is kept, the line naming both paths', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const stuck = add(weather, join(root, 'stuck'), 'stuck');
+  const aside = `${stuck}.kirunak-removing`;
+  const rename = (from, to) => {
+    if (from === aside) refuses('EPERM')();
+    renameSync(from, to);
+  };
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename });
+  assert.deepEqual(whys(r.kept), {
+    [stuck]: `moved to ${aside} to see whether a process works in it, and Windows refuses to move it back to ${stuck} (EPERM): move it back by hand`,
+  });
+  assert.ok(existsSync(aside) && branchExists(weather, 'stuck'));
+  renameSync(aside, stuck);
 });
