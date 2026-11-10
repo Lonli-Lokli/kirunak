@@ -16,6 +16,8 @@ is done.
   device or a person. A task is done when the owner says so (`/k-done`).
 - **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone a brief board, in the chat
   (`/k-board`: the groups, then a group's tasks, then a task's card) or as a private page you open (`/k-board-page`).
+  Beside it the heavy queue: `k heavy` (`/k-heavy` in the chat) shows the job holding the lock and each job waiting,
+  in the order they will run, with its task, its step, its length and when it should end.
 - **Drafts.** An idea for a task that comes up in the middle of other work is kept in git as a draft, not lost in
   scratch files: `k draft new <id> --title "..."` writes the skeleton in `kirunak/drafts/`, `k draft check <id>` holds
   its shape, `k draft drop <id> --why "..."` removes it with the reason in the commit, and `k drafts` lists them. A
@@ -97,7 +99,7 @@ You need Node 22 or later, git and Claude Code.
 
    `k install` adds a PreToolUse hook and two SessionStart hooks to `~/.claude/settings.json` (keeping yours; one
    says, as a session you start begins, how many bugs wait) and links the `k-intake`, `k-draft`, `k-bug`, `k-done`,
-   `k-board-page` and `usage-review` skills into `~/.claude/skills/` (`k-board-page` publishes the board as a page,
+   `k-board-page`, `k-heavy` and `usage-review` skills into `~/.claude/skills/` (`k-board-page` publishes the board as a page,
    below). It also prints one line to add to your status line command, so the cache keeper sees each session's
    context and cache and `k cost` its money, and the rate-limit log gets a line (time, week %, 5-hour %, the session's
    name, when each window resets) whenever a session's reading moves either figure on: a rise, or a new window, never
@@ -170,6 +172,7 @@ You need Node 22 or later, git and Claude Code.
    | `/k-list` (`/k-list all`) | the tasks, the queue first, as numbered entries with state, place, title and step |
    | `/k-board` | the board's groups (working on now, queued, done this week and the rest) and how many tasks each holds, at once and without a model turn; tap a group for its tasks, a line each, then a task for its card, or Skip for the brief board as text |
    | `/k-board <id>` | that task's card: its state, step, session, approval and every AC and E with its verdict |
+   | `/k-heavy` | the skill: `k heavy`'s two tables, the job holding the lock (Now) and each job waiting in turn (Next), with its task, length or time left, end and step; one model turn |
    | `/k-board-page` | the skill: the board as a private page on claude.ai, a brief row per task that opens its card when tapped; one model turn; it updates the one link it keeps in `$KIRUNAK_HOME/board-artifact.json` |
    | `/k-drafts` | the drafts waiting, in the order they wait (`k drafts move` changes it), a choice each; the one picked shows whole, with Start intake (the session starts the intake from it, its first question every proposed answer of the draft, agreed in one tap or each asked alone), Drop (you type the reason, then confirm) and Back; bugs are not among them |
    | `/k-bugs` | the bugs, a fix ready first, then the oldest, a choice each; the one picked shows whole, with Review & merge when its fix is ready (a fresh session reviews it, and it merges into master only with no finding), Start fix (the session starts an intake from it), Drop (you type the reason, then confirm; the fix branch stays) and Back; while a bug marked `quad-damage: yes` waits, Quad Damage comes first, with how many it takes ("Quad Damage (2 bugs)"), and while its run lives, its line heads the list and the bug it is on has none of these |
