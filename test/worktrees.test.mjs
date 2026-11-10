@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
+import { processPaths } from '../lib/os.mjs';
 import { holdsLine, worktrees } from '../lib/worktrees.mjs';
 import { gitCommitAll, gitInit, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
@@ -172,7 +173,7 @@ test('AC-1: a worktree a process works in stays (lsof), and so does every one wh
   } finally {
     child.kill();
   }
-  assert.deepEqual(whys((await worktrees({ ws, processes: () => null })).kept), { [busy]: 'lsof cannot tell whether a process works in it or runs from it' });
+  assert.deepEqual(whys((await worktrees({ ws, processes: () => null })).kept), { [busy]: 'cannot tell whether a process works in it or runs from it (lsof gave no answer)' });
 });
 
 test('E-6: a detached worktree goes only when a plugin offers it; a keep from any plugin wins; a plugin adds repos; a failing plugin removes nothing', async () => {
@@ -303,4 +304,70 @@ test('AC-2, E-4, E-7: k accept removes after its commit and prints each removed 
   } finally {
     chmodSync(join(stuck, 'locked'), 0o755);
   }
+});
+
+// asilak/kirunak-worktrees-lsof-windows: the cleanup as Windows reads it, PowerShell's answer faked over real repos.
+const win = (path) => path.replaceAll('/', '\\');
+const powershell = (list) => (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: JSON.stringify(list) }) });
+
+test('AC-7: on win32 a merged worktree no process names goes, and its branch with it', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const free = add(weather, join(root, 'free'), 'free');
+  const processes = powershell([
+    { ProcessId: 4, Name: 'System', ExecutablePath: null, CommandLine: null },
+    { ProcessId: 50, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: `node.exe ${win(free)}-capture\\serve.js` },
+  ]);
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
+  assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [[free, 'free merged into master', true]]);
+  assert.deepEqual(r.kept, []);
+  assert.equal(existsSync(free), false);
+  assert.equal(branchExists(weather, 'free'), false);
+});
+
+test('AC-4, AC-8, E-2: on win32 a worktree a process runs from, or whose path a command line names, stays and the line names the pid', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const runs = add(weather, join(root, 'runs'), 'runs');
+  const named = add(weather, join(root, 'named'), 'named');
+  const processes = powershell([
+    { ProcessId: 61, Name: 'app.exe', ExecutablePath: `${win(runs).toUpperCase()}\\BIN\\APP.EXE`, CommandLine: null },
+    { ProcessId: 62, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: `"C:\\Program Files\\nodejs\\node.exe" ${win(named)}\\serve.js` },
+  ]);
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
+  assert.deepEqual(whys(r.kept), {
+    [named]: 'node.exe (pid 62) works in it: its command line names it',
+    [runs]: 'app.exe (pid 61) runs from it',
+  });
+  assert.deepEqual(r.removed, []);
+  assert.ok(existsSync(runs) && existsSync(named) && branchExists(weather, 'runs') && branchExists(weather, 'named'));
+});
+
+test('AC-9: on win32, when PowerShell gives no answer every candidate stays', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const a = add(weather, join(root, 'a'), 'a');
+  const b = add(weather, join(root, 'b'), 'b');
+  const processes = (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: 'Get-CimInstance : not recognized' }) });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
+  const why = 'cannot tell whether a process works in it or runs from it (PowerShell gave no answer)';
+  assert.deepEqual(whys(r.kept), { [a]: why, [b]: why });
+  assert.deepEqual(r.removed, []);
+  assert.ok(existsSync(a) && existsSync(b));
+});
+
+test('AC-5: on win32 a removal git refuses (a folder that cannot be deleted, as a process working in it makes it) is kept with git\'s line', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const parent = join(root, 'held');
+  mkdirSync(parent);
+  const held = add(weather, join(parent, 'wt'), 'held');
+  chmodSync(parent, 0o555);
+  let r;
+  try {
+    r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]) });
+  } finally {
+    chmodSync(parent, 0o755);
+  }
+  assert.deepEqual(r.removed, []);
+  assert.equal(r.kept.length, 1);
+  assert.equal(r.kept[0].path, held);
+  assert.match(r.kept[0].why, /^git worktree remove failed: error: failed to delete '.*wt': Permission denied$/);
+  assert.ok(branchExists(weather, 'held'), 'its branch is not deleted');
 });
