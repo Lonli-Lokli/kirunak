@@ -74,7 +74,7 @@ async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept')
   if (!rows.length) return offerText(verb, rows)
   const startable = verb === 'approve' && rows.some(r => r.why === null && r.fromBug)
   const first = verb === 'accept'
-    ? acceptScreen(rows)
+    ? acceptScreen(rows, await $.session.id())
     : approveScreen(rows, startable ? await $.session.id() : null, ok => {
       if (ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
     })
@@ -121,6 +121,9 @@ async function ownerVerb($: EngineInterface, turn: Turn, name: string, verb: Ver
   }
   const parsed = argvFor(verb, args)
   if ('problem' in parsed) return `/${name}: ${parsed.problem}. Nothing ran. Usage: /${name} ${HINTS[verb]}`
+  // k accept takes this session out of every worktree's lock before its removal (asilak/kirunak-worktrees-lsof-windows
+  // AC-18); a $.process.run child has no $CLAUDE_CODE_SESSION_ID of its own, so the session goes by flag.
+  if (verb === 'accept') return turn.typed([...parsed.argv, '--session', await $.session.id()])
   if (verb !== 'start') return turn.typed(parsed.argv)
   return turn.typed([...parsed.argv, '--session', await $.session.id()], ok => {
     if (ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
@@ -283,7 +286,7 @@ async function bugsDialog($: EngineInterface, turn: Turn): Promise<string | Outc
     }
   }
   const run = await quadDamageStatus($, turn.k)
-  const out = await turn.dialog(bugsScreen(rows, files, run, await nowOf($)))
+  const out = await turn.dialog(bugsScreen(rows, files, run, await nowOf($), await $.session.id()))
   if (out.ended !== undefined) return startFix($, turn.k, out.ended)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${bugsText(rows, run)}`
 }

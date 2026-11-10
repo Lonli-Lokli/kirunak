@@ -108,13 +108,15 @@ export function approveScreen(rows: readonly WaitingRow[], session: string | nul
 }
 
 // A task blocked only by open checklist items offers "Accept with open items" (AC-9): the reason typed in the
-// free-text row, then the verb under it.
-export function acceptScreen(rows: readonly WaitingRow[]): Screen {
+// free-text row, then the verb under it. Each accept names this session (`session`), which k accept takes out of
+// every worktree's lock before its removal (asilak/kirunak-worktrees-lsof-windows AC-18).
+export function acceptScreen(rows: readonly WaitingRow[], session: string | null = null): Screen {
+  const mine = session === null ? [] : ['--session', session]
   const confirm = (r: WaitingRow, why: string): Screen => ({
     kind: 'item',
     header: 'Accept',
     text: [...taskText('accept', r), `Reason: ${why}`],
-    choices: [{ label: `Accept ${r.id} with open items`, description: 'accepts it as done, for that reason', verb: ['accept', r.id, '--checklist-open', why, '--via', 'mod'] }],
+    choices: [{ label: `Accept ${r.id} with open items`, description: 'accepts it as done, for that reason', verb: ['accept', r.id, '--checklist-open', why, '--via', 'mod', ...mine] }],
     question: 'Accept it with these items open, for that reason?',
     look: reasonLook(headOnly(waitingLook('accept', r)), why),
   })
@@ -128,7 +130,7 @@ export function acceptScreen(rows: readonly WaitingRow[]): Screen {
   })
   const item = (r: WaitingRow): Screen => {
     const choices: Choice[] = []
-    if (r.why === null) choices.push({ label: `Accept ${r.id}`, description: 'accepts it as done', verb: ['accept', r.id, '--via', 'mod'] })
+    if (r.why === null) choices.push({ label: `Accept ${r.id}`, description: 'accepts it as done', verb: ['accept', r.id, '--via', 'mod', ...mine] })
     else if (r.onlyChecklist) choices.push({ label: 'Accept with open items', description: 'asks why, then accepts it', open: () => reason(r) })
     const question = r.why === null ? 'Accept it as done?' : r.onlyChecklist ? 'Only open checklist items stop it. Accept it with them open?' : REFUSED
     return { kind: 'item', header: 'Accept', text: taskText('accept', r), choices, question, look: waitingLook('accept', r) }

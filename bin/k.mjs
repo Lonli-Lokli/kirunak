@@ -66,7 +66,8 @@ Usage     k usage [--from <ISO>] [--to <ISO>] [--out <dir>]: the weekly usage re
             last finished one by default, its start the workspace's usage.weekStart) from this Mac's transcripts, into
             <KIRUNAK_HOME>/usage/<to's date>/ unless --out; prints the summary, then each task's and step's weight
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
-          k accept <id> [--checklist-open "<why>"]: then removes the merged worktrees, printing each removed and kept
+          k accept <id> [--checklist-open "<why>"] [--session <id>]: then takes the session (or $CLAUDE_CODE_SESSION_ID)
+            out of every worktree's lock and removes the merged worktrees, printing each removed and kept
           k hold <id> --why "..." | k resume <id>
           k step stop <id> S-n --why "...": ends a running step the owner stops; counts no failure, the next brief reads why
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
@@ -92,9 +93,10 @@ Bugs      k bug new <repo>/<slug> --title "..." --quad-damage yes|no [--bug-of <
           k bug from <id> --quad-damage yes|no [--no-commit]: a draft, or a task whose intake is not approved, moved
             into kirunak/bugs/ with its history and its mark, draft/<slug> renamed bug/<slug>, each repo's paths
             committed alone
-          k bug review <id> [--detach] [--dry-run] (the owner's): Review & merge, a fresh Opus session reviews the fix's
-            diff and kirunak reads its verdict; clean, bug/<slug> is merged into its fix repo's master (never pushed)
-            and the bug closes; a finding or a conflict merges nothing, written in kirunak/bugs/<slug>/review-<n>.md
+          k bug review <id> [--detach] [--dry-run] [--session <id>] (the owner's): Review & merge, a fresh Opus session
+            reviews the fix's diff and kirunak reads its verdict; clean, bug/<slug> is merged into its fix repo's master
+            (never pushed), the session (or $CLAUDE_CODE_SESSION_ID) is taken out of every worktree's lock, and the bug
+            closes; a finding or a conflict merges nothing, written in kirunak/bugs/<slug>/review-<n>.md
           k bugs: every bug in every repo, one line each (id, title, date written, its fix, bug of <task>), those with a
             fix ready first, then the oldest first
           k bugs quad-damage [--dry-run] (the owner's): Quad Damage, one detached run that fixes and reviews the bugs
@@ -224,10 +226,10 @@ async function reviewed(ws, id, flags) {
     return { ...r, text: `${id}: ${r.branch} at ${r.head.slice(0, 12)} in ${r.fixRepo}; ${then}` };
   }
   if (flags.detach) {
-    const r = bugReview.detach({ ws, id, via });
+    const r = bugReview.detach({ ws, id, via, session: session(flags) });
     return { ...r, text: `${id}: Review & merge runs as pid ${r.pid}; its log is ${r.log}, and k bugs shows its result` };
   }
-  const r = await bugReview.review({ ws, id, via });
+  const r = await bugReview.review({ ws, id, via, session: session(flags) });
   const at = `${r.branch} at ${r.head.slice(0, 12)}`;
   const said = {
     merged: () => `${id}: ${r.review.rel} clean${r.review.reused ? ' (taken again)' : ''}; ${at} merged into ${r.fixRepo}'s master as ` +
@@ -544,8 +546,9 @@ const VERBS = {
       taskCost = { error: e.message };
     }
     const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: taskCost });
-    // Once the acceptance is committed, the merged worktrees go (approval.md §4); nothing there undoes or fails it.
-    const w = await worktrees.worktrees({ ws, closing: id, remove: true });
+    // Once the acceptance is committed, the merged worktrees go (approval.md §4), the session that runs it first taken
+    // out of every worktree's lock; nothing there undoes or fails it.
+    const w = await worktrees.worktrees({ ws, closing: id, remove: true, session: session(flags) });
     const text = `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}${offMain(r)}`;
     return { ...r, worktrees: w, text: [text, ...worktrees.lines(w)].join('\n') };
   },

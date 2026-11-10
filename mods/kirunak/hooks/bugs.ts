@@ -8,8 +8,9 @@ import type { Look, Screen } from './owner'
 // /k-bugs (gulnya/kirunak-bugs AC-6, D-1): the bugs, faults in something that exists, as `k bugs --json` gives them,
 // every repo's, those with a fix ready first, then the oldest. The list names each by its id, title, its fix and the
 // date written; the one picked shows whole, from its file, with Review & merge when its fix is ready, Start fix and
-// Drop. Review & merge runs `k bug review <id> --detach --via mod`, the owner's verb: a fresh Opus session reviews the
-// fix, and kirunak merges it into master only when the review finds nothing. Start fix runs no verb: it ends the
+// Drop. Review & merge runs `k bug review <id> --detach --via mod --session <this session>`, the owner's verb: a fresh
+// Opus session reviews the fix, and kirunak merges it into master only when the review finds nothing; this session is
+// taken out of every worktree's lock first, so the fix's worktree goes once merged. Start fix runs no verb: it ends the
 // dialog, and the command hands the bug to the model in a prompt of its own (fixPrompt). Drop takes the reason typed in
 // the free-text row, then "Drop <id>" runs `k bug drop <id> --why`. Each by id, so a bug gone since ends in k's
 // refusal, never on another.
@@ -291,8 +292,8 @@ const stopRow = (live: QuadDamageStatus) => ({
 // read. `run`, Quad Damage's status: while a run lives, its line above the list, Stop Quad Damage first and, on the bug
 // it is on, no choice but Back and Cancel (E-4); while none lives, its row first when a marked bug waits. On the phone
 // and the desktop app each dialog draws its look above the choices, each choice with its line (gulnya/mobile-dialogs
-// AC-1, AC-14), dates said from `now`, this machine's clock.
-export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>, run: QuadDamageStatus | null = null, now = Date.now()): Screen {
+// AC-1, AC-14), dates said from `now`, this machine's clock; `session`, this session's id, goes to Review & merge.
+export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, string>, run: QuadDamageStatus | null = null, now = Date.now(), session: string | null = null): Screen {
   // Drop's reason and its confirmation keep the bug's head alone.
   const headOf = (b: BugRow): Look => ({ ...itemLook(b, files.get(b.path) ?? null, now), first: [], fold: null })
   const confirm = (b: BugRow, why: string): Screen => ({
@@ -327,7 +328,7 @@ export function bugsScreen(rows: readonly BugRow[], files: ReadonlyMap<string, s
       ...(mergeable(b) ? ['', `Review & merge: a fresh Opus session reviews ${b.branch}; only when it finds nothing is the fix merged into ${b.fixRepo}'s master, never pushed, and the bug closed.`] : []),
     ],
     choices: [
-      ...(mergeable(b) ? [{ label: 'Review & merge', description: 'a fresh session reviews, then merges, never pushes', verb: ['bug', 'review', b.id, '--detach', '--via', 'mod'] }] : []),
+      ...(mergeable(b) ? [{ label: 'Review & merge', description: 'a fresh session reviews, then merges, never pushes', verb: ['bug', 'review', b.id, '--detach', '--via', 'mod', ...(session === null ? [] : ['--session', session])] }] : []),
       { label: 'Start fix', description: 'starts a task to fix it, its intake first', ends: b.id },
       { label: 'Drop', description: 'asks why, then drops it in a commit', open: () => reason(b) },
     ],
