@@ -167,7 +167,9 @@ const sh = (s: string): string => (/^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replac
 
 // Review & merge k took: k's answer names the process and its log (`<id>: Review & merge runs as pid <n>; its log is
 // <path>, and k bugs shows its result`). The session waits for the process in one background command, never polling,
-// and says the result its log and k bugs give; an answer without them leaves the result to /k-bugs.
+// and says the result its log and k bugs give; an answer without them leaves the result to /k-bugs. Node, not the
+// shell's `kill -0`, says whether the pid lives: Git Bash's sees no Windows process it did not start, so its wait
+// ended at once (asilak/kirunak-review-wait-windows).
 const RUNS = /runs as pid (\d+); its log is (.+?), and k bugs shows/
 function reviewPrompt(id: string, said: string): string {
   const head = `The owner tapped Review & merge on the bug ${id} in /k-bugs, and kirunak started it`
@@ -177,7 +179,7 @@ function reviewPrompt(id: string, said: string): string {
   const [, pid, log] = m as unknown as [string, string, string]
   return [
     `${head}: a fresh Opus session reviews its fix as pid ${pid}, its log at ${log}.`,
-    `Say in one line that the review of ${id} started. Then run this one command with Bash in the background (run_in_background), and do not poll it or sleep: \`while kill -0 ${pid} 2>/dev/null; do sleep 20; done; tail -n 5 ${sh(log)}\``,
+    `Say in one line that the review of ${id} started. Then run this one command with Bash in the background (run_in_background), and do not poll it or sleep: \`while node -e "process.kill(${pid}, 0)" 2>/dev/null; do sleep 20; done; tail -n 5 ${sh(log)}\``,
     `When it ends, read what it printed and \`k bugs\`, and tell the owner the result in plain words: the fix merged into master, not pushed, and the bug closed, with the merge's commit; or what the review found, with its review file; or the conflict, with its files. ${never}`,
   ].join('\n')
 }
