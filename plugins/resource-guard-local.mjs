@@ -270,20 +270,23 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       } catch {
         return false;
       }
-      writeOwner(P, { session: me.session, what: me.what, pid: me.pid, pidStart: me.pidStart, since: new Date().toISOString(), id: me.id });
+      writeOwner(P, { session: me.session, what: me.what, pid: me.pid, pidStart: me.pidStart, since: new Date().toISOString(), id: me.id, expectMinutes: me.expectMinutes, maxMinutes: me.maxMinutes });
       writeQueue(P, live.slice(1));
       return true;
     });
 
   const history = (P) => (existsSync(P.log) ? readFileSync(P.log, 'utf8').split('\n').map(parse).filter((x) => x && typeof x.minutes === 'number') : []);
 
-  // The median length of the last ten jobs with the same `what`, or 15 minutes with no history.
-  const estimate = (P, what) => {
+  // The median length of the last ten jobs with the same `what`, or null with no history.
+  const usual = (P, what) => {
     const last = history(P).filter((x) => x.what === what).slice(-10).map((x) => x.minutes).sort((a, b) => a - b);
-    if (!last.length) return NO_HISTORY_MINUTES;
+    if (!last.length) return null;
     const mid = last.length >> 1;
     return last.length % 2 ? last[mid] : (last[mid - 1] + last[mid]) / 2;
   };
+  // The same, or 15 minutes with no history.
+  const estimate = (P, what) => usual(P, what) ?? NO_HISTORY_MINUTES;
+  const minutesOr = (x) => (x > 0 ? x : null);
 
   const held = (c, now = Date.now()) => !c.released && (!c.until || Date.parse(c.until) > now);
   const claimsOf = (P) => readJson(P.claims, []) || [];
@@ -293,11 +296,12 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
     version: '1',
     provides: {
       resourceGuard: {
-        // job.expectMinutes (the length the caller expects, or null) is taken and not used: this guard serves its
-        // queue in the order the jobs came, and a guard that orders by length reads it (plugins.md).
+        // job.expectMinutes (the length the caller expects, or null) does not order anything: this guard serves its
+        // queue in the order the jobs came, and a guard that orders by length reads it (plugins.md). It is kept with
+        // job.maxMinutes in the job's queue line and the owner file, for queue().
         async run(job) {
           const P = at();
-          const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() };
+          const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, pidStart: OWN_START, since: new Date().toISOString(), expectMinutes: minutesOr(job.expectMinutes), maxMinutes: minutesOr(job.maxMinutes) };
           await edit(P, () => appendFileSync(P.queue, JSON.stringify(me) + '\n'));
           let told = false;
           for (;;) {
@@ -372,6 +376,25 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           const queued = readQueue(P).filter((e) => e && stillRuns(e.pid, e.pidStart)).map(job);
           const left = h ? Math.max(0, h.estimateMinutes - minutesSince(h.since)) : 0;
           return { held: h, queued, estimateMinutes: Math.round((left + queued.reduce((s, q) => s + q.estimateMinutes, 0)) * 100) / 100 };
+        },
+
+        // { now, first, held, waiting } (plugins.md §2): the holder as status() sees it, and the live waiters in the
+        // order this guard serves them, the order they came. Lengths are those the job stated, its usual the median of
+        // the same `what` in the log (null with none); this guard knows no kinds and no first session.
+        queue() {
+          const P = at();
+          const owner = readJson(P.owner);
+          const job = (e, at) => ({
+            session: e.session, what: e.what, [at]: e.since ?? null, pid: Number.isInteger(e.pid) ? e.pid : null,
+            expectMinutes: minutesOr(e.expectMinutes), maxMinutes: minutesOr(e.maxMinutes), kind: null, usualMinutes: usual(P, e.what),
+          });
+          const live = owner && (stillRuns(owner.pid, owner.pidStart) || (groupAlive(owner.job) && isStill(owner.job, owner.jobStart) !== false));
+          return {
+            now: new Date().toISOString(),
+            first: null,
+            held: live ? job(owner, 'since') : null,
+            waiting: readQueue(P).filter((e) => e && stillRuns(e.pid, e.pidStart)).map((e) => job(e, 'queuedAt')),
+          };
         },
 
         claim(resource, by, why, hours) {
