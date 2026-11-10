@@ -327,8 +327,9 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 - no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
   Linux `/proc/<pid>/cwd` and `exe`, on Windows one PowerShell `Get-CimInstance Win32_Process` call, whose
   ExecutablePath inside it is a process running from it and whose CommandLine naming it (as a task's file would) is a
-  process working in it. Windows gives no other process's current folder: one working in it makes the removal fail,
-  and the worktree is kept with git's error. When the reader cannot tell, none goes;
+  process working in it. Windows gives no other process's current folder, so before the removal the folder is moved
+  aside (`<path>.kirunak-removing`) and straight back: Windows refuses that while a process works in it, and the
+  worktree stays whole, known to git with its branch, for a later pass. When the reader cannot tell, none goes;
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
 
