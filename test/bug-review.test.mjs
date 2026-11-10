@@ -236,18 +236,22 @@ test("AC-18: a clean review run by a session takes it out of the fix worktree's 
   }
 });
 
-test('AC-18: k bug review hands its --session to the detached run, which takes it out of the lock before the removal', async () => {
+test('AC-18: k bug review hands its --session to the detached run, which takes it out of the lock before the removal; its log names the worktree removed, branch deleted (asilak/kirunak-review-worktree-lines)', async () => {
   const w = await bugWorkspace({ plugin: true });
   git(w.fix, 'worktree', 'lock', '--reason', `kirunak s1 ${LIVE}`, w.tree);
   const d = k(w.home, ['bug', 'review', BUG, '--detach', '--json', '--via', 'mod', '--session', 's1'], { CLAUDE_CODE_SESSION_ID: '', FAKE_VERDICT: 'clean' });
   assert.equal(d.status, 0, d.stderr);
-  // Waits for the run's own last line and its lock to go, up to 30 s: a loaded machine starts the child late.
+  // Waits for the run's own last line and its lock to go, up to 120 s: a loaded machine starts the child late, and a
+  // Windows one under load took 50 to 95 s for the whole run.
   const log = JSON.parse(d.stdout).log;
   const ended = () => /merged into hub's master/.test(readFileSync(log, 'utf8')) && !existsSync(reviewLockPath(w.home, BUG));
-  for (let i = 0; i < 600 && !ended(); i++) await new Promise((r) => setTimeout(r, 50));
-  assert.ok(ended(), `the detached review merges and ends; its log:\n${readFileSync(log, 'utf8')}`);
+  for (let i = 0; i < 2400 && !ended(); i++) await new Promise((r) => setTimeout(r, 50));
+  const text = readFileSync(log, 'utf8');
+  assert.ok(ended(), `the detached review merges and ends; its log:\n${text}`);
   assert.equal(existsSync(w.tree), false);
   assert.equal(git(w.hub, 'branch', '--list', BRANCH), '');
+  // The cleanup's lines follow the merge's, indented as the cost line is, so the mod's reading of the first is unchanged.
+  assert.match(text, /merged into hub's master.*\n {2}removed \S*fix-tree \(bug\/stale-tiles merged into master, branch deleted\)\n/);
 });
 
 test('findings merge nothing: the review is committed beside the bug and the fix is not ready at that head', async () => {
