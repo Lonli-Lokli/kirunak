@@ -340,18 +340,29 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
 
-A session holds the worktree it works in by `git worktree lock --reason "kirunak <session> <until>"`, `<until>` the
-end of its lease as an ISO time (`lib/worktree-lock.mjs`). The freeze hook takes it after letting a call through
-(§2): for the call's `cwd` and the file an Edit, Write, MultiEdit or NotebookEdit names, the linked worktree of a
-workspace repo (as `escalate/config.json` names them) it is in, read from its `.git` file and git's `locked` file
-without git, is locked for two hours when it has no lock, and locked again for two more when it is this session's
-with under an hour left; a lock with any other reason is someone else's and is left. It spawns git only then, never
-locks a main checkout and fails open. On every SessionEnd, `/clear` included, `hooks/kirunak-unlock.mjs` (wired by
-`k install` with no matcher and 5 seconds; `k doctor` checks it) unlocks every worktree of the workspace's repos whose
-reason names the ending session. A session that ends without it leaves its lease to run out: the removal lifts a lock
-of kirunak's whose lease has ended (`git worktree unlock`) and goes on with the worktree as an unlocked one, its line
-starting "lock of session <s> lifted: its lease ended <until>" ("would lift" in a dry run, which lifts nothing). A
-live lease keeps it: "locked: session <s> works in it until <HH:MM>".
+The sessions working in a worktree hold it by its `git worktree lock`, whose reason names each with its lease:
+`kirunak <session> <until> [<session> <until>]...`, `<until>` the end of that session's lease as an ISO time
+(`lib/worktree-lock.mjs`). git keeps one lock per worktree, so several sessions share it, one pair each, and the
+first lease's reason of one pair reads as one. The freeze hook takes it after letting a call through (§2): for the
+call's `cwd` and the file an Edit, Write, MultiEdit or NotebookEdit names, the linked worktree of a workspace repo (as
+`escalate/config.json` names them) it is in, read from its `.git` file and git's `locked` file without git, is locked
+for this session for two hours when it has no lock; a lock of kirunak's without this session, or with under an hour
+of its lease left, is rewritten (unlocked, locked again) with this session's new lease added and every lease that has
+ended taken out; a lock with any other reason is someone else's and is left. It spawns git only then, never locks a
+main checkout and fails open. On every SessionEnd, `/clear` included, `hooks/kirunak-unlock.mjs` (wired by `k install`
+with no matcher and 5 seconds; `k doctor` checks it) takes the ending session out of every lock of kirunak's on the
+workspace's repos: the lock rewritten with the other sessions' pairs, or unlocked when none is left. A session that
+ends without it leaves its lease to run out: the removal takes out of a lock of kirunak's every lease that has ended
+(the lock rewritten with the live ones, or unlocked), and a worktree left with none goes on as an unlocked one, its
+line starting "lock of session <s> lifted: its lease ended <until>" for each ("would lift" in a dry run, which lifts
+nothing). Any live lease keeps it, its line naming each, joined by "; ": "locked: session <s> works in it until
+<HH:MM>".
+
+`k accept` and Review & merge (`k bug review`) first take the session that runs them out of every lock of kirunak's
+on the workspace's repos, as its SessionEnd would, then look: a merged worktree only that session held goes, one
+another session holds with a live lease stays. The session is `--session <id>`, else `$CLAUDE_CODE_SESSION_ID`; the
+mod passes its own by flag, since a `$.process.run` child carries none (`boards.md`), and `--detach` hands it to the
+detached run. With none, nothing is released and the removal runs as before; Quad Damage's run passes none.
 
 The main checkout never goes, nor a worktree locked by hand or by another tool, or one whose folder is gone. A
 detached one goes only when a plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit is lost

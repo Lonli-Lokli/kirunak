@@ -317,8 +317,8 @@ As built, where the build chose (each judgement unless marked):
   version. An owner's verb may run 10 minutes (the most `$.process.run` allows), since its commit runs the repo's git
   hooks (`approval.md` §3); the command waits for a running turn to end (no `immediate`), so it never commits beside
   the model. A `$.process.run` child carries no `CLAUDE_CODE_SESSION_ID` of its session (measured, review N63: absent,
-  or a parent process's), so the mod names the session by flag on `k start` and `k status`, and any verb it runs later
-  that reads one (`k handoff`, `k keep`, `k step`) must do the same.
+  or a parent process's), so the mod names the session by flag on `k start`, `k status`, `k accept` and Review &
+  merge's `k bug review`, and any verb it runs later that reads one (`k handoff`, `k keep`, `k step`) must do the same.
 - **Reads.** One at a time; reads asked for while one runs make one more after it. A failed read keeps the last rows
   on screen under its reason. Only the start and the 30 s tick (re)start the tail, so a tail that ends cannot loop.
 - **The pane opens** on `/k-start`, on `/kirunak`, and unasked at the start only when the session already has a task
