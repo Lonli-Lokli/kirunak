@@ -498,6 +498,26 @@ dismissed and runs nothing, as it does for a reload mid-dialog. And an answer ac
 whatever string a time-out returned would run nothing. Buttons in the pane remain unbuilt for the reason in
 `boards.md` §4: a press carries no origin.
 
+### Approve and start, for a task from a bug (asilak/kirunak-worktrees-lsof-windows)
+
+A task whose intake started from a bug (its folder holds `bug.md`; `k waiting --json` gives its row `fromBug: true`)
+can be approved and started in one choice. In `/k-approve`'s dialog, under "Approve <id>", such a task that k would
+approve shows **"Approve and start <id>"**: it runs `k approve <id> --via mod` and, only when that exits 0, `k start
+<id> --session <this session>`, the session's id read before the dialog opens. It is one choice, under the task's own
+text, bound to the command's turn like every verb choice above; the second verb is a choice's `then`, which `owner.ts`
+runs through `runVerb` only once k took the first. So:
+
+- a task not from a bug shows "Approve <id>" alone, and a task k would refuse shows neither;
+- a refused approval starts nothing, and its turn is the refusal's, as for "Approve <id>";
+- the approval taken and `k start` refused, the answer says "Approved <id>." and "Not started: <k's reason>", and the
+  session's turn "approved <id>, not started: <k's reason>"; the task stays approved and queued, nothing undone;
+- both taken, the session's turn (`turns.ts`) says both took and goes on with the task's plan from its first step, as
+  the /k-start turn does, and the pane opens.
+
+It runs only where `/k-approve`'s dialog runs, from a typed command or Remote Control (`composer`, `bridge`). The typed
+`/k-approve <id>` and `! k approve <id>` are unchanged. The intake's hand-over for a bug says "Type /k-approve to
+freeze and queue it, or to approve and start it here." (`skills/k-intake/SKILL.md`).
+
 ## 6. A frozen openspec's instructions, once slice 1 exists (D11, R20)
 
 kirunak ships no openspec hook (judgement: freezing a tool is a workspace's decision, D11). A workspace whose

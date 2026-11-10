@@ -91,12 +91,11 @@ from: <path of the old record, only when there is one>
 
 ## Bringing in an openspec change (or any old plan)
 
-The old text is a brief to re-ask, never a source. Every unchecked item becomes a question. An item that already
-landed (the `notes.md` that `--from` wrote lists commits that touched the change's files) becomes a line in
-`notes.md`, "already landed: ...", and you ask whether the task still covers its edge cases. An item that belongs to
-another repo becomes an `O-n` line naming where it goes. Every call the old change left open becomes a `Q-n` that
-must close or be ruled out. Each line may keep `[from <path> <item>]` beside its real source. Never write in the old
-record's folder.
+The old text is a brief to re-ask, never a source. Every unchecked item becomes a question. An item that already landed
+(the `notes.md` that `--from` wrote lists commits that touched the change's files) becomes a line in `notes.md`,
+"already landed: ...", and you ask whether the task still covers its edge cases. An item that belongs to another repo
+becomes an `O-n` line naming where it goes. Every call the old change left open becomes a `Q-n` that must close or be
+ruled out. Each line may keep `[from <path> <item>]` beside its real source. Never write in the old record's folder.
 
 ## Starting from a kirunak draft
 
@@ -113,14 +112,15 @@ straight after the goal. A `bug-of:` draft is refused: k names `k bug from`.
 ## Starting from a bug (Start fix)
 
 Only when the owner asks (Start fix in `/k-bugs`, or naming it): step 1's `--from kirunak/bugs/<slug>.md`, its own id,
-refused while its Review & merge runs. The bug moves to `bug.md`, its records to `bug/`, staged.
-`notes.md` lists its proposed answers (a `Proposed:` line under the question), its open questions, and for a bug of
-an accepted task that task's Edge cases, Out of scope and Aspects lines. **The first question holds every proposed
-answer, and each task line that still applies with its id, in its own text** for one yes or no: on the phone the
-dialog covers the text above it. A yes sources each `[owner <date> Q-1]` (a task's line renumbered, also `[from
-<repo>/<slug> <id>]`); anything else is a no, each asked alone, as is a `Proposed:` that only says what is missing.
-Then each open question alone, then step 2's "anything else" (step 7 asks again), check and commit (steps 7, 8; a
-plan in `bug.md` stays for the plan), and hand over with the task whole and: "Type /k-approve to freeze and queue it."
+refused while its Review & merge runs. The bug moves to `bug.md`, its records to `bug/`, staged. `notes.md` lists its
+proposed answers (a `Proposed:` line under the question), its open questions, and for a bug of an accepted task that
+task's Edge cases, Out of scope and Aspects lines. **The first question holds every proposed answer, and each task line
+that still applies with its id, in its own text** for one yes or no: on the phone the dialog covers the text above it. A
+yes sources each `[owner <date> Q-1]` (a task's line renumbered, also `[from <repo>/<slug> <id>]`); anything else is a
+no, each asked alone, as is a `Proposed:` that only says what is missing. Then each open question alone, then step 2's
+"anything else" (step 7 asks again), check and commit (steps 7, 8; a plan in `bug.md` stays for the plan), and hand over
+with the task whole and: "Type /k-approve to freeze and queue it, or to approve and start it here." Its Approve and
+start makes it this session's task and starts its plan.
 
 ## After approval
 
