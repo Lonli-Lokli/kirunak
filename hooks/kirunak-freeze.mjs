@@ -542,6 +542,19 @@ async function forEscalation(input) {
   else rules.startedInBackground(home, input, rules.readConfig(home));
 }
 
+// The worktree the call works in is locked for this session (approval.md §4): the hook's cwd and the file an edit
+// names. Only with the workspace's repos in config.json; lib/worktree-lock.mjs loads only then, and spawns git only to
+// lock or renew.
+async function forLock(input) {
+  const file = EDIT_TOOLS.has(input.tool_name) ? input.tool_input?.file_path ?? input.tool_input?.notebook_path : null;
+  const paths = [input.cwd, file].filter((p) => typeof p === 'string' && p);
+  if (!paths.length || typeof input.session_id !== 'string') return;
+  const home = kirunakHome();
+  if (!existsSync(join(home, 'escalate', 'config.json'))) return;
+  const lock = await import('../lib/worktree-lock.mjs');
+  lock.holdFor({ session: input.session_id, paths, roots: lock.rootsFrom(home) });
+}
+
 async function main() {
   let raw = '';
   for await (const chunk of process.stdin) raw += chunk;
@@ -558,6 +571,11 @@ async function main() {
       await forEscalation(input);
     } catch {
       // the escalation hook's notes never change the decision
+    }
+    try {
+      await forLock(input);
+    } catch {
+      // nor does the worktree's lock: it fails open
     }
     return;
   }
