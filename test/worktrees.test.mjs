@@ -306,6 +306,24 @@ test('AC-2, E-4, E-7: k accept removes after its commit and prints each removed 
   }
 });
 
+test("AC-18: k accept takes the session that runs it ($CLAUDE_CODE_SESSION_ID here) out of every worktree's lock first: a merged worktree only it held goes, one another session holds stays", async () => {
+  const { ws, root, weather, home } = await makeWorkspace();
+  const mine = add(weather, join(root, 'mine'), 'mine');
+  const shared = add(weather, join(root, 'shared'), 'shared');
+  sh(weather, 'git', ['worktree', 'lock', '--reason', 'kirunak s1 2099-01-01T00:00:00.000Z', mine]);
+  sh(weather, 'git', ['worktree', 'lock', '--reason', 'kirunak s1 2099-01-01T00:00:00.000Z s2 2099-01-01T00:00:00.000Z', shared]);
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(sh(weather, 'git', ['rev-parse', '--short', 'HEAD']).trim()));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  const r = k(home, ['accept', ID], { CLAUDE_CODE_SESSION_ID: 's1' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.split('\n').includes(`removed ${mine} (mine merged into master, branch deleted)`), r.stdout);
+  assert.match(r.stdout, new RegExp(`^kept ${shared}: locked: session s2 works in it until \\d\\d:\\d\\d$`, 'm'));
+  assert.equal(existsSync(mine), false);
+  assert.equal(sh(weather, 'git', ['worktree', 'list', '--porcelain']).match(/^locked (.*)$/m)?.[1], 'kirunak s2 2099-01-01T00:00:00.000Z');
+});
+
 // asilak/kirunak-worktrees-lsof-windows: the cleanup as Windows reads it, PowerShell's answer faked over real repos.
 const win = (path) => path.replaceAll('/', '\\');
 const powershell = (list) => (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: JSON.stringify(list) }) });
@@ -452,6 +470,75 @@ test('AC-2: a live lease keeps a merged worktree, any other lock keeps it as bef
 
   const k2 = await worktrees({ ws, remove: true, processes: none, now: new Date('2026-11-10T10:30:00.000Z') });
   assert.deepEqual(k2.removed.map((w) => [w.path, w.branchDeleted]), [[live, true]], 'once its lease ends, the live one goes too');
+});
+
+// The local HH:MM a lease's line names.
+const clock = (iso) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+const works = (session, iso) => `locked: session ${session} works in it until ${clock(iso)}`;
+
+test('AC-2: several leases in one lock: any live one keeps the worktree, its line naming each live one; the ended ones are taken out; with none live it goes with its branch; a dry run lifts nothing', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const now = new Date('2026-11-10T09:00:00.000Z');
+  const both = add(weather, join(root, 'both'), 'both');
+  const mixed = add(weather, join(root, 'mixed'), 'mixed');
+  const ended = add(weather, join(root, 'ended'), 'ended');
+  const reasons = {
+    both: 'kirunak s1 2026-11-10T10:30:00.000Z s2 2026-11-10T09:45:00.000Z',
+    mixed: 'kirunak s1 2026-11-10T08:00:00.000Z s2 2026-11-10T09:45:00.000Z',
+    ended: 'kirunak s1 2026-11-10T08:00:00.000Z s2 2026-11-10T08:30:00.000Z',
+  };
+  lock(weather, both, reasons.both);
+  lock(weather, mixed, reasons.mixed);
+  lock(weather, ended, reasons.ended);
+  const keeps = {
+    [both]: `${works('s1', '2026-11-10T10:30:00.000Z')}; ${works('s2', '2026-11-10T09:45:00.000Z')}`,
+    [mixed]: works('s2', '2026-11-10T09:45:00.000Z'),
+  };
+
+  const look = await worktrees({ ws, processes: none, now });
+  assert.deepEqual(whys(look.kept), keeps);
+  assert.deepEqual(look.removed.map((w) => [w.path, w.why]), [[ended,
+    'would lift the lock of session s1: its lease ended 2026-11-10T08:00:00.000Z; would lift the lock of session s2: its lease ended 2026-11-10T08:30:00.000Z; ended merged into master']]);
+  assert.deepEqual([lockOf(weather, both), lockOf(weather, mixed), lockOf(weather, ended)], [reasons.both, reasons.mixed, reasons.ended], 'a dry run lifts nothing');
+
+  const r = await worktrees({ ws, remove: true, processes: none, now });
+  assert.deepEqual(whys(r.kept), keeps);
+  assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [[ended,
+    'lock of session s1 lifted: its lease ended 2026-11-10T08:00:00.000Z; lock of session s2 lifted: its lease ended 2026-11-10T08:30:00.000Z; ended merged into master', true]]);
+  assert.deepEqual(r.problems, []);
+  assert.equal(existsSync(ended), false);
+  assert.equal(branchExists(weather, 'ended'), false);
+  assert.equal(lockOf(weather, mixed), 'kirunak s2 2026-11-10T09:45:00.000Z', "the ended lease taken out, the live one's pair as it was");
+  assert.equal(lockOf(weather, both), reasons.both);
+});
+
+test("AC-18: worktrees({ remove, session }) first takes the session out of every lock: a merged worktree only it held goes, one another session holds stays; a dry run or no session releases nothing", async () => {
+  const { ws, root, weather, hub } = await makeWorkspace();
+  const now = new Date('2026-11-10T09:00:00.000Z');
+  const mine = add(weather, join(root, 'mine'), 'mine');
+  const shared = add(weather, join(root, 'shared'), 'shared');
+  const theirs = add(hub, join(root, 'theirs'), 'theirs');
+  lock(weather, mine, 'kirunak s1 2026-11-10T10:30:00.000Z');
+  lock(weather, shared, 'kirunak s1 2026-11-10T10:30:00.000Z s2 2026-11-10T10:00:00.000Z');
+  lock(hub, theirs, 'kirunak s2 2026-11-10T10:00:00.000Z');
+
+  const dry = await worktrees({ ws, processes: none, now, session: 's1' });
+  assert.deepEqual(dry.removed, []);
+  assert.equal(lockOf(weather, mine), 'kirunak s1 2026-11-10T10:30:00.000Z', 'a dry run releases nothing');
+  const plain = await worktrees({ ws, remove: true, processes: none, now });
+  assert.deepEqual(plain.removed, [], 'no session: the pass as before');
+  assert.equal(whys(plain.kept)[mine], works('s1', '2026-11-10T10:30:00.000Z'));
+
+  const r = await worktrees({ ws, remove: true, processes: none, now, session: 's1' });
+  assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [[mine, 'mine merged into master', true]]);
+  assert.deepEqual(whys(r.kept), { [shared]: works('s2', '2026-11-10T10:00:00.000Z'), [theirs]: works('s2', '2026-11-10T10:00:00.000Z') });
+  assert.deepEqual(r.problems, []);
+  assert.equal(existsSync(mine), false);
+  assert.equal(lockOf(weather, shared), 'kirunak s2 2026-11-10T10:00:00.000Z');
+  assert.equal(lockOf(hub, theirs), 'kirunak s2 2026-11-10T10:00:00.000Z');
 });
 
 // asilak/kirunak-worktrees-lsof-windows E-1: a bug's fix branch bug/<slug> that reads as merged.

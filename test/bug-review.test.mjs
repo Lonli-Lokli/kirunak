@@ -214,6 +214,40 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   assert.equal(e.outcome, 'merged');
 });
 
+// asilak/kirunak-worktrees-lsof-windows AC-18: the session that runs Review & merge, as k passes it, is taken out of
+// every worktree's lock before the fix's worktree is looked at.
+const LIVE = '2099-01-01T00:00:00.000Z';
+const lockedBy = (dir) => sh(dir, 'git', ['worktree', 'list', '--porcelain']).match(/^locked (.*)$/m)?.[1] ?? null;
+
+test("AC-18: a clean review run by a session takes it out of the fix worktree's lock, so the worktree it alone held goes; with no session, or another session holding it too, it stays", async () => {
+  for (const [session, reason, gone, left] of [
+    ['s1', `kirunak s1 ${LIVE}`, true, null],
+    [null, `kirunak s1 ${LIVE}`, false, `kirunak s1 ${LIVE}`],
+    ['s1', `kirunak s1 ${LIVE} s2 ${LIVE}`, false, `kirunak s2 ${LIVE}`],
+  ]) {
+    const w = await bugWorkspace();
+    git(w.fix, 'worktree', 'lock', '--reason', reason, w.tree);
+    w.ws.seams.runner = fakeRunner(({ head, base }) => answer('clean', head, base));
+    const r = await review({ ws: w.ws, id: BUG, processes: NOBODY, session });
+    assert.equal(r.outcome, 'merged', JSON.stringify(r.problems));
+    assert.equal(existsSync(w.tree), !gone, `${session} ${reason}`);
+    assert.equal(lockedBy(w.fix), left);
+    if (!gone) assert.match(r.worktrees.kept[0].why, /^locked: session s[12] works in it until \d\d:\d\d$/);
+  }
+});
+
+test('AC-18: k bug review hands its --session to the detached run, which takes it out of the lock before the removal', async () => {
+  const w = await bugWorkspace({ plugin: true });
+  git(w.fix, 'worktree', 'lock', '--reason', `kirunak s1 ${LIVE}`, w.tree);
+  const d = k(w.home, ['bug', 'review', BUG, '--detach', '--json', '--via', 'mod', '--session', 's1'], { CLAUDE_CODE_SESSION_ID: '', FAKE_VERDICT: 'clean' });
+  assert.equal(d.status, 0, d.stderr);
+  for (let i = 0; i < 300 && existsSync(reviewLockPath(w.home, BUG)); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(!existsSync(reviewLockPath(w.home, BUG)), 'the detached review ends');
+  assert.match(readFileSync(JSON.parse(d.stdout).log, 'utf8'), /merged into hub's master/);
+  assert.equal(existsSync(w.tree), false);
+  assert.equal(git(w.hub, 'branch', '--list', BRANCH), '');
+});
+
 test('findings merge nothing: the review is committed beside the bug and the fix is not ready at that head', async () => {
   const w = await bugWorkspace();
   const master = git(w.hub, 'rev-parse', 'master');

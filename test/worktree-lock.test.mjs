@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { holdFor, leaseOf, releaseAll, rootsFrom, worktreeOf } from '../lib/worktree-lock.mjs';
+import { holdFor, leasesOf, releaseAll, rootsFrom, worktreeOf } from '../lib/worktree-lock.mjs';
 import { gitCommitAll, gitInit, sh } from './helpers.mjs';
 
 const NOW = new Date('2026-11-10T09:00:00.000Z');
@@ -58,12 +58,36 @@ test('AC-1: a first call locks for two hours, a second within the lease changes 
   assert.equal(lockOn(repo, wt), 'kirunak s1 2026-11-10T14:20:00.000Z');
 });
 
-test("AC-1: another session's lock and a hand-made one are left alone", () => {
+test('AC-1: two sessions hold one worktree, each renewing its own pair; a lease that ended is dropped on the next rewrite', () => {
   const { repo, wt } = repos();
-  sh(repo, 'git', ['worktree', 'lock', '--reason', 'kirunak s2 2026-11-10T09:30:00.000Z', wt]);
-  assert.deepEqual(holdFor({ session: 's1', paths: [wt], now: later(120), roots: [repo] }), [{ path: wt, did: 'theirs' }], 'even past its lease');
-  assert.equal(lockOn(repo, wt), 'kirunak s2 2026-11-10T09:30:00.000Z');
+  const hold = (session, now) => holdFor({ session, paths: [wt], now, roots: [repo] });
+  assert.deepEqual(hold('s1', NOW), [{ path: wt, did: 'locked' }]);
+  assert.deepEqual(hold('s2', later(30)), [{ path: wt, did: 'joined' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s1 2026-11-10T11:00:00.000Z s2 2026-11-10T11:30:00.000Z');
+  assert.deepEqual([hold('s1', later(59)), hold('s2', later(59))], [[{ path: wt, did: 'held' }], [{ path: wt, did: 'held' }]]);
+  assert.equal(lockOn(repo, wt), 'kirunak s1 2026-11-10T11:00:00.000Z s2 2026-11-10T11:30:00.000Z');
+  assert.deepEqual(hold('s1', later(61)), [{ path: wt, did: 'renewed' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s2 2026-11-10T11:30:00.000Z s1 2026-11-10T12:01:00.000Z', "s2's pair as it was");
+  assert.deepEqual(hold('s2', later(91)), [{ path: wt, did: 'renewed' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s1 2026-11-10T12:01:00.000Z s2 2026-11-10T12:31:00.000Z');
+  // s1 stops with no SessionEnd: its lease ends at 12:01, and s3 joining at 12:10 drops it.
+  assert.deepEqual(hold('s3', later(190)), [{ path: wt, did: 'joined' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s2 2026-11-10T12:31:00.000Z s3 2026-11-10T14:10:00.000Z');
+});
+
+test("AC-1: a lock of one pair, as the first lease wrote it, reads and gains a second pair; one whose lease ended loses it", () => {
+  const { repo, wt } = repos();
+  sh(repo, 'git', ['worktree', 'lock', '--reason', 'kirunak s2 2026-11-10T10:00:00.000Z', wt]);
+  assert.deepEqual(holdFor({ session: 's1', paths: [wt], now: NOW, roots: [repo] }), [{ path: wt, did: 'joined' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s2 2026-11-10T10:00:00.000Z s1 2026-11-10T11:00:00.000Z');
   sh(repo, 'git', ['worktree', 'unlock', wt]);
+  sh(repo, 'git', ['worktree', 'lock', '--reason', 'kirunak s2 2026-11-10T09:30:00.000Z', wt]);
+  assert.deepEqual(holdFor({ session: 's1', paths: [wt], now: later(120), roots: [repo] }), [{ path: wt, did: 'joined' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s1 2026-11-10T13:00:00.000Z');
+});
+
+test('AC-1: a lock kirunak did not write is left alone', () => {
+  const { repo, wt } = repos();
   sh(repo, 'git', ['worktree', 'lock', wt]);
   assert.deepEqual(holdFor({ session: 's1', paths: [wt], now: NOW, roots: [repo] }), [{ path: wt, did: 'theirs' }]);
   assert.equal(lockOn(repo, wt), '');
@@ -71,6 +95,10 @@ test("AC-1: another session's lock and a hand-made one are left alone", () => {
   sh(repo, 'git', ['worktree', 'lock', '--reason', 'moving disks', wt]);
   assert.deepEqual(holdFor({ session: 's1', paths: [wt], now: NOW, roots: [repo] }), [{ path: wt, did: 'theirs' }]);
   assert.equal(lockOn(repo, wt), 'moving disks');
+  sh(repo, 'git', ['worktree', 'unlock', wt]);
+  sh(repo, 'git', ['worktree', 'lock', '--reason', 'kirunak s2 2026-11-10T10:00:00.000Z by hand', wt]);
+  assert.deepEqual(holdFor({ session: 's1', paths: [wt], now: NOW, roots: [repo] }), [{ path: wt, did: 'theirs' }]);
+  assert.equal(lockOn(repo, wt), 'kirunak s2 2026-11-10T10:00:00.000Z by hand');
 });
 
 test('AC-1: the main checkout, a path outside any checkout, a repo the workspace does not name and a bad session lock nothing', () => {
@@ -104,17 +132,33 @@ test("AC-1: releaseAll unlocks only this session's locks, in every repo given", 
   holdFor({ session: 's2', paths: [third], now: NOW, roots: [repo] });
   sh(repo, 'git', ['worktree', 'lock', '--reason', 'moving disks', fourth]);
   const r = await releaseAll({ session: 's1', roots: [repo, other] });
-  assert.deepEqual(r, { unlocked: [wt, otherWt], problems: [] });
+  assert.deepEqual(r, { unlocked: [wt, otherWt], rewritten: [], problems: [] });
   assert.equal(lockOn(repo, wt), null);
   assert.equal(lockOn(other, otherWt), null);
   assert.equal(lockOn(repo, realpathSync(third)), 'kirunak s2 2026-11-10T11:00:00.000Z');
   assert.equal(lockOn(repo, realpathSync(fourth)), 'moving disks');
-  assert.deepEqual(await releaseAll({ session: 's1', roots: [repo, other] }), { unlocked: [], problems: [] }, 'a second end finds none');
+  assert.deepEqual(await releaseAll({ session: 's1', roots: [repo, other] }), { unlocked: [], rewritten: [], problems: [] }, 'a second end finds none');
 });
 
-test('leaseOf reads only the reason kirunak writes', () => {
-  assert.deepEqual(leaseOf('kirunak s1 2026-11-10T11:00:00.000Z\n'), { session: 's1', until: new Date('2026-11-10T11:00:00.000Z'), text: '2026-11-10T11:00:00.000Z' });
-  for (const r of ['', 'moving disks', 'kirunak s1', 'kirunak s1 tomorrow', 'kirunak s 1 2026-11-10T11:00:00.000Z', null]) assert.equal(leaseOf(r), null, r);
+test("AC-1: releaseAll of one session leaves the others' pairs as they were, and the last one's unlocks", async () => {
+  const { repo, wt } = repos();
+  holdFor({ session: 's1', paths: [wt], now: NOW, roots: [repo] });
+  holdFor({ session: 's2', paths: [wt], now: later(10), roots: [repo] });
+  holdFor({ session: 's3', paths: [wt], now: later(20), roots: [repo] });
+  assert.deepEqual(await releaseAll({ session: 's2', roots: [repo] }), { unlocked: [], rewritten: [wt], problems: [] });
+  assert.equal(lockOn(repo, wt), 'kirunak s1 2026-11-10T11:00:00.000Z s3 2026-11-10T11:20:00.000Z');
+  assert.deepEqual(await releaseAll({ session: 's1', roots: [repo] }), { unlocked: [], rewritten: [wt], problems: [] });
+  assert.equal(lockOn(repo, wt), 'kirunak s3 2026-11-10T11:20:00.000Z');
+  assert.deepEqual(await releaseAll({ session: 's3', roots: [repo] }), { unlocked: [wt], rewritten: [], problems: [] });
+  assert.equal(lockOn(repo, wt), null);
+});
+
+test('leasesOf reads only the reason kirunak writes, of one pair or more', () => {
+  const lease = (session, text) => ({ session, until: new Date(text), text });
+  assert.deepEqual(leasesOf('kirunak s1 2026-11-10T11:00:00.000Z\n'), [lease('s1', '2026-11-10T11:00:00.000Z')]);
+  assert.deepEqual(leasesOf('kirunak s1 2026-11-10T11:00:00.000Z s2 2026-11-10T12:30:00Z'), [lease('s1', '2026-11-10T11:00:00.000Z'), lease('s2', '2026-11-10T12:30:00Z')]);
+  for (const r of ['', 'kirunak', 'moving disks', 'kirunak s1', 'kirunak s1 tomorrow', 'kirunak s 1 2026-11-10T11:00:00.000Z', 'kirunak s1 2026-11-10T11:00:00.000Z s2',
+    'kirunak s1 2026-11-10T11:00:00.000Z s/2 2026-11-10T11:00:00.000Z', 'kirunak s1 2026-13-40T11:00:00.000Z', null]) assert.equal(leasesOf(r), null, r);
 });
 
 // The hooks as Claude Code runs them: the JSON on stdin, with $KIRUNAK_HOME holding config.json's repos.
