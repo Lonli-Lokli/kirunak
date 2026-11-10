@@ -23,7 +23,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { bugsHookLine, cacheChecks, compactChecks, ladderChecks, trackerLine, unlockHookLine } from '../lib/doctor.mjs';
+import { bugsHookLine, cacheChecks, compactChecks, copiesLine, freezeHookLine, ladderChecks, trackerLine, unlockHookLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -295,8 +295,8 @@ const VERBS = {
     }
     for (const name of ['kirunak-freeze.mjs', 'kirunak-escalate.mjs', 'kirunak-bugs.mjs', 'git-pre-commit.mjs']) say(existsSync(join(KIRUNAK, 'hooks', name)), `hook ${name}`);
     const settings = flags.settings ? resolve(expandHome(flags.settings)) : join(homedir(), '.claude', 'settings.json');
-    const wired = existsSync(settings) && readFileSync(settings, 'utf8').includes('hooks/kirunak-freeze.mjs');
-    say(wired, `the freeze hook is wired in ${settings}${wired ? '' : ' (run k install)'}`);
+    say(...freezeHookLine({ settingsPath: settings }));
+    say(...copiesLine({ settingsPath: settings }));
     for (const s of SKILLS) {
       say(existsSync(join(homedir(), '.claude', 'skills', s, 'SKILL.md')), `skill ${s} is linked (k install)`);
     }
