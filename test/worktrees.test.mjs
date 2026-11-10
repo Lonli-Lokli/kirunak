@@ -1,7 +1,7 @@
 // The worktrees an acceptance removes (approval.md §4), on fixture repos: lib/worktrees.mjs, `k worktrees`, `k accept`.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
@@ -452,4 +452,68 @@ test('AC-2: a live lease keeps a merged worktree, any other lock keeps it as bef
 
   const k2 = await worktrees({ ws, remove: true, processes: none, now: new Date('2026-11-10T10:30:00.000Z') });
   assert.deepEqual(k2.removed.map((w) => [w.path, w.branchDeleted]), [[live, true]], 'once its lease ends, the live one goes too');
+});
+
+// asilak/kirunak-worktrees-lsof-windows E-1: a bug's fix branch bug/<slug> that reads as merged.
+const bugFile = (repo, slug) => {
+  mkdirSync(join(repo, 'kirunak', 'bugs'), { recursive: true });
+  writeFileSync(join(repo, 'kirunak', 'bugs', `${slug}.md`), `---\ntitle: ${slug}\nwritten: 2026-11-10\nquad-damage: yes\n---\n`);
+};
+const runOn = (home, bug) => {
+  mkdirSync(join(home, 'bugs'), { recursive: true });
+  writeFileSync(join(home, 'bugs', 'quad-damage.json'), JSON.stringify({ pid: process.pid, started: '2026-11-10T09:00', by: 'owner', bug, phase: 'fixing', try: 1 }));
+};
+const mergeNoFf = (repo, branch) => sh(repo, 'git', ['merge', '--no-ff', '-q', '-m', `Merge ${branch}`, branch]);
+
+test('E-1: a fresh bug/<slug> whose bug is open stays, as does the branch of the bug Quad Damage is on; a merged fix with commits, or a fresh branch whose bug is gone, goes', async () => {
+  const { ws, root, home, weather } = await makeWorkspace();
+  bugFile(weather, 'fresh');
+  bugFile(weather, 'fixed');
+  bugFile(weather, 'running');
+  const fresh = add(weather, join(root, 'fresh'), 'bug/fresh');
+  const dropped = add(weather, join(root, 'dropped'), 'bug/dropped');
+  const fixed = add(weather, join(root, 'fixed'), 'bug/fixed');
+  commitIn(fixed, 'fixed.txt');
+  mergeNoFf(weather, 'bug/fixed');
+  const running = add(weather, join(root, 'running'), 'bug/running');
+  commitIn(running, 'running.txt');
+  mergeNoFf(weather, 'bug/running');
+  commitIn(weather, 'later.txt');
+  runOn(home, 'weather/running');
+
+  const r = await worktrees({ ws, remove: true, processes: none });
+  assert.deepEqual(whys(r.kept), {
+    [fresh]: 'the bug weather/fresh is still open and bug/fresh has no commit of its own',
+    [running]: 'Quad Damage is on the bug weather/running',
+  });
+  assert.deepEqual(whys(r.removed), { [dropped]: 'bug/dropped merged into master', [fixed]: 'bug/fixed merged into master' });
+  assert.ok(existsSync(fresh) && branchExists(weather, 'bug/fresh') && existsSync(running) && branchExists(weather, 'bug/running'));
+  assert.equal(branchExists(weather, 'bug/fixed'), false);
+
+  // Review & merge's own removal of the branch it just merged: the run on that bug is its own, and the branch has
+  // commits of its own, so it goes even while its bug is still listed (closing it failed).
+  const own = await worktrees({ ws, remove: true, processes: none, only: { root: weather, branch: 'bug/running' } });
+  assert.deepEqual(whys(own.removed), { [running]: 'bug/running merged into master' });
+  assert.deepEqual(own.kept, []);
+
+  // The bug dropped, its fresh branch goes.
+  rmSync(join(weather, 'kirunak', 'bugs', 'fresh.md'));
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).removed), { [fresh]: 'bug/fresh merged into master' });
+});
+
+test('E-1: the bugs and the run are read only when a bug/<slug> is a candidate, and bugs that cannot be read keep it', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const plain = add(weather, join(root, 'plain'), 'plain');
+  let reads = 0;
+  const counted = () => {
+    reads++;
+    return [];
+  };
+  assert.deepEqual(paths((await worktrees({ ws, processes: none, openBugs: counted, quadDamage: counted })).removed), [plain]);
+  assert.equal(reads, 0);
+  const fresh = add(weather, join(root, 'fresh'), 'bug/fresh');
+  const failing = () => {
+    throw new Error('no bugs here');
+  };
+  assert.deepEqual(whys((await worktrees({ ws, processes: none, openBugs: failing })).kept), { [fresh]: 'cannot tell whether its bug is open: no bugs here' });
 });
