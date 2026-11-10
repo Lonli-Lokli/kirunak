@@ -418,3 +418,30 @@ test('the lock is released inside the queue mutex', async () => {
   assert.equal((await running).exitCode, 0);
   assert.equal(existsSync(join(home, 'guard', 'lock')), false);
 });
+
+test('queue(): the holder and the live waiters in the order they came, with their stated lengths and usual; a dead waiter is left out (E-6)', async () => {
+  const { home, g } = guard();
+  assert.deepEqual({ ...g.queue(), now: null }, { now: null, first: null, held: null, waiting: [] });
+  writeFileSync(join(home, 'guard', 'log.jsonl'), [3, 5, 4].map((m) => JSON.stringify({ what: 'tests', minutes: m, exitCode: 0 }) + '\n').join(''));
+  const f = join(home, 'go');
+  const a = g.run({ session: 'kirunak:a', what: 'tests', maxMinutes: 30, expectMinutes: 5, cwd: home, command: sh(`while [ ! -e ${f} ]; do sleep 0.05; done`) });
+  await until(() => ownerOf(home)?.job);
+  const b = g.run({ session: 'kirunak:b', what: 'lint', maxMinutes: 10, expectMinutes: null, cwd: home, command: sh('true') });
+  await until(() => existsSync(join(home, 'guard', 'queue')) && readFileSync(join(home, 'guard', 'queue'), 'utf8').includes('kirunak:b'));
+  // A waiter whose process is gone, queued between them: heavy-lock and this guard drop it, and so does queue().
+  const dead = spawnSync('/bin/sh', ['-c', 'echo $$']).stdout.toString().trim();
+  const lines = readFileSync(join(home, 'guard', 'queue'), 'utf8');
+  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'x', session: 'gone', what: 'old', pid: Number(dead), pidStart: OWN_START, since: new Date().toISOString(), maxMinutes: 5 }) + '\n' + lines);
+  const q = g.queue();
+  assert.ok(Date.parse(q.now) > 0);
+  assert.equal(q.first, null);
+  const { since, ...held } = q.held;
+  assert.ok(Date.parse(since) > 0);
+  assert.deepEqual(held, { session: 'kirunak:a', what: 'tests', pid: process.pid, expectMinutes: 5, maxMinutes: 30, kind: null, usualMinutes: 4 });
+  assert.deepEqual(q.waiting.map(({ queuedAt, ...w }) => (assert.ok(Date.parse(queuedAt) > 0), w)), [
+    { session: 'kirunak:b', what: 'lint', pid: process.pid, expectMinutes: null, maxMinutes: 10, kind: null, usualMinutes: null },
+  ]);
+  writeFileSync(f, '');
+  await Promise.all([a, b]);
+  assert.equal(g.queue().held, null);
+});
