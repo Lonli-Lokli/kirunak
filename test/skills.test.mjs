@@ -68,6 +68,16 @@ test('the skills stay short', () => {
   assert.ok(read('skills/k-heavy/SKILL.md').split('\n').length <= 28);
 });
 
+test("a bug's intake hands over with /k-approve's two ways, and the skill, design/approval.md and the README describe Approve and start (asilak/kirunak-worktrees-lsof-windows AC-16, AC-17)", () => {
+  const flat = (f) => read(f).replace(/\s+/g, ' ');
+  const skill = flat('skills/k-intake/SKILL.md');
+  const bug = skill.slice(skill.indexOf('## Starting from a bug'), skill.indexOf('## After approval'));
+  assert.match(bug, /"Type \/k-approve to freeze and queue it, or to approve and start it here\."/);
+  assert.match(bug, /Approve and start makes it this session's task/);
+  assert.match(flat('design/approval.md'), /\*\*"Approve and start <id>"\*\*: it runs `k approve <id> --via mod` and, only when that exits 0, `k start <id> --session <this session>`/);
+  assert.match(flat('README.md'), /"Approve and start <id>", which approves it and, once that took, makes it this session's task/);
+});
+
 test('k install links every skill this repo ships, and only those', () => {
   const shipped = readdirSync(join(KIRUNAK, 'skills')).filter((d) => !d.startsWith('.')).sort();
   assert.deepEqual([...LINKED].sort(), shipped);

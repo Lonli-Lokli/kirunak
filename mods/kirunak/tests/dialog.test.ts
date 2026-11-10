@@ -339,3 +339,73 @@ describe('the dialog log', () => {
     expect(verbs(w.runs)).toEqual([['approve', 'hub/proposed', '--via', 'mod']])
   })
 })
+
+// A task whose intake started from a bug, as k waiting gives it (fromBug), beside one that did not and one from a bug k
+// would refuse (asilak/kirunak-worktrees-lsof-windows AC-12 to AC-15, E-3 to E-5, D-2).
+const BUGGY: Waiting = {
+  ...WAITING,
+  approve: [
+    { id: 'hub/stale-tiles', title: 'The stale tiles reload', why: null, fromBug: true },
+    { id: 'hub/proposed', title: 'Asks for approval', why: null, fromBug: false },
+    { id: 'hub/bad-fix', title: 'A fix with no source', why: 'hub/bad-fix: task.md fails k check: AC-1 has no source', fromBug: true },
+  ],
+}
+const QUEUED = { exitCode: 0, stdout: 'hub/stale-tiles: queued, place 1\n', stderr: '' }
+const STARTED = { exitCode: 0, stdout: "hub/stale-tiles: this session's task\n", stderr: '' }
+const BOTH = 'Approve and start hub/stale-tiles'
+
+describe('Approve and start', () => {
+  test('a task from a bug k would approve shows "Approve and start <id>" under "Approve <id>"; one not from a bug shows only "Approve <id>", and one k would refuse neither (AC-12, D-2, E-5)', async ($, on) => {
+    const w = world(on, { waiting: [BUGGY], taps: ['hub/proposed', 'Back', 'hub/bad-fix', 'Back', 'hub/stale-tiles', BOTH], answers: [QUEUED, STARTED] })
+    await run($, 'k-approve')
+    expect(w.asked.slice(1).filter((_, i) => i % 2 === 0)).toEqual([
+      { header: 'Approve', question: 'hub/proposed: Asks for approval.\nState: proposed.\nk would approve it now.\nApprove it?', labels: ['Approve hub/proposed', 'Back'] },
+      { header: 'Approve', question: 'hub/bad-fix: A fix with no source.\nState: proposed.\nNot yet:\ntask.md fails k check: AC-1 has no source\nk would refuse it now. Back to the list?', labels: ['Cancel', 'Back'] },
+      { header: 'Approve', question: 'hub/stale-tiles: The stale tiles reload.\nState: proposed.\nk would approve it now.\nApprove it, or approve it and start it here?', labels: ['Approve hub/stale-tiles', BOTH, 'Back'] },
+    ])
+    expect(w.lines[5]).toEqual({ 'Approve hub/stale-tiles': 'approves it, so its steps can start', [BOTH]: "approves it and makes it this session's task, its plan started here", Back: 'the dialog before' })
+  })
+
+  test('"Approve and start" runs k approve --via mod, then, once it took, k start with this session\'s id, read before the dialog opened; the answer says both took and the pane opens (AC-13)', async ($, on) => {
+    const w = world(on, { waiting: [BUGGY], taps: ['hub/stale-tiles', BOTH], answers: [QUEUED, STARTED] })
+    expect(await run($, 'k-approve')).toBe("Approved hub/stale-tiles.\nhub/stale-tiles: queued, place 1\nhub/stale-tiles: this session's task")
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/stale-tiles', '--via', 'mod'], ['start', 'hub/stale-tiles', '--session', 'sess-1']])
+    expect(w.idRead[0]).toBe(0)
+    expect(w.panes.has('kirunak')).toBe(true)
+  })
+
+  test('a list with no task from a bug k would approve reads no session id before its dialog opens, as before (D-2)', async ($, on) => {
+    const w = world(on, { taps: ['hub/proposed', 'Approve hub/proposed'], verb: QUEUED })
+    await run($, 'k-approve')
+    expect(w.idRead.includes(0)).toBe(false)
+  })
+
+  test('an approval k refused runs no k start, and its answer is the refusal alone (AC-15)', async ($, on) => {
+    const w = world(on, { waiting: [BUGGY], taps: ['hub/stale-tiles', BOTH], answers: [{ exitCode: 1, stdout: '', stderr: 'k: hub/stale-tiles: task.md changed since the intake\n' }] })
+    expect(await run($, 'k-approve')).toBe('/k-approve refused:\nk: hub/stale-tiles: task.md changed since the intake')
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/stale-tiles', '--via', 'mod']])
+    expect(w.panes.has('kirunak')).toBe(false)
+  })
+
+  test('the approval took and k start refused: the answer says approved, not started, with k\'s reason; nothing undone (E-3)', async ($, on) => {
+    const w = world(on, { waiting: [BUGGY], taps: ['hub/stale-tiles', BOTH], answers: [QUEUED, { exitCode: 1, stdout: '', stderr: 'k: hub/stale-tiles is on hold since 2026-11-07\n' }] })
+    expect(await run($, 'k-approve')).toBe('Approved hub/stale-tiles.\nhub/stale-tiles: queued, place 1\nNot started: k: hub/stale-tiles is on hold since 2026-11-07')
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/stale-tiles', '--via', 'mod'], ['start', 'hub/stale-tiles', '--session', 'sess-1']])
+    expect(w.panes.has('kirunak')).toBe(false)
+  })
+
+  test('it runs from Remote Control as from the composer, and from no other origin, which opens no dialog and runs nothing (E-4)', async ($, on) => {
+    const w = world(on, { waiting: [BUGGY], taps: ['hub/stale-tiles', BOTH], answers: [QUEUED, STARTED] })
+    expect(await run($, 'k-approve', '', { kind: 'task-notification' })).toMatch(/^\/k-approve runs only from your own prompt or from Remote Control; .*nothing ran\.$/)
+    expect(w.asked).toEqual([])
+    expect(w.runs).toEqual([])
+    expect(await run($, 'k-approve', '', { kind: 'bridge' })).toBe("Approved hub/stale-tiles.\nhub/stale-tiles: queued, place 1\nhub/stale-tiles: this session's task\n(typed in Remote Control)")
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/stale-tiles', '--via', 'mod'], ['start', 'hub/stale-tiles', '--session', 'sess-1']])
+  })
+
+  test('typed /k-approve <id> on a task from a bug still runs k approve alone (O-3)', async ($, on) => {
+    const w = world(on, { waiting: [BUGGY], answers: [QUEUED] })
+    expect(await run($, 'k-approve', 'hub/stale-tiles')).toBe('Approved hub/stale-tiles.\nhub/stale-tiles: queued, place 1')
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/stale-tiles', '--via', 'mod']])
+  })
+})

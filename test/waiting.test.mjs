@@ -211,6 +211,15 @@ test("k waiting says in one line how many drafts wait for the owner's intake and
   assert.equal(draftsLine({ count: 1 }), "1 draft waits for the owner's intake: /k-drafts");
 });
 
+test('k waiting --json gives each task to approve fromBug, true when its folder holds bug.md, which the intake from a bug moves there, else false (asilak/kirunak-worktrees-lsof-windows AC-12, D-2)', async () => {
+  const { weather, home } = await makeWorkspace();
+  let w = waiting(home);
+  assert.deepEqual(w.approve.map((r) => [r.id, r.fromBug]), [[ID, false]]);
+  writeFileSync(join(dirOf(weather), 'bug.md'), '---\nid: weather/offline-forecast\ntitle: The forecast is gone offline\nwritten: 2026-11-04\n---\n');
+  w = waiting(home);
+  assert.deepEqual(w.approve.map((r) => [r.id, r.fromBug]), [[ID, true]]);
+});
+
 // A bug as k bug new leaves it (gulnya/kirunak-bugs S-1), in `root`'s kirunak/bugs/; with `fix`, a commit on bug/<slug>
 // that master lacks, made without checking anything out, so its fix is ready.
 function bugAt(root, slug, title, written, { fix = false } = {}) {

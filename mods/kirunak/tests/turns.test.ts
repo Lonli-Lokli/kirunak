@@ -82,6 +82,34 @@ describe('the turn after an owner\'s verb (kirunak-bugs AC-11 to AC-14)', () => 
     expect(verbs(w.runs)).toEqual([['start', ID, '--via', 'mod', '--session', 'sess-1'], ['start', 'hub/sync-notes', '--via', 'mod', '--session', 'sess-1']])
   })
 
+  // asilak/kirunak-worktrees-lsof-windows AC-14, AC-15, E-3: a task from a bug, approved and started in one choice.
+  const FROM_BUG = { ...WAITING, approve: [{ id: 'hub/stale-tiles', title: 'The stale tiles reload', why: null, fromBug: true }] }
+  const QUEUED = { exitCode: 0, stdout: 'hub/stale-tiles: queued, place 1\n', stderr: '' }
+  const BOTH = 'Approve and start hub/stale-tiles'
+
+  test('Approve and start, both taken: a turn says both took and goes on with the task\'s plan from its first step, as the /k-start turn does, whoever\'s task it was (AC-14)', async ($, on) => {
+    const w = world(on, { waiting: [FROM_BUG], taps: ['hub/stale-tiles', BOTH], answers: [QUEUED, { exitCode: 0, stdout: "hub/stale-tiles: this session's task\n", stderr: '' }] })
+    await run($, 'k-approve')
+    expect(await turns(w)).toEqual([
+      "The owner tapped Approve and start on hub/stale-tiles in /k-approve, and kirunak took both: it approved hub/stale-tiles and made it this session's task.\nhub/stale-tiles: queued, place 1\nhub/stale-tiles: this session's task\nSay so in one line, then start work on it now with its plan, from its first step, as \"Work on hub/stale-tiles\" does.",
+    ])
+  })
+
+  test('Approve and start, the approval taken and k start refused: a turn says approved, not started, with k\'s reason, the task left approved and queued (E-3)', async ($, on) => {
+    const w = world(on, { waiting: [FROM_BUG], taps: ['hub/stale-tiles', BOTH], answers: [QUEUED, { exitCode: 1, stdout: '', stderr: 'k: hub/stale-tiles is on hold since 2026-11-07\n' }] })
+    await run($, 'k-approve')
+    expect(await turns(w)).toEqual([
+      'The owner tapped Approve and start on hub/stale-tiles in /k-approve: kirunak approved hub/stale-tiles, not started: k: hub/stale-tiles is on hold since 2026-11-07\nThe task stays approved and queued, and nothing was undone. Say in one line that hub/stale-tiles is approved, not started, and kirunak\'s reason. Never run `k start` yourself: the owner starts it with /k-start.',
+    ])
+  })
+
+  test('Approve and start, the approval refused: no k start, and the turn is the refusal\'s, as for Approve (AC-15)', async ($, on) => {
+    const w = world(on, { waiting: [FROM_BUG], task: 'hub/stale-tiles', taps: ['hub/stale-tiles', BOTH], answers: [REFUSED] })
+    await run($, 'k-approve')
+    expect(await turns(w)).toEqual([refused('approve hub/stale-tiles', 'with a tap in /k-approve', `k: ${ID}: the latest review is not met (AC-2)`, 'approve', '/k-approve')])
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/stale-tiles', '--via', 'mod']])
+  })
+
   test('a /k-start k refused gets no turn (O-3: no task starts by itself)', async ($, on) => {
     const w = world(on, { verb: { exitCode: 1, stdout: '', stderr: `k: ${ID} is on hold since 2026-11-07\n` } })
     await run($, 'k-start', ID)

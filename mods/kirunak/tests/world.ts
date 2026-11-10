@@ -158,7 +158,7 @@ export type Asked = { question: string; labels: string[]; header: string }
 // The world beneath the mod: a clock, the commands it registers, its session's id (`idRead`: how many dialogs had
 // opened at each read of it), a k that exists and answers `k list` (from `rows`, ROWS unless a test gives its own),
 // `k status`, `k waiting` and `k board --brief` from the fixtures above, `k board --card <id>` for a task of `rows` or a draft (any
-// other id refused) (each owner verb with `verb`), the amendment files,
+// other id refused) (each owner verb with `verb`, or the next of `answers` while any is left), the amendment files,
 // `k drafts --json` from `drafts` and `k bugs --json` from `bugs` (each read takes the next, the last again once they
 // run out; null is a k that failed), `k bugs quad-damage --status --json` from `quadDamage` (`quadReads` counts them,
 // taken as `bugs` are), `k bugs quad-damage` itself an owner verb, `k board --card <id>` a bug's card too,
@@ -173,7 +173,7 @@ export type Asked = { question: string; labels: string[]; header: string }
 // A tap that looks first: given the dialog's questions, it answers as a tap of `taps` does.
 export type Tap = (questions: unknown[]) => Promise<string | null>
 
-export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null | Tap)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[], statusFails = null as string | null, submitRefused = null as string | null, waitingMs = 0 } = {}) {
+export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, stderr: '' } as Answer, task = ID as string | null, events = [] as string[], broken = false, linkedTo = null as string | null, waiting = [WAITING] as (Waiting | null)[], brief = { exitCode: 0, stdout: JSON.stringify(BRIEF), stderr: '' } as Answer, verbFails = null as string | null, taps = [] as (string | null | Tap)[], rows = ROWS, env = { HOME: '/home/dev' } as Record<string, string>, unwritable = false, drafts = [DRAFTS] as (DraftRow[] | null)[], bugs = [BUGS] as (BugRow[] | null)[], quadDamage = [NO_RUN] as (QuadDamageStatus | null)[], statusFails = null as string | null, submitRefused = null as string | null, waitingMs = 0, answers = [] as Answer[] } = {}) {
   const clock = mock.clock(on, { now: Date.UTC(2026, 10, 7, 12, 0) })
   const w = { clock, registered: [] as string[], runs: [] as string[][], reads: 0, waits: 0, boards: [] as string[][], tails: [] as string[][], toasts: [] as string[], panes: new Set<string>(), asked: [] as Asked[], lines: [] as Record<string, string>[], idRead: [] as number[], files: {} as Record<string, string>, draftReads: 0, bugReads: 0, quadReads: 0, described: {} as Record<string, string>, submitted: [] as { text: string; origin: PromptOrigin }[] }
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e) => {
@@ -255,6 +255,7 @@ export function world(on: On, { verb = { exitCode: 0, stdout: `${ID}: done\n`, s
       w.runs.push([...e.argv])
       // `verbFails`: the verb never finished, as a timeout rejects.
       if (verbFails !== null) return { deny: verbFails }
+      answer = answers.shift() ?? verb
     }
     return { value: { ...answer, isStdoutTruncated: false, isStderrTruncated: false } }
   })
