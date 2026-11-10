@@ -87,17 +87,17 @@ describe('/k-bugs (kirunak-bugs AC-6, D-1)', () => {
     expect(w.runs).toEqual([])
   })
 
-  test('Review & merge runs k bug review <id> --detach --via mod, the owner\'s verb, and answers that a fresh Opus session reviews it, merges only with no finding, never pushes, and where the result shows (D-1)', async ($, on) => {
+  test('Review & merge runs k bug review <id> --detach --via mod --session <this session>, the owner\'s verb, and answers that a fresh Opus session reviews it, merges only with no finding, never pushes, and where the result shows (D-1)', async ($, on) => {
     const w = world(on, { taps: ['hub/stale-tiles', 'Review & merge'], verb: { exitCode: 0, stdout: REVIEWED, stderr: '' } })
     expect(await run($)).toBe(`A fresh Opus session reviews the fix of hub/stale-tiles now. Only when it finds nothing is the fix merged into master, never pushed, and the bug closed; a finding or a conflict merges nothing and is written beside the bug.\n/k-bugs or \`k bugs\` shows the result.\n\n${REVIEWED.trim()}`)
-    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod']])
+    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod', '--session', 'sess-1']])
     expect(w.submitted).toEqual([])
   })
 
   test('a Review & merge k refuses (a review running, the fix no longer ready) answers in k\'s own words', async ($, on) => {
     const w = world(on, { taps: ['hub/stale-tiles', 'Review & merge'], verb: { exitCode: 1, stdout: '', stderr: 'k: hub/stale-tiles: a Review & merge of it runs already, as pid 4242\n' } })
     expect(await run($)).toBe('/k-bugs refused:\nk: hub/stale-tiles: a Review & merge of it runs already, as pid 4242')
-    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod']])
+    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod', '--session', 'sess-1']])
   })
 
   test('Start fix reads the bugs again and submits a prompt of its own that names the bug, the k-intake skill and k intake start; it runs no verb', async ($, on) => {

@@ -68,7 +68,7 @@ describe('the turn after an owner\'s verb (kirunak-bugs AC-11 to AC-14)', () => 
     const w = world(on, { taps: ['hub/stale-tiles', 'Review & merge'], verb: { exitCode: 1, stdout: '', stderr: 'k: hub/stale-tiles: a Review & merge of it runs already, as pid 4242\n' } })
     await run($, 'k-bugs')
     expect(await turns(w)).toEqual([])
-    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod']])
+    expect(verbs(w.runs)).toEqual([['bug', 'review', 'hub/stale-tiles', '--detach', '--via', 'mod', '--session', 'sess-1']])
   })
 
   test('/k-start k took, picked or typed: a turn starts work on the task from where its progress left off, as "Work on <id>" does (AC-12)', async ($, on) => {

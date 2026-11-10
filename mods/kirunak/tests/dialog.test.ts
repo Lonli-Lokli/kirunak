@@ -81,7 +81,7 @@ describe('picking by touch', () => {
     await run($, 'k-approve', '4')
     await run($, 'k-accept', '5')
     await run($, 'k-approve-amendment', '4')
-    expect(verbs(w.runs)).toEqual([['approve', 'hub/t4', '--via', 'mod'], ['accept', 'hub/a5', '--via', 'mod'], ['approve', ID, '--amendment', 'A-4', '--via', 'mod']])
+    expect(verbs(w.runs)).toEqual([['approve', 'hub/t4', '--via', 'mod'], ['accept', 'hub/a5', '--via', 'mod', '--session', 'sess-1'], ['approve', ID, '--amendment', 'A-4', '--via', 'mod']])
   })
 
   test('/k-hold, /k-start and /k-queue take no number typed, so a page after the first adds none: /k-hold\'s and /k-start\'s lines keep the app\'s numbers, /k-queue\'s their places in the queue (A-11)', async ($, on) => {
@@ -166,8 +166,8 @@ describe('picking by touch', () => {
     expect(w.asked[5]).toEqual({ header: 'Accept', question: `${text}\nReason: read on the phone\nAccept it with these items open, for that reason?`, labels: [`Accept ${ID} with open items`, 'Back'] })
     expect(w.asked[6]).toEqual(reason)
     expect(verbs(w.runs)).toEqual([
-      ['accept', 'weather/was-reviewed', '--via', 'mod'],
-      ['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod'],
+      ['accept', 'weather/was-reviewed', '--via', 'mod', '--session', 'sess-1'],
+      ['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod', '--session', 'sess-1'],
     ])
   })
 
@@ -198,7 +198,7 @@ describe('picking by touch', () => {
     ].join('\n'))
     expect(w.runs).toEqual([])
     expect(await run($, 'k-accept', ID, { kind: 'bridge' })).toBe(`/k-accept refused:\nk: ${BLOCKED.why}\n(typed in Remote Control)`)
-    expect(verbs(w.runs)).toEqual([['accept', ID, '--via', 'mod']])
+    expect(verbs(w.runs)).toEqual([['accept', ID, '--via', 'mod', '--session', 'sess-1']])
   })
 
   test('/k-accept on the phone: at most ten blocking lines for a task, in the dialog\'s list, its view and the refusal, then how many more there are (kirunak-accept-shared-repo E-2, A-1)', async ($, on) => {

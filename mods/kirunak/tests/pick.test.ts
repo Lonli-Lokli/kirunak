@@ -39,8 +39,8 @@ describe('picking what waits for the owner', () => {
     await run($, 'k-accept', '2 --checklist-open "read on the phone"', { kind: 'bridge' })
     await run($, 'k-accept', '1')
     expect(w.runs.map(argv => argv.slice(2))).toEqual([
-      ['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod'],
-      ['accept', 'weather/was-reviewed', '--via', 'mod'],
+      ['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod', '--session', 'sess-1'],
+      ['accept', 'weather/was-reviewed', '--via', 'mod', '--session', 'sess-1'],
     ])
   })
 

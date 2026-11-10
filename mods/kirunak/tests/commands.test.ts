@@ -53,7 +53,7 @@ describe('the owner\'s commands', () => {
       expect(w.runs.map(argv => argv[0])).toEqual(['node', 'node', 'node', 'node', 'node'])
       expect(w.runs.every(argv => /\/mods\/kirunak\/\.\.\/\.\.\/bin\/k\.mjs$/.test(argv[1] ?? ''))).toBe(true)
       expect(w.runs.map(argv => argv.slice(2))).toEqual([
-        ['accept', ID, '--via', 'mod'],
+        ['accept', ID, '--via', 'mod', '--session', 'sess-1'],
         ['approve', ID, '--amendment', 'A-2', '--first', '--via', 'mod'],
         ['hold', ID, '--why', 'waiting for the phone test', '--via', 'mod'],
         ['resume', ID],
@@ -67,7 +67,7 @@ describe('the owner\'s commands', () => {
     await run($, 'k-accept', `${ID} --checklist-open "checked on the phone"`, { kind: 'bridge' })
     await run($, 'k-hold', `${ID} --why='the owner is away'`, { kind: 'composer' })
     expect(w.runs.map(argv => argv.slice(2))).toEqual([
-      ['accept', ID, '--checklist-open', 'checked on the phone', '--via', 'mod'],
+      ['accept', ID, '--checklist-open', 'checked on the phone', '--via', 'mod', '--session', 'sess-1'],
       ['hold', ID, '--why', 'the owner is away', '--via', 'mod'],
     ])
   })

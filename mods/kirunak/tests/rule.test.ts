@@ -97,7 +97,7 @@ describe('the owner-only rule (kirunak-phone AC-4)', () => {
     expect(w.asked.slice(4, 7)).toEqual([reason, item, list])
     expect(w.runs).toEqual([])
     await run($, 'k-accept')
-    expect(w.runs.map(argv => argv.slice(2))).toEqual([['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod']])
+    expect(w.runs.map(argv => argv.slice(2))).toEqual([['accept', ID, '--checklist-open', 'read on the phone', '--via', 'mod', '--session', 'sess-1']])
   })
 
   test('a dialog the model raised, answered "Hold <id>", "Start <id>", "Move <id> before <id>", "Park <id>", "Put back <id>", "Earlier" or "Later", runs nothing, before and after the owner\'s own dialogs', async ($, on) => {
