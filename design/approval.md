@@ -333,9 +333,22 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
 
-The main checkout never goes, nor a locked worktree or one whose folder is gone. A detached one goes only when a
-plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit is lost with it; a keep from any
-plugin wins. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
+A session holds the worktree it works in by `git worktree lock --reason "kirunak <session> <until>"`, `<until>` the
+end of its lease as an ISO time (`lib/worktree-lock.mjs`). The freeze hook takes it after letting a call through
+(§2): for the call's `cwd` and the file an Edit, Write, MultiEdit or NotebookEdit names, the linked worktree of a
+workspace repo (as `escalate/config.json` names them) it is in, read from its `.git` file and git's `locked` file
+without git, is locked for two hours when it has no lock, and locked again for two more when it is this session's
+with under an hour left; a lock with any other reason is someone else's and is left. It spawns git only then, never
+locks a main checkout and fails open. On every SessionEnd, `/clear` included, `hooks/kirunak-unlock.mjs` (wired by
+`k install` with no matcher and 5 seconds; `k doctor` checks it) unlocks every worktree of the workspace's repos whose
+reason names the ending session. A session that ends without it leaves its lease to run out: the removal lifts a lock
+of kirunak's whose lease has ended (`git worktree unlock`) and goes on with the worktree as an unlocked one, its line
+starting "lock of session <s> lifted: its lease ended <until>" ("would lift" in a dry run, which lifts nothing). A
+live lease keeps it: "locked: session <s> works in it until <HH:MM>".
+
+The main checkout never goes, nor a worktree locked by hand or by another tool, or one whose folder is gone. A
+detached one goes only when a plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit is lost
+with it; a keep from any plugin wins. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
 branch goes with `git branch -D`. It is never `--force` but for a removal cut short (killed partway, say by the
 phone's time limit): when its only changes are tracked files deleted, nothing of its own is left in it, and it goes
 with `--force`. Every git call but the removal has a time limit (two minutes; the look at processes one), and what one cannot tell in
