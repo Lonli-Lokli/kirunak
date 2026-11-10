@@ -60,7 +60,10 @@ async function readWaiting($: EngineInterface, k: string): Promise<Waiting | str
 }
 
 // `/k-approve` or `/k-accept` with no id: what waits for that verb, kept for a number, as the dialog's choices
-// (kirunak-phone AC-3); when nothing ran, the answer says why and shows the list as a number takes it.
+// (kirunak-phone AC-3); when nothing ran, the answer says why and shows the list as a number takes it. A task from a
+// bug k would approve gets Approve and start too, which names it this session's task: the session's id is read
+// before the dialog opens, and the pane opens once k took both, as after /k-start (asilak/kirunak-worktrees-lsof-windows
+// AC-12, AC-13).
 async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept'): Promise<string | Outcome> {
   // A list that could not be read leaves none to pick from, never the one before it (review G27).
   delete offered[verb]
@@ -69,7 +72,13 @@ async function offer($: EngineInterface, turn: Turn, verb: 'approve' | 'accept')
   const rows = w[verb]
   offered[verb] = rows.map(row => row.id)
   if (!rows.length) return offerText(verb, rows)
-  const out = await turn.dialog(verb === 'approve' ? approveScreen(rows) : acceptScreen(rows))
+  const startable = verb === 'approve' && rows.some(r => r.why === null && r.fromBug)
+  const first = verb === 'accept'
+    ? acceptScreen(rows)
+    : approveScreen(rows, startable ? await $.session.id() : null, ok => {
+      if (ok) void $.ui.open({ id: PANE, title: 'kirunak' }).catch(() => undefined)
+    })
+  const out = await turn.dialog(first)
   return out.nothing === null ? out : `${nothingRan(out.nothing)}\n\n${offerText(verb, rows)}`
 }
 

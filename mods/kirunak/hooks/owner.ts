@@ -20,7 +20,9 @@ import { capBlocking } from './waiting'
 //   Move list's Earlier and Later, under the task's lines, kirunak-phone A-11);
 // - a verb runs only through runVerb, which this module keeps to itself and calls once, as the hook answers, for an
 //   Outcome this same turn made: the verb typed on the command line itself, or the verb choice that was the dialog's
-//   last tap (a turn that opened its dialog can type none);
+//   last tap (a turn that opened its dialog can type none); a choice's `then` (/k-approve's Approve and start: k start,
+//   asilak/kirunak-worktrees-lsof-windows AC-13) is called a second time, only once k took the first, and a first k
+//   refused runs nothing after it (AC-15);
 // - no other hook, no later command and no dialog the model raised can make such an Outcome or reach runVerb: the mod's
 //   hooks on AskUserQuestion (look.tsx, gulnya/mobile-dialogs D-1) write each choice's line into the call and draw the
 //   dialog's look, and never answer it; the look's buttons only fold and unfold it, and a tap reaches nothing but the
@@ -48,7 +50,8 @@ const VERBS = /^(?:approve|accept|hold|resume|start|amend decline|queue (?:add|m
 export type Outcome = { readonly nothing: string | null; readonly ended?: string }
 
 // `tapped`: chosen by the dialog's last tap, not typed.
-type Chosen = { turn: object; tapped: boolean; argv: readonly string[]; after: ((ok: boolean) => void) | undefined }
+// `then`: the verb run after it, only when k took it (a choice's `then`).
+type Chosen = { turn: object; tapped: boolean; argv: readonly string[]; after: ((ok: boolean) => void) | undefined; then: readonly string[] | undefined }
 const chosen = new WeakMap<Outcome, Chosen>()
 
 // What a command's own hook is handed once its origin passed: what was typed after the command's name, the checkout's
@@ -75,12 +78,13 @@ export type Turn = {
 // item's words after its name, as the list's numbered line said them before (AC-23).
 export type Row = { item: Item; label: string; place?: number | null; description?: string } & ({ open: () => Screen | Promise<Screen> } | { verb: readonly string[] })
 // An item dialog's choice: one that opens another dialog, or a verb, run if it is the last tap; its `after` is told
-// whether k took it, as a typed verb's is; or one that `ends` the dialog with nothing run, its value the Outcome's
-// `ended`, for the command to read.
+// whether k took it, as a typed verb's is; with `then`, a second verb run only once k took the first, and `after` is
+// told whether k took both; or one that `ends` the dialog with nothing run, its value the Outcome's `ended`, for the
+// command to read.
 // `description`: the one line the dialog shows under its label, in its own words (gulnya/mobile-dialogs AC-14).
 export type Choice =
   | { label: string; description?: string; open: () => Screen | Promise<Screen> }
-  | { label: string; description?: string; verb: readonly string[]; after?: (ok: boolean) => void }
+  | { label: string; description?: string; verb: readonly string[]; then?: readonly string[]; after?: (ok: boolean) => void }
   | { label: string; description?: string; ends: string }
 // One dialog: `header` is its chip (12 characters at most), `question` its last line, ending in a question mark.
 // - list: the rows of one page (three and More when there are more than four; one fewer under Back), asked in one
@@ -224,24 +228,31 @@ async function answer($: EngineInterface, name: string, args: string, body: (tur
   // A verb this turn did not choose, or a typed one where the dialog was opened, never runs.
   if (verb === undefined || verb.turn !== me || verb.tapped !== asked) throw new Error(`/${name}: a verb this command did not choose`)
   const r = await runVerb($, name, k, verb.argv)
-  verb.after?.(r.ok)
+  // The verb after it runs only once k took the first; one k refused leaves the first as it took, nothing undone
+  // (asilak/kirunak-worktrees-lsof-windows E-3).
+  const next = r.ok && verb.then !== undefined ? await runVerb($, name, k, verb.then) : null
+  verb.after?.(r.ok && (next === null || next.ok))
   // The session's turn after it, when it gets one (turns.ts); it runs no verb. The answer names what k took ahead of
   // its state line, and a turn due that cannot start says why under it (gulnya/approval-turn-missing AC-2, AC-3).
-  const why = await told($, { name, k, argv: verb.argv, tapped: verb.tapped, ok: r.ok, said: r.said })
+  const then = next === null || verb.then === undefined ? {} : { then: { argv: verb.then, ok: next.ok, said: next.said } }
+  const why = await told($, { name, k, argv: verb.argv, tapped: verb.tapped, ok: r.ok, said: r.said, ...then })
   const done = r.ok ? doneLine(verb.argv) : null
-  return [...(done === null ? [] : [done]), r.text, ...(why === null ? [] : [`No turn followed in this session: ${why}`])].join('\n')
+  const started = next === null ? [] : [next.ok ? next.text : `Not started: ${next.said}`]
+  return [...(done === null ? [] : [done]), r.text, ...started, ...(why === null ? [] : [`No turn followed in this session: ${why}`])].join('\n')
 }
 
-function choose(turn: object, tapped: boolean, argv: readonly string[], after?: (ok: boolean) => void): Outcome {
-  const head = argv.slice(0, argv[0] === 'amend' || argv[0] === 'queue' || argv[0] === 'draft' || argv[0] === 'bug' || argv[0] === 'bugs' ? 2 : 1).join(' ')
-  if (!VERBS.test(head)) throw new Error(`not an owner's verb: ${head}`)
+function choose(turn: object, tapped: boolean, argv: readonly string[], after?: (ok: boolean) => void, then?: readonly string[]): Outcome {
+  for (const v of then === undefined ? [argv] : [argv, then]) {
+    const head = v.slice(0, v[0] === 'amend' || v[0] === 'queue' || v[0] === 'draft' || v[0] === 'bug' || v[0] === 'bugs' ? 2 : 1).join(' ')
+    if (!VERBS.test(head)) throw new Error(`not an owner's verb: ${head}`)
+  }
   const out: Outcome = { nothing: null }
-  chosen.set(out, { turn, tapped, argv: [...argv], after })
+  chosen.set(out, { turn, tapped, argv: [...argv], after, then: then === undefined ? undefined : [...then] })
   return out
 }
 
 // What a dialog's choice does.
-type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[]; after: ((ok: boolean) => void) | undefined } | { pick: string } | 'back' | 'more' | 'cancel'
+type Act = { open: () => Screen | Promise<Screen> } | { verb: readonly string[]; after: ((ok: boolean) => void) | undefined; then?: readonly string[] | undefined } | { pick: string } | 'back' | 'more' | 'cancel'
 // `text` and `ask`: the question's lines above it and its last line, as drawn, for the dialog log.
 // `described`: each choice's line by its label, the dialog's own choices' among them.
 type Drawn = { question: string; text: string[]; ask: string; choices: { label: string; act: Act }[]; described: Record<string, string> }
@@ -272,7 +283,7 @@ async function talk($: EngineInterface, name: string, turn: object, first: Scree
       await showLook($, null)
     }
     const act = tap === SKIP ? undefined : choices.find(c => c.label === tap)?.act
-    const ends = tap === SKIP ? 'skipped' : act === undefined ? (frame.screen.kind === 'reason' && tap.trim() && !tap.trim().startsWith('--') ? null : 'typed') : typeof act !== 'object' ? (act === 'cancel' ? 'cancelled' : null) : 'verb' in act ? act.verb.join(' ') : 'pick' in act ? 'picked' : null
+    const ends = tap === SKIP ? 'skipped' : act === undefined ? (frame.screen.kind === 'reason' && tap.trim() && !tap.trim().startsWith('--') ? null : 'typed') : typeof act !== 'object' ? (act === 'cancel' ? 'cancelled' : null) : 'verb' in act ? [act.verb, ...(act.then ? [act.then] : [])].map(v => v.join(' ')).join(', then ') : 'pick' in act ? 'picked' : null
     await logDialog($, shown, tap === SKIP ? null : tap, ends)
     if (tap === SKIP) return { nothing: 'skipped' }
     if (act === undefined) {
@@ -285,7 +296,7 @@ async function talk($: EngineInterface, name: string, turn: object, first: Scree
     } else if (act === 'back') stack.pop()
     else if (act === 'more') stack.push({ screen: frame.screen, start: frame.start + choices.filter(c => typeof c.act === 'object').length })
     else if (act === 'cancel') return { nothing: 'cancelled' }
-    else if ('verb' in act) return choose(turn, true, act.verb, act.after)
+    else if ('verb' in act) return choose(turn, true, act.verb, act.after, act.then)
     else if ('pick' in act) return frame.screen.kind === 'pick' ? { picked: act.pick } : { nothing: `${tap} ended the dialog`, ended: act.pick }
     else {
       const next = await act.open()
@@ -350,7 +361,7 @@ function draw({ screen, start }: Frame, back: boolean): Drawn {
   } else {
     if (!screen.text.length) throw new Error('an item dialog shows the item')
     lines = [...screen.text]
-    if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after } : 'ends' in c ? { pick: c.ends } : { open: c.open } })))
+    if (screen.kind === 'item') choices.push(...screen.choices.map(c => ({ label: c.label, act: 'verb' in c ? { verb: c.verb, after: c.after, then: c.then } : 'ends' in c ? { pick: c.ends } : { open: c.open } })))
     if (screen.kind === 'item') for (const c of screen.choices) if (c.description) described[c.label] = c.description
     if (screen.kind === 'reason' || (screen.kind === 'item' && screen.cancel)) choices.push({ label: CANCEL, act: 'cancel' })
   }

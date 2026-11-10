@@ -84,13 +84,24 @@ function waitingLook(verb: 'approve' | 'accept', r: WaitingRow): Look {
 const waitingRows = (verb: 'approve' | 'accept', rows: readonly WaitingRow[]): KirunakLookRow[] => rows.map(r => ({ chip: taskChip(waitingState(verb, r)), id: taskLabel(r), words: titleOf(r) }))
 const waits = (n: number): KirunakChip => ({ stage: 'waits', word: `${n} ${n === 1 ? 'waits' : 'wait'} for you` })
 
-export function approveScreen(rows: readonly WaitingRow[]): Screen {
+// /k-approve with no id: "Approve <id>" for a task k would approve; under it, for one whose intake started from a bug,
+// "Approve and start <id>", which runs k start with this session's id (`session`, read before the dialog opens) once k
+// took the approval, and `after` is told whether both took (asilak/kirunak-worktrees-lsof-windows AC-12, AC-13, D-2).
+// A task k would refuse shows neither (E-5).
+export function approveScreen(rows: readonly WaitingRow[], session: string | null = null, after?: (ok: boolean) => void): Screen {
+  const choices = (r: WaitingRow): Choice[] => {
+    if (r.why !== null) return []
+    const approve: Choice = { label: `Approve ${r.id}`, description: 'approves it, so its steps can start', verb: ['approve', r.id, '--via', 'mod'] }
+    if (!r.fromBug || session === null) return [approve]
+    const start: Choice = { label: `Approve and start ${r.id}`, description: "approves it and makes it this session's task, its plan started here", verb: ['approve', r.id, '--via', 'mod'], then: ['start', r.id, '--session', session], ...(after ? { after } : {}) }
+    return [approve, start]
+  }
   const item = (r: WaitingRow): Screen => ({
     kind: 'item',
     header: 'Approve',
     text: taskText('approve', r),
-    choices: r.why === null ? [{ label: `Approve ${r.id}`, description: 'approves it, so its steps can start', verb: ['approve', r.id, '--via', 'mod'] }] : [],
-    question: r.why === null ? 'Approve it?' : REFUSED,
+    choices: choices(r),
+    question: r.why !== null ? REFUSED : choices(r).length > 1 ? 'Approve it, or approve it and start it here?' : 'Approve it?',
     look: waitingLook('approve', r),
   })
   return { kind: 'list', header: 'Approve', head: 'Waiting for you to approve:', question: 'Which task?', typed: true, rows: rows.map(r => ({ item: waitingItem('approve', r), label: taskLabel(r), open: () => item(r) })), look: listLook('Approve', waits(rows.length), rows.map(r => r.id), waitingRows('approve', rows)) }

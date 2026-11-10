@@ -728,7 +728,8 @@ const VERBS = {
   },
 
   // What waits for the owner, for the mod's /k-approve and /k-accept with no id (boards.md §4): the proposed tasks
-  // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not.
+  // with what k approve would refuse, and the reviewed ones with what k accept would refuse; null when it would not;
+  // each proposed task's fromBug, true when its intake started from a bug (lib/waiting.mjs).
   // For its pick lists (kirunak-phone): the amendments waiting with what their approval would refuse, each accept
   // row's open checklist items, and the tasks k hold and k start take (lib/waiting.mjs). Last, the drafts that wait for
   // the owner's intake: a count and their ids (kirunak-drafts AC-8). First in the text when there is one, a step k run
@@ -754,7 +755,7 @@ const VERBS = {
     const approve = [];
     for (const r of rows.filter((x) => x.state === 'proposed')) {
       const problems = await approvalProblems(ws, r.id);
-      approve.push({ id: r.id, title: r.title, state: r.state, why: problems.length ? problems.join('; ') : null });
+      approve.push({ id: r.id, title: r.title, state: r.state, why: problems.length ? problems.join('; ') : null, fromBug: waiting.fromBug(ws, r.id) });
     }
     // A task awaiting the owner with no review asked a question in progress (lib/state.mjs): nothing to accept (G26).
     const accept = [];

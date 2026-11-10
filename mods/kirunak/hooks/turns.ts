@@ -12,6 +12,10 @@ import { appendDialogLog } from './log'
 //   line of its progress and write it, then print its summary, one line a bug, and send its push line to the owner's
 //   phone.
 // - /k-start k took (AC-12), picked or typed: start work on the task, from where its progress left off.
+// - /k-approve's Approve and start on a task from a bug (asilak/kirunak-worktrees-lsof-windows AC-14, E-3), whoever's
+//   task it was: both took, say so and go on with the task's plan from its first step, as the /k-start turn does; the
+//   approval took and k start refused, say it is approved, not started, with k's reason. A refused approval ran no
+//   k start, and gets the refusal's turn below (AC-15).
 // - /k-approve (a task or an amendment), /k-accept and /k-resume on this session's task or one whose intake it ran
 //   (AC-13, AC-14): what the owner did and the work that waited, or what failed, with kirunak's reason, and the work
 //   that blocked it. Another session's task, a decline, a hold, a queue verb and a dry run get none.
@@ -62,8 +66,9 @@ export function noteAuthors(rows: readonly { id: string; by: string | null }[], 
 export const forgetRan = (): void => ran.clear()
 
 // The verb a turn ran: the command's name, the checkout's k, k's arguments, whether the dialog's last tap chose it,
-// whether k took it, and what k said (its state line, or its reason).
-export type Told = { name: string; k: string; argv: readonly string[]; tapped: boolean; ok: boolean; said: string }
+// whether k took it, and what k said (its state line, or its reason); `then`, the verb run after it once k took it
+// (Approve and start's k start), whether k took that and what k said.
+export type Told = { name: string; k: string; argv: readonly string[]; tapped: boolean; ok: boolean; said: string; then?: { argv: readonly string[]; ok: boolean; said: string } }
 
 // The turn after the verb, if it gets one. A turn due that cannot start (k status failed, the session's id unread) is
 // never swallowed: told answers why, for the command's answer, and leaves a row in dialogs.jsonl; null when the turn
@@ -89,9 +94,10 @@ export function doneLine(argv: readonly string[]): string | null {
   return `${did.charAt(0).toUpperCase()}${did.slice(1)}.`
 }
 
-async function turnText($: EngineInterface, { name, k, argv, tapped, ok, said }: Told): Promise<string | null> {
+async function turnText($: EngineInterface, { name, k, argv, tapped, ok, said, then }: Told): Promise<string | null> {
   if (argv.includes('--dry-run')) return null
   const [verb, id = ''] = argv
+  if (verb === 'approve' && ok && then !== undefined) return approveStartPrompt(id, name, said, then)
   if (verb === 'bug') return argv[1] === 'review' && ok ? reviewPrompt(argv[2] ?? '', said) : null
   // Stop Quad Damage hands the model nothing: the run's own session writes its summary (AC-17).
   if (verb === 'bugs') return argv[1] === 'quad-damage' && !argv.includes('--stop') && ok ? quadDamagePrompt(said) : null
@@ -137,6 +143,24 @@ const startPrompt = (id: string, tapped: boolean): string =>
     `${tapped ? `The owner picked ${id} in /k-start` : `The owner typed /k-start ${id}`}, and kirunak made it this session's task.`,
     `Start work on it now, from the last line of its progress.md, as "Work on ${id}" does.`,
   ].join('\n')
+
+// Approve and start in /k-approve (asilak/kirunak-worktrees-lsof-windows AC-14, E-3): k took the approval, then k
+// start took the task as this session's, or refused it, the task left approved and queued, nothing undone.
+function approveStartPrompt(id: string, name: string, said: string, then: { ok: boolean; said: string }): string {
+  const head = `The owner tapped Approve and start on ${id} in /${name}`
+  if (then.ok) {
+    return [
+      `${head}, and kirunak took both: it approved ${id} and made it this session's task.`,
+      said,
+      then.said,
+      `Say so in one line, then start work on it now with its plan, from its first step, as "Work on ${id}" does.`,
+    ].join('\n')
+  }
+  return [
+    `${head}: kirunak approved ${id}, not started: ${then.said}`,
+    `The task stays approved and queued, and nothing was undone. Say in one line that ${id} is approved, not started, and kirunak's reason. Never run \`k start\` yourself: the owner starts it with /k-start.`,
+  ].join('\n')
+}
 
 // A word the shell takes as it is, or one quoted.
 const sh = (s: string): string => (/^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`)

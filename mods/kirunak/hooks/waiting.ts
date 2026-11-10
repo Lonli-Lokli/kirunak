@@ -5,7 +5,8 @@ import type { KirunakRow } from '../types'
 // What waits for the owner, as `k waiting --json` gives it: why is what the verb would refuse, null when it would not;
 // an accept row's onlyChecklist says open checklist items are all that stops it (`--checklist-open` would run), and its
 // blocking names each file a commit after the review changed, with that commit and the task it names, or "no task"
-// (kirunak-accept-shared-repo AC-6); none from an older k.
+// (kirunak-accept-shared-repo AC-6); none from an older k. An approve row's fromBug says its task's intake started from
+// a bug, which /k-approve offers "Approve and start" too (design/approval.md §5); none from an older k.
 export type Blocking = { path: string; commit: string; task: string }
 export type WaitingRow = {
   id: string
@@ -16,6 +17,7 @@ export type WaitingRow = {
   blocking?: readonly Blocking[]
   checklistOpen?: number
   onlyChecklist?: boolean
+  fromBug?: boolean
 }
 
 // A blocking file as k accept's refusal names it: `<path>  <commit>  <task>`, at most ten for a task (capBlocking).
