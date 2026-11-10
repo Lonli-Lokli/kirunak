@@ -318,6 +318,13 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 
 - its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`), by ancestry or
   with nothing left in `git cherry`;
+- it is no bug's fix still being worked on (asilak/kirunak-worktrees-lsof-windows E-1): a `bug/<slug>` stays, "Quad
+  Damage is on the bug <id>", while the live Quad Damage run is on that bug, whatever its commits; and "the bug <id>
+  is still open and bug/<slug> has no commit of its own" while its bug is open (`lib/bugs.mjs` `list`) and its head is
+  on the main line's first-parent line, cut from it and never committed to, so that it only reads as merged. A fix
+  merged with `--no-ff` or cherry-picked sits off that line and goes, as does a branch whose bug is gone. The bugs and
+  the run are read once, only when such a branch is a candidate. Review & merge's own removal of the branch it has just
+  merged leaves the run out: the run on that bug is its own;
 - it has no uncommitted or untracked change;
 - no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS and Windows
   in any case, on Windows with either slash): a task that still needs a worktree writes its path so. The files are
