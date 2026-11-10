@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { bugsHookLine, compactChecks, ladderChecks, unlockHookLine } from '../lib/doctor.mjs';
+import { bugsHookLine, compactChecks, ladderChecks, trackerLine, unlockHookLine } from '../lib/doctor.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
 import { k, ladderWorkspace } from './helpers.mjs';
 
@@ -166,4 +166,15 @@ test('another tool\'s hook whose path merely ends like kirunak\'s, outside a hoo
   assert.ok(after.SessionEnd.some((b) => b.hooks[0].command === win('kirunak-unlock.mjs')), 'kirunak\'s own beside it');
   assert.ok(after.SessionStart.some((b) => b.hooks[0].command === win('kirunak-bugs.mjs')));
   assert.deepEqual(unlockHookLine(w), [true, 'worktree lock release: wired on SessionEnd, every end']);
+});
+
+test('the status line\'s tracker written with backslashes is kirunak\'s to k install and k doctor; another folder\'s file of that name is not', async () => {
+  const w = await windows();
+  const tracker = win('statusline-track.mjs');
+  w.put({ ...w.fixture, statusLine: { type: 'command', command: `${tracker}; echo done` } });
+  assert.deepEqual(trackerLine({ settingsPath: w.settingsPath, kirunakRoot: WIN }), [true, `status line tracker: run by statusLine in ${w.settingsPath}`]);
+  const { actions } = install({ settingsPath: w.settingsPath, agentsDir: w.agentsDir, skillsDir: join(w.dir, 'win-skills'), kirunakRoot: WIN, platform: 'win32', home: w.home, ws: w.ws, print: true });
+  assert.ok(actions.includes(`${w.settingsPath}: the status line already runs kirunak's tracker`), actions.at(-1));
+  w.put({ ...w.fixture, statusLine: { type: 'command', command: 'node C:\\tools\\myhooks\\statusline-track.mjs' } });
+  assert.equal(trackerLine({ settingsPath: w.settingsPath, kirunakRoot: WIN })[0], 'warn');
 });
