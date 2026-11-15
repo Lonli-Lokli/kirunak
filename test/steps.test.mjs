@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { hold } from '../lib/approval.mjs';
@@ -277,7 +277,7 @@ test('needs.json heavy: expectMinutes is optional; one that is no number or is o
   for (const bad of [0, -1, '4']) assert.deepEqual(needs({ expectMinutes: bad }), { error: 'needs.json heavy expectMinutes is a number of minutes' }, String(bad));
 });
 
-test('k step finish commits the evidence the step wrote and nothing else; a review then cites it at head; no evidence, no commit', async () => {
+test('k step finish commits the evidence the step wrote and nothing else, then its records; a review then cites it at head; no evidence, no evidence commit', async () => {
   const w = await approvedWorkspace(PLAN);
   const git = (...args) => sh(w.weather, 'git', args).trim();
   assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
@@ -288,9 +288,12 @@ test('k step finish commits the evidence the step wrote and nothing else; a revi
   const before = git('rev-parse', 'HEAD');
   const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
   assert.equal(r.status, 0, r.stderr);
-  assert.notEqual(git('rev-parse', 'HEAD'), before);
-  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD'),
+  assert.equal(git('rev-parse', 'HEAD~2'), before);
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD~1'),
     'weather/offline-forecast S-1: the step\'s evidence\n\nkirunak/tasks/offline-forecast/evidence/S-1-cache-sizes.tsv');
+  // The records commit after it (gulnya/close-leaves-untracked-step-files AC-2).
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD'),
+    'weather/offline-forecast S-1: the step\'s records\n\nkirunak/tasks/offline-forecast/progress.md\nkirunak/tasks/offline-forecast/steps/S-1/report.md');
   assert.equal(git('diff', '--cached', '--name-only'), 'docs/staged.md', 'what else was staged stays staged');
 
   const head = git('rev-parse', '--short', 'HEAD');
@@ -302,7 +305,10 @@ test('k step finish commits the evidence the step wrote and nothing else; a revi
   put(w, 'review.md', `---\ntask: ${w.id}\nhead: ${head}\nbase: ${base}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.join('\n')}\n\nverdict: met\n`);
   const done = k(w.home, ['step', 'finish', w.id, 'S-2']);
   assert.equal(done.status, 0, done.stderr);
-  assert.equal(git('rev-parse', '--short', 'HEAD'), head, 'a finish with no new or changed evidence makes no commit');
+  assert.equal(git('rev-parse', '--short', 'HEAD~1'), head, 'a finish with no new or changed evidence makes no evidence commit');
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD'),
+    'weather/offline-forecast S-2: the step\'s records\n\nkirunak/tasks/offline-forecast/progress.md\nkirunak/tasks/offline-forecast/steps/S-2/given.json',
+    'only its records commit: progress.md and the given.json k step start wrote');
   assert.equal(git('diff', '--cached', '--name-only'), 'docs/staged.md');
 });
 
@@ -344,7 +350,7 @@ test('k step finish commits only its own step\'s evidence: named for it, inside 
   for (const f of ['S-1-a.tsv', 'S-1/shot.txt', 'cache-sizes.tsv', 'S-2-b.tsv', 'S-1-look-x.tsv', 'S-10-y.tsv']) put(w, `evidence/${f}`);
   const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD'),
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD~1'),
     `weather/offline-forecast S-1: the step's evidence\n\n${['S-1-a.tsv', 'S-1/shot.txt', 'S-10-y.tsv', 'cache-sizes.tsv'].map(ev).join('\n')}`,
     'its own by name, by folder and by declaration; S-10-y.tsv no step names, so it goes too');
   assert.deepEqual(git('ls-files', '--others', '--', ev('')).split('\n').sort(), [ev('S-1-look-x.tsv'), ev('S-2-b.tsv')],
@@ -352,7 +358,7 @@ test('k step finish commits only its own step\'s evidence: named for it, inside 
 
   put(w, 'steps/S-1-look/report.md');
   assert.equal(k(w.home, ['step', 'finish', w.id, 'S-1-look']).status, 0);
-  assert.equal(git('show', '--name-only', '--format=', 'HEAD'), ev('S-1-look-x.tsv'));
+  assert.equal(git('show', '--name-only', '--format=', 'HEAD~1'), ev('S-1-look-x.tsv'));
   assert.equal(git('ls-files', '--others', '--', ev('')), ev('S-2-b.tsv'));
 });
 
@@ -392,9 +398,35 @@ test('a finish whose evidence commit kirunak\'s own hook refuses waits for the o
   writeFileSync(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const again = k(w.home, ['step', 'finish', w.id, 'S-1']);
   assert.equal(again.status, 0, again.stderr);
-  assert.equal(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']).trim(), 'kirunak/tasks/offline-forecast/evidence/S-1-cache-sizes.tsv');
+  assert.equal(sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD~1']).trim(), 'kirunak/tasks/offline-forecast/evidence/S-1-cache-sizes.tsv');
   assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'done');
   assert.equal(existsSync(join(w.p.dir, 'steps', 'S-1', 'needs.json')), false, 'the question is set aside');
+});
+
+test('a finish whose records commit kirunak\'s own hook refuses takes its finished line back and waits for the owner; once fixed, the finish commits the records and the question set aside (gulnya/close-leaves-untracked-step-files AC-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  const hook = join(w.weather, '.git', 'hooks', 'pre-commit');
+  writeFileSync(hook, `#!/bin/sh\nif git diff --cached --name-only | grep -q progress.md; then echo "${KIRUNAK_REFUSAL}" >&2; exit 1; fi\n`, { mode: 0o755 });
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 1);
+  const owner = `kirunak refused the commit of ${w.id} S-1's records: ${KIRUNAK_REFUSAL}. Once it is fixed: k step finish ${w.id} S-1`;
+  assert.equal(r.stderr.trim(), `${w.id} S-1 waits for the owner: ${owner}`);
+  assert.equal(git('show', '--name-only', '--format=', 'HEAD'), `${TASK}/evidence/S-1-cache-sizes.tsv`, 'the evidence commit stands');
+  assert.doesNotMatch(progress(w), /S-1 finished|S-1 failed/);
+  assert.match(progress(w), /S-1 waiting for the owner: kirunak refused the commit/);
+  assert.equal(git('diff', '--cached', '--name-only'), '', 'nothing of the refused commit is left staged');
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'waiting-owner');
+
+  writeFileSync(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const again = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.deepEqual(git('show', '--name-only', '--format=', 'HEAD').split('\n'),
+    [`${TASK}/progress.md`, `${TASK}/steps/S-1/needs-1.json`, `${TASK}/steps/S-1/report.md`]);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'done');
 });
 
 test('a step needing a step written below it is ready once that one is done', async () => {
@@ -509,4 +541,54 @@ outputs: steps/S-3/answer.md
   assert.match(r.stderr, /cannot finish a step:\n.*is on hold/);
   assert.notEqual(statesOf(w)['S-3'], 'done');
   assert.doesNotMatch(existsSync(join(w.p.dir, 'progress.md')) ? progress(w) : '', /S-3 finished/);
+});
+
+// A step's records, the top-level .md, .json and .txt of its folder that are not ignored, committed by its finish
+// with progress.md; anything else unignored there refuses it (gulnya/close-leaves-untracked-step-files AC-2, E-2).
+const TASK = 'kirunak/tasks/offline-forecast';
+
+test('k step finish commits the step\'s brief.md, report.md and given.json with progress.md after its evidence, and leaves nothing of the step untracked (gulnya/close-leaves-untracked-step-files AC-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  assert.equal(k(w.home, ['step', 'brief', w.id, 'S-1']).status, 0);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'steps/S-1/given.json', '{}\n');
+  steps.runRecord(w.p, 'S-1', 'impl-1').ended({ exitCode: 0 });
+  assert.ok(existsSync(join(w.p.dir, 'steps', 'S-1', 'run-1.json')) && existsSync(join(w.p.dir, 'steps', 'S-1', '.gitignore')), 'k run\'s own record and the step\'s .gitignore beside the records');
+  put(w, 'evidence/S-1-cache-sizes.tsv', 'days\tbytes\n3\t2048\n');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(git('show', '--name-only', '--format=', 'HEAD').split('\n').sort(),
+    [`${TASK}/progress.md`, `${TASK}/steps/S-1/brief.md`, `${TASK}/steps/S-1/given.json`, `${TASK}/steps/S-1/report.md`], 'the records commit holds exactly the records and progress.md');
+  assert.match(git('show', `HEAD:${TASK}/progress.md`), /S-1 finished\n?$/, 'progress.md as committed has the finished line');
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD~1'),
+    `weather/offline-forecast S-1: the step's evidence\n\n${TASK}/evidence/S-1-cache-sizes.tsv`, 'the evidence commit comes first, as before');
+  assert.equal(git('status', '--porcelain', '--untracked-files=all', '--', `${TASK}/steps/S-1`, `${TASK}/progress.md`), '',
+    'nothing of the step is left untracked or changed; its run-1.json and .gitignore stay ignored');
+  assert.equal(git('ls-files', '--', `${TASK}/steps/S-1/run-1.json`, `${TASK}/steps/S-1/.gitignore`), '', 'kirunak\'s own files stay out of git');
+});
+
+test('a finish with raw output in its step folder (xml/TEST-x.xml, a log) is refused before any commit or line, naming each file and the ways out (gulnya/close-leaves-untracked-step-files AC-2, E-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv');
+  put(w, 'steps/S-1/xml/TEST-x.xml', '<testsuite/>\n');
+  put(w, 'steps/S-1/gradle.log', 'BUILD SUCCESSFUL\n');
+  const head = git('rev-parse', 'HEAD');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 1, r.stderr);
+  for (const f of ['steps/S-1/xml/TEST-x.xml', 'steps/S-1/gradle.log', 'evidence/', 'kirunak/tasks/.gitignore']) assert.ok(r.stderr.includes(f), `names ${f}: ${r.stderr}`);
+  assert.ok(!r.stderr.includes('steps/S-1/report.md'), 'a record is never raw output');
+  assert.equal(git('rev-parse', 'HEAD'), head, 'no commit, not even the evidence one');
+  assert.doesNotMatch(progress(w), /S-1 finished/);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'running');
+
+  rmSync(join(w.p.dir, 'steps', 'S-1', 'xml'), { recursive: true });
+  rmSync(join(w.p.dir, 'steps', 'S-1', 'gradle.log'));
+  const again = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'done');
 });

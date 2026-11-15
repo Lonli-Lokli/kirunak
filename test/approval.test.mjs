@@ -440,10 +440,14 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
   reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   assert.throws(() => accept({ ws, id: ID }), new RegExp(`2 unticked item\\(s\\), 2 not in checklist\\.md yet \\(k checklist ${ID} writes them from review\\.md\\):\n {2}- \\[ \\] AC-3 On a phone: restart offline \\(review\\.md\\)\n {2}- \\[ \\] E-1`));
+  // The session commits checklist.md and the owner's ticks, as a real task's are: k accept refuses a file of the task
+  // that git does not hold as it stands (gulnya/close-leaves-untracked-step-files AC-1).
   generate(ws, ID);
+  gitCommitAll(weather, 'checklist');
   assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 2 unticked item\(s\):\n {2}- \[ \] AC-3 On a phone: restart offline \(review\.md\)\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
   const file = join(taskDir(weather), 'checklist.md');
   writeFileSync(file, readFileSync(file, 'utf8').replace('- [ ] AC-3', '- [x] AC-3'));
+  gitCommitAll(weather, 'AC-3 ticked');
   assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 1 unticked item\(s\):\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: '  ' }), /needs its reason/);
   // Left open: AC-3 unticked again, and E-1's item gone from checklist.md.
@@ -853,4 +857,60 @@ test('a done.json git does not hold, left by an accept refused before the fix, i
   assert.equal(JSON.parse(readFileSync(join(taskDir(weather), 'done.json'), 'utf8')).review, 'review.md');
   assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
   assert.throws(() => accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }), /already accepted/);
+});
+
+// A step folder's raw output left behind, as the 19,000 files that reached an accept (gulnya/close-leaves-untracked-step-files).
+const STRAY = 'kirunak/tasks/offline-forecast/steps/S-1/xml/TEST-x.xml';
+
+test('accept refuses a task with a stray file in a step folder, naming it, as its dry run and k waiting do, whatever the checklist; an ignored file is no stray (gulnya/close-leaves-untracked-step-files AC-1, AC-4)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: needs owner (AC-3, E-1)'));
+  reviewsRan(taskDir(weather));
+  generate(ws, ID);
+  gitCommitAll(weather, 'review and checklist');
+  const head = headOf(weather);
+  mkdirSync(join(weather, STRAY, '..'), { recursive: true });
+  writeFileSync(join(weather, STRAY), '<testsuite/>\n');
+  const step = join(taskDir(weather), 'steps', 'S-1');
+  writeFileSync(join(step, '.gitignore'), '.gitignore\ndiff.patch\n');
+  writeFileSync(join(step, 'diff.patch'), 'ignored by the step\n');
+  const names = (text) => text.includes(STRAY) && !text.includes('diff.patch');
+
+  for (const flags of [{}, { checklistOpen: 'read on the phone later' }, { dryRun: true }, { dryRun: true, checklistOpen: 'later' }]) {
+    assert.throws(() => accept({ ws, id: ID, now: NOV7, ...flags }), (e) => names(e.message), `accept ${JSON.stringify(flags)} names the stray`);
+  }
+  const dry = run(['accept', ID, '--dry-run']);
+  assert.equal(dry.status, 1, dry.stdout);
+  assert.ok(names(dry.stderr), dry.stderr);
+  const why = JSON.parse(run(['waiting', '--json']).stdout).accept[0]?.why ?? '';
+  assert.ok(names(why), why);
+  assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), headOf(weather)], [false, head], 'a refused accept writes and commits nothing');
+
+  rmSync(join(step, 'xml'), { recursive: true });
+  assert.equal(accept({ ws, id: ID, checklistOpen: 'read on the phone later', now: NOV7 }).state, 'done', 'with the stray gone, it accepts');
+});
+
+test('done.json and cost.md left on disk by a refused accept are no strays: a stray beside them is named alone, and once it is gone the accept takes them (gulnya/close-leaves-untracked-step-files AC-1, AC-4)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  const head = headOf(weather);
+  writeFileSync(join(taskDir(weather), 'done.json'), JSON.stringify({ task: ID, accepted: 'left over' }) + '\n');
+  writeFileSync(join(taskDir(weather), 'cost.md'), 'left over\n');
+  const log = 'kirunak/tasks/offline-forecast/steps/S-1/gradle.log';
+  mkdirSync(join(weather, log, '..'), { recursive: true });
+  writeFileSync(join(weather, log), 'BUILD SUCCESSFUL\n');
+
+  assert.throws(() => accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }),
+    (e) => e.message.includes(log) && !/done\.json|cost\.md/.test(e.message), 'the log is named, done.json and cost.md are not');
+  assert.throws(() => accept({ ws, id: ID, dryRun: true }), (e) => e.message.includes(log) && !/done\.json|cost\.md/.test(e.message));
+  assert.equal(headOf(weather), head);
+
+  rmSync(join(weather, log));
+  assert.equal(accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }).state, 'done');
+  assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
 });

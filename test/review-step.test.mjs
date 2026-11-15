@@ -105,8 +105,10 @@ test('a review\'s diff leaves out the task folder: committed notes, a step\'s re
   writeFileSync(join(w.weather, 'docs', 'offline.md'), 'the cache keeps three days\n');
   sh(w.weather, 'git', ['add', '-A']);
   sh(w.weather, 'git', ['commit', '-qm', 'the work and the implementer\'s account']);
-  const committed = sh(w.weather, 'git', ['show', '--name-only', '--format=', 'HEAD']);
+  // S-1's finish committed its report and progress.md, this commit the notes (gulnya/close-leaves-untracked-step-files).
+  const committed = sh(w.weather, 'git', ['ls-files', '--', 'kirunak/tasks/offline-forecast']);
   for (const f of ['notes.md', 'steps/S-1/report.md', 'progress.md']) assert.ok(committed.includes(`kirunak/tasks/offline-forecast/${f}`), f);
+  assert.equal(sh(w.weather, 'git', ['status', '--porcelain', '--', 'kirunak/tasks/offline-forecast']), '');
   assert.equal(k(w.home, ['step', 'brief', w.id, 'S-2', '--session', 'rev-1']).status, 0);
   const patch = readFileSync(join(w.p.dir, 'steps', 'S-2', 'in', 'diff.patch'), 'utf8');
   assert.match(patch, /\+the cache keeps three days/);
@@ -155,6 +157,10 @@ test('a review step finishes with its file\'s hash; k accept and k checklist tak
   writeFileSync(join(w.hub, 'kirunak', 'baseline.json'), '{ not json');
   const module = join(w.hub, 'kirunak', 'workspace.mjs');
   writeFileSync(module, readFileSync(module, 'utf8').replace("plugins: ['./plugins/checklist.mjs'],", "plugins: ['./plugins/checklist.mjs'],\n  baseline: './baseline.json',"));
+  // The task's files committed, as a real task's are: k accept refuses one git does not hold as it stands
+  // (gulnya/close-leaves-untracked-step-files AC-1).
+  sh(w.weather, 'git', ['add', '-A', '--', w.p.rel('')]);
+  sh(w.weather, 'git', ['commit', '-q', '-m', `kirunak: ${w.id}'s plan, notes and review`]);
   const r = k(w.home, ['accept', w.id]);
   assert.equal(r.status, 0, r.stderr);
   // The accept commits done.json and cost.md, k cost's numbers; the steps' copies stay out of git.

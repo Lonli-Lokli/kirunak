@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { BUGS_MATCHER, FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
@@ -262,6 +262,65 @@ test('--git follows core.hooksPath', () => {
   install({ ...h, git: r });
   assert.ok(existsSync(join(r, '.githooks', 'prepare-commit-msg')));
   assert.ok(!existsSync(join(r, '.git', 'hooks', 'prepare-commit-msg')));
+});
+
+// gulnya/close-leaves-untracked-step-files AC-3, E-1: kirunak/tasks/.gitignore keeps raw run output out of git.
+const NIVA = ['*.xcresult/', '*/steps/**/xml/', '*/steps/**/*Test/', '*/steps/**/profile-*/', '*/steps/**/*profile*.html', '*/steps/**/*.log', '*/steps/**/*.out'];
+const patterns = (text) => text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+
+test('--git writes kirunak/tasks/.gitignore with niva\'s lines in a repo with none; the root .gitignore is untouched; a second run keeps it (AC-3)', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  writeFileSync(join(r, '.gitignore'), 'node_modules/\n');
+  const file = join(r, 'kirunak', 'tasks', '.gitignore');
+  const { actions } = install({ ...h, git: r });
+  const text = readFileSync(file, 'utf8');
+  assert.deepEqual(patterns(text), NIVA);
+  assert.match(text, /^# Raw run output/);
+  assert.ok(actions.some((a) => a.startsWith(`wrote ${file}`) && a.endsWith('commit it')));
+  assert.equal(readFileSync(join(r, '.gitignore'), 'utf8'), 'node_modules/\n');
+  const again = install({ ...h, git: r }).actions;
+  assert.equal(readFileSync(file, 'utf8'), text);
+  assert.ok(again.includes(`${file} has every raw-output line; kept`));
+  mkdirSync(join(r, 'kirunak', 'tasks', 't', 'steps', 'S-1', 'app', 'testDebugUnitTest'), { recursive: true });
+  for (const f of ['run.log', 'out.out', 'report.md', 'app/testDebugUnitTest/a.xml']) writeFileSync(join(r, 'kirunak', 'tasks', 't', 'steps', 'S-1', f), 'x\n');
+  const untracked = execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'kirunak/tasks/t'], { cwd: r, encoding: 'utf8' });
+  assert.equal(untracked.trim(), '?? kirunak/tasks/t/steps/S-1/report.md', 'git ignores the raw output, never a record');
+});
+
+test('--git keeps a repo\'s own kirunak/tasks/.gitignore lines and adds only the ones it lacks; a second run changes nothing (E-1)', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  const file = join(r, 'kirunak', 'tasks', '.gitignore');
+  mkdirSync(dirname(file), { recursive: true });
+  const own = '# Our own: screen recordings\n*.mov\n  */steps/**/*.log  \n*.xcresult/';
+  writeFileSync(file, own);
+  const { actions } = install({ ...h, git: r });
+  const text = readFileSync(file, 'utf8');
+  const lacking = NIVA.filter((l) => l !== '*/steps/**/*.log' && l !== '*.xcresult/');
+  assert.equal(text, `${own}\n${lacking.join('\n')}\n`);
+  assert.ok(actions.some((a) => a.startsWith(`added to ${file} the lines it lacked`) && a.endsWith('commit it')));
+  install({ ...h, git: r });
+  assert.equal(readFileSync(file, 'utf8'), text);
+});
+
+test('--git --print writes no kirunak/tasks/.gitignore and says what it would write or add (AC-3)', () => {
+  const h = home();
+  const bare = repo(h.dir, 'weather');
+  const own = repo(h.dir, 'hub');
+  const ownFile = join(own, 'kirunak', 'tasks', '.gitignore');
+  mkdirSync(dirname(ownFile), { recursive: true });
+  writeFileSync(ownFile, '*.mov\n*/steps/**/*.log\n');
+  const all = install({ ...h, git: [bare, own], print: true }).actions.join('\n');
+  const file = join(bare, 'kirunak', 'tasks', '.gitignore');
+  assert.ok(!existsSync(join(bare, 'kirunak')));
+  assert.equal(readFileSync(ownFile, 'utf8'), '*.mov\n*/steps/**/*.log\n');
+  assert.ok(all.includes(`would write ${file}`));
+  for (const l of NIVA) assert.ok(all.includes(`\n${l}\n`), l);
+  const lines = all.split('\n');
+  const add = lines.findIndex((l) => l.startsWith(`would add to ${ownFile} the lines it lacks`));
+  assert.ok(add >= 0, 'names the lines it would add to the repo\'s own file');
+  assert.deepEqual(lines.slice(add + 1, add + 7), NIVA.filter((l) => l !== '*/steps/**/*.log'));
 });
 
 test('a hook kirunak wrote before is rewritten; the new one finds node with a GUI\'s bare PATH', () => {
