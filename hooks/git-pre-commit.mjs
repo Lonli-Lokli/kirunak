@@ -30,7 +30,7 @@ export const OWNER_VARS = ['KIRUNAK_APPROVING', 'KIRUNAK_ACCEPTING', 'KIRUNAK_HO
 const hashBytes = (buf) => 'sha256:' + createHash('sha256').update(buf).digest('hex');
 
 // A variable names the task when it is its id (`<repo>/<slug>`) or its slug.
-const names = (value, slug) => typeof value === 'string' && value !== '' && value.split('/').pop() === slug;
+export const names = (value, slug) => typeof value === 'string' && value !== '' && value.split('/').pop() === slug;
 
 // Whether `path` is a record the owner's commands write for the task one of their variables names: its approval
 // record, done.json, hold.md, an amendment or cost.md, and task.md when KIRUNAK_APPROVING names it. The SLAP hook

@@ -102,6 +102,15 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   on 2026-10-27 as L, SLAP 61, for the 518 lines of k cost's numbers in its `done.json`, which a starter
   `.slapignore` does not list. Judgement: like a replay, such a commit is no change a person or an agent wrote; the
   owner's command writes it whole, and the work it records was measured commit by commit.
+- **A step's records are skipped too** (gulnya/close-leaves-untracked-step-files, AC-5, D-1): `k step finish`'s
+  records commit, made under `KIRUNAK_RECORDING=<id>`, whose every path is that task's `progress.md` or a file under
+  its `steps/` (a brief, a report, a review's `given.json`), decided by `stepsRecords` in
+  `hooks/git-prepare-commit-msg.mjs`, the variable naming the task by its id or its slug. One more path and the whole
+  commit is measured; the step's evidence commit, made with no variable, is measured as before. `KIRUNAK_RECORDING` is
+  no owner's variable: the pre-commit hook never lets it stage the owner's records, and the SLAP hook does not count
+  them as a step's. Evidence: a review step's `given.json` runs to about 500 lines (the task's bug.md), L on its own.
+  Judgement (the owner's D-1, 2026-11-15): kirunak's own commits of its records are not measured; the owner's
+  `.slapignore` stays as it is.
 - **It fails closed**: if the hook cannot run (kirunak moved, git failed, the record unreadable), the commit is refused
   with the error. Judgement: R22 has no override, so a gate that silently lets everything through when broken would
   be one.
@@ -158,7 +167,11 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   `test/slap-gate.test.mjs` also: a 600-line `done.json` and its
   `cost.md` pass under `KIRUNAK_ACCEPTING` naming their task and are refused without it, under another task's id
   or with a 600-line source file beside them, and pass as `k accept` commits them, by path, with that file left
-  staged; `hold.md` passes under `KIRUNAK_HOLDING`, and `task.md` with its approval only under `KIRUNAK_APPROVING`. `test/slapignore.test.mjs`: the starter's sections, `k install
+  staged; `hold.md` passes under `KIRUNAK_HOLDING`, and `task.md` with its approval only under `KIRUNAK_APPROVING`. A
+  500-line `given.json` and `progress.md` pass under `KIRUNAK_RECORDING` naming their task by id or slug, and are
+  refused without it, under another task's id, under `KIRUNAK_ACCEPTING`, or with a source file beside them; a
+  `done.json` under `KIRUNAK_RECORDING` is refused; a review step's finish with a 500-line `given.json` commits in a
+  repo with the hook, while the step's evidence commit before it gets its SLAP line. `test/slapignore.test.mjs`: the starter's sections, `k install
   --git` writing and keeping it, `approve` for one repo, by name and `--all` with its history and dry run, a refusal
   that writes nothing, and the whole path through `k`. `test/freeze-hook.test.mjs`: the edits, shell writes and verb
   R23 refuses. `test/install.test.mjs`: the hook written beside pre-commit, `core.hooksPath` followed.

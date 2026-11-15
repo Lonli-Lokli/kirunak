@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { KIRUNAK, gitInit, sh } from './helpers.mjs';
+import { KIRUNAK, approvedWorkspace, gitInit, k, sh } from './helpers.mjs';
 import { hashBytes, recordFile, repoInfo } from '../lib/slap.mjs';
 
 // The gate's other refusals (R22, R23, design/change-size.md §3): an unapproved .slapignore, an unlisted binary
@@ -156,4 +156,98 @@ test("hold.md under KIRUNAK_HOLDING and task.md with its approval under KIRUNAK_
   assert.notEqual(commit(r, `kirunak: approve ${ID}`, [], { KIRUNAK_HOLDING: ID }).status, 0, 'task.md is the approval\'s alone');
   const approved = commit(r, `kirunak: approve ${ID}`, [], { KIRUNAK_APPROVING: ID });
   assert.equal(approved.status, 0, approved.stderr);
+});
+
+// A step's records commit (gulnya/close-leaves-untracked-step-files AC-5, D-1): `k step finish` commits progress.md and
+// the step's records under KIRUNAK_RECORDING=<id>, and a review step's given.json runs to about 500 lines.
+const GIVEN = `${TASK_DIR}/steps/S-4/given.json`;
+const PROGRESS = `${TASK_DIR}/progress.md`;
+const records = (r, tag) => {
+  put(r, GIVEN, json(500).replace(ID, `${ID} ${tag}`));
+  put(r, PROGRESS, `2026-11-15 10:00 S-4 started (session ${tag})\n2026-11-15 10:30 S-4 finished\n`);
+};
+
+test("a step's records commit under KIRUNAK_RECORDING naming its task, by id or slug, is not measured; one more file, no variable or another task's is (R22)", () => {
+  const r = repo();
+  root(r);
+  // No .slapignore: everything counts, the records' 500 lines too.
+  records(r, 'a');
+  const plain = commit(r, `${ID} S-4: the step's records`);
+  assert.notEqual(plain.status, 0, 'without the variable it is measured as any commit');
+  assert.match(plain.stderr, /this commit is L, SLAP \d+: 502 lines of code in 2 files/);
+  const other = commit(r, `${ID} S-4: the step's records`, [], { KIRUNAK_RECORDING: 'weather/radar-tiles' });
+  assert.notEqual(other.status, 0, "another task's id leaves it measured");
+  const owner = commit(r, `${ID} S-4: the step's records`, [], { KIRUNAK_ACCEPTING: ID });
+  assert.notEqual(owner.status, 0, "an owner's variable does not cover a step's records");
+  put(r, 'src/app.kt', lines(20));
+  const mixed = commit(r, `${ID} S-4: the step's records`, [], { KIRUNAK_RECORDING: ID });
+  assert.notEqual(mixed.status, 0, 'a path besides the records keeps the whole commit measured');
+  assert.match(mixed.stderr, /522 lines of code in 3 files \(.*src\/app\.kt/);
+  // As `k step finish` commits (git.mjs commit): only its own paths, whatever else is staged beside them.
+  const ok = git(r, ['commit', '-q', '-m', `${ID} S-4: the step's records`, '--', GIVEN, PROGRESS], { KIRUNAK_RECORDING: ID });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.doesNotMatch(message(r), /SLAP:/, 'not measured, as a merge is not');
+  assert.equal(git(r, ['status', '--porcelain']).stdout, 'A  src/app.kt\n', 'the other staged file stays staged');
+  assert.equal(git(r, ['restore', '--staged', 'src/app.kt']).status, 0);
+  rmSync(join(r.dir, 'src/app.kt'));
+  records(r, 'b');
+  const bySlug = commit(r, `${ID} S-4: the step's records`, [], { KIRUNAK_RECORDING: 'offline-forecast' });
+  assert.equal(bySlug.status, 0, bySlug.stderr);
+  // KIRUNAK_RECORDING is no owner's variable: the owner's done.json under it is measured.
+  put(r, `${TASK_DIR}/done.json`, json(600));
+  const done = commit(r, `kirunak: accept ${ID}`, [], { KIRUNAK_RECORDING: ID });
+  assert.notEqual(done.status, 0, "the owner's records are not a step's");
+});
+
+// test/steps.test.mjs's plan: S-1 an agent's step, S-2 its review.
+const PLAN = `---
+task: weather/offline-forecast
+blocked-by: []
+---
+
+### S-1 Keep the last forecast on disk [agent]
+covers: AC-1, AC-2, E-1, D-1
+inputs: task, docs/offline.md
+outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv
+budget: 80 calls
+
+### S-2 Review [review]
+needs: S-1
+covers: all
+inputs: task, diff, evidence/
+outputs: review.md
+`;
+
+test("a review step's finish commits a 500-line given.json with its progress.md in a repo with the SLAP hook (AC-5)", async () => {
+  const w = await approvedWorkspace(PLAN);
+  const hook = join(w.weather, '.git', 'hooks', 'prepare-commit-msg');
+  writeFileSync(hook, `#!/bin/sh\nexec node ${JSON.stringify(join(KIRUNAK, 'hooks', 'git-prepare-commit-msg.mjs'))} "$@"\n`, { mode: 0o755 });
+  const wg = (...args) => sh(w.weather, 'git', args).trim();
+  const task = 'kirunak/tasks/offline-forecast';
+  const put2 = (rel, text) => {
+    mkdirSync(join(w.p.dir, rel, '..'), { recursive: true });
+    writeFileSync(join(w.p.dir, rel), text);
+  };
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put2('steps/S-1/report.md', 'done\n');
+  put2('evidence/S-1-cache-sizes.tsv', 'days\tbytes\n3\t2048\n');
+  const one = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(one.status, 0, one.stderr);
+  const head = wg('rev-parse', '--short', 'HEAD');
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).status, 0);
+  const given = join(w.p.dir, 'steps', 'S-2', 'given.json');
+  const g = JSON.parse(readFileSync(given, 'utf8'));
+  writeFileSync(given, JSON.stringify({ ...g, rows: Array.from({ length: 495 }, (_, i) => i) }, null, 1) + '\n');
+  assert.ok(readFileSync(given, 'utf8').split('\n').length > 500);
+  const rows = ['AC-1', 'AC-2', 'AC-3'].map((id) => `| ${id} | met | file docs/offline.md:1 |`);
+  rows.push('| E-1 | met | measure evidence/S-1-cache-sizes.tsv row 2 |');
+  const base = wg('log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json');
+  put2('review.md', `---\ntask: ${w.id}\nhead: ${head}\nbase: ${base}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows.join('\n')}\n\nverdict: met\n`);
+  const done = k(w.home, ['step', 'finish', w.id, 'S-2']);
+  assert.equal(done.status, 0, done.stderr);
+  assert.equal(wg('show', '--name-only', '--format=%s', 'HEAD'),
+    `${w.id} S-2: the step's records\n\n${task}/progress.md\n${task}/steps/S-2/given.json`);
+  assert.doesNotMatch(wg('log', '-1', '--format=%B'), /SLAP:/);
+  const evidence = wg('log', '--format=%H', '--grep', `^${w.id} S-1: the step's evidence$`);
+  assert.match(wg('log', '-1', '--format=%B', evidence), /SLAP: \d+ \(S\)/, "the step's evidence commit, made with no variable, is still measured");
 });
