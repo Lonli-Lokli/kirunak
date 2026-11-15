@@ -337,8 +337,11 @@ has failed. A stop (you killed `k run`, or the `k run` that started the step is 
 stop), `plan.md` (the stopped step is marked `[escalate]` and gets a `failures:` field listing every report), and
 `events.jsonl` (each climb with its trigger, and each rung's run with its tokens and cost). A climb the ladder carries
 on with sends you nothing; a stop shows first in `k waiting` and `k board --brief`, with the title, the reason and the
-folder of the reports, and a `k run` that a session started in the background ends with a line that session sends as
-a push.
+way back (take `[escalate]` off the step's header in `plan.md`, then `k run`; /k-go-on and `k resume` do not lift
+it), and a `k run` that a session started in the background ends with a line that session sends as
+a push. A `[heavy]` step is not rerun when a rerun cannot pass: when its job failed (other than a timeout, exit 124)
+and the checkout its command `cd`s into has the same commit and status, or when its job passed without writing its
+outputs, it stops for you at once; `k plan check` warns about an output the command never names.
 
 **The hook.** In an interactive session the escalation hook counts a build or test command (also through
 `heavy-lock.mjs`) that fails again on the same test or error after the session edited something in between; a test

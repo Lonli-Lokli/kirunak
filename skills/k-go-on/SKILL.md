@@ -13,3 +13,7 @@ Say in one line what you will do next, and go on.
 
 If an edit is still refused with the block's reason, the override did not reach the hook: say so in one line, and
 the owner types /k-go-on again at the terminal.
+
+/k-go-on lifts only this session's edit block, and `k resume` is only for a task on hold. A step that k run stopped
+for the owner (`[escalate]` on its header) runs again once the owner's session takes `[escalate]` off its header in
+plan.md and starts `k run`.
