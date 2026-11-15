@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkPlan, parseBudget, parsePlan, VERIFY_SINCE } from '../lib/plan.mjs';
+import { checkPlan, FAST_QUEUE_SINCE, fastQueue, parseBudget, parsePlan, VERIFY_SINCE } from '../lib/plan.mjs';
 import { gate, load } from '../lib/steps.mjs';
 import { parseTask } from '../lib/task.mjs';
-import { taskPaths } from '../lib/workspace.mjs';
+import { checkPlanSettings, taskPaths } from '../lib/workspace.mjs';
 import { approvedWorkspace, k, makeWorkspace } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
@@ -64,7 +64,7 @@ test('a [heavy] step may state expect-minutes; none is null; one that is no numb
 test('the plan of the design parses: kinds, model, effort, lists, budget', () => {
   const { front, steps, problems } = parsePlan(PLAN);
   assert.deepEqual(problems, []);
-  assert.deepEqual(front, { task: ID, blockedBy: [] });
+  assert.deepEqual(front, { task: ID, blockedBy: [], release: false });
   assert.deepEqual(steps.map((s) => [s.id, s.kind, s.model, s.effort]), [
     ['S-1', 'agent', 'sonnet', 'high'], ['S-2', 'heavy', null, null], ['S-3', 'review', null, null],
   ]);
@@ -198,6 +198,7 @@ test('the grammar: a bad header, an unknown kind, effort or field, a needs no st
     'S-2 is a heavy step with no command',
     'the plan has no review step, and k accept needs a review: add a step of kind review (outputs: review.md)',
     'AC-3 is covered by no step',
+    'S-2 is a heavy step beside S-1, which neither needs it nor is needed by it: make S-2 need S-1, so the heavy work runs after the work that does not take its output',
   ]);
   assert.deepEqual(problemsOf(w, PLAN.replace('task: weather/offline-forecast', 'task: weather/other')), [
     'the plan is for weather/other, not weather/offline-forecast',
@@ -297,4 +298,138 @@ test('k plan check warns about a [heavy] step\'s output its command never names,
   const r = k(w.home, ['plan', 'check', ID]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /plan: check passes\n {2}warning, line 14: S-2's command never names evidence\/S-2-tests\.xml: k run fails the step "missing outputs" after its job passes/);
+});
+
+// gulnya/fast-heavy-queue: the heavy and store-set rules. `step` writes one step block; `fq` runs the rules alone on a
+// task with no approval record, where every finding refuses.
+const step = (id, title, kind, ...fields) => `### ${id} ${title} [${kind}]\n${fields.map((f) => `${f}\n`).join('')}`;
+const planOf = (front, ...steps) => `---\ntask: ${ID}\n${front}---\n\n${steps.join('\n')}`;
+const fq = (text, ws = null) => {
+  const plan = parsePlan(text);
+  assert.deepEqual(plan.problems, []);
+  return fastQueue(plan, null, ws).map((x) => x.problem);
+};
+const REVIEW = (...needs) => step('S-9', 'Review', 'review', `needs: ${needs.join(', ')}`, 'covers: all', 'inputs: task, diff, evidence/', 'outputs: review.md');
+
+test('the new fields parse: long, sooner, final, resumable and the front matter\'s release; a bad value is a problem (gulnya/fast-heavy-queue)', () => {
+  const p = parsePlan(planOf('release: yes\n',
+    step('S-1', 'Tests', 'heavy', 'command: npm test', 'long: a device boot', 'resumable: yes'),
+    step('S-2', 'Store set', 'agent', 'final: yes', 'sooner: the owner asked'),
+  ));
+  assert.deepEqual(p.problems, []);
+  assert.equal(p.front.release, true);
+  assert.deepEqual(p.steps.map((s) => [s.long, s.sooner, s.final, s.resumable]), [['a device boot', null, false, true], [null, 'the owner asked', true, false]]);
+  const bad = parsePlan(planOf('release: maybe\n', step('S-1', 'Tests', 'heavy', 'command: npm test', 'final: no', 'resumable: true', 'long:', 'sooner: ')));
+  assert.deepEqual(bad.problems.map((x) => x.problem), [
+    'release is `yes` or left out, not maybe',
+    'S-1: final is `yes` or left out, not no',
+    'S-1: resumable is `yes` or left out, not true',
+    'S-1: long: says why, `long: <why>`',
+    'S-1: sooner: says why, `sooner: <why>`',
+  ]);
+});
+
+test('AC-1: a heavy step beside work that neither needs it nor is needed by it is refused, naming that work; made to need it, it passes', () => {
+  const fix = step('S-1', 'Fix', 'agent');
+  const tests = (...needs) => step('S-2', 'Unit tests', 'heavy', `needs: ${needs.join(', ')}`, 'command: npm test');
+  const docs = step('S-3', 'Docs', 'agent');
+  assert.deepEqual(fq(planOf('', fix, tests('S-1'), docs, REVIEW('S-2', 'S-3'))), [
+    'S-2 is a heavy step beside S-3, which neither needs it nor is needed by it: make S-2 need S-3, so the heavy work runs after the work that does not take its output',
+  ]);
+  assert.deepEqual(fq(planOf('', fix, docs, tests('S-1', 'S-3'), REVIEW('S-2'))), []);
+  // Two steps beside it are named in one finding.
+  assert.match(fq(planOf('', fix, tests('S-1'), docs, step('S-4', 'More docs', 'agent'), REVIEW('S-2', 'S-3', 'S-4')))[0], /^S-2 is a heavy step beside S-3, S-4, which neither need it nor are needed by it: make S-2 need S-3, S-4,/);
+});
+
+test('AC-1: a test a fix needs stays before the fix, through any number of needs; another heavy step and a final step are no work beside it', () => {
+  const failing = step('S-1', 'A test that fails without the fix', 'agent');
+  const fix = step('S-2', 'The fix', 'agent', 'needs: S-1');
+  const tests = (id, ...fields) => step(id, 'Unit tests', 'heavy', 'needs: S-2', 'command: npm test', ...fields);
+  assert.deepEqual(fq(planOf('', failing, fix, tests('S-3'), REVIEW('S-3'))), []);
+  assert.deepEqual(fq(planOf('', failing, fix, tests('S-3'), tests('S-4'), REVIEW('S-3', 'S-4'))), []);
+  assert.deepEqual(fq(planOf('release: yes\n', failing, fix, tests('S-3'), REVIEW('S-3'), step('S-10', 'Ship it', 'agent', 'needs: S-9', 'final: yes'))), []);
+});
+
+test('AC-2: a heavy step stated over plan.shortMinutes is refused unless resumable or long; expect-minutes, else max-minutes, else the budget; no setting, no rule', () => {
+  const ws = { plan: { shortMinutes: 30 } };
+  const heavy = (...fields) => planOf('', step('S-1', 'Simulator tests', 'heavy', 'command: npm test', ...fields), REVIEW('S-1'));
+  const OVER = (n) => `S-1 is a heavy step of ${n} minutes, over the short line of 30: split it into steps of 30 minutes or less, mark it \`resumable: yes\` when its job can run in pieces, or add \`long: <why it cannot split>\``;
+  assert.deepEqual(fq(heavy('expect-minutes: 45', 'max-minutes: 90'), ws), [OVER(45)]);
+  assert.deepEqual(fq(heavy('max-minutes: 45'), ws), [OVER(45)]);
+  assert.deepEqual(fq(heavy('budget: 50 calls, 40 minutes, 1 USD'), ws), [OVER(40)]);
+  assert.deepEqual(fq(heavy('expect-minutes: 20', 'max-minutes: 60'), ws), [], 'the expected length decides');
+  assert.deepEqual(fq(heavy('max-minutes: 30'), ws), [], '30 is not over 30');
+  assert.deepEqual(fq(heavy('max-minutes: 45', 'resumable: yes'), ws), []);
+  assert.deepEqual(fq(heavy('max-minutes: 45', 'long: a release bundle cannot split'), ws), []);
+  assert.deepEqual(fq(heavy('max-minutes: 45')), [], 'no plan.shortMinutes');
+  assert.deepEqual(fq(heavy('max-minutes: 45'), { plan: { storeSet: ['store set'] } }), []);
+});
+
+const STORE = { plan: { storeSet: ['store (screenshot|set)', 'preview video', /feature graphic/i] } };
+
+test('AC-5, E-1: outside a release a step whose title makes a store set is refused unless it says sooner; a capture taken as review evidence matches nothing; no setting, no rule', () => {
+  const work = step('S-1', 'The settings screen', 'agent');
+  const shots = (...fields) => step('S-2', 'Store screenshots in every locale', 'agent', 'needs: S-1', ...fields);
+  assert.deepEqual(fq(planOf('', work, shots(), REVIEW('S-2')), STORE), [
+    'S-2 makes a store set in a plan that is no release: store sets are made once, by a release\'s final steps; drop the step, or add `sooner: <why it is needed now>`',
+  ]);
+  assert.deepEqual(fq(planOf('', work, shots('sooner: the owner asked for them on 2026-11-15'), REVIEW('S-2')), STORE), []);
+  // A RegExp counts as a string does; the title decides, never a what: line that only names a store set.
+  assert.equal(fq(planOf('', work, step('S-2', 'The Play feature graphic', 'agent', 'needs: S-1'), REVIEW('S-2')), STORE).length, 1);
+  const what = step('S-2', 'Settings in each theme: renders', 'agent', 'needs: S-1', 'what: at the store set\'s phone size, render Settings for the owner');
+  assert.deepEqual(fq(planOf('', work, what, REVIEW('S-2')), STORE), []);
+  // E-1: a capture the review must see.
+  const capture = step('S-2', 'Capture the settings screen for the review', 'agent', 'needs: S-1', 'what: capture evidence/S-2-settings.png in both themes');
+  assert.deepEqual(fq(planOf('', work, capture, REVIEW('S-2')), STORE), []);
+  assert.deepEqual(fq(planOf('', work, shots(), REVIEW('S-2'))), [], 'no plan.storeSet');
+});
+
+test('AC-6: final steps belong to a release, make its store set and come last; nothing that is not final needs one', () => {
+  const work = step('S-1', 'The settings screen', 'agent');
+  const review = step('S-2', 'Review', 'review', 'needs: S-1', 'covers: all', 'inputs: task, diff, evidence/', 'outputs: review.md');
+  const shots = (...fields) => step('S-3', 'Store screenshots', 'agent', 'needs: S-2', ...fields);
+  const R = 'release: yes\n';
+  assert.deepEqual(fq(planOf(R, work, review, shots('final: yes')), STORE), []);
+  assert.deepEqual(fq(planOf('', work, review, step('S-3', 'Ship it', 'agent', 'needs: S-2', 'final: yes'))), [
+    'S-3 is `final: yes` in a plan that is no release: final steps belong to a release\'s plan, its front matter `release: yes`; drop the mark',
+  ]);
+  assert.deepEqual(fq(planOf(R, work, review, shots()), STORE), [
+    'S-3 makes a store set: mark it `final: yes`, so it runs once the stories the release ships are accepted, or add `sooner: <why>`',
+  ]);
+  assert.deepEqual(fq(planOf(R, work, review, shots('sooner: the owner asked')), STORE), []);
+  const after = step('S-4', 'Notes', 'agent', 'needs: S-3');
+  assert.deepEqual(fq(planOf(R, work, review, shots('final: yes'), after), STORE), [
+    'S-4 is not final but needs the final step S-3: mark it `final: yes`, or drop the need',
+    'S-3 is a final step with S-4 after it, not final: move the final steps to the end of the plan',
+  ]);
+  assert.deepEqual(fq(planOf(R, work, shots('final: yes').replace('needs: S-2', 'needs: S-1'), review), STORE), [
+    'S-3 is a final step with S-2 after it, not final: move the final steps to the end of the plan',
+  ]);
+});
+
+test('the rules are warnings in a task first approved before FAST_QUEUE_SINCE: k plan check passes and the gate runs it; one approved since is refused', async () => {
+  const beside = PLAN.replace('### S-2 Unit tests [heavy]\nneeds: S-1\n', '### S-2 Unit tests [heavy]\n').replace('### S-3 Review [review]\nneeds: S-2\n', '### S-3 Review [review]\nneeds: S-1, S-2\n');
+  const FINDING = 'S-2 is a heavy step beside S-1, which neither needs it nor is needed by it: make S-2 need S-1, so the heavy work runs after the work that does not take its output';
+  const w = await approvedWorkspace(beside);
+  const record = JSON.parse(readFileSync(w.p.record, 'utf8'));
+  const approvedOn = (day) => writeFileSync(w.p.record, JSON.stringify({ ...record, history: [{ ...record.history[0], approved: `${day}T10:00:00+00:00` }] }));
+  approvedOn('2026-11-15');
+  const old = k(w.home, ['plan', 'check', ID]);
+  assert.equal(old.status, 0, old.stderr);
+  assert.ok(old.stdout.includes(`warning, line 14: ${FINDING} (a warning: ${ID} was approved before ${FAST_QUEUE_SINCE})`), old.stdout);
+  assert.deepEqual(gate(load(w.ws, ID)).filter((x) => x.startsWith('plan.md')), []);
+  approvedOn(FAST_QUEUE_SINCE);
+  const since = k(w.home, ['plan', 'check', ID]);
+  assert.equal(since.status, 1);
+  assert.ok(since.stderr.includes(`line 14: ${FINDING}`), since.stderr);
+  assert.deepEqual(gate(load(w.ws, ID)).filter((x) => x.startsWith('plan.md')), [`plan.md line 14: ${FINDING}`]);
+});
+
+test('the workspace\'s plan settings: absent or good pass; a shortMinutes that is no number or a storeSet that is no list of patterns is a problem', () => {
+  assert.deepEqual(checkPlanSettings(undefined), []);
+  assert.deepEqual(checkPlanSettings({ shortMinutes: 30, storeSet: ['store set', /preview video/i] }), []);
+  assert.deepEqual(checkPlanSettings({ shortMinutes: '30' }), ['plan.shortMinutes is a number of minutes']);
+  assert.deepEqual(checkPlanSettings({ storeSet: 'store set' }), ['plan.storeSet is a list of patterns, each a RegExp or a string that reads as one']);
+  assert.deepEqual(checkPlanSettings({ storeSet: ['(unclosed'] }), ['plan.storeSet is a list of patterns, each a RegExp or a string that reads as one']);
+  assert.deepEqual(checkPlanSettings([]), ['plan is { shortMinutes, storeSet }']);
 });
