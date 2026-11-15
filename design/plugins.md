@@ -110,6 +110,7 @@ export default {
   usage: { weekStart: { day: 'sunday', time: '00:00', zone: 'UTC' }, reviews: null, baseline: null,
     limitsLog: '<KIRUNAK_HOME>/rate-limits.log', stale: { minutes: 60, context: 150000 } },
   cache: { promptCacheTtl: '1h', subagentPromptCacheTtl: null, syncClaudeAiSkills: false },  // optional; none by default
+  plan: { shortMinutes: 30, storeSet: ['store screenshot', /preview video/i] },  // optional; none by default
 };
 ```
 
@@ -220,6 +221,12 @@ export default {
   be absent. `k doctor` prints one line for each key named, ok or a failure naming both values; a key not named, and
   a workspace with no `cache` (the default), get no line (E-2). kirunak never writes them. Any other key, or a value
   of another type, is refused at load.
+- **`plan`** holds `k plan check`'s heavy and store-set settings (gulnya/fast-heavy-queue, `orchestrator.md` §1):
+  `shortMinutes`, the short line a `[heavy]` step's stated length may not pass unless `resumable: yes` or `long:`,
+  and `storeSet`, the patterns (a RegExp, or a string read as a case-blind one) that mark, in a step's title, a step making a store set.
+  Each is optional, and the rule that reads it is off without it. A `shortMinutes` that is no positive number, or a
+  `storeSet` that is no list of patterns, is refused at load. Judgement: the short line and what a store set is are
+  each workspace's own, so kirunak names neither.
 - A plugin module default-exports `{ name, version, provides: { <seam>: implementation } }`. The core loads the
   workspace, then each plugin in order, validates every `provides` entry against the seam's contract (each named
   function present and a function; unknown seam names refused), applies the policy, and only then runs a verb.

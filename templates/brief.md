@@ -31,6 +31,10 @@ You run one step of a task whose file the owner approved and froze. Do this step
   and end your turn. The job runs outside this conversation, which then resumes with its result. When you have a
   measured length of the same job (a past run's minutes), add `"expectMinutes": <minutes>`, no more than
   `maxMinutes`; without one, leave it out.
+- When you write or change a plan's steps: put each `[heavy]` step after every step that does not take its output
+  (`needs:` them), split one stated over the workspace's short line or mark it `resumable: yes` or `long: <why>`, and
+  leave store sets to a release's `final: yes` steps, each saying in its title what it makes (`sooner: <why>` only
+  when the owner needs one before). `k plan check` names what breaks these.
 - A question only the owner can answer: write `{{stepDir}}/needs.json` as `{ "owner": "<the question>" }` and end
   your turn.
 - No agents.

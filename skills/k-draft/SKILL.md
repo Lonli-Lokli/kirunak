@@ -31,11 +31,14 @@ later starts the intake from it, which reads it as background and still asks eve
 
    **Groom it** (owner, 2026-10-26): leave the owner nothing to work out, only what to change. Ask the task as you
    would write it, each part a question with its `Proposed:` answer: the goal, the criteria, the edge cases and out of
-   scope, the aspects (all n/a in one question when nothing has an app), the plan's steps. When the fix is small and
-   safe (no heavy job, nothing outside the machine), try it on a `draft/<slug>` branch in its own worktree, with a test
-   that fails without it and the docs, never merged, and cite its commits and test runs under What was found. A
-   question stays open only where you cannot know (the owner's taste, a fact you cannot measure), its `Proposed:`
-   line saying what is missing. Nothing in a draft is a ruling: the owner's answers at the intake decide.
+   scope, the aspects (all n/a in one question when nothing has an app), the plan's steps: heavy steps after the work
+   that does not take their output, each within the workspace's short line or marked `resumable: yes` or `long:
+   <why>`, and store sets only in a release's `final: yes` steps (`k plan check` refuses the rest). When the fix is
+   small and safe (no heavy job, nothing outside the machine), try it on a `draft/<slug>` branch in its own
+   worktree, with a test that fails without it and the docs, never merged, and cite its commits and test runs under
+   What was found. A question stays open only where you cannot know (the owner's taste, a fact you cannot
+   measure), its `Proposed:` line saying what is missing. Nothing in a draft is a ruling: the owner's answers at
+   the intake decide.
 4. **Check**: `k draft check <id>` until it passes. It names each problem with its line.
 5. **Commit the draft alone**, in its repo:
 

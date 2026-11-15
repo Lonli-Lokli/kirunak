@@ -100,6 +100,33 @@ outputs: review.md
   length of the same job (a past run's minutes); otherwise it leaves it out and the guard reads the max. `k plan
   check` refuses one that is not a positive number or is larger than the step's max. Judgement: a guard that serves
   short jobs first needs an honest length, and a guess is worse than none.
+- **Heavy steps last, short, and store sets only in a release** (gulnya/fast-heavy-queue AC-1, AC-2, AC-5, AC-6, E-1).
+  The fields: a step's `long: <why it cannot split>`, `resumable: yes` (its job can run in pieces), `sooner: <why>`
+  (a store set needed before the release) and `final: yes` (a release's last steps), and the front matter's
+  `release: yes`, which marks a release's plan. Each flag is `yes` or left out, and `long:` and `sooner:` say why; any
+  other value is a plan problem. The workspace's settings (`plugins.md` §3 `plan`): `plan.shortMinutes`, the short
+  line in minutes, and `plan.storeSet`, a list of patterns matched against a step's title. A step that makes a store
+  set says so in its title; its `what:` is not read, since a step names store sets it only measures at, renders
+  beside or leaves alone there (a render at the store set's phone size is review evidence). `k plan check` refuses:
+  - a `[heavy]` step H beside a step X that is neither `[heavy]` nor `final: yes`, where neither needs the other
+    through any number of `needs:`; the finding names X and says to make H need X, so the heavy work runs after the
+    work that does not take its output, as late as the work allows. A test a fix needs still comes before the fix,
+    since the fix needs the test, and the heavy run that proves both needs the fix.
+  - a `[heavy]` step whose stated length (`expect-minutes:`, else `max-minutes:`, else the budget's minutes) is over
+    `plan.shortMinutes`, unless it is `resumable: yes` or says `long:`. With no `plan.shortMinutes` the rule is off.
+  - in a plan without `release: yes`, a step matching `plan.storeSet` with no `sooner:`. A capture taken as review
+    evidence, a screen the review must see, matches no pattern, so it goes anywhere with no mark: the patterns name
+    store screenshots, store sets, feature graphics and preview videos, never the word capture alone. With no
+    `plan.storeSet` the rule is off.
+  - `final: yes` in a plan without `release: yes`; in a release, a step matching `plan.storeSet` that is neither
+    `final: yes` nor `sooner:`, a step that is not final and needs a final step (through any number of `needs:`), and
+    a final step with a step that is not final after it in the file.
+
+  For a task first approved before `FAST_QUEUE_SINCE` (lib/plan.mjs, the day these rules reached the main branch),
+  each finding is a warning, read from the same first approval as the `verify:` rule's: no running task stops, and
+  an amendment brings it under the rules. Judgement: one machine runs one heavy job at a time and serves short ones
+  first, so a plan that queues its heavy work early, or in one long piece, holds the line against work that could
+  have run before it; and a store set made before the owner agrees with the build is made again.
 
 ## 2. The step lifecycle (R9)
 
