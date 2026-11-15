@@ -462,6 +462,40 @@ test('a [heavy] step that cds into a subfolder of a checkout holding an untracke
   assert.match(s.stopped, /^S-1 failed on an unchanged checkout /);
 });
 
+test('a [heavy] step still stops on an unchanged checkout when kirunak\'s records in it changed between its jobs, or a file changed while its job waited in the queue: one job (gulnya/heavy-retry-unchanged AC-1, review-2)', async () => {
+  // Another task's progress, written into the same repo after the fingerprint: a record, no change to the code.
+  const c = checkoutFixture();
+  const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, (n) => {
+    mkdirSync(join(c.dir, 'kirunak', 'tasks', 'other'), { recursive: true });
+    writeFileSync(join(c.dir, 'kirunak', 'tasks', 'other', 'progress.md'), `line ${n}\n`);
+    return { exitCode: 1, log: 'red' };
+  });
+  fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 1);
+  assert.match(r.stopped, /^S-1 failed on an unchanged checkout /);
+  // A file changed while the job waited: the guard calls the job's started once it holds the lock, and the job ran on
+  // the changed file, so the same file after it is no change.
+  const d = checkoutFixture();
+  const v = await approvedWorkspace(heavyIn(`cd ${d.dir} && npm test`));
+  const waited = [];
+  v.ws.seams.resourceGuard = {
+    run: (job) => {
+      waited.push(job);
+      writeFileSync(join(d.dir, 'a.txt'), `changed while waiting ${waited.length}\n`);
+      job.started?.();
+      return { exitCode: 1, log: 'red' };
+    },
+    status: () => ({}), claim() {}, release() {}, resources: () => [],
+  };
+  fakeRunner(v);
+  const s = await run({ ws: v.ws, id: v.id, watch: true, intervalMs: 20 });
+  assert.equal(waited.length, 1);
+  assert.match(s.stopped, /^S-1 failed on an unchanged checkout /);
+});
+
 test('a [heavy] step that timed out (exit 124) runs again on the same checkout: two jobs (gulnya/heavy-retry-unchanged AC-3, D-2)', async () => {
   const c = checkoutFixture();
   const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));

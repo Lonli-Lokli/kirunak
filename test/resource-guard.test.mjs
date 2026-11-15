@@ -68,6 +68,18 @@ test('one job at a time: a second waits its turn, and the status shows who holds
   assert.deepEqual(logOf(home).map((x) => [x.session, x.what, x.exitCode]), [['kirunak:a', 'tests', 0], ['kirunak:b', 'tests', 0]]);
 });
 
+test('a job\'s started is called once the guard holds the lock for it, just before its command starts, not while it waits (gulnya/heavy-retry-unchanged review-2)', async () => {
+  const { home, g } = guard();
+  const f = join(home, 'order.txt');
+  const job = (name) =>
+    g.run({ session: `kirunak:${name}`, what: 'tests', maxMinutes: 1, cwd: home, command: sh(`echo start-${name} >> ${f}; sleep 0.3; echo end-${name} >> ${f}`), started: () => fs.appendFileSync(f, `started-${name}\n`) });
+  const a = job('a');
+  await sleep(60);
+  const b = job('b');
+  await Promise.all([a, b]);
+  assert.deepEqual(readFileSync(f, 'utf8').trim().split('\n'), ['started-a', 'start-a', 'end-a', 'started-b', 'start-b', 'end-b']);
+});
+
 test('past maxMinutes the job and its children are killed, exit code 124', async () => {
   const { home, g } = guard({ killAfterMs: 500 });
   const pidFile = join(home, 'child.pid');
