@@ -45,13 +45,15 @@ test('both limits hold for any length: 3 lines of 80 (or the width asked), one o
   }
 });
 
-test('a stop names the step\'s folder and its reports, the folder alone when that is too long; a question names where the answer goes', () => {
+test('a stop names the way back, the plan edit (gulnya/heavy-retry-unchanged AC-4); a repeat stop its folder and repeat.md, the folder alone when that is too long; a question names where the answer goes', () => {
   const r = { title: 'Wind alerts', id: 'weather/wind' };
   const stop = { step: 'S-2', kind: 'escalated', what: 'stopped, failed on every rung', why: 'exit 1', dir: 'kirunak/tasks/wind/steps/S-2/', reports: [1, 2, 3, 4].map((k) => `steps/S-2/failure-${k}.md`) };
-  assert.deepEqual(stopNotice(r, stop).lines, ['Wind alerts (weather/wind): S-2 stopped, failed on every rung', 'why: exit 1', 'read kirunak/tasks/wind/steps/S-2/ (failure-1.md … failure-4.md)']);
-  assert.equal(stopNotice(r, { ...stop, reports: stop.reports.slice(0, 2) }).lines[2], 'read kirunak/tasks/wind/steps/S-2/ (failure-1.md, failure-2.md)');
+  assert.deepEqual(stopNotice(r, stop).lines, ['Wind alerts (weather/wind): S-2 stopped, failed on every rung', 'why: exit 1', 'take [escalate] off S-2\'s header in plan.md, then k run']);
+  assert.equal(stopNotice(r, { ...stop, reports: stop.reports.slice(0, 2) }).lines[2], 'take [escalate] off S-2\'s header in plan.md, then k run');
+  const repeat = { ...stop, what: 'stopped, the same not met twice', reports: ['steps/S-2/repeat.md'] };
+  assert.equal(stopNotice(r, repeat).lines[2], 'read kirunak/tasks/wind/steps/S-2/ (repeat.md)');
   const dir = `kirunak/tasks/${'a-long-slug-'.repeat(4)}/steps/S-2/`;
-  assert.equal(stopNotice(r, { ...stop, dir }).lines[2], `read ${dir}`);
+  assert.equal(stopNotice(r, { ...repeat, dir }).lines[2], `read ${dir}`);
   const asked = stopNotice(r, { step: 'S-3', kind: 'owner', what: 'waits for your answer', why: 'Which cache size?', dir: 'x', reports: [] });
   assert.deepEqual(asked.lines, ['Wind alerts (weather/wind): S-3 waits for your answer', 'why: Which cache size?', 'answer in a session or in notes.md, then start k run again']);
   // One started by hand: k run does not resume it, so the answer goes to the session that started it.
@@ -76,7 +78,7 @@ test('the push of a stop on the longest title: one line of at most 200, the titl
     assert.ok(n.one.startsWith(title.slice(0, 40)) && n.one.includes(` (${r.id}): `), n.one);
     assert.ok(n.one.endsWith(`. ${n.lines.at(-1)}`), n.one);
   }
-  assert.match(stopNotice(r, stop).one, /…? \(storms\/[a-z-]+\): S-14 stopped, failed on every rung\. read kirunak\/tasks\/[a-z-]+\/steps\/S-14\/( \(failure-1\.md … failure-4\.md\))?$/);
+  assert.match(stopNotice(r, stop).one, /…? \(storms\/[a-z-]+\): S-14 stopped, failed on every rung\. take \[escalate\] off S-14's header in plan\.md, then k run$/);
 });
 
 test('the push keeps why when it fits and leaves it out when too little room is left; no full stop after a question mark', () => {

@@ -192,6 +192,27 @@ pending  →  ready  →  running  →  done
     gets a `failures:` field naming every failure report of the step, and the stop line reads `S-1 failed on every
     rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md`. Removing the mark retries the
     step on its own rung. An older plan's `[escalate: <model>, <effort>]` mark still parses.
+  - **A heavy step that cannot pass on a rerun** stops at once (gulnya/heavy-retry-unchanged). Each job of a `[heavy]`
+    step records in its `heavy-<k>.json` the checkout it started on (`lib/checkout.mjs`): the folder of its command's
+    first `cd <dir>` (`~` and `$HOME` expanded, quotes taken off, relative to the task repo's root), its `git rev-parse
+    HEAD` and the sha256 of its `git status --porcelain`, `git diff HEAD` and each untracked file's contents (A-1: the
+    status alone names files, not contents), all read from the work tree's top folder with kirunak's records left out
+    (`kirunak/tasks`, `kirunak/bugs`, `kirunak/drafts`, `kirunak/approvals` and the task's own folder: k run and other
+    sessions write them between two jobs), taken when the guard starts the job (its `started`, plugins.md), so a change
+    made while the job waited in the queue is in it; `null` with no `cd`, a folder outside a git work tree, or a git
+    command that fails. Before a rerun after a failure of its own, `k run`'s pass compares: when that job exited
+    other than 0 and 124 and the checkout is the same now, the step does not start and stops as above, its why `failed
+    on an unchanged checkout (<dir> at <short head>): a rerun would fail the same way`. A new commit or a changed
+    status runs it again; a timeout (exit 124) is always retried; a command with no checkout, and a failure with no job
+    (a device not claimed), keep the retry. A job that exits 0 without every output stops in the same pass, with no
+    rerun: `its job passed but wrote no <outputs>: a rerun cannot write them; the plan's command or outputs: is
+    wrong`, and `k plan check` warns about each `[heavy]` step output its command never names. Judgement: the same
+    code fails the same way, and a rerun spent an hour of the one machine's queue to say so (chooser-quality S-3).
+  - **The way back** from a stop for the owner is the plan edit: the owner's session takes `[escalate]` off the step's
+    header in `plan.md` and starts `k run` (the `escalated` line already started the count afresh). `k run`'s line for
+    a step still marked, and the notice of an escalated stop, say so: `take [escalate] off S-1's header in plan.md, then
+    k run` (a repeat stop's notice names its `repeat.md`, which holds its three ways on). /k-go-on lifts only a
+    session's edit block, and `k resume` only a hold.
   - **A review that would repeat a `not met`** stops the same way, before it starts (gulnya/review-reruns-whole-task
     AC-4, D-4; `review.md` §2). `k run`'s pass, before it admits a ready `review` step, and `k step start` read the
     two latest reviews that count before the file the step writes. When an id is `not met` in both, the step gets

@@ -26,7 +26,7 @@ verify: npm test
 
 ### S-2 Unit tests [heavy]
 needs: S-1
-command: npm test
+command: npm test -- --test-reporter=junit --test-reporter-destination=evidence/S-2-tests.xml
 what: weather unit tests, 4 minutes
 max-minutes: 10
 outputs: evidence/S-2-tests.xml
@@ -70,7 +70,7 @@ test('the plan of the design parses: kinds, model, effort, lists, budget', () =>
   ]);
   assert.deepEqual(steps[0].covers, ['AC-1', 'AC-2', 'E-1']);
   assert.deepEqual(steps[0].budget, { calls: 100, minutes: 40, usd: 3 });
-  assert.equal(steps[1].command, 'npm test');
+  assert.equal(steps[1].command, 'npm test -- --test-reporter=junit --test-reporter-destination=evidence/S-2-tests.xml');
   assert.equal(steps[1].maxMinutes, 10);
   assert.deepEqual(steps[2].needs, ['S-2']);
   assert.deepEqual(parseBudget('3 USD, 1 call'), { usd: 3, calls: 1, bad: [] });
@@ -187,7 +187,7 @@ test('the grammar: a bad header, an unknown kind, effort or field, a needs no st
   const w = await fixture();
   const bad = PLAN.replace('[agent, sonnet, high]', '[agnet, sonnet, hgih]')
     .replace('needs: S-1\n', 'needs: S-9\n')
-    .replace('command: npm test\n', 'comand: npm test\n')
+    .replace('command: npm test -- --test-reporter=junit --test-reporter-destination=evidence/S-2-tests.xml\n', 'comand: npm test\n')
     .replace('### S-3 Review [review]', '### S-3 Review');
   assert.deepEqual(problemsOf(w, bad), [
     'S-1: unknown kind agnet; the kinds are agent, heavy, review, owner, sync',
@@ -284,4 +284,17 @@ test('a step\'s tools: is all or nothing; any other list is a problem (gulnya/k-
   assert.deepEqual([parsePlan(plan()).steps[0].tools, parsePlan(plan()).problems], [null, []]);
   assert.deepEqual([parsePlan(plan('all')).steps[0].tools, parsePlan(plan('all')).problems], ['all', []]);
   assert.deepEqual(parsePlan(plan('Read, Bash')).problems.map((x) => x.problem), ['S-1: tools is `all` or nothing, not Read, Bash']);
+});
+
+// gulnya/heavy-retry-unchanged AC-6: a [heavy] step's output its command never names is warned about, never refused.
+test('k plan check warns about a [heavy] step\'s output its command never names, naming the step and the path; none when the command names it (gulnya/heavy-retry-unchanged AC-6)', async () => {
+  const w = await fixture();
+  const unnamed = PLAN.replace('command: npm test -- --test-reporter=junit --test-reporter-destination=evidence/S-2-tests.xml\n', 'command: npm test\n');
+  const WARN = 'S-2\'s command never names evidence/S-2-tests.xml: k run fails the step "missing outputs" after its job passes';
+  assert.deepEqual(checkPlan(parsePlan(unnamed), w.task, w.p), [{ line: 14, problem: WARN, warning: true }]);
+  assert.deepEqual(checkPlan(parsePlan(PLAN), w.task, w.p), [], 'the command names the path');
+  writeFileSync(join(w.p.dir, 'plan.md'), unnamed);
+  const r = k(w.home, ['plan', 'check', ID]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /plan: check passes\n {2}warning, line 14: S-2's command never names evidence\/S-2-tests\.xml: k run fails the step "missing outputs" after its job passes/);
 });

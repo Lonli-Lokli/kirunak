@@ -269,7 +269,7 @@ test('k waiting\'s group Stopped for you: per stopped step of a task not done, i
     'stopped for you:',
     '  The last forecast stays readable offline (weather/offline-forecast)',
     '  S-4 stopped, failed on every rung: missing outputs: steps/S-4/report.md',
-    '  read kirunak/tasks/offline-forecast/steps/S-4/ (failure-1.md … failure-4.md)',
+    '  take [escalate] off S-4\'s header in plan.md, then k run',
   ]);
   assert.ok(text.every((l) => l.length <= 80));
   assert.ok(stopped[0].one.length <= 200);

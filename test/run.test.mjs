@@ -181,7 +181,7 @@ test('a missing output fails the step; the retry is a fresh conversation that re
   assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-4.md'), 'utf8'), /: missing outputs: steps\/S-1\/design-1\.md\n/);
   assert.equal(r.stopped, 'S-1 failed on every rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md');
   // The stop line, then the push, the last line; the climbs before it pushed nothing (E-17).
-  const spent = PUSHED('S-1 stopped, failed on every rung. read kirunak/tasks/offline-forecast/steps/S-1/ (failure-1.md … failure-4.md)');
+  const spent = PUSHED('S-1 stopped, failed on every rung. why: missing outputs: steps/S-1/design… take [escalate] off S-1\'s header in plan.md, then k run');
   assert.deepEqual([lines.at(-2), lines.at(-1)], [`${w.id} stopped: ${r.stopped}`, spent]);
   assert.deepEqual([pushes(lines), `kirunak-push: ${r.push}`], [[spent], spent]);
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[agent\] \[escalate\]$/m);
@@ -289,14 +289,14 @@ test('a Sonnet step whose Opus attempt fails: Fable designs it (design-1.md its 
   assert.deepEqual(brief.lines, [
     'The last forecast stays readable offline (weather/offline-forecast)',
     'S-1 stopped, failed on every rung: missing outputs: steps/S-1/report.md, eviden…',
-    'read kirunak/tasks/offline-forecast/steps/S-1/ (failure-1.md … failure-4.md)',
+    'take [escalate] off S-1\'s header in plan.md, then k run',
   ]);
   assert.deepEqual([brief.name, brief.count, brief.ids], ['Stopped for you', 1, [w.id]]);
   const [waiting] = stoppedFor(list);
   for (const ls of [brief.lines, waiting.lines]) {
     assert.ok(ls.length <= 3 && ls.every((l) => l.length <= 80), ls.join('\n'));
     assert.equal(ls[0], 'The last forecast stays readable offline (weather/offline-forecast)');
-    assert.match(ls.at(-1), /^read kirunak\/tasks\/offline-forecast\/steps\/S-1\/ \(failure-1\.md … failure-4\.md\)$/);
+    assert.equal(ls.at(-1), 'take [escalate] off S-1\'s header in plan.md, then k run');
   }
   assert.ok(waiting.lines.every((l) => l.length <= 78), 'k waiting indents them two spaces');
   assert.ok(waiting.one.length <= 200 && !waiting.one.includes('\n'));
@@ -356,10 +356,170 @@ test('a heavy step has no rung: its second failure stops the task with every rep
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
   assert.equal(calls.length, 0);
   assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
-  assert.equal(lines.at(-1), PUSHED('S-1 stopped, failed 2 times. why: exit 1. read kirunak/tasks/offline-forecast/steps/S-1/ (failure-1.md, failure-2.md)'));
+  assert.equal(lines.at(-1), PUSHED('S-1 stopped, failed 2 times. why: exit 1. take [escalate] off S-1\'s header in plan.md, then k run'));
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^failures: steps\/S-1\/failure-1\.md, steps\/S-1\/failure-2\.md$/m);
   assert.ok(!/escalated: to /.test(progress(w)));
   assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map((e) => [e.kind, e.to, e.stopped]), [['escalate', null, true]]);
+  // A command with no cd into a git checkout records none, and keeps its retry (gulnya/heavy-retry-unchanged E-1).
+  assert.equal(JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'heavy-1.json'), 'utf8')).checkout, null);
+});
+
+// gulnya/heavy-retry-unchanged: a git checkout a [heavy] step's command cds into, a guard that records each job and
+// answers with `answer(n)` for the n-th, and the plan with S-1 that step.
+function checkoutFixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-checkout-'));
+  const g = (...a) => spawnSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' });
+  const commit = (text) => (writeFileSync(join(dir, 'a.txt'), text), g('add', '.'), g('commit', '-qm', text));
+  g('init', '-q');
+  commit('one\n');
+  return { dir, commit, head: () => g('rev-parse', '--short=7', 'HEAD').stdout.trim() };
+}
+const heavyGuard = (w, jobs, answer) => (w.ws.seams.resourceGuard = {
+  run: (job) => (jobs.push(job), answer(jobs.length)), status: () => ({}), claim() {}, release() {}, resources: () => [],
+});
+const heavyIn = (command) => PLAN.replace('### S-1 Keep the last forecast on disk [agent]\ncovers: AC-1, AC-2, E-1\ninputs: task, docs/offline.md\n', `### S-1 Keep the last forecast on disk [heavy]\ncovers: AC-1, AC-2, E-1\ncommand: ${command}\n`);
+const escape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const WAY_BACK = 'take [escalate] off S-1\'s header in plan.md, then k run';
+
+test('a [heavy] step whose job failed on a checkout that is still the same stops for the owner instead of a rerun: one job, the checkout in its record and in the why; the stop names the way back, which runs it again (gulnya/heavy-retry-unchanged AC-1, AC-4)', async () => {
+  const c = checkoutFixture();
+  const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, () => ({ exitCode: 1, log: 'red' }));
+  const calls = fakeRunner(w);
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.deepEqual([calls.length, jobs.length], [0, 1]);
+  const why = `failed on an unchanged checkout (${c.dir} at ${c.head()}): a rerun would fail the same way`;
+  assert.equal(r.stopped, `S-1 ${why}; the owner decides: read steps/S-1/failure-1.md`);
+  const record = JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'heavy-1.json'), 'utf8'));
+  assert.deepEqual([record.checkout.dir, record.checkout.head.slice(0, 7), record.checkout.status.length], [c.dir, c.head(), 64]);
+  assert.match(progress(w), new RegExp(`S-1 failed: exit 1\\n.*S-1 escalated: stopped for the owner, ${escape(why)}\\n$`));
+  assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[heavy\] \[escalate\]\n[^]*^failures: steps\/S-1\/failure-1\.md$/m);
+  assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map((e) => [e.kind, e.to, e.stopped]), [['escalate', null, true]]);
+  // The push and the notice name the way back (AC-4); a later k run says it on the escalated step's line.
+  assert.match(lines.at(-1), /^kirunak-push: The last fo… \(weather\/offline-forecast\): S-1 stopped, failed on an unchanged checkout \(/);
+  assert.ok(lines.at(-1).endsWith(` ${WAY_BACK}`), lines.at(-1));
+  const [stopped] = stoppedFor(await rows(w.ws, { all: true }));
+  assert.equal(stopped.lines.at(-1), WAY_BACK);
+  const again = await run({ ws: w.ws, id: w.id });
+  assert.equal(again.stopped, `S-1 is marked [escalate] in plan.md: the owner's session decides; to run it again, ${WAY_BACK}`);
+  assert.equal(jobs.length, 1);
+  // The way back: the owner's session takes the mark off, and k run starts the job again.
+  const plan = join(w.p.dir, 'plan.md');
+  writeFileSync(plan, readFileSync(plan, 'utf8').replace('[heavy] [escalate]', '[heavy]'));
+  const back = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 2);
+  assert.match(back.stopped, /^S-1 failed on an unchanged checkout /);
+});
+
+test('a [heavy] step whose checkout moved after its job failed runs again: a new commit gives a second job (gulnya/heavy-retry-unchanged AC-2)', async () => {
+  const c = checkoutFixture();
+  const w = await approvedWorkspace(heavyIn(`cd "${c.dir}" && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, (n) => (n === 1 && c.commit('two\n'), { exitCode: 1, log: 'red' }));
+  fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 2);
+  assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
+});
+
+test('a [heavy] step whose checkout changed only in a file\'s contents runs again: a further uncommitted edit to a modified file, or to an untracked one, gives a second job (gulnya/heavy-retry-unchanged AC-2, A-1)', async () => {
+  for (const file of ['a.txt', 'new.txt']) {
+    const c = checkoutFixture();
+    // Modified (or untracked) before the first job, so `git status --porcelain` reads the same after the second edit.
+    writeFileSync(join(c.dir, file), 'edited once\n');
+    const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+    const jobs = [];
+    heavyGuard(w, jobs, (n) => (n === 1 && writeFileSync(join(c.dir, file), 'edited twice\n'), { exitCode: 1, log: 'red' }));
+    fakeRunner(w);
+    const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+    assert.equal(jobs.length, 2, file);
+    assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md', file);
+  }
+});
+
+test('a [heavy] step that cds into a subfolder of a checkout holding an untracked file, or into the task\'s own repo, still stops on an unchanged checkout: one job (gulnya/heavy-retry-unchanged AC-1, review-1)', async () => {
+  // A subfolder: git hash-object reads the untracked paths from the work tree's top folder.
+  const c = checkoutFixture();
+  mkdirSync(join(c.dir, 'sub'));
+  writeFileSync(join(c.dir, 'sub', 'new.txt'), 'untracked\n');
+  const w = await approvedWorkspace(heavyIn(`cd ${join(c.dir, 'sub')} && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, () => ({ exitCode: 1, log: 'red' }));
+  fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 1);
+  assert.match(r.stopped, /^S-1 failed on an unchanged checkout /);
+  // The task's own repo: k run's own writes in the task folder between the two jobs are no change.
+  const t = await approvedWorkspace(heavyIn('cd ROOT && npm test'));
+  writeFileSync(join(t.p.dir, 'plan.md'), readFileSync(join(t.p.dir, 'plan.md'), 'utf8').replace('cd ROOT', `cd ${t.p.root}`));
+  const own = [];
+  heavyGuard(t, own, () => ({ exitCode: 1, log: 'red' }));
+  fakeRunner(t);
+  const s = await run({ ws: t.ws, id: t.id, watch: true, intervalMs: 20 });
+  assert.equal(own.length, 1);
+  assert.match(s.stopped, /^S-1 failed on an unchanged checkout /);
+});
+
+test('a [heavy] step still stops on an unchanged checkout when kirunak\'s records in it changed between its jobs, or a file changed while its job waited in the queue: one job (gulnya/heavy-retry-unchanged AC-1, review-2)', async () => {
+  // Another task's progress, written into the same repo after the fingerprint: a record, no change to the code.
+  const c = checkoutFixture();
+  const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, (n) => {
+    mkdirSync(join(c.dir, 'kirunak', 'tasks', 'other'), { recursive: true });
+    writeFileSync(join(c.dir, 'kirunak', 'tasks', 'other', 'progress.md'), `line ${n}\n`);
+    return { exitCode: 1, log: 'red' };
+  });
+  fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 1);
+  assert.match(r.stopped, /^S-1 failed on an unchanged checkout /);
+  // A file changed while the job waited: the guard calls the job's started once it holds the lock, and the job ran on
+  // the changed file, so the same file after it is no change.
+  const d = checkoutFixture();
+  const v = await approvedWorkspace(heavyIn(`cd ${d.dir} && npm test`));
+  const waited = [];
+  v.ws.seams.resourceGuard = {
+    run: (job) => {
+      waited.push(job);
+      writeFileSync(join(d.dir, 'a.txt'), `changed while waiting ${waited.length}\n`);
+      job.started?.();
+      return { exitCode: 1, log: 'red' };
+    },
+    status: () => ({}), claim() {}, release() {}, resources: () => [],
+  };
+  fakeRunner(v);
+  const s = await run({ ws: v.ws, id: v.id, watch: true, intervalMs: 20 });
+  assert.equal(waited.length, 1);
+  assert.match(s.stopped, /^S-1 failed on an unchanged checkout /);
+});
+
+test('a [heavy] step that timed out (exit 124) runs again on the same checkout: two jobs (gulnya/heavy-retry-unchanged AC-3, D-2)', async () => {
+  const c = checkoutFixture();
+  const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, () => ({ exitCode: 124, log: 'timed out' }));
+  fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 2);
+  assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
+});
+
+test('a [heavy] step whose job passed but wrote not its outputs stops for the owner at once: one job, no rerun (gulnya/heavy-retry-unchanged AC-5)', async () => {
+  const w = await approvedWorkspace(heavyIn('npm test'));
+  const jobs = [];
+  heavyGuard(w, jobs, () => ({ exitCode: 0, log: 'green' }));
+  fakeRunner(w);
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  assert.equal(jobs.length, 1);
+  const why = 'its job passed but wrote no steps/S-1/report.md, evidence/S-1-cache-sizes.tsv: a rerun cannot write them; the plan\'s command or outputs: is wrong';
+  assert.equal(r.stopped, `S-1 ${why}; the owner decides: read steps/S-1/failure-1.md`);
+  assert.match(progress(w), new RegExp(`S-1 failed: missing outputs: steps/S-1/report\\.md, evidence/S-1-cache-sizes\\.tsv\\n.*S-1 escalated: stopped for the owner, ${escape(why)}\\n$`));
+  assert.match(lines.at(-1), /^kirunak-push: The last fo… \(weather\/offline-forecast\): S-1 stopped, its job passed but wrote no steps\/S-1\/report\.md/);
+  assert.ok(lines.at(-1).endsWith(` ${WAY_BACK}`), lines.at(-1));
 });
 
 test('the guard gets the expected minutes a [heavy] step or a needs.json states, null when none; one over the max never queues (gulnya/heavy-queue-nearest-done E-1, E-3)', async () => {
@@ -1398,7 +1558,7 @@ test('k run stops before a review whose two latest counting reviews repeat a not
 
   // A second k run while the mark stands stops as any [escalate] does, writing nothing more.
   const r2 = await run({ ws: w.ws, id: w.id });
-  assert.equal(r2.stopped, 'S-4 is marked [escalate] in plan.md: the owner\'s session decides');
+  assert.equal(r2.stopped, 'S-4 is marked [escalate] in plan.md: the owner\'s session decides; to run it again, take [escalate] off S-4\'s header in plan.md, then k run');
   assert.equal(progress(w).match(/S-4 escalated/g).length, 1);
 
   // The owner lets one more fix run: the mark off, the same pair does not stop S-4, which runs and writes review-3
@@ -1600,7 +1760,7 @@ test('a question waiting for the owner and a step marked [escalate] still stop t
   const elines = [];
   const ecalls = fakeRunner(e);
   const er = await run({ ws: e.ws, id: e.id, watch: true, intervalMs: 20, out: (l) => elines.push(l) });
-  assert.deepEqual([ecalls.length, er.stopped], [0, 'S-3 is marked [escalate] in plan.md: the owner\'s session decides'], elines.join('\n'));
+  assert.deepEqual([ecalls.length, er.stopped], [0, 'S-3 is marked [escalate] in plan.md: the owner\'s session decides; to run it again, take [escalate] off S-3\'s header in plan.md, then k run'], elines.join('\n'));
   assert.ok(!pushes(elines).some((l) => l.includes('are yours') || l.includes('is yours')), elines.join('\n'));
 });
 

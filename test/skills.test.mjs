@@ -98,6 +98,12 @@ test('k-go-on is the owner\'s alone: the model may not invoke it (design/approva
   assert.match(front, /^disable-model-invocation: true$/m);
 });
 
+test('k-go-on names the way back for a step stopped for the owner: the plan edit, not /k-go-on or k resume (gulnya/heavy-retry-unchanged AC-4)', () => {
+  const text = read('skills/k-go-on/SKILL.md').replace(/\s+/g, ' ');
+  assert.match(text, /\/k-go-on lifts only this session's edit block, and `k resume` is only for a task on hold/);
+  assert.match(text, /runs again once the owner's session takes `\[escalate\]` off its header in plan\.md and starts `k run`/);
+});
+
 test('the README is its four parts and the licence line', () => {
   const text = read('README.md');
   assert.deepEqual([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]), ['What it is', 'Setup', 'Change size', 'Working a task']);

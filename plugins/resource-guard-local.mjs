@@ -318,6 +318,8 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
               await sleep(pollMs);
             }
           }
+          // The caller's `started` (plugins.md): the lock is held and the command starts now.
+          job.started?.();
           const started = Date.now();
           let r = { exitCode: 1, log: '' };
           let pid = null;
