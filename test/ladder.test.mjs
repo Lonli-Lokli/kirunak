@@ -52,6 +52,28 @@ test('a bad ladder refuses the workspace at load, naming the module and every pr
   });
 });
 
+// gulnya/builder-from-ladder AC-2: the workspace's `builder` entry, the rung it stands on and its tools.
+test('a builder entry loads as it is; none loads as null', async () => {
+  const builder = { rung: 'opus', tools: ['Read', 'Edit', 'Bash'] };
+  assert.deepEqual((await ladderWorkspace({ builder })).ws.builder, builder);
+  assert.equal((await ladderWorkspace()).ws.builder, null);
+});
+
+test('refused at load: a builder rung that names no rung, tools not a non-empty list of names, a key it does not take', async () => {
+  const tools = ['Read', 'Edit'];
+  for (const [builder, why] of [
+    [{ rung: 'haiku', tools }, /workspace\.mjs: builder\.rung "haiku" names no rung of the ladder \(sonnet, opus, fable\)/],
+    [{ tools }, /builder\.rung undefined names no rung of the ladder/],
+    [{ rung: 'opus', tools: [] }, /builder\.tools must be a non-empty list of tool names/],
+    [{ rung: 'opus', tools: 'Read, Edit' }, /builder\.tools must be a non-empty list of tool names/],
+    [{ rung: 'opus', tools: ['Read', ' '] }, /builder\.tools must be a non-empty list of tool names/],
+    [{ rung: 'opus', tools: ['Read, Edit'] }, /builder\.tools must be a non-empty list of tool names/],
+    [{ rung: 'opus', tools, effort: 'max' }, /builder takes only rung and tools \(its model and effort are its rung's\), not effort/],
+    ['opus', /builder must be an object such as/],
+  ]) await assert.rejects(ladderWorkspace({ builder }), (e) => e.code === 1 && why.test(e.message), JSON.stringify(builder));
+  await assert.rejects(ladderWorkspace({ ladder: HAIKU, builder: { rung: 'fable', tools } }), /names no rung of the ladder \(haiku, sonnet, opus\)/);
+});
+
 test('refused: a ladder that is not a non-empty list, or a rung that is not an object', () => {
   for (const bad of [undefined, null, {}, 'sonnet', []]) {
     assert.deepEqual(checkLadder(bad), ['the ladder must be a non-empty list of rungs, lowest first']);

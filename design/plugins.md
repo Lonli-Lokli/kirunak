@@ -101,6 +101,7 @@ export default {
     { model: 'opus', effort: 'high', mode: 'build', attempts: 1 },
     { model: 'fable', effort: 'high', mode: 'design', attempts: 1 },
   ],
+  builder: { rung: 'opus', tools: ['Read', 'Edit', 'Write', 'Bash'] },  // optional; none by default
   hook: { enabled: true, block: true, repeats: 2, commands: [] },
   compact: { enabled: true, handoverSize: 150000, midStepLimit: 167000, alsoIn: [] },
   kirunakRoot: '~/code/kirunak',      // kirunak's own checkout; optional
@@ -132,6 +133,17 @@ export default {
   and its two attempts are `k run`'s), or a design rung with a design rung directly below it (its build run is on the
   rung below, which must build). A design rung's attempt is a design run on its model and a fresh build run on the rung
   below.
+- **`builder`** (gulnya/builder-from-ladder) asks `k install` for a `builder` agent, the agent a session hands a build
+  step to: `{ rung, tools }`, `rung` the model of the ladder's rung it stands on, `tools` the tools it may use, a
+  non-empty list of names. Its model (or the rung's `id`), effort, `autoCompactWindow` and `cacheTtl` are the rung's,
+  as a rung agent's are; its tools are the list, written as the frontmatter's `tools` line and named in its body; its
+  words are kirunak's, templates/builder-agent.md. Judgement: the tools a build needs are each workspace's choice,
+  so kirunak names none, and the model and effort follow the ladder, so a rung's change reaches the builder with no
+  hand edit. `k install` writes it as it writes the rung agents (the marker line, a link written through, an unmarked
+  file replaced only with `--replace-agents`), and `k doctor` warns when the installed file is not, to the letter,
+  what `k install` would write, naming what differs. Without the key, no builder is written and `k doctor` names
+  none. The workspace is refused at load when `rung` names no rung, `tools` is not a non-empty list of names without
+  commas, or the entry has another key.
 - **`records`** names more files and folders as kirunak's records (`approval.md` §3, gulnya/kirunak-accept-shared-repo
   AC-5): never part of a task's own change, never blocking `k accept`, and committable naming an accepted task. Each
   is a path like the queue's, made real as the repos' roots are, a folder ending with a slash; one inside a repo counts

@@ -50,6 +50,7 @@ const HELP = `k: tasks the owner approves and agents cannot rewrite.
 Setup     k init --workspace <module> | k plugins | k doctor [--settings <file>] [--agents <dir>]
           k install [--settings <file>] [--skills <dir>] [--agents <dir>] [--replace-agents] [--git <repo>]... [--print]:
             the hooks, the skills, and a <model>-step agent for every rung of the workspace's ladder above the lowest;
+            the builder agent, on the rung and with the tools its builder entry names, when the workspace has one;
             the handover window in each workspace repo's own .claude/settings.local.json (never in --settings' file)
 Intake    k intake start <id> [--from <path>] [--title "..."] | k intake aspects <id>
           k intake question <id> --topic <t> "<question>" | k intake answer <id> Q-n "<verbatim>" --ruling "<ruling>"
