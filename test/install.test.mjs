@@ -293,15 +293,33 @@ test('--git keeps a repo\'s own kirunak/tasks/.gitignore lines and adds only the
   const r = repo(h.dir, 'weather');
   const file = join(r, 'kirunak', 'tasks', '.gitignore');
   mkdirSync(dirname(file), { recursive: true });
-  const own = '# Our own: screen recordings\n*.mov\n  */steps/**/*.log  \n*.xcresult/';
+  const own = '# Our own: screen recordings\n*.mov\n*/steps/**/*.log  \n  *.xcresult/';
   writeFileSync(file, own);
   const { actions } = install({ ...h, git: r });
   const text = readFileSync(file, 'utf8');
-  const lacking = NIVA.filter((l) => l !== '*/steps/**/*.log' && l !== '*.xcresult/');
+  // git drops a line's trailing spaces but keeps its leading ones: '  *.xcresult/' ignores nothing, so it is lacking.
+  const lacking = NIVA.filter((l) => l !== '*/steps/**/*.log');
   assert.equal(text, `${own}\n${lacking.join('\n')}\n`);
   assert.ok(actions.some((a) => a.startsWith(`added to ${file} the lines it lacked`) && a.endsWith('commit it')));
   install({ ...h, git: r });
   assert.equal(readFileSync(file, 'utf8'), text);
+});
+
+test('--git keeps untouched a CRLF kirunak/tasks/.gitignore that has every line, as git reads it (E-1)', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  const file = join(r, 'kirunak', 'tasks', '.gitignore');
+  mkdirSync(dirname(file), { recursive: true });
+  // git drops a line's trailing '\r' before its trailing spaces, so each of these lines ignores as its pattern does.
+  const own = `# Our own\r\n${NIVA.map((l, i) => (i === 5 ? `${l}  ` : l)).join('\r\n')}\r\n`;
+  writeFileSync(file, own);
+  const { actions } = install({ ...h, git: r });
+  assert.equal(readFileSync(file, 'utf8'), own);
+  assert.ok(actions.includes(`${file} has every raw-output line; kept`));
+  mkdirSync(join(r, 'kirunak', 'tasks', 't', 'steps', 'S-1'), { recursive: true });
+  writeFileSync(join(r, 'kirunak', 'tasks', 't', 'steps', 'S-1', 'run.log'), 'x\n');
+  const untracked = execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'kirunak/tasks/t'], { cwd: r, encoding: 'utf8' });
+  assert.equal(untracked.trim(), '', 'git reads the CRLF line with trailing spaces as its pattern');
 });
 
 test('--git --print writes no kirunak/tasks/.gitignore and says what it would write or add (AC-3)', () => {
