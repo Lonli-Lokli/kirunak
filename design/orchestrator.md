@@ -194,7 +194,9 @@ pending  →  ready  →  running  →  done
     step records in its `heavy-<k>.json` the checkout it started on (`lib/checkout.mjs`): the folder of its command's
     first `cd <dir>` (`~` and `$HOME` expanded, quotes taken off, relative to the task repo's root), its `git rev-parse
     HEAD` and the sha256 of its `git status --porcelain`, `git diff HEAD` and each untracked file's contents (A-1: the
-    status alone names files, not contents); `null` with no `cd`, a folder outside a git work tree, or a git command
+    status alone names files, not contents), all read from the work tree's top folder and with the task's own folder
+    left out when the work tree holds it (k run writes progress, plan and failure reports there between two jobs);
+    `null` with no `cd`, a folder outside a git work tree, or a git command
     that fails. Before a rerun after a failure of its own, `k run`'s pass compares: when that job exited
     other than 0 and 124 and the checkout is the same now, the step does not start and stops as above, its why `failed
     on an unchanged checkout (<dir> at <short head>): a rerun would fail the same way`. A new commit or a changed
