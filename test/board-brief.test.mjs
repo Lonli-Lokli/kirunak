@@ -188,7 +188,7 @@ test('a step k run stopped for the owner: the brief board opens with Stopped for
   const [first] = b.groups;
   assert.deepEqual([first.name, first.count, first.ids], ['Stopped for you', 1, ['weather/hourly-chart']]);
   // The title and id fill the first line, so what happened opens the second, before why.
-  assert.deepEqual(first.lines, [`${r.title} (weather/hourly-chart)`, 'S-2 stopped, failed on every rung: exit 1', 'read kirunak/tasks/hourly-chart/steps/S-2/ (failure-1.md … failure-4.md)']);
+  assert.deepEqual(first.lines, [`${r.title} (weather/hourly-chart)`, 'S-2 stopped, failed on every rung: exit 1', 'take [escalate] off S-2\'s header in plan.md, then k run']);
   assert.ok(first.lines.length <= 3 && first.lines.every((l) => l.length <= 80), first.lines.join('\n'));
   assert.ok(b.text.startsWith(`Made at 2026-11-07 12:00.\n\nStopped for you (1)\n${first.lines.join('\n')}\n\nWorking on now (`), b.text);
   assert.equal(b.ids[0], 'weather/hourly-chart');
