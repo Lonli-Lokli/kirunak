@@ -424,6 +424,21 @@ test('a [heavy] step whose checkout moved after its job failed runs again: a new
   assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
 });
 
+test('a [heavy] step whose checkout changed only in a file\'s contents runs again: a further uncommitted edit to a modified file, or to an untracked one, gives a second job (gulnya/heavy-retry-unchanged AC-2, A-1)', async () => {
+  for (const file of ['a.txt', 'new.txt']) {
+    const c = checkoutFixture();
+    // Modified (or untracked) before the first job, so `git status --porcelain` reads the same after the second edit.
+    writeFileSync(join(c.dir, file), 'edited once\n');
+    const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+    const jobs = [];
+    heavyGuard(w, jobs, (n) => (n === 1 && writeFileSync(join(c.dir, file), 'edited twice\n'), { exitCode: 1, log: 'red' }));
+    fakeRunner(w);
+    const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+    assert.equal(jobs.length, 2, file);
+    assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md', file);
+  }
+});
+
 test('a [heavy] step that timed out (exit 124) runs again on the same checkout: two jobs (gulnya/heavy-retry-unchanged AC-3, D-2)', async () => {
   const c = checkoutFixture();
   const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
