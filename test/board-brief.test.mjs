@@ -123,6 +123,9 @@ test('the machine\'s line: the lock, the heavy jobs waiting, the running steps a
 
 test('k board --brief prints the text; with --json { made, text, ids, groups, machine }, text exactly the printed text; it writes nothing', async () => {
   const w = await fixture();
+  // The CLI reads the real clock, not NOW: weather/recent is accepted today, so it stays done this week whatever the
+  // date the test runs on (the board hides a done task a week after it, lib/board-model.mjs model).
+  writeFileSync(join(w.weather, 'kirunak', 'tasks', 'recent', 'done.json'), JSON.stringify({ accepted: new Date().toISOString().slice(0, 10) }));
   const plain = k(w.home, ['board', '--brief']);
   assert.equal(plain.status, 0, plain.stderr);
   assert.match(plain.stdout, /^Made at \d{4}-\d{2}-\d{2} \d{2}:\d{2}\.\n\nWorking on now \(0\)\n\nProposed \(1\)\nweather\/offline-forecast: proposed, 0 of 4 met\n\n/);
