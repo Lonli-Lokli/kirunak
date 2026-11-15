@@ -134,7 +134,9 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   <kirunak>/hooks/git-commit-msg.mjs "$@"`), the check of an accepted task on the message the commit keeps; a repo's
   own `commit-msg` gets the line printed, to add before its first `exit`. It writes the starter `.slapignore` (§2)
   when the repo has none, keeps one that is there, and registers the repo in the record, so `--all` finds it.
-  `--print` shows the starter.
+  `--print` shows the starter. It writes `kirunak/tasks/.gitignore` with niva's lines for raw run output (game-minesweeper
+  bd58b693), or appends only the pattern lines a file there lacks, the owner's kept; never the root `.gitignore`
+  (gulnya/close-leaves-untracked-step-files AC-3, E-1). The owner commits it.
 - **Rolling out to repos that already have the hooks**: run `k install --git` on each (the hooks are already there;
   the starter and the registry are new), then the owner reads the starters and runs `k slapignore approve --all`,
   then each starter is committed (it passes, being the approved one). Until a repo's starter is committed, its prose
