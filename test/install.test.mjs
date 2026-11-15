@@ -293,11 +293,12 @@ test('--git keeps a repo\'s own kirunak/tasks/.gitignore lines and adds only the
   const r = repo(h.dir, 'weather');
   const file = join(r, 'kirunak', 'tasks', '.gitignore');
   mkdirSync(dirname(file), { recursive: true });
-  const own = '# Our own: screen recordings\n*.mov\n  */steps/**/*.log  \n*.xcresult/';
+  const own = '# Our own: screen recordings\n*.mov\n*/steps/**/*.log  \n  *.xcresult/';
   writeFileSync(file, own);
   const { actions } = install({ ...h, git: r });
   const text = readFileSync(file, 'utf8');
-  const lacking = NIVA.filter((l) => l !== '*/steps/**/*.log' && l !== '*.xcresult/');
+  // git drops a line's trailing spaces but keeps its leading ones: '  *.xcresult/' ignores nothing, so it is lacking.
+  const lacking = NIVA.filter((l) => l !== '*/steps/**/*.log');
   assert.equal(text, `${own}\n${lacking.join('\n')}\n`);
   assert.ok(actions.some((a) => a.startsWith(`added to ${file} the lines it lacked`) && a.endsWith('commit it')));
   install({ ...h, git: r });
