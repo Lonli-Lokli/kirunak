@@ -439,6 +439,29 @@ test('a [heavy] step whose checkout changed only in a file\'s contents runs agai
   }
 });
 
+test('a [heavy] step that cds into a subfolder of a checkout holding an untracked file, or into the task\'s own repo, still stops on an unchanged checkout: one job (gulnya/heavy-retry-unchanged AC-1, review-1)', async () => {
+  // A subfolder: git hash-object reads the untracked paths from the work tree's top folder.
+  const c = checkoutFixture();
+  mkdirSync(join(c.dir, 'sub'));
+  writeFileSync(join(c.dir, 'sub', 'new.txt'), 'untracked\n');
+  const w = await approvedWorkspace(heavyIn(`cd ${join(c.dir, 'sub')} && npm test`));
+  const jobs = [];
+  heavyGuard(w, jobs, () => ({ exitCode: 1, log: 'red' }));
+  fakeRunner(w);
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
+  assert.equal(jobs.length, 1);
+  assert.match(r.stopped, /^S-1 failed on an unchanged checkout /);
+  // The task's own repo: k run's own writes in the task folder between the two jobs are no change.
+  const t = await approvedWorkspace(heavyIn('cd ROOT && npm test'));
+  writeFileSync(join(t.p.dir, 'plan.md'), readFileSync(join(t.p.dir, 'plan.md'), 'utf8').replace('cd ROOT', `cd ${t.p.root}`));
+  const own = [];
+  heavyGuard(t, own, () => ({ exitCode: 1, log: 'red' }));
+  fakeRunner(t);
+  const s = await run({ ws: t.ws, id: t.id, watch: true, intervalMs: 20 });
+  assert.equal(own.length, 1);
+  assert.match(s.stopped, /^S-1 failed on an unchanged checkout /);
+});
+
 test('a [heavy] step that timed out (exit 124) runs again on the same checkout: two jobs (gulnya/heavy-retry-unchanged AC-3, D-2)', async () => {
   const c = checkoutFixture();
   const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
