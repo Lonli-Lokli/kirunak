@@ -440,6 +440,60 @@ test('a link to nothing is refused by name', () => {
   assert.throws(() => install({ ...h, ws: ws() }), /opus-step\.md is a link to .*gone\.md, which does not exist/);
 });
 
+// gulnya/builder-from-ladder AC-1, AC-2, AC-3: the builder from the rung its entry names, with the entry's tools.
+const TOOLS = ['Read', 'Edit', 'Bash', 'mcp__docs__search'];
+
+test('a ladder whose builder rung is on another model writes builder.md with that model, that effort and the workspace\'s tools', () => {
+  const h = home();
+  const ladder = [{ model: 'haiku' }, { model: 'sonnet', effort: 'medium', mode: 'build' }, { model: 'opus', effort: 'high', mode: 'design' }];
+  const { actions } = install({ ...h, ws: ws({ ladder, builder: { rung: 'sonnet', tools: TOOLS } }) });
+  const builder = agent(h, 'builder');
+  assert.match(builder, /^---\nname: builder\ndescription: "Builds one step a session hands it: .*On the sonnet rung's model and effort.*"\nmodel: sonnet\neffort: medium\ntools: Read, Edit, Bash, mcp__docs__search\n---\n/);
+  assert.ok(builder.includes(`\n${MARKER}\n`));
+  assert.ok(builder.includes('You have Read, Edit, Bash and mcp__docs__search only.'));
+  assert.match(builder, /return `NEEDS-TOOLS`/);
+  assert.ok(!/\{\{|opus|Glob|Grep|TaskStop|gulnya|owner 20/.test(builder), 'every slot filled, nothing of another rung or a portfolio');
+  assert.ok(actions.includes(`wrote the builder agent: ${join(h.agentsDir, 'builder.md')}`));
+});
+
+test('the builder takes its rung\'s id, autoCompactWindow and cacheTtl as the rung agents do', () => {
+  const h = home();
+  const ladder = [LADDER[0], { ...LADDER[1], id: 'claude-opus-5-5', autoCompactWindow: 300_000, cacheTtl: '5m' }, LADDER[2]];
+  install({ ...h, ws: ws({ ladder, builder: { rung: 'opus', tools: ['Read'] } }) });
+  assert.match(agent(h, 'builder'), /\nmodel: claude-opus-5-5\neffort: high\nautoCompactWindow: 300000\ntools: Read\nexperimental:\n {2}cacheTtl: 5m\n---\n/);
+  assert.ok(agent(h, 'builder').includes('You have Read only.'));
+});
+
+test('no builder entry, no builder.md', () => {
+  const h = home();
+  const { actions } = install({ ...h, ws: ws() });
+  assert.ok(!existsSync(join(h.agentsDir, 'builder.md')));
+  assert.ok(!actions.some((a) => a.includes('builder')));
+});
+
+test('the builder follows the rung agents\' rules: kept, rewritten when its tools change, an unmarked one replaced only with --replace-agents, written through a link', () => {
+  const h = home();
+  const repoAgents = join(h.dir, 'portfolio', 'claude', 'agents');
+  mkdirSync(repoAgents, { recursive: true });
+  mkdirSync(h.agentsDir, { recursive: true });
+  const own = '---\nname: builder\nmodel: opus\neffort: high\ntools: Read\n---\nWritten by hand.\n';
+  writeFileSync(join(repoAgents, 'builder.md'), own);
+  const path = join(h.agentsDir, 'builder.md');
+  symlinkSync(join(repoAgents, 'builder.md'), path);
+  const real = realpathSync(join(repoAgents, 'builder.md'));
+  const entry = (tools) => ws({ builder: { rung: 'opus', tools } });
+  assert.throws(() => install({ ...h, ws: entry(TOOLS) }), (e) => e.message.includes(`${real} is an agent kirunak did not write`) && e.message.includes('--replace-agents'));
+  assert.equal(readFileSync(real, 'utf8'), own);
+  assert.match(install({ ...h, ws: entry(TOOLS), print: true }).actions.join('\n'), /would refuse: .*builder\.md is an agent kirunak did not write/);
+  assert.ok(install({ ...h, ws: entry(TOOLS), replaceAgents: true }).actions.includes(`replaced the builder agent: ${path} → ${real}`));
+  assert.ok(lstatSync(path).isSymbolicLink(), 'the link kept');
+  assert.match(readFileSync(real, 'utf8'), /\nmodel: opus\neffort: high\ntools: Read, Edit, Bash, mcp__docs__search\n/);
+  assert.ok(install({ ...h, ws: entry(TOOLS) }).actions.includes(`${path} → ${real} is already the builder agent the ladder makes`));
+  assert.ok(install({ ...h, ws: entry(['Read']) }).actions.includes(`rewrote the builder agent: ${path} → ${real}`));
+  assert.match(readFileSync(real, 'utf8'), /\ntools: Read\n/);
+  assert.ok(install({ ...h, ws: entry(['Read']), print: true }).actions.includes(`${path} → ${real} is already the builder agent the ladder makes`));
+});
+
 test('config.json: the ladder with each rung\'s agents, the hook switches, the repos and the workspace, written every run', () => {
   const h = home();
   const now = new Date('2026-10-25T12:00:00Z');

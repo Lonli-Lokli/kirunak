@@ -85,6 +85,37 @@ test('the workspace\'s own agents on a rung are checked the same, through a link
   assert.ok(w.check().some(([ok, l]) => ok && l === `rung agent fable-step: ${join(w.agentsDir, 'fable-step.md')}, claude-fable-5-1, high`));
 });
 
+// gulnya/builder-from-ladder AC-4: the builder's line, after the rung agents, the whole file against what k install writes.
+test('the builder: ok when it is what k install writes; a WARN naming run k install when it differs or is missing, --replace-agents when unmarked', async () => {
+  const w = await installed({ builder: { rung: 'opus', tools: ['Read', 'Edit', 'Bash'] } });
+  const path = join(w.agentsDir, 'builder.md');
+  const line = () => w.check().filter(([, l]) => l.startsWith('builder agent'));
+  assert.deepEqual(line(), [[true, `builder agent: ${path}, opus, high, tools Read, Edit, Bash`]]);
+  assert.equal(w.check().findIndex(([, l]) => l.startsWith('builder agent')), 3, 'after the rung agents');
+  const text = readFileSync(path, 'utf8');
+  writeFileSync(path, text.replace('effort: high', 'effort: xhigh'));
+  assert.deepEqual(line(), [['warn', `builder agent: ${path} is not what the ladder writes (its effort): run k install`]]);
+  writeFileSync(path, text.replace('model: opus', 'model: sonnet').replace('tools: Read, Edit, Bash', 'tools: Read'));
+  assert.deepEqual(line(), [['warn', `builder agent: ${path} is not what the ladder writes (its model, tools): run k install`]]);
+  writeFileSync(path, text.replace('use the tools you have', 'use any tool'));
+  assert.deepEqual(line(), [['warn', `builder agent: ${path} is not what the ladder writes (its body): run k install`]]);
+  const repo = join(w.dir, 'portfolio');
+  mkdirSync(repo);
+  writeFileSync(join(repo, 'builder.md'), '---\nname: builder\nmodel: opus\neffort: high\ntools: Read, Edit, Bash\n---\nWritten by hand.\n');
+  rmSync(path);
+  symlinkSync(join(repo, 'builder.md'), path);
+  const real = realpathSync(path);
+  assert.deepEqual(line(), [['warn', `builder agent: ${path} → ${real} is not one kirunak wrote (no marker line): run k install --replace-agents`]]);
+  rmSync(path);
+  assert.deepEqual(line(), [['warn', `builder agent: ${path} is missing: run k install`]]);
+  assert.deepEqual(w.fails(), [], 'a warning, never a FAIL');
+});
+
+test('a workspace with no builder entry gets no builder line', async () => {
+  const w = await installed();
+  assert.ok(!w.check().some(([, l]) => l.includes('builder')));
+});
+
 test('modelSettings: Opus at xhigh disagrees with the rung at high, and any effort for Fable FAILs (AC-19, AC-20)', async () => {
   const w = await installed();
   w.settings((json) => {
