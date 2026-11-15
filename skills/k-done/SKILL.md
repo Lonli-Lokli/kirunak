@@ -9,7 +9,10 @@ The owner says when a task is done. You record nothing yourself: the acceptance 
 
 1. **Say what is done, in a few lines**: the task id, the commits (short hash and subject), the builds made. List
    anything uncommitted, unpushed or unverified, and ask whether it belongs to the task. Commit only if the owner
-   says so.
+   says so. Then run `k accept <id> --dry-run` (it writes nothing) and show the stray files it names as printed: a
+   file in the task's folder that git does not hold as it stands (raw output, an uncommitted report or checklist)
+   makes the acceptance refuse, so ask for each whether to commit it, move it out (into evidence/, or a rule in
+   kirunak/tasks/.gitignore) or delete it.
 2. **Show what the acceptance removes**: run `k worktrees --closing <id>` and show its lines as printed. Each worktree
    that will go has one line of the folders it holds besides build output, with their sizes; each that stays says
    why. `k accept` removes those worktrees whole, files git ignores included, so ask the owner to save first what they

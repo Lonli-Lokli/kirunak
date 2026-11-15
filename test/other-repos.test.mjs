@@ -351,6 +351,10 @@ function reviewed(w) {
   const rows = ['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file src/forecast.txt:1 |`).join('\n');
   writeFileSync(join(w.p.dir, 'review.md'), `---\ntask: ${w.id}\nhead: ${head}\nbase: ${first}\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${rows}\n\nverdict: met\n`);
   reviewsRan(w.p.dir);
+  // The task's files committed, as a real task's are: k accept refuses one git does not hold as it stands
+  // (gulnya/close-leaves-untracked-step-files AC-1).
+  sh(w.weather, 'git', ['add', '-A', '--', 'kirunak/tasks/offline-forecast']);
+  sh(w.weather, 'git', ['commit', '-q', '-m', `kirunak: ${w.id}'s plan, review and records`]);
 }
 const accepts = (w, why) => assert.equal(accept({ ws: w.ws, id: w.id, dryRun: true }).state, 'would accept', why);
 function refuses(w, rows, where) {

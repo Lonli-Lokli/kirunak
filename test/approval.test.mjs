@@ -440,10 +440,14 @@ test('accept with a review: every item the owner checks is ticked, or it refuses
   reviewsRan(taskDir(weather));
   gitCommitAll(weather, 'review');
   assert.throws(() => accept({ ws, id: ID }), new RegExp(`2 unticked item\\(s\\), 2 not in checklist\\.md yet \\(k checklist ${ID} writes them from review\\.md\\):\n {2}- \\[ \\] AC-3 On a phone: restart offline \\(review\\.md\\)\n {2}- \\[ \\] E-1`));
+  // The session commits checklist.md and the owner's ticks, as a real task's are: k accept refuses a file of the task
+  // that git does not hold as it stands (gulnya/close-leaves-untracked-step-files AC-1).
   generate(ws, ID);
+  gitCommitAll(weather, 'checklist');
   assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 2 unticked item\(s\):\n {2}- \[ \] AC-3 On a phone: restart offline \(review\.md\)\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
   const file = join(taskDir(weather), 'checklist.md');
   writeFileSync(file, readFileSync(file, 'utf8').replace('- [ ] AC-3', '- [x] AC-3'));
+  gitCommitAll(weather, 'AC-3 ticked');
   assert.throws(() => accept({ ws, id: ID }), /checklist\.md has 1 unticked item\(s\):\n {2}- \[ \] E-1 Read: the age line \(review\.md\)$/);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: '  ' }), /needs its reason/);
   // Left open: AC-3 unticked again, and E-1's item gone from checklist.md.

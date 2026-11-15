@@ -39,6 +39,12 @@ const headOf = (dir) => sh(dir, 'git', ['rev-parse', '--short', 'HEAD']).trim();
 const firstOf = (w) => sh(w.weather, 'git', ['log', '--diff-filter=A', '--format=%h', '--', 'kirunak/approvals/offline-forecast.json']).trim();
 const review = (w, base) => `---\ntask: ${w.id}\nhead: ${headOf(w.weather)}\n${base === null ? '' : `base: ${base}\n`}---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n${['AC-1', 'AC-2', 'AC-3', 'E-1'].map((id) => `| ${id} | met | file docs/offline.md:1 |`).join('\n')}\n\nverdict: met\n`;
 const given = (w) => join(w.p.dir, 'steps', 'S-2', 'given.json');
+// The task's files committed, as a real task's are: k accept refuses one git does not hold as it stands
+// (gulnya/close-leaves-untracked-step-files AC-1).
+const records = (w) => {
+  sh(w.weather, 'git', ['add', '-A', '--', 'kirunak/tasks/offline-forecast']);
+  sh(w.weather, 'git', ['commit', '-q', '-m', `kirunak: ${w.id}'s plan, review and records`]);
+};
 
 test('k review check, a review step\'s finish and k accept refuse a review whose base is not the one kirunak gave; one briefed before is not checked (AC-4, E-5)', async () => {
   const w = await approvedWorkspace(PLAN);
@@ -75,6 +81,7 @@ test('k review check, a review step\'s finish and k accept refuse a review whose
   assert.throws(() => accept({ ws: w.ws, id: w.id, dryRun: true }), new RegExp(`not a review k accept takes:\\n {2}line 1: base ${wrong} is not ${first}`));
   rmSync(given(w));
   assert.equal(k(w.home, ['review', 'check', w.id]).status, 0, 'a review briefed before kirunak kept its base is not checked');
+  records(w);
   assert.equal(accept({ ws: w.ws, id: w.id, dryRun: true }).state, 'would accept');
 });
 
@@ -90,6 +97,7 @@ test('k accept refuses a task whose change in another repo changed after the hea
   await steps.brief({ ws: w.ws, id: w.id, step: 'S-2', session: 'rev-1' });
   writeFileSync(join(w.p.dir, 'review.md'), review(w, firstOf(w)));
   reviewsRan(w.p.dir);
+  records(w);
   const ok = () => assert.equal(accept({ ws: w.ws, id: w.id, dryRun: true }).state, 'would accept');
   const refused = (rows) => assert.throws(() => accept({ ws: w.ws, id: w.id, dryRun: true }), (e) => {
     assert.match(e.message, /its work changed after review\.md's head \w+ \(in hub, after the head it saw there\), in \d+ file\(s\) the review never saw/);
