@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { hold } from '../lib/approval.mjs';
@@ -509,4 +509,54 @@ outputs: steps/S-3/answer.md
   assert.match(r.stderr, /cannot finish a step:\n.*is on hold/);
   assert.notEqual(statesOf(w)['S-3'], 'done');
   assert.doesNotMatch(existsSync(join(w.p.dir, 'progress.md')) ? progress(w) : '', /S-3 finished/);
+});
+
+// A step's records, the top-level .md, .json and .txt of its folder that are not ignored, committed by its finish
+// with progress.md; anything else unignored there refuses it (gulnya/close-leaves-untracked-step-files AC-2, E-2).
+const TASK = 'kirunak/tasks/offline-forecast';
+
+test('k step finish commits the step\'s brief.md, report.md and given.json with progress.md after its evidence, and leaves nothing of the step untracked (gulnya/close-leaves-untracked-step-files AC-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  assert.equal(k(w.home, ['step', 'brief', w.id, 'S-1']).status, 0);
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'steps/S-1/given.json', '{}\n');
+  steps.runRecord(w.p, 'S-1', 'impl-1').ended({ exitCode: 0 });
+  assert.ok(existsSync(join(w.p.dir, 'steps', 'S-1', 'run-1.json')) && existsSync(join(w.p.dir, 'steps', 'S-1', '.gitignore')), 'k run\'s own record and the step\'s .gitignore beside the records');
+  put(w, 'evidence/S-1-cache-sizes.tsv', 'days\tbytes\n3\t2048\n');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(git('show', '--name-only', '--format=', 'HEAD').split('\n').sort(),
+    [`${TASK}/progress.md`, `${TASK}/steps/S-1/brief.md`, `${TASK}/steps/S-1/given.json`, `${TASK}/steps/S-1/report.md`], 'the records commit holds exactly the records and progress.md');
+  assert.match(git('show', `HEAD:${TASK}/progress.md`), /S-1 finished\n?$/, 'progress.md as committed has the finished line');
+  assert.equal(git('show', '--name-only', '--format=%s', 'HEAD~1'),
+    `weather/offline-forecast S-1: the step's evidence\n\n${TASK}/evidence/S-1-cache-sizes.tsv`, 'the evidence commit comes first, as before');
+  assert.equal(git('status', '--porcelain', '--untracked-files=all', '--', `${TASK}/steps/S-1`, `${TASK}/progress.md`), '',
+    'nothing of the step is left untracked or changed; its run-1.json and .gitignore stay ignored');
+  assert.equal(git('ls-files', '--', `${TASK}/steps/S-1/run-1.json`, `${TASK}/steps/S-1/.gitignore`), '', 'kirunak\'s own files stay out of git');
+});
+
+test('a finish with raw output in its step folder (xml/TEST-x.xml, a log) is refused before any commit or line, naming each file and the ways out (gulnya/close-leaves-untracked-step-files AC-2, E-2)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv');
+  put(w, 'steps/S-1/xml/TEST-x.xml', '<testsuite/>\n');
+  put(w, 'steps/S-1/gradle.log', 'BUILD SUCCESSFUL\n');
+  const head = git('rev-parse', 'HEAD');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 1, r.stderr);
+  for (const f of ['steps/S-1/xml/TEST-x.xml', 'steps/S-1/gradle.log', 'evidence/', 'kirunak/tasks/.gitignore']) assert.ok(r.stderr.includes(f), `names ${f}: ${r.stderr}`);
+  assert.ok(!r.stderr.includes('steps/S-1/report.md'), 'a record is never raw output');
+  assert.equal(git('rev-parse', 'HEAD'), head, 'no commit, not even the evidence one');
+  assert.doesNotMatch(progress(w), /S-1 finished/);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'running');
+
+  rmSync(join(w.p.dir, 'steps', 'S-1', 'xml'), { recursive: true });
+  rmSync(join(w.p.dir, 'steps', 'S-1', 'gradle.log'));
+  const again = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'done');
 });
