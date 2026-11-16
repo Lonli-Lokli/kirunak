@@ -30,6 +30,7 @@ import * as cost from '../lib/cost.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
 import * as keeper from '../lib/keeper.mjs';
 import * as worktrees from '../lib/worktrees.mjs';
+import * as closing from '../lib/close.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
@@ -69,6 +70,7 @@ Usage     k usage [--from <ISO>] [--to <ISO>] [--out <dir>]: the weekly usage re
 Owner     k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>] [--no-queue]
           k accept <id> [--checklist-open "<why>"] [--session <id>]: then takes the session (or $CLAUDE_CODE_SESSION_ID)
             out of every worktree's lock and removes the merged worktrees, printing each removed and kept
+            (a release with final steps not finished is signed off instead: they run, and kirunak closes it once they pass)
           k hold <id> --why "..." | k resume <id>
           k step stop <id> S-n --why "...": ends a running step the owner stops; counts no failure, the next brief reads why
           k amend decline <id> A-n --why "..." | k queue add|move <id> [--first|--last|--before <id>|--after <id>]
@@ -455,7 +457,8 @@ const VERBS = {
     if (sub === 'finish') {
       const r = steps.finish({ ws, id, step });
       if (r.state === 'waiting-owner') return { code: 1, text: `${id} ${step} waits for the owner: ${r.owner}` };
-      return { text: `${id} ${step}: done` };
+      const c = await closing.closeIfFinal({ ws, id, step });
+      return { text: `${id} ${step}: done${c ? `\n${id}: done, its final steps passed` : ''}` };
     }
     const why = need(flags.why, '--why "<why>"');
     // The owner's stop (gulnya/escalation-counts-non-work-failures): no failure counted; the freeze hook refuses it
@@ -533,23 +536,14 @@ const VERBS = {
     const id = need(pos[0], 'task id');
     if (flags['dry-run']) {
       const r = approval.accept({ ws, id, checklistOpen: flags['checklist-open'], dryRun: true });
-      return { ...r, text: `would accept ${id} (${r.review}, verdict: ${r.verdict})${r.openItems.length ? `, with ${r.openItems.length} checklist item(s) open` : ''}${offMain(r)}` };
+      const what = r.final.length ? `would sign off ${id}: final step(s) ${r.final.join(', ')} queued, and it closes once they pass` : `would accept ${id}`;
+      return { ...r, text: `${what} (${r.review}, verdict: ${r.verdict})${r.openItems.length ? `, with ${r.openItems.length} checklist item(s) open` : ''}${offMain(r)}` };
     }
-    // The task's cost, read before the accept, which records it in done.json and commits cost.md rendered from it; a
-    // cost that cannot be read (the records, or a baseline that does not parse) is recorded as why and never stops
-    // the accept.
-    let taskCost;
-    try {
-      const c = await cost.costOf(ws, id);
-      const b = baselineOf(ws);
-      taskCost = cost.summary(c, b ? cost.compare(c, b) : []);
-    } catch (e) {
-      taskCost = { error: e.message };
-    }
-    const r = await approval.accept({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', cost: taskCost });
-    // Once the acceptance is committed, the merged worktrees go (approval.md §4), the session that runs it first taken
-    // out of every worktree's lock; nothing there undoes or fails it.
-    const w = await worktrees.worktrees({ ws, closing: id, remove: true, session: session(flags) });
+    // The close (lib/close.mjs): the cost, the acceptance, the merged worktrees; a release with final steps not
+    // finished is signed off instead, and kirunak closes it once they pass (final.mjs).
+    const r = await closing.close({ ws, id, checklistOpen: flags['checklist-open'], via: flags.via || 'shell', session: session(flags) });
+    if (r.state === 'final') return { ...r, text: `${id}: signed off; final step(s) ${r.final.join(', ')} queued, and kirunak closes it once they pass${offMain(r)}` };
+    const w = r.worktrees;
     const text = `${id}: done${flags['checklist-open'] ? ` (checklist open: ${flags['checklist-open']})` : ''}${offMain(r)}`;
     return { ...r, worktrees: w, text: [text, ...worktrees.lines(w)].join('\n') };
   },
@@ -780,7 +774,7 @@ const VERBS = {
       approve.length ? ['to approve:', ...approve.map(line('approve'))].join('\n') : 'nothing to approve',
       amendments.length ? ['amendments to approve:', ...amendments.map((x) => waiting.amendmentLine(x))].join('\n') : 'no amendment to approve',
       // Under an accept row its later commits block, each file with its commit and task, as k accept names them (AC-6).
-      accept.length ? ['to accept:', ...accept.flatMap((x) => [line('accept')(x), ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
+      accept.length ? ['to accept:', ...accept.flatMap((x) => [`${line('accept')(x)}${x.final?.length ? ` (signs off: final step(s) ${x.final.join(', ')} queued, closed once they pass)` : ''}`, ...waiting.blockingLines(x)])].join('\n') : 'nothing to accept',
       waiting.draftsLine(drafts),
     ].join('\n');
     return { quadDamage, bugs, approve, accept, amendments, hold, start, drafts, stopped, text };
