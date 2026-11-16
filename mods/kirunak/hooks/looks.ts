@@ -37,7 +37,7 @@ export type Stage = keyof typeof STAGES
 export const stateOf = (stage: string): State => (STAGES as Record<string, State>)[stage] ?? 'na'
 
 // A task's state as k names it (lib/state.mjs) as a chip (AC-8): the stage nearest it, the state itself the word.
-// Running while a session works on it or reviews it; done once done; waits for the owner while it is proposed,
+// Running while a session works on it, reviews it or runs a signed-off release's final steps; done once done; waits for the owner while it is proposed,
 // reviewed or awaits the owner, and while it is parked or on hold, which the owner lifts; failed when it is blocked or
 // stale; not reached while it is a draft or queued, waiting its turn and no one's choice. A state of no known name is
 // not reached.
@@ -51,6 +51,7 @@ const TASK_STAGES: Readonly<Record<string, Stage>> = {
   'in review': 'reviewing',
   reviewed: 'waits',
   'awaiting owner': 'waits',
+  final: 'started',
   done: 'done',
   'on hold': 'paused',
   stale: 'failed',

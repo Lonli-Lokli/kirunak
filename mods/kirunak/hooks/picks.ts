@@ -243,7 +243,7 @@ const groupChip = (g: BriefGroup): KirunakChip => {
   const stage = GROUP_CHIPS[g.name]
   return stage !== undefined ? { stage, word: g.name.toLowerCase() } : taskChip(g.name.toLowerCase())
 }
-const STATE_WORDS = new Set(['draft', 'proposed', 'queued', 'parked', 'blocked', 'in progress', 'in review', 'reviewed', 'awaiting owner', 'done', 'on hold', 'stale'])
+const STATE_WORDS = new Set(['draft', 'proposed', 'queued', 'parked', 'blocked', 'in progress', 'in review', 'reviewed', 'awaiting owner', 'final', 'done', 'on hold', 'stale'])
 // The brief's "Made at 2026-11-07 12:00" in words: "made today, 12:00".
 const madeWord = (made: string, now: number): string => {
   const time = /\d{2}:\d{2}/.exec(made)?.[0]
