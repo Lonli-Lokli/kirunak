@@ -331,11 +331,15 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
   the run are read once, only when such a branch is a candidate. Review & merge's own removal of the branch it has just
   merged leaves the run out: the run on that bug is its own;
 - it has no uncommitted or untracked change;
-- no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS and Windows
-  in any case, on Windows with either slash): a task that still needs a worktree writes its path so. The files are
-  read one at a time in one walk, so a task's evidence costs time, never memory; one over 4 MB, a binary one (a NUL
-  byte in its first 8,000 bytes, git's own test, read no further) and one that cannot be read name nothing
-  (gulnya/worktrees-read-oom);
+- no open task but the one accepted names its path in one of its written files, absolute or from `~` (on macOS and
+  Windows in any case, on Windows with either slash): a task that still needs a worktree writes its path so. Its
+  written files are matched by name, `task.md`, `plan.md`, `notes.md`, `progress.md` and `review.md` in the task
+  folder and `report.md` and `needs.json` in a step's folder `steps/S-<n>/`; nothing else names a worktree, whatever
+  its extension (a log, evidence, a brief, a diff, an amendment, a handoff), since a path in a tool's output (a build's
+  log, a saved `k worktrees` run, the cache prune's "kept <sha>: locked by <path>") says nothing about whether the
+  task still needs it (gulnya/worktree-sweep-keeps-stale D-1). The files are read one at a time, so a task's writing
+  costs time, never memory; one over 4 MB, a binary one (a NUL byte in its first 8,000 bytes, git's own test, read no
+  further) and one that cannot be read name nothing (gulnya/worktrees-read-oom);
 - no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
   Linux `/proc/<pid>/cwd` and `exe`, on Windows one PowerShell `Get-CimInstance Win32_Process` call, whose
   ExecutablePath inside it is a process running from it and whose CommandLine naming it (as a task's file would) is a
