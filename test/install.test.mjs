@@ -264,6 +264,125 @@ test('--git follows core.hooksPath', () => {
   assert.ok(!existsSync(join(r, '.git', 'hooks', 'prepare-commit-msg')));
 });
 
+// gulnya/kirunak-install-dry-run: a hook runs kirunak's hook however it spells the path, and a registered repo is
+// reported as registered.
+
+// katyafm's kirunak block in its pre-commit, verbatim (the task's evidence/S-0-before.txt, its lines 59-62).
+const KATYAFM_BLOCK = [
+  '# kirunak: a frozen task matches its approval, owner-only records, intake.md append-only (kirunak design/approval.md §3).',
+  '# A git GUI such as Fork reads no shell profile, so nvm\'s node is added when none is on PATH.',
+  'command -v node >/dev/null 2>&1 || PATH="$PATH:$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | tail -1)"',
+  'node "$HOME"/sources/kirunak/hooks/git-pre-commit.mjs || exit 1',
+];
+
+// A temp home whose kirunak checkout is <userHome>/sources/kirunak, where katyafm's block finds it through $HOME.
+function homeAt() {
+  const h = home();
+  const kirunakRoot = join(h.dir, 'sources', 'kirunak');
+  for (const s of SKILLS) mkdirSync(join(kirunakRoot, 'skills', s), { recursive: true });
+  return { ...h, kirunakRoot, userHome: h.dir };
+}
+
+// A repo whose pre-commit is #!/bin/sh, a line of the owner's, then `lines`.
+function ownHook(h, name, lines) {
+  const r = repo(h.dir, name);
+  const hook = join(r, '.git', 'hooks', 'pre-commit');
+  writeFileSync(hook, ['#!/bin/sh', 'npm test || exit 1', ...lines, ''].join('\n'), { mode: 0o755 });
+  return { r, hook, text: readFileSync(hook, 'utf8') };
+}
+
+const dryAndReal = (h, git) => [install({ ...h, git, print: true }).actions, install({ ...h, git }).actions];
+
+test('katyafm\'s block, its node line through "$HOME", $HOME, ${HOME}, ~ or single quotes, already runs kirunak\'s hook, dry run and real, and is kept (AC-1, AC-4)', () => {
+  const h = homeAt();
+  const variants = {
+    katyafm: KATYAFM_BLOCK,
+    bare: [...KATYAFM_BLOCK.slice(0, 3), 'node $HOME/sources/kirunak/hooks/git-pre-commit.mjs || exit 1'],
+    braced: [...KATYAFM_BLOCK.slice(0, 3), 'node "${HOME}/sources/kirunak/hooks/git-pre-commit.mjs" || exit 1'],
+    tilde: [...KATYAFM_BLOCK.slice(0, 3), 'node ~/sources/kirunak/hooks/git-pre-commit.mjs || exit 1'],
+    single: [...KATYAFM_BLOCK.slice(0, 3), 'node "$HOME"\'/sources/kirunak/hooks/git-pre-commit.mjs\' || exit 1'],
+  };
+  const repos = Object.entries(variants).map(([name, lines]) => ownHook(h, name, lines));
+  const [dry, real] = dryAndReal(h, repos.map((x) => x.r));
+  for (const { hook, text } of repos) {
+    assert.ok(dry.includes(`${hook} already runs kirunak's hook`), `the dry run: ${dry.find((a) => a.includes(hook))}`);
+    assert.ok(real.includes(`${hook} already runs kirunak's hook`), `the real install: ${real.find((a) => a.includes(hook))}`);
+    assert.equal(readFileSync(hook, 'utf8'), text, 'the hook is unchanged');
+  }
+});
+
+test('a commented-out node line, another checkout\'s hook or a path inside a longer one still gets "add this line" (AC-5, E-1, E-2)', () => {
+  const h = homeAt();
+  const root = h.kirunakRoot;
+  const variants = {
+    commented: [...KATYAFM_BLOCK.slice(0, 3), '# node "$HOME"/sources/kirunak/hooks/git-pre-commit.mjs || exit 1'],
+    commentedAbsolute: [`  #node ${root}/hooks/git-pre-commit.mjs || exit 1`],
+    other: ['node "$HOME"/sources/kirunak-other/hooks/git-pre-commit.mjs || exit 1'],
+    longer: [`node /x${root}/hooks/git-pre-commit.mjs || exit 1`],
+    suffix: [`node ${root}/hooks/git-pre-commit.mjs.bak || exit 1`],
+  };
+  const repos = Object.entries(variants).map(([name, lines]) => ownHook(h, name, lines));
+  const [dry, real] = dryAndReal(h, repos.map((x) => x.r));
+  for (const { hook, text } of repos) {
+    assert.ok(dry.some((a) => a.startsWith(`add this line to ${hook}: `)), `the dry run: ${dry.find((a) => a.includes(hook))}`);
+    assert.ok(real.some((a) => a.startsWith(`${hook} is the repo's own hook; add this line to it: `)), `the real install: ${real.find((a) => a.includes(hook))}`);
+    assert.equal(readFileSync(hook, 'utf8'), text, 'the hook is unchanged');
+  }
+});
+
+test('a hook of only #!/bin/sh and kirunak\'s line through $HOME is reported already, never rewritten (E-4)', () => {
+  const h = homeAt();
+  const r = repo(h.dir, 'katyafm');
+  const hook = join(r, '.git', 'hooks', 'pre-commit');
+  const text = '#!/bin/sh\nnode "$HOME"/sources/kirunak/hooks/git-pre-commit.mjs || exit 1\n';
+  writeFileSync(hook, text, { mode: 0o755 });
+  const [dry, real] = dryAndReal(h, r);
+  assert.ok(dry.includes(`${hook} already runs kirunak's hook`), `the dry run: ${dry.find((a) => a.includes(hook))}`);
+  assert.ok(real.includes(`${hook} already runs kirunak's hook`), `the real install: ${real.find((a) => a.includes(hook))}`);
+  assert.equal(readFileSync(hook, 'utf8'), text);
+});
+
+test('a hook of only #!/bin/sh and kirunak\'s absolute line commented out is the owner\'s switched off: "add this line", never rewritten (E-2)', () => {
+  const h = homeAt();
+  const r = repo(h.dir, 'katyafm');
+  const hook = join(r, '.git', 'hooks', 'pre-commit');
+  const text = `#!/bin/sh\n# node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1\n`;
+  writeFileSync(hook, text, { mode: 0o755 });
+  const [dry, real] = dryAndReal(h, r);
+  assert.ok(dry.some((a) => a.startsWith(`add this line to ${hook}: `)), `the dry run: ${dry.find((a) => a.includes(hook))}`);
+  assert.ok(real.some((a) => a.startsWith(`${hook} is the repo's own hook; add this line to it: `)), `the real install: ${real.find((a) => a.includes(hook))}`);
+  assert.equal(readFileSync(hook, 'utf8'), text, 'the hook is unchanged');
+});
+
+test('a registered repo, given with a trailing slash, is "already registered" in the dry run and the real install, and slapignore.json is kept (AC-2, AC-3, AC-6, E-3)', () => {
+  const h = home();
+  const r = repo(h.dir, 'katyafm');
+  const key = realpathSync(r);
+  const file = join(h.home, 'slapignore.json');
+  const first = install({ ...h, git: r }).actions;
+  assert.ok(first.includes(`registered ${key} in ${file}`), `the first install: ${first.filter((a) => a.includes('regist'))}`);
+  const bytes = readFileSync(file);
+  const [dry, real] = dryAndReal(h, `${r}/`);
+  const line = `${key} is already registered in ${file}`;
+  assert.ok(dry.includes(line), `the dry run: ${dry.filter((a) => a.includes('regist'))}`);
+  assert.ok(!dry.some((a) => a.startsWith('would register')));
+  assert.ok(real.includes(line), `the real install: ${real.filter((a) => a.includes('regist'))}`);
+  assert.deepEqual(readFileSync(file), bytes, 'slapignore.json is unchanged');
+});
+
+test('a repo slapignore.json does not list gets "would register" in the dry run, which writes nothing (AC-2, AC-7)', () => {
+  const h = home();
+  const listed = repo(h.dir, 'katyafm');
+  install({ ...h, git: listed });
+  const r = repo(h.dir, 'weather');
+  const file = join(h.home, 'slapignore.json');
+  const bytes = readFileSync(file);
+  const dry = install({ ...h, git: r, print: true }).actions;
+  assert.ok(dry.includes(`would register ${realpathSync(r)} in ${file}`), `the dry run: ${dry.filter((a) => a.includes('regist'))}`);
+  assert.ok(!dry.some((a) => a.includes('already registered')));
+  assert.deepEqual(readFileSync(file), bytes, 'the dry run writes nothing');
+});
+
 // gulnya/close-leaves-untracked-step-files AC-3, E-1: kirunak/tasks/.gitignore keeps raw run output out of git.
 const NIVA = ['*.xcresult/', '*/steps/**/xml/', '*/steps/**/*Test/', '*/steps/**/profile-*/', '*/steps/**/*profile*.html', '*/steps/**/*.log', '*/steps/**/*.out'];
 const patterns = (text) => text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));

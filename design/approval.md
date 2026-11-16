@@ -81,8 +81,14 @@ allowed.
 Installed per repo that holds tasks. `k install --git <repo>` writes `.git/hooks/pre-commit` calling it when the repo
 has no pre-commit hook; a repo that already has one (often a committed `githooks/pre-commit` copied into
 `.git/hooks`) adds one line, which `k install --git <repo> --print` prints with the install path filled in:
-`node <kirunak>/hooks/git-pre-commit.mjs || exit 1`. Judgement: kirunak never rewrites a hook it did not write. It
-reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuses a commit when:
+`node <kirunak>/hooks/git-pre-commit.mjs || exit 1`. Judgement: kirunak never rewrites a hook it did not write. A
+hook of the repo's own already runs kirunak's (dry run and real install both say so, and nothing is printed to add)
+when a line of it that is not a comment names `<kirunak>/hooks/<hook name>` as a word of its own, once `"` and `'`
+are dropped and `${HOME}`, `$HOME` and a leading `~` are read as the home folder: `node
+"$HOME"/sources/kirunak/hooks/git-pre-commit.mjs || exit 1` counts for a checkout at `~/sources/kirunak`; a commented
+line, another checkout's or a path inside a longer one does not (`runsKirunakHook` in `lib/install.mjs`,
+gulnya/kirunak-install-dry-run AC-1, E-1, E-2). Only a hook of kirunak's own lines with the literal absolute path is
+rewritten as kirunak's (E-4). It reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuses a commit when:
 
 1. a staged `kirunak/tasks/<slug>/task.md` has an approval record (in the index, else in HEAD) whose `hash` differs
    from the SHA-256 of the staged bytes, and `KIRUNAK_APPROVING` is not `<id>` in the environment: "task.md changed
