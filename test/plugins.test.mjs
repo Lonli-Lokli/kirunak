@@ -61,6 +61,26 @@ test('two checklist plugins merge in order', async () => {
   assert.deepEqual((await aspectsOf(ws)).map((a) => a.id), ['one', 'two', 'three']);
 });
 
+test('a workspace with no checklist plugin gets kirunak\'s default aspects; one with its own gets its own alone (asilak/kirunak-checklist-default)', async () => {
+  const bare = await load({});
+  assert.deepEqual((await aspectsOf(bare)).map((a) => a.id), ['platforms', 'tests', 'data-kept', 'failures', 'concurrency', 'security', 'docs']);
+  assert.ok(bare.seams.loaded.some((l) => l.seam === 'checklist' && /checklist-default/.test(l.module)));
+  const own = await load({ 'a.mjs': plugin('a', `{ checklist: { aspects: () => [{ id: 'one' }] } }`) });
+  assert.deepEqual((await aspectsOf(own)).map((a) => a.id), ['one']);
+  assert.ok(!own.seams.loaded.some((l) => /checklist-default/.test(l.module)), 'the default is not merged in');
+});
+
+test('kirunak\'s default aspects each have a title, a question, an edge case and a source, and no id twice', async () => {
+  const aspects = await aspectsOf(await load({}));
+  assert.ok(aspects.length > 0, 'the default gives aspects');
+  assert.equal(new Set(aspects.map((a) => a.id)).size, aspects.length);
+  for (const a of aspects) {
+    assert.ok(a.title && a.question, `${a.id}: a title and a question`);
+    assert.ok(a.edgeCases.length > 0 && a.edgeCases.every(Boolean), `${a.id}: an edge case`);
+    assert.ok(a.sources.length > 0 && a.sources.every((s) => /^design\/intake\.md §3/.test(s)), `${a.id}: its source`);
+  }
+});
+
 test('two handoff plugins merge in order, after the core default', async () => {
   const ws = await load({
     'a.mjs': plugin('a', `{ handoff: { targets: () => [{ where: 'a' }], release: () => [] } }`),
