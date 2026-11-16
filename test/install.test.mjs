@@ -342,6 +342,18 @@ test('a hook of only #!/bin/sh and kirunak\'s line through $HOME is reported alr
   assert.equal(readFileSync(hook, 'utf8'), text);
 });
 
+test('a hook of only #!/bin/sh and kirunak\'s absolute line commented out is the owner\'s switched off: "add this line", never rewritten (E-2)', () => {
+  const h = homeAt();
+  const r = repo(h.dir, 'katyafm');
+  const hook = join(r, '.git', 'hooks', 'pre-commit');
+  const text = `#!/bin/sh\n# node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1\n`;
+  writeFileSync(hook, text, { mode: 0o755 });
+  const [dry, real] = dryAndReal(h, r);
+  assert.ok(dry.some((a) => a.startsWith(`add this line to ${hook}: `)), `the dry run: ${dry.find((a) => a.includes(hook))}`);
+  assert.ok(real.some((a) => a.startsWith(`${hook} is the repo's own hook; add this line to it: `)), `the real install: ${real.find((a) => a.includes(hook))}`);
+  assert.equal(readFileSync(hook, 'utf8'), text, 'the hook is unchanged');
+});
+
 test('a registered repo, given with a trailing slash, is "already registered" in the dry run and the real install, and slapignore.json is kept (AC-2, AC-3, AC-6, E-3)', () => {
   const h = home();
   const r = repo(h.dir, 'katyafm');
