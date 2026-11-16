@@ -125,5 +125,7 @@ test('k accept refuses a task whose change in another repo changed after the hea
   assert.throws(() => accept({ ws: w.ws, id: w.id, dryRun: true }), /repos\.md names what kirunak cannot read, so it cannot be accepted:\n {2}line 1, "- nowhere main"/);
   rmSync(join(w.p.dir, 'repos.md'));
   rmSync(given(w));
+  // Its removal committed: k accept refuses a deletion git does not hold too (gulnya/accept-leaves-task-files AC-2).
+  records(w);
   ok();
 });
