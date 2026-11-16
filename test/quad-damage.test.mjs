@@ -671,9 +671,9 @@ test('the 150th call\'s result ends the session, and so do its minutes: the bug 
   const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], {
     fixes: [{ calls: 160, sleep: 30, ...fixed() }, { calls: 2, sleep: 30, ...fixed() }],
   });
-  const t = Date.now();
+  // Killed, not waited for: a's record says so (150 calls, ended by them, exit 143 from SIGTERM), never the clock,
+  // which a loaded machine stretches past any bound while an idle one runs all 160 calls well inside it.
   const r = await fixRun(w, { limit: { calls: 150, minutes: 0.005 } });
-  assert.ok(Date.now() - t < 10000, 'killed, not waited for');
   assert.deepEqual(r.bugs, [
     { id: 'hub/a', outcome: 'waits', why: 'its fixing session, try 1, reached 150 tool calls; what holds is on bug/a in hub' },
     { id: 'hub/c', outcome: 'waits', why: 'its fixing session, try 1, reached 0.005 minutes; what holds is on bug/c in hub' },
