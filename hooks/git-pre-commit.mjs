@@ -42,6 +42,15 @@ export function ownerRecord(path, env = process.env) {
   return Boolean(m) && OWNER_VARS.some((v) => names(env[v], m[1]));
 }
 
+// Whether `path` is a record only the owner's commands write, whatever variable is set: done.json, hold.md, cost.md,
+// an approval record, or an amendment whose applied:/declined: stamps grew against `base` (an amendment's approval).
+// `read(spec)` returns the bytes of `:path` or `<base>:path`, or null. The SLAP hook never lets one of these through
+// a records commit under KIRUNAK_RECORDING (gulnya/accept-leaves-task-files AC-5).
+export function ownersOnly(path, read, base = 'HEAD') {
+  if (RECORD.exec(path) || OWNED.exec(path) || COST.exec(path)) return true;
+  return Boolean(AMENDMENT.exec(path)) && stamps(read(`:${path}`)) > stamps(read(`${base}:${path}`));
+}
+
 const stamps = (buf) => (buf ? (buf.toString('utf8').match(STAMP) ?? []).length : 0);
 
 /**

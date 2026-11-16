@@ -8,8 +8,8 @@
 // Inside a merge, pick, rebase or revert the SLAP gate is skipped, while AC-8 still judges what the commit stages
 // beyond git's own replay (lib/replay.mjs); git's pick keeps its message, with no `Task:` added (AC-3). It is skipped
 // too for the owner's own record commit, one whose every path is a record of the task an owner's variable names, and
-// for a step's records commit, `k step finish`'s under KIRUNAK_RECORDING, whose every path is that task's progress.md
-// or a file under its steps/. A step's evidence commit, made with no variable, stays measured.
+// for a records commit under KIRUNAK_RECORDING (`k step finish`'s, `k records`'), whose every path is in that task's
+// folder, task.md and the owner's records aside. A step's evidence commit, made with no variable, stays measured.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { BASE_FILE, commitConfig, doneNamed, doneRefusal } from '../lib/records.mjs';
 import { ownBase, replayState, sameAsGit } from '../lib/replay.mjs';
 import { EMPTY_TREE, gate, line, parentOf, repoInfo } from '../lib/slap.mjs';
-import { OWNER_VARS, names, ownerRecord } from './git-pre-commit.mjs';
+import { OWNER_VARS, names, ownerRecord, ownersOnly } from './git-pre-commit.mjs';
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -40,19 +40,30 @@ function ownersRecords(base, env) {
   return paths.length > 0 && paths.every((p) => ownerRecord(p, env));
 }
 
-// For the SLAP gate only: a step's records commit, as `k step finish` makes it under KIRUNAK_RECORDING=<id>
-// (lib/steps.mjs), whose every path is that task's progress.md or a file under its steps/ (a brief, a report, a
-// review's given.json). kirunak writes it after the step's work was measured, so it is not measured; one path besides,
-// and the whole commit is (change-size.md §3, gulnya/close-leaves-untracked-step-files D-1). It is no owner's
-// variable: the pre-commit hook never lets it unlock the owner's records.
-const STEP_RECORD = /^kirunak\/tasks\/([^/]+)\/(?:progress\.md|steps\/.+)$/;
+// For the SLAP gate only: a records commit under KIRUNAK_RECORDING=<id>, as `k step finish` makes it (progress.md and
+// a step's brief, report and given.json, lib/steps.mjs) and `k records` (every changed file of the folder, the
+// handoff after the accept, lib/folder-records.mjs), whose every path is in that task's folder: task.md never, nor a
+// record only the owner's commands write (done.json, cost.md, hold.md, an amendment's new stamp; git-pre-commit.mjs
+// ownersOnly). kirunak commits it as the task's own records, nobody reviews them line by line, and a handoff or notes
+// run long, so it is not measured; one path besides, and the whole commit is (change-size.md §3,
+// gulnya/close-leaves-untracked-step-files D-1, gulnya/accept-leaves-task-files AC-5). It is no owner's variable: the
+// pre-commit hook never lets it unlock the owner's records.
+const TASK_FILE = /^kirunak\/tasks\/([^/]+)\/(.+)$/;
 
-function stepsRecords(base, env) {
+const shown = (spec) => {
+  try {
+    return execFileSync('git', ['show', spec], { stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return null;
+  }
+};
+
+function taskRecords(base, env) {
   if (!env.KIRUNAK_RECORDING) return false;
   const paths = staged(base);
   return paths.length > 0 && paths.every((p) => {
-    const m = STEP_RECORD.exec(p);
-    return Boolean(m) && names(env.KIRUNAK_RECORDING, m[1]);
+    const m = TASK_FILE.exec(p);
+    return Boolean(m) && names(env.KIRUNAK_RECORDING, m[1]) && m[2] !== 'task.md' && !ownersOnly(p, shown, base);
   });
 }
 
@@ -80,7 +91,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   // One given -m or -F is known by its author date. Either is measured as the whole commit it becomes.
   const amending = (source === 'commit' && head && (sha === 'HEAD' || sha === head)) || amendsHead(env, head);
   const base = amending ? parentOf(process.cwd(), 'HEAD') : head || EMPTY_TREE;
-  const skipSlap = source === 'merge' || replaying(info.gitDir) || ownersRecords(base, env) || stepsRecords(base, env);
+  const skipSlap = source === 'merge' || replaying(info.gitDir) || ownersRecords(base, env) || taskRecords(base, env);
   let m = null;
   if (!skipSlap) {
     const g = gate(process.cwd(), base, undefined, info);

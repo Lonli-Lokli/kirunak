@@ -31,6 +31,7 @@ import { costMarkdown } from '../lib/cost-md.mjs';
 import * as keeper from '../lib/keeper.mjs';
 import * as worktrees from '../lib/worktrees.mjs';
 import * as closing from '../lib/close.mjs';
+import { records } from '../lib/folder-records.mjs';
 import * as steps from '../lib/steps.mjs';
 import * as orchestrator from '../lib/run.mjs';
 import * as review from '../lib/review.mjs';
@@ -87,6 +88,9 @@ Size      k slap [--staged | <commit> | <from>..<to>]: SLAP of the staged change
           k slapignore status | k slapignore approve <repo>... | --all (the owner's)
 Work      k amend new <id> --title "..." [--by "..."] | k amend check <id> A-n | k start <id> [--session <id>]
           k handoff <id> [--session <id>]
+          k records <id> [<file>...] [--dry-run]: every changed, new or deleted file of the task's folder (task.md,
+            done.json, cost.md and ignored files aside), listed, then committed alone in one commit, kirunak: <id>
+            records; <file>... (relative to the folder) narrows it; --dry-run only lists
 Bugs      k bug new <repo>/<slug> --title "..." --quad-damage yes|no [--bug-of <task>] [--fix-repo <repo>]: a bug's
             skeleton, kirunak/bugs/<slug>.md in that repo, to fill in; its fix is the branch bug/<slug> in its fix repo
             (a repo of the workspace, or kirunak for kirunak's own checkout; its own when none is named); its mark yes
@@ -412,6 +416,13 @@ const VERBS = {
     const comparisons = baseline ? cost.compare(c, baseline) : [];
     if (flags.baseline) return { comparisons, text: comparisons.join('\n') };
     return { ...c, comparisons, text: [cost.format(c), ...(comparisons.length ? ['', ...comparisons] : [])].join('\n') };
+  },
+
+  // `k records <id> [<file>...] [--dry-run]` (gulnya/accept-leaves-task-files AC-1, AC-3): no owner's verb, so the
+  // freeze hook lets a session run it, on an accepted task too.
+  async records({ ws, pos, flags }) {
+    const id = need(pos[0], 'task id');
+    return records({ ws, id, files: pos.slice(1), dryRun: !!flags['dry-run'] });
   },
 
   async keep({ ws, flags }) {
