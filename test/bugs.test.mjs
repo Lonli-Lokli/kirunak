@@ -310,6 +310,21 @@ test('E-5: k bug drop removes the bug and its folder in a commit of their own, t
   assert.deepEqual(loose.branch, { repo: 'kirunak', branch: 'bug/k-crash', head: kept.slice(0, 12) });
 });
 
+// gulnya/draft-drop-staged-deletion: a drop whose commit met another session's .git/index.lock left the deletion staged
+// and the files put back (its reset met the lock too); run again, git's commit of the paths added them back.
+test('E-5: k bug drop run again after a commit that failed with the deletion staged commits the deletion', async () => {
+  const w = await bugWorkspace();
+  put(bugFile(w), filled());
+  put(join(w.hub, 'kirunak', 'bugs', 'stale-tiles', 'review-1.md'), 'verdict: findings\n');
+  gitCommitAll(w.hub, 'a bug');
+  git(w.hub, 'rm', '-q', '-r', '--cached', '--', 'kirunak/bugs');
+  const r = drop({ ws: w.ws, id: BUG, why: 'fixed by another' });
+  assert.equal(r.commit, git(w.hub, 'rev-parse', '--short', 'HEAD'));
+  assert.equal(git(w.hub, 'show', '--name-status', '--format=', 'HEAD'), 'D\tkirunak/bugs/stale-tiles.md\nD\tkirunak/bugs/stale-tiles/review-1.md');
+  assert.equal(existsSync(bugFile(w)), false);
+  assert.equal(git(w.hub, 'status', '--porcelain'), '');
+});
+
 // The paths a commit or the index holds, sorted, a rename's score left out.
 const moved = (status) => status.split('\n').map((l) => l.replace(/^R\d+/, 'R')).sort();
 const MOVED = ['M\tkirunak/drafts-order.md', 'R\tkirunak/drafts/stale-tiles.md\tkirunak/bugs/stale-tiles.md'];
