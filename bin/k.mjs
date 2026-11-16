@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { KError, refuse, usage } from '../lib/errors.mjs';
 import { parseArgs } from '../lib/args.mjs';
 import { expandHome, kirunakHome } from '../lib/home.mjs';
-import { aspectsOf, allTaskIds, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
+import { aspectsOf, allTaskIds, defaultChecklist, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask, removedIds } from '../lib/task.mjs';
 import { checkPlan, parsePlan } from '../lib/plan.mjs';
@@ -299,8 +299,7 @@ const VERBS = {
     for (const r of ws.repos) say(existsSync(join(r.root, '.git')), `repo ${r.name}: ${r.root} is a git repo`);
     say(existsSync(ws.queue), `queue ${ws.queue}`);
     const aspects = await aspectsOf(ws);
-    const fallback = ws.seams.loaded.some((l) => l.seam === 'checklist' && /checklist-default\.mjs$/.test(l.module));
-    say(aspects.length > 0, `${aspects.length} checklist aspects loaded${fallback ? " (kirunak's default: the workspace lists no checklist plugin)" : ''}`);
+    say(aspects.length > 0, `${aspects.length} checklist aspects loaded${defaultChecklist(ws) ? " (kirunak's default: the workspace lists no checklist plugin)" : ''}`);
     for (const a of aspects) {
       say((a.sources || []).length > 0 && (a.edgeCases || []).length > 0, `aspect ${a.id} has a source and an edge case`);
     }
