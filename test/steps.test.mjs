@@ -277,6 +277,18 @@ test('needs.json heavy: expectMinutes is optional; one that is no number or is o
   for (const bad of [0, -1, '4']) assert.deepEqual(needs({ expectMinutes: bad }), { error: 'needs.json heavy expectMinutes is a number of minutes' }, String(bad));
 });
 
+test('needs.json heavy: resumable is optional, true or false (gulnya/fast-heavy-queue S-3)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const needs = (heavy) => {
+    put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 60, ...heavy }, then: 'resume' }));
+    return steps.readNeeds(join(w.p.dir, 'steps', 'S-1'));
+  };
+  assert.equal(needs({ resumable: true }).heavy.resumable, true);
+  assert.equal(needs({ resumable: false }).heavy.resumable, false);
+  assert.equal(needs({}).heavy.resumable, undefined);
+  for (const bad of ['yes', 1]) assert.deepEqual(needs({ resumable: bad }), { error: 'needs.json heavy resumable is true or false' }, String(bad));
+});
+
 test('k step finish commits the evidence the step wrote and nothing else, then its records; a review then cites it at head; no evidence, no evidence commit', async () => {
   const w = await approvedWorkspace(PLAN);
   const git = (...args) => sh(w.weather, 'git', args).trim();

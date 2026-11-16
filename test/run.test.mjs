@@ -522,6 +522,32 @@ test('a [heavy] step whose job passed but wrote not its outputs stops for the ow
   assert.ok(lines.at(-1).endsWith(` ${WAY_BACK}`), lines.at(-1));
 });
 
+test('a resumable [heavy] step or needs.json job reaches the guard as pieceMinutes, the workspace\'s plan.shortMinutes (gulnya/fast-heavy-queue S-3)', async () => {
+  const guard = (w, jobs) => (w.ws.seams.resourceGuard = {
+    run: (job) => (jobs.push(job), put(w, 'steps/S-1/report.md'), put(w, 'evidence/S-1-cache-sizes.tsv'), { exitCode: 0, log: '' }),
+    status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [],
+  });
+  const heavyPlan = (extra) => PLAN.replace('### S-1 Keep the last forecast on disk [agent]\ncovers: AC-1, AC-2, E-1\ninputs: task, docs/offline.md\n', `### S-1 Keep the last forecast on disk [heavy]\ncovers: AC-1, AC-2, E-1\ncommand: npm test\nmax-minutes: 90\n${extra}`);
+  for (const [extra, short, want] of [['resumable: yes\n', 30, 30], ['', 30, undefined], ['resumable: yes\n', undefined, undefined]]) {
+    const w = await approvedWorkspace(heavyPlan(extra));
+    w.ws.plan = short ? { shortMinutes: short } : null;
+    const jobs = [];
+    guard(w, jobs);
+    fakeRunner(w);
+    await run({ ws: w.ws, id: w.id });
+    assert.deepEqual(jobs.map((j) => j.pieceMinutes), [want], `a [heavy] step with ${extra || 'no resumable'}, shortMinutes ${short}`);
+  }
+  for (const [resumable, want] of [[true, 30], [false, undefined], [undefined, undefined]]) {
+    const w = await approvedWorkspace(PLAN);
+    w.ws.plan = { shortMinutes: 30 };
+    const jobs = [];
+    guard(w, jobs);
+    fakeRunner(w, (step, n) => (n === 1 ? (put(w, 'steps/S-1/needs.json', JSON.stringify({ heavy: { what: 'tests', command: ['npm', 'test'], maxMinutes: 90, resumable }, then: 'resume' })), 'nothing') : 'write'));
+    await run({ ws: w.ws, id: w.id });
+    assert.deepEqual(jobs.map((j) => j.pieceMinutes), [want], `a needs.json with resumable ${resumable}`);
+  }
+});
+
 test('the guard gets the expected minutes a [heavy] step or a needs.json states, null when none; one over the max never queues (gulnya/heavy-queue-nearest-done E-1, E-3)', async () => {
   const guard = (w, jobs) => (w.ws.seams.resourceGuard = {
     run: (job) => (jobs.push(job), put(w, 'steps/S-1/report.md'), put(w, 'evidence/S-1-cache-sizes.tsv'), { exitCode: 0, log: '' }),
