@@ -299,7 +299,8 @@ const VERBS = {
     for (const r of ws.repos) say(existsSync(join(r.root, '.git')), `repo ${r.name}: ${r.root} is a git repo`);
     say(existsSync(ws.queue), `queue ${ws.queue}`);
     const aspects = await aspectsOf(ws);
-    say(aspects.length > 0, `${aspects.length} checklist aspects loaded`);
+    const fallback = ws.seams.loaded.some((l) => l.seam === 'checklist' && /checklist-default\.mjs$/.test(l.module));
+    say(aspects.length > 0, `${aspects.length} checklist aspects loaded${fallback ? " (kirunak's default: the workspace lists no checklist plugin)" : ''}`);
     for (const a of aspects) {
       say((a.sources || []).length > 0 && (a.edgeCases || []).length > 0, `aspect ${a.id} has a source and an edge case`);
     }
