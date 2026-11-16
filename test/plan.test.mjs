@@ -425,6 +425,11 @@ test('the rules are warnings in a task first approved before FAST_QUEUE_SINCE: k
   assert.deepEqual(gate(load(w.ws, ID)).filter((x) => x.startsWith('plan.md')), [`plan.md line 14: ${FINDING}`]);
 });
 
+test('FAST_QUEUE_SINCE is a real day not after today, never a placeholder, so the rules refuse in a task approved since', () => {
+  assert.match(FAST_QUEUE_SINCE, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(FAST_QUEUE_SINCE <= new Date().toISOString().slice(0, 10), `FAST_QUEUE_SINCE ${FAST_QUEUE_SINCE} is in the future: set it to the day the rules reached master`);
+});
+
 test('the workspace\'s plan settings: absent or good pass; a shortMinutes that is no number or a storeSet that is no list of patterns is a problem', () => {
   assert.deepEqual(checkPlanSettings(undefined), []);
   assert.deepEqual(checkPlanSettings({ shortMinutes: 30, storeSet: ['store set', /preview video/i] }), []);
