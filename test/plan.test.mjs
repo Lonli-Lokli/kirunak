@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkPlan, FAST_QUEUE_SINCE, fastQueue, parseBudget, parsePlan, VERIFY_SINCE } from '../lib/plan.mjs';
+import { budgetOf, checkPlan, FAST_QUEUE_SINCE, fastQueue, parseBudget, parsePlan, VERIFY_SINCE } from '../lib/plan.mjs';
 import { gate, load } from '../lib/steps.mjs';
 import { parseTask } from '../lib/task.mjs';
 import { checkPlanSettings, taskPaths } from '../lib/workspace.mjs';
@@ -363,6 +364,29 @@ test('AC-2: a heavy step stated over plan.shortMinutes is refused unless resumab
   assert.deepEqual(fq(heavy('max-minutes: 45', 'long: a release bundle cannot split'), ws), []);
   assert.deepEqual(fq(heavy('max-minutes: 45')), [], 'no plan.shortMinutes');
   assert.deepEqual(fq(heavy('max-minutes: 45'), { plan: { storeSet: ['store set'] } }), []);
+});
+
+test('AC-2: a heavy step that states no length is judged at the minutes k run queues it at, its budget\'s (budgetOf); refused over the line, a warning in an older task', () => {
+  const ws = { plan: { shortMinutes: 30 }, budget: { calls: 100, minutes: 40, usd: 3 } };
+  const heavy = (...fields) => planOf('', step('S-1', 'Simulator tests', 'heavy', 'command: npm test', ...fields), REVIEW('S-1'));
+  const OVER = 'S-1 is a heavy step of 40 minutes, over the short line of 30: split it into steps of 30 minutes or less, mark it `resumable: yes` when its job can run in pieces, or add `long: <why it cannot split>`';
+  assert.equal(budgetOf(ws, {}).minutes, 40, 'the same minutes k run queues the job at');
+  assert.deepEqual(fq(heavy(), ws), [OVER]);
+  assert.deepEqual(fq(heavy(), { plan: { shortMinutes: 30 } }), [OVER], 'no workspace budget: budgetOf\'s default, 40');
+  assert.deepEqual(fq(heavy('resumable: yes'), ws), []);
+  assert.deepEqual(fq(heavy('long: a device boot cannot split'), ws), []);
+  assert.deepEqual(fq(heavy('max-minutes: 20'), ws), []);
+  assert.deepEqual(fq(heavy(), { ...ws, budget: { minutes: 25 } }), [], 'a workspace budget under the line');
+  assert.deepEqual(fq(heavy()), [], 'no plan.shortMinutes');
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-ac2-'));
+  try {
+    const record = join(dir, 'approval.json');
+    writeFileSync(record, JSON.stringify({ history: [{ approved: '2026-11-01T09:00:00Z' }] }));
+    const old = fastQueue(parsePlan(heavy()), { id: ID, record }, ws);
+    assert.deepEqual(old, [{ line: old[0]?.line, problem: `${OVER} (a warning: ${ID} was approved before ${FAST_QUEUE_SINCE})`, warning: true }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const STORE = { plan: { storeSet: ['store (screenshot|set)', 'preview video', /feature graphic/i] } };
