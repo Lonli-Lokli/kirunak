@@ -297,6 +297,78 @@ task is started by hand, one task per session:
    `k accept` runs every final step again. `k accept --dry-run`, `k waiting` and `/k-accept` say when an accept will
    queue final steps; a task with no final steps is accepted at once.
 
+### Closing a task
+
+Only the owner says a task is done, and only the owner's `k accept` records it. The `k-done` skill (`/k-done`) takes
+the session through the close in this order: the task folder's records committed, a look at what the acceptance
+removes, the owner's `k accept`, then the handoff and its own commit. The session never runs `k accept` itself.
+
+```mermaid
+flowchart TD
+  owner["The owner says the task is done (/k-done)"] --> list["k records #lt;id#gt; #45;#45;dry-run lists the folder's changed, new and deleted files; nothing is written"]
+  list --> commit["k records #lt;id#gt; commits them in one commit of those paths (task.md, done.json and cost.md aside)"]
+  commit --> hook{"A git hook refused it?"}
+  hook -- "yes: nothing was committed" --> fixHook["Fix what the hook named"]
+  fixHook --> owner
+  hook -- "no, or nothing to commit" --> trees["k worktrees #45;#45;closing #lt;id#gt; shows the worktrees the acceptance removes; the owner saves what they still need"]
+  trees --> dry["k accept #lt;id#gt; #45;#45;dry-run makes every check and writes nothing"]
+  dry --> accept["The owner types ! k accept #lt;id#gt; (or /k-accept #lt;id#gt;)"]
+  accept --> took{"Accepted?"}
+  took -- "refused: it names what blocks it" --> clear["Clear that (the table below), then run /k-done again"]
+  clear --> owner
+  took -- "yes" --> done["done.json committed; the closed work's worktrees removed"]
+  done --> handoff["k handoff #lt;id#gt; #45;#45;json; the handoff written, then k records #lt;id#gt; handoff.md commits it alone"]
+  handoff --> fresh["The owner types /clear and the next task starts fresh"]
+  bare["The owner types ! k accept #lt;id#gt; with no /k-done, the folder already committed"] --> took2{"Accepted?"}
+  took2 -- "yes" --> bareDone["done.json committed and worktrees removed, but no handoff is written"]
+  took2 -- "refused" --> clear
+```
+
+k-done may run again as often as it takes. Each kirunak command before the acceptance writes nothing or commits only
+the folder's records, and `k records` with nothing left prints `nothing to commit`, so a second run picks up where the
+refusal left off. The task is done only when `k accept` succeeds and the folder's `done.json` is committed. The owner
+may also type `k accept` without k-done: when the folder is committed and every check passes, the task closes, but no
+handoff is written. A refusal or `--dry-run` removes no worktree.
+
+`k accept` makes its checks in this order and stops at the first that fails; `k accept --dry-run` and `k waiting`
+name the same refusal.
+
+```mermaid
+flowchart TD
+  start["k accept #lt;id#gt;"] --> c1{"Its done.json already committed?"}
+  c1 -- "yes" --> r1["Refused: already accepted"]
+  c1 -- "no" --> c2{"task.md approved and unchanged since?"}
+  c2 -- "no" --> r2["Refused: never approved, or stale"]
+  c2 -- "yes" --> c3{"A release signed off with final steps unfinished?"}
+  c3 -- "yes" --> r3["Refused: it closes by itself once they pass"]
+  c3 -- "no" --> c4{"A latest review?"}
+  c4 -- "no" --> r4["Refused: no review"]
+  c4 -- "yes" --> c5{"It passes k review check, and a finished review step wrote it as it stands?"}
+  c5 -- "no" --> r5["Refused: not a review k accept takes"]
+  c5 -- "yes" --> c6{"Its verdict is not met?"}
+  c6 -- "yes" --> r6["Refused: a not met verdict"]
+  c6 -- "no" --> c7{"The task's work changed after the review's head?"}
+  c7 -- "yes" --> r7["Refused: each such file named with its commit"]
+  c7 -- "no" --> c8{"A file of the folder uncommitted, new or deleted?"}
+  c8 -- "yes" --> r8["Refused: each such file named"]
+  c8 -- "no" --> c9{"A checklist item unticked or not written yet, and no #45;#45;checklist-open?"}
+  c9 -- "yes" --> r9["Refused: each item named"]
+  c9 -- "no" --> ok["Accepted: done.json committed (a release with final steps not yet signed off is signed off instead)"]
+```
+
+| Refusal | What clears it |
+| --- | --- |
+| Already accepted | Nothing: the task is done, and new work on it is a new task. |
+| Never approved | The owner's `! k approve <id>`. |
+| `task.md` stale (changed since its approval) | Put `task.md` back as it was approved; a change goes through an amendment. |
+| A release signed off, its final steps not finished | Nothing to type: kirunak closes it once they pass. |
+| No review | Add a review step to `plan.md` and run it. |
+| The review fails `k review check`, its step has not finished, or it was changed after its step finished | Let the review step finish, or run a new review (a review step whose output is the next `review-<n>.md`). |
+| The verdict is `not met` | Amend the task (`k amend new <id> --title "<a few words>"`) and review again, or run a new review. No flag waives it. |
+| The task's work changed after the review's head (a later commit to a file the task's own commits touched, or one naming the task; in another repo, after the head the review saw there) | Run a new review. No flag waives it. |
+| A file of the task's folder uncommitted, new or deleted | `k records <id>` commits them; raw output moves out (into evidence/, or a rule in `kirunak/tasks/.gitignore`) or is deleted. |
+| A checklist item unticked, or a review row with no item yet | `k checklist <id>` writes the missing items and the owner ticks them, or the owner accepts with `--checklist-open "<why>"`, recorded with the items it leaves open. |
+
 ### Cheaper steps: `verify:` and `tools: all`
 
 A plan puts a step on Sonnet when a check can prove its work: a finished change repeated in another repo, a scripted
