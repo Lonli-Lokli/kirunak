@@ -376,7 +376,9 @@ branch goes with `git branch -D`. It is never `--force` but for a removal cut sh
 phone's time limit): when its only changes are tracked files deleted, nothing of its own is left in it, and it goes
 with `--force`. Every git call but the removal has a time limit (two minutes; the look at processes one), and what one cannot tell in
 time keeps the worktree. A failure is a kept line with git's error. `k accept` prints a line for each worktree removed
-and each kept, with why.
+and each kept, with why; Review & merge prints the same lines after its merge's line, indented two spaces as its cost
+line is, the detached run's log included (asilak/kirunak-review-worktree-lines). Findings, a conflict and a refused
+merge run no cleanup and print none.
 
 `k worktrees [--closing <id>]` prints the same survey and removes nothing. For each worktree that would go it adds one
 line: the folders git ignores in it besides build output (the plugins' `buildOutput`), the five largest with their
