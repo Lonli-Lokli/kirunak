@@ -298,7 +298,8 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       resourceGuard: {
         // job.expectMinutes (the length the caller expects, or null) does not order anything: this guard serves its
         // queue in the order the jobs came, and a guard that orders by length reads it (plugins.md). It is kept with
-        // job.maxMinutes in the job's queue line and the owner file, for queue().
+        // job.maxMinutes in the job's queue line and the owner file, for queue(). job.pieceMinutes (a job that can resume) is
+        // taken and not used: this guard runs every job whole and gives it no deadline, so such a job runs to its end.
         async run(job) {
           const P = at();
           const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, pidStart: OWN_START, since: new Date().toISOString(), expectMinutes: minutesOr(job.expectMinutes), maxMinutes: minutesOr(job.maxMinutes) };
