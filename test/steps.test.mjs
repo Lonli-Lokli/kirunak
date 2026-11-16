@@ -604,3 +604,25 @@ test('a finish with raw output in its step folder (xml/TEST-x.xml, a log) is ref
   assert.equal(again.status, 0, again.stderr);
   assert.equal(steps.load(w.ws, w.id).states.get('S-1').state, 'done');
 });
+
+// k step finish commits the step's records and evidence and no more of the task's folder: a new notes.md, the plan
+// k run reads, and a deleted tracked file stay as they were, for k records (gulnya/accept-leaves-task-files AC-4).
+test('k step finish leaves plan.md, notes.md and a deleted tracked file of the task folder uncommitted (gulnya/accept-leaves-task-files AC-4)', async () => {
+  const w = await approvedWorkspace(PLAN);
+  const git = (...args) => sh(w.weather, 'git', args).trim();
+  put(w, 'old.md', 'kept for now\n');
+  git('add', '--', `${TASK}/old.md`);
+  git('commit', '-q', '-m', 'old.md', '--', `${TASK}/old.md`);
+  rmSync(join(w.p.dir, 'old.md'));
+  put(w, 'notes.md', '# Notes\n');
+  assert.equal(k(w.home, ['step', 'start', w.id, 'S-1', '--session', 'impl-1']).status, 0);
+  put(w, 'steps/S-1/report.md');
+  put(w, 'evidence/S-1-cache-sizes.tsv', 'days\tbytes\n');
+  const r = k(w.home, ['step', 'finish', w.id, 'S-1']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(git('show', '--name-only', '--format=', 'HEAD').split('\n').sort(),
+    [`${TASK}/progress.md`, `${TASK}/steps/S-1/brief.md`, `${TASK}/steps/S-1/report.md`].filter((f) => existsSync(join(w.weather, f))));
+  assert.equal(git('show', '--name-only', '--format=', 'HEAD~1'), `${TASK}/evidence/S-1-cache-sizes.tsv`);
+  assert.equal(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', TASK]).trimEnd(),
+    [` D ${TASK}/old.md`, `?? ${TASK}/notes.md`, `?? ${TASK}/plan.md`].join('\n'));
+});

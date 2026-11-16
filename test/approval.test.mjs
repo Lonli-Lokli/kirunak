@@ -914,3 +914,36 @@ test('done.json and cost.md left on disk by a refused accept are no strays: a st
   assert.equal(accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }).state, 'done');
   assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '');
 });
+
+// A tracked file of the task's folder deleted and not committed, staged (git rm) or not, refuses the accept as an
+// untracked one does, named as deleted, and so does the dry run and k waiting (gulnya/accept-leaves-task-files AC-2).
+test('accept refuses a task whose folder has an uncommitted deletion of a tracked file, staged or not, naming it as deleted, as its dry run and k waiting do (gulnya/accept-leaves-task-files AC-2)', async () => {
+  const { ws, home, weather } = await makeWorkspace();
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  writeFileSync(join(taskDir(weather), 'notes.md'), '# Notes\n');
+  mkdirSync(join(taskDir(weather), 'evidence'), { recursive: true });
+  writeFileSync(join(taskDir(weather), 'evidence', 'S-1-sizes.tsv'), 'days\tbytes\n');
+  gitCommitAll(weather, 'review and notes');
+  const head = headOf(weather);
+  const notes = 'kirunak/tasks/offline-forecast/notes.md';
+  const sizes = 'kirunak/tasks/offline-forecast/evidence/S-1-sizes.tsv';
+  rmSync(join(weather, notes));
+  sh(weather, 'git', ['rm', '-q', '--', sizes]);
+  const names = (text) => [notes, sizes].every((f) => new RegExp(`${f.replace(/[.]/g, '\\.')} \\(deleted\\)`).test(text));
+
+  for (const flags of [{}, { dryRun: true }]) {
+    assert.throws(() => accept({ ws, id: ID, now: NOV7, ...flags }), (e) => names(e.message), `accept ${JSON.stringify(flags)} names both deletions`);
+  }
+  const dry = run(['accept', ID, '--dry-run']);
+  assert.equal(dry.status, 1, dry.stdout);
+  assert.ok(names(dry.stderr), dry.stderr);
+  const why = JSON.parse(run(['waiting', '--json']).stdout).accept[0]?.why ?? '';
+  assert.ok(names(why), why);
+  assert.deepEqual([existsSync(join(taskDir(weather), 'done.json')), headOf(weather)], [false, head], 'a refused accept writes and commits nothing');
+
+  sh(weather, 'git', ['commit', '-q', '-m', 'notes and sizes go', '--', notes, sizes]);
+  assert.equal(accept({ ws, id: ID, now: NOV7 }).state, 'done', 'with the deletions committed, it accepts');
+});

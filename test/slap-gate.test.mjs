@@ -251,3 +251,80 @@ test("a review step's finish commits a 500-line given.json with its progress.md 
   const evidence = wg('log', '--format=%H', '--grep', `^${w.id} S-1: the step's evidence$`);
   assert.match(wg('log', '-1', '--format=%B', evidence), /SLAP: \d+ \(S\)/, "the step's evidence commit, made with no variable, is still measured");
 });
+
+// The records commit `k records` makes, and the handoff k-done commits with it after the accept, under
+// KIRUNAK_RECORDING=<id> (gulnya/accept-leaves-task-files AC-5): every path in the named task's folder, task.md aside,
+// is not measured however long; task.md, a source file or another task's file beside them measures the whole commit,
+// and the owner's records never pass under it.
+const notesMd = (n, tag = 'note') => Array.from({ length: n }, (_, i) => `- ${tag} ${i}: what the step found`).join('\n') + '\n';
+
+test("a task folder's records commit under KIRUNAK_RECORDING, 600-line notes.md and review.md or a 600-line handoff.md, is not measured; task.md, a source file or the owner's records beside them are (AC-5)", () => {
+  const r = repo();
+  root(r);
+  put(r, `${TASK_DIR}/task.md`, '# Task\n');
+  assert.equal(commit(r, 'the task').status, 0);
+  const rec = (msg, paths, env = { KIRUNAK_RECORDING: ID }) => {
+    git(r, ['add', '-A', '--', ...paths]);
+    return git(r, ['commit', '-q', '-m', msg, '--', ...paths], env);
+  };
+  const reset = () => {
+    git(r, ['reset', '-q']);
+    git(r, ['checkout', '-q', '--', '.']);
+    git(r, ['clean', '-qfd']);
+  };
+
+  // task.md beside the records: the whole commit is measured.
+  put(r, `${TASK_DIR}/notes.md`, notesMd(600));
+  put(r, `${TASK_DIR}/review.md`, notesMd(600, 'row'));
+  put(r, `${TASK_DIR}/task.md`, '# Task\n\nchanged\n');
+  const withTask = rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`, `${TASK_DIR}/review.md`, `${TASK_DIR}/task.md`]);
+  assert.notEqual(withTask.status, 0, 'task.md beside them keeps the commit measured');
+  assert.match(withTask.stderr, /this commit is X?L, SLAP/);
+  reset();
+  // A source file beside them: measured.
+  put(r, `${TASK_DIR}/notes.md`, notesMd(600));
+  put(r, 'src/app.kt', lines(20));
+  const withSource = rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`, 'src/app.kt']);
+  assert.notEqual(withSource.status, 0, 'a source file beside them keeps the commit measured');
+  reset();
+  // Another task's notes: measured.
+  put(r, 'kirunak/tasks/radar-tiles/notes.md', notesMd(600));
+  assert.notEqual(rec(`kirunak: ${ID} records`, ['kirunak/tasks/radar-tiles/notes.md']).status, 0, "another task's folder is measured");
+  reset();
+  // The owner's records are never a session's, even in the folder.
+  for (const owned of ['done.json', 'cost.md', 'hold.md']) {
+    put(r, `${TASK_DIR}/notes.md`, notesMd(600));
+    put(r, `${TASK_DIR}/${owned}`, json(600));
+    assert.notEqual(rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`, `${TASK_DIR}/${owned}`]).status, 0, `${owned} beside them keeps the commit measured`);
+    reset();
+  }
+  // An amendment's approval, its new applied: stamp, is the owner's; the amendment a session writes is the task's.
+  put(r, `${TASK_DIR}/notes.md`, notesMd(600));
+  put(r, `${TASK_DIR}/amendments/A-1.md`, '---\ntask: x\n---\n\n## Why\nwhy\n\napplied: 2026-11-15\n');
+  assert.notEqual(rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`, `${TASK_DIR}/amendments/A-1.md`]).status, 0, "an amendment's new stamp keeps the commit measured");
+  reset();
+  put(r, `${TASK_DIR}/notes.md`, notesMd(600));
+  put(r, `${TASK_DIR}/amendments/A-1.md`, '---\ntask: x\n---\n\n## Why\nwhy\n');
+  const amendment = rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`, `${TASK_DIR}/amendments/A-1.md`]);
+  assert.equal(amendment.status, 0, amendment.stderr);
+  // No variable: measured.
+  put(r, `${TASK_DIR}/notes.md`, notesMd(600, 'again'));
+  assert.notEqual(rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`], {}).status, 0, 'without the variable it is measured');
+  reset();
+
+  // The records commit: 600-line notes.md and review.md, evidence and a deletion, by slug or id.
+  put(r, `${TASK_DIR}/old.md`, 'early\n');
+  assert.equal(commit(r, 'old.md').status, 0);
+  put(r, `${TASK_DIR}/notes.md`, notesMd(600));
+  put(r, `${TASK_DIR}/review.md`, notesMd(600, 'row'));
+  put(r, `${TASK_DIR}/evidence/S-1-sizes.tsv`, notesMd(300, 'size'));
+  rmSync(join(r.dir, TASK_DIR, 'old.md'));
+  const ok = rec(`kirunak: ${ID} records`, [`${TASK_DIR}/notes.md`, `${TASK_DIR}/review.md`, `${TASK_DIR}/evidence/S-1-sizes.tsv`, `${TASK_DIR}/old.md`]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.doesNotMatch(message(r), /SLAP:/, 'not measured');
+  // The handoff, alone, after the accept.
+  put(r, `${TASK_DIR}/handoff.md`, notesMd(600, 'handoff'));
+  const handoff = rec(`kirunak: ${ID} records`, [`${TASK_DIR}/handoff.md`], { KIRUNAK_RECORDING: 'offline-forecast' });
+  assert.equal(handoff.status, 0, handoff.stderr);
+  assert.doesNotMatch(message(r), /SLAP:/);
+});
