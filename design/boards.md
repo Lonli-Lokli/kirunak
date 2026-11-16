@@ -25,9 +25,19 @@ step's own "ready" means its inputs are met and is a different thing (kirunak-ph
 and the mod. Queued tasks come first, in queue order, then the rest by id.
 
 `--json` gives the same rows with every field (`id`, `title`, `state`, `queue`, `step`, `lock`, `approved`,
-`review`, `checklist`), which the page, the artifact step and the mod read. `--repo <name>`, `--all` (done and on
+`review`, `checklist`, and `release`: `{ finals, left, signed }` for a plan with final steps, else null), which the
+page, the artifact step and the mod read. `--repo <name>`, `--all` (done and on
 hold too). Number to check: under 1 s across the workspace's repos (it reads a few files per task and runs no git
 command except `git show` for a staged hash when asked).
+
+A release's final steps (orchestrator.md §1, gulnya/fast-heavy-queue AC-9) read apart on every surface, with a word
+and no emoji, so the phone shows them too. A task in the `final` state reads `final steps, <n> left` where any other
+reads its state's name: this list's state column, the page's and the brief board's entry, the card's `state:` line,
+the task queue's rows, and the markdown board's bullet beside its counts; the board's group for it is "final steps".
+A final step named in a step line (the last step, "worked on by", the running steps, a climb) reads `final S-8`, so
+"final S-8 done" or "sign-off withdrawn: final S-8 failed". The card adds one line for a release: `final steps S-8,
+S-9: wait for the owner's sign-off, k accept` before the sign-off and after a failure withdrew it, `... : 1 left, S-9`
+while they run, `... : passed` once closed; this list adds the waiting line to a release not yet signed off.
 
 ## 2. The page: `k board` and `k board --html` (D10)
 
