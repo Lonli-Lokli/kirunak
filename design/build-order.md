@@ -25,7 +25,7 @@ lib/task.mjs                parseTask(text) → { front, sections: { goal, ac, e
                             checkTask(parsed, aspectIds) → [{ line, problem }]  (task-files.md §2 rules 1 to 6)
                             isReady(parsed, aspectIds) → boolean (check passes and q is empty)
 lib/source.mjs              parseTags(line) → [{ kind: 'owner'|'research'|'default'|'from', date?, ref?, q? }] or null
-lib/state.mjs               stateOf({ taskDir, record, queue, files }) → one of the twelve states (task-files.md §4)
+lib/state.mjs               stateOf({ taskDir, record, queue, files }) → one of the thirteen states (task-files.md §4)
 lib/approval.mjs            hashBytes(buf) → 'sha256:<hex>'; readRecord(repo, slug); approve({ ws, id, amendment?, via,
                             queuePlace? }) → { hash, commit }; verify(ws, id) → 'ok' | 'stale' | 'none'
 lib/amend.mjs               parseAmendment(text) → { front, why, ops: [{ op: 'replace'|'add'|'remove', id, section?, line? }] }

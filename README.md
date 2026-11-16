@@ -284,6 +284,14 @@ task is started by hand, one task per session:
    approvals, the queue), never do. The refusal, `k waiting` and `/k-accept` name each such file with its commit and
    the task that commit names, and the way out is a new review. Once the task is accepted, the git hook refuses a
    commit that names it unless it touches only kirunak's records: new work on it is a new task.
+   A release (`release: yes`) with `final: yes` steps not finished is signed off instead of closed: after the same
+   checks, `k accept` writes `<time> signed off by the owner: final steps S-x, S-y queued (session <id>)` to
+   progress.md, the task's state becomes `final`, and `k run` starts the final steps, which never start before the
+   sign-off. When the last one finishes, kirunak closes the task as `k accept` does (done.json, cost, the merged
+   worktrees), with the session the sign-off names; a final step's own commits never block that close. A final step
+   that fails withdraws the sign-off (`sign-off withdrawn: S-n failed`), the release is open for a fix, and the next
+   `k accept` runs every final step again. `k accept --dry-run`, `k waiting` and `/k-accept` say when an accept will
+   queue final steps; a task with no final steps is accepted at once.
 
 ### Cheaper steps: `verify:` and `tools: all`
 

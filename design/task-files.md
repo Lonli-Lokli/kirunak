@@ -313,7 +313,8 @@ are a state field agents rewrite; a state read from files that only named comman
 | in review | the latest review exists, and fails the grammar (`review.md` §2, what reads git aside) or no finished review step of `plan.md` wrote it as it stands (the hash on the step's `finished` line) | `k review start` |
 | reviewed | the latest review passes the grammar and its review step finished in `progress.md` with the file's hash; no `done.json` | the review step |
 | awaiting owner | `checklist.md` has an unticked item, or reviewed | `k checklist` |
-| done | `done.json` exists | the owner: `k accept` (through `/k-done`) |
+| final | a release's `plan.md` has `final: yes` steps and `progress.md` a `signed off by the owner` line with no `sign-off withdrawn` line after it; no `done.json` | the owner: `k accept` on a release (`orchestrator.md` §1, the sign-off) |
+| done | `done.json` exists | the owner: `k accept` (through `/k-done`), or kirunak once a signed-off release's final steps pass |
 | on hold | `hold.md` exists (why, date) and no `done.json` | the owner: `k hold` / `k resume` |
 | stale | approval record whose hash does not match `task.md` | never on purpose: the git hook refuses it; `k list` shows it red |
 

@@ -128,6 +128,24 @@ outputs: review.md
   first, so a plan that queues its heavy work early, or in one long piece, holds the line against work that could
   have run before it; and a store set made before the owner agrees with the build is made again.
 
+  **The sign-off** (lib/final.mjs, gulnya/fast-heavy-queue AC-7, AC-8). A final step never starts before the owner
+  signs off: until then `stepStates` holds it `pending` ("it waits for the owner's sign-off, k accept"). `k accept`
+  on a release whose final steps are not all finished makes every check it makes for a close (the review and its
+  head, the checklist, the task's folder), then, instead of done.json, appends and commits to progress.md
+  `<time> signed off by the owner: final steps S-x, S-y queued (session <id>[, checklist open: <why>])`, puts the
+  task back in the queue when it is not there, and removes no worktree. The task's state is `final` (lib/state.mjs)
+  while that line stands, and the final steps run as any other ready step; their history counts from the line on.
+  When the last final step finishes (k run's finish or `k step finish`), lib/close.mjs closes the task by the code
+  `k accept` closes with (done.json with `signedOff` and `finalSteps`, cost, the session taken out of the worktree
+  locks, the merged worktrees removed), `via: sign-off`, with the line's session and checklist reason; a commit
+  after the review whose message names `(<id> S-n)`, or is the step's own record (`<id> S-n: ...`), for a final S-n
+  never blocks it. A close refused there leaves the task `final`, and the owner's `k accept` closes it. A final
+  step's counted failure (not a stop, an owner's stop or an unfinished run) appends `<time> sign-off withdrawn: S-n
+  failed`: the task leaves `final` for the state its records give it (reviewed, or awaiting the owner), open for a
+  fix, and the owner's next `k accept` signs off again and runs every final step, since the build may have changed.
+  A plan with no final steps is accepted at once, as before. `k accept --dry-run` says "would sign off" and `k
+  waiting`'s accept row names the final steps the accept would queue.
+
 ## 2. The step lifecycle (R9)
 
 ```

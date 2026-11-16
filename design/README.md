@@ -6,7 +6,7 @@ examples are invented: a repo `weather`, a task `weather/offline-forecast`, a hu
 
 | File | What it settles |
 | --- | --- |
-| `task-files.md` | the `kirunak/` folder in a repo, the frozen `task.md` grammar (every line sourced), the other files, the twelve states (queued and parked among them) and who moves a task, amendments, the one queue |
+| `task-files.md` | the `kirunak/` folder in a repo, the frozen `task.md` grammar (every line sourced), the other files, the thirteen states (queued and parked among them) and who moves a task, amendments, the one queue |
 | `plugins.md` | the core's shape, the ten seams with their contracts, policies and defaults (the default resource guard, the `handoff` seam), the workspace config (its `ladder` and `hook` keys included), how plugins load, the state folder `$KIRUNAK_HOME` |
 | `intake.md` | the `k-intake` skill with its own interview method, the `k intake` verbs, what a workspace's checklist plugin supplies, converting an openspec change |
 | `approval.md` | the approval record and hash, the PreToolUse freeze hook, the git pre-commit hook, a task's part of prepare-commit-msg (the `Task:` trailer, no new work on an accepted task), `k approve` and `k accept` through `!`, the escalation hook, its block and `/k-go-on`, D14 settled (the mod's command replaces `!`), the instruction text for a workspace's openspec freeze |
