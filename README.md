@@ -145,7 +145,9 @@ You need Node 22 or later, git and Claude Code.
    `k doctor` line each, failing a difference. kirunak never sets them for you.
 
    `--print` shows what it would do and writes nothing. A repo that already
-   has a pre-commit hook gets the one line to add, printed, instead of a new hook. `--git` also writes a starter
+   has a pre-commit hook gets the one line to add, printed, instead of a new hook, unless a line of it already runs
+   kirunak's hook, by its absolute path or through `$HOME` or `~`; a commented-out line does not count. A repo
+   already registered is named so, never registered twice. `--git` also writes a starter
    `.slapignore`, the files left out of a commit's size (R21), when the repo has none: read it, type
    `! k slapignore approve ~/code/app`, and commit it. It writes `kirunak/tasks/.gitignore` too, so raw run output in
    a step's folder (`*.xcresult/`, Gradle's `xml/` and `*Test/` folders, `--profile` HTML, `*.log`, `*.out`) stays out

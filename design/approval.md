@@ -81,8 +81,14 @@ allowed.
 Installed per repo that holds tasks. `k install --git <repo>` writes `.git/hooks/pre-commit` calling it when the repo
 has no pre-commit hook; a repo that already has one (often a committed `githooks/pre-commit` copied into
 `.git/hooks`) adds one line, which `k install --git <repo> --print` prints with the install path filled in:
-`node <kirunak>/hooks/git-pre-commit.mjs || exit 1`. Judgement: kirunak never rewrites a hook it did not write. It
-reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuses a commit when:
+`node <kirunak>/hooks/git-pre-commit.mjs || exit 1`. Judgement: kirunak never rewrites a hook it did not write. A
+hook of the repo's own already runs kirunak's (dry run and real install both say so, and nothing is printed to add)
+when a line of it that is not a comment names `<kirunak>/hooks/<hook name>` as a word of its own, once `"` and `'`
+are dropped and `${HOME}`, `$HOME` and a leading `~` are read as the home folder: `node
+"$HOME"/sources/kirunak/hooks/git-pre-commit.mjs || exit 1` counts for a checkout at `~/sources/kirunak`; a commented
+line, another checkout's or a path inside a longer one does not (`runsKirunakHook` in `lib/install.mjs`,
+gulnya/kirunak-install-dry-run AC-1, E-1, E-2). Only a hook of kirunak's own lines with the literal absolute path is
+rewritten as kirunak's (E-4). It reads the index (`git diff --cached --name-only`, `git show :<path>`) and refuses a commit when:
 
 1. a staged `kirunak/tasks/<slug>/task.md` has an approval record (in the index, else in HEAD) whose `hash` differs
    from the SHA-256 of the staged bytes, and `KIRUNAK_APPROVING` is not `<id>` in the environment: "task.md changed
@@ -321,8 +327,10 @@ gulnya/worktrees-on-close). A refusal or `--dry-run` removes nothing, and nothin
 acceptance. It looks, from no record, at every worktree of the workspace's repos and of the repos a `worktrees`
 plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones too. A worktree goes when:
 
-- its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`), by ancestry or
-  with nothing left in `git cherry`;
+- its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`) or that line's
+  upstream `origin/<main>`, by ancestry or with nothing left in `git cherry`, so a local main line behind origin still
+  counts a branch merged there (gulnya/worktree-sweep-keeps-stale AC-5); a kept line counts the commits against the
+  line that lacks fewest;
 - it is no bug's fix still being worked on (asilak/kirunak-worktrees-lsof-windows E-1): a `bug/<slug>` stays, "Quad
   Damage is on the bug <id>", while the live Quad Damage run is on that bug, whatever its commits; and "the bug <id>
   is still open and bug/<slug> has no commit of its own" while its bug is open (`lib/bugs.mjs` `list`) and its head is
@@ -331,11 +339,16 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
   the run are read once, only when such a branch is a candidate. Review & merge's own removal of the branch it has just
   merged leaves the run out: the run on that bug is its own;
 - it has no uncommitted or untracked change;
-- no open task but the one accepted names its path in one of its files, absolute or from `~` (on macOS and Windows
-  in any case, on Windows with either slash): a task that still needs a worktree writes its path so. The files are
-  read one at a time in one walk, so a task's evidence costs time, never memory; one over 4 MB, a binary one (a NUL
-  byte in its first 8,000 bytes, git's own test, read no further) and one that cannot be read name nothing
-  (gulnya/worktrees-read-oom);
+- no open task but the one accepted names its path in one of its written files, absolute or from `~` (on macOS and
+  Windows in any case, on Windows with either slash): a task that still needs a worktree writes its path so. Its
+  written files are matched by name, `task.md`, `plan.md`, `notes.md`, `progress.md` and `review.md` in the task
+  folder and `report.md` and `needs.json` in a step's folder `steps/<step id>/`, the id as a plan's header reads it
+  (`lib/plan.mjs`'s `STEP_ID`: `S-1`, `S-13a`, `S-14-M1`; `steps/notes/` is no step's); nothing else names a
+  worktree, whatever its extension (a log, evidence, a brief, a diff, an amendment, a handoff), since a path in a
+  tool's output (a build's log, a saved `k worktrees` run, the cache prune's "kept <sha>: locked by <path>") says
+  nothing about whether the task still needs it (gulnya/worktree-sweep-keeps-stale D-1). The files are read one at a
+  time, so a task's writing costs time, never memory; one over 4 MB, a binary one (a NUL byte in its first 8,000
+  bytes, git's own test, read no further) and one that cannot be read name nothing (gulnya/worktrees-read-oom);
 - no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
   Linux `/proc/<pid>/cwd` and `exe`, on Windows one PowerShell `Get-CimInstance Win32_Process` call, whose
   ExecutablePath inside it is a process running from it and whose CommandLine naming it (as a task's file would) is a
@@ -370,8 +383,19 @@ mod passes its own by flag, since a `$.process.run` child carries none (`boards.
 detached run. With none, nothing is released and the removal runs as before; Quad Damage's run passes none.
 
 The main checkout never goes, nor a worktree locked by hand or by another tool, or one whose folder is gone. A
-detached one goes only when a plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit is lost
-with it; a keep from any plugin wins. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
+detached one goes only when its HEAD is on a branch, remote branch or tag, so no commit is lost with it, and either a
+plugin offers it (a keep from any plugin wins) or, offered by none, its HEAD is on the main line or its upstream and it
+is over 3 days old (`DETACHED_DAYS`; gulnya/worktree-sweep-keeps-stale AC-3, D-2): "detached on master, 5 days old".
+Its age is the time since its own git folder's `HEAD` file was written (`git rev-parse --git-path HEAD` in it), which
+git does when the worktree is made and when its HEAD moves; never the index, which `git status` rewrites. A kept line
+names the test that kept it: "detached on master, 2 days old, not over 3 days", "detached, its HEAD 1a2b3c4 is not on
+master or origin/master", or that its age cannot be read; while a plugin failed, every detached one it did not offer
+stays, since it may be one the plugin keeps. A baseline a live step still needs is kept by naming it in a written
+file of its task or by `git worktree lock` (E-1). The detached worktrees a plugin offers are decided last: once the
+others are decided, the core asks the plugins' `candidates` again with `gone`, the paths removed (or that would be, in
+a dry run), and their second answer decides, so the games-core cache worktree only a removed checkout pinned goes in
+the same sweep and shows in the same dry run (D-3). While a plugin fails that second time, or none offers it again, it
+stays. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
 branch goes with `git branch -D`. It is never `--force` but for a removal cut short (killed partway, say by the
 phone's time limit): when its only changes are tracked files deleted, nothing of its own is left in it, and it goes
 with `--force`. Every git call but the removal has a time limit (two minutes; the look at processes one), and what one cannot tell in
@@ -379,6 +403,18 @@ time keeps the worktree. A failure is a kept line with git's error. `k accept` p
 and each kept, with why; Review & merge prints the same lines after its merge's line, indented two spaces as its cost
 line is, the detached run's log included (asilak/kirunak-review-worktree-lines). Findings, a conflict and a refused
 merge run no cleanup and print none.
+
+Review & merge's own removal (`only`: the fix repo's worktrees of the branch it has just merged) takes with them the
+detached worktrees this Review & merge freed, and nothing else (AC-6; the owner's ruling 2026-11-16, "Remove it at
+Review & merge"). Freed means a plugin kept it on the first ask and offers it for removal on the second, asked with
+`gone` once the branch's worktrees are decided. Review & merge takes that first ask before its merge
+(`pluginsBefore`, passed as `only.before`), since a merged branch's own lock pins nothing: so the games-core cache
+worktree only the fix's checkout or its branch's lock pinned goes with the fix's worktree, in whichever repo it is,
+while one already free before the merge, one another checkout or unmerged branch still pins, and any other stale
+worktree wait for a full sweep and are no line of Review & merge's. Without `only.before` the first ask is taken at
+the call, after the merge, and only a removed checkout's own file counts. A freed worktree passes every check above
+(changes, a lock, a process, an open task naming it, a checkout inside); while a plugin fails on either ask, each
+stays, the failure in the problems.
 
 `k worktrees [--closing <id>]` prints the same survey and removes nothing. For each worktree that would go it adds one
 line: the folders git ignores in it besides build output (the plugins' `buildOutput`), the five largest with their
