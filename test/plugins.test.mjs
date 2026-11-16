@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeWorkspace } from './helpers.mjs';
 import { kirunakHome } from '../lib/home.mjs';
-import { aspectsOf, loadWorkspaceModule } from '../lib/workspace.mjs';
+import { aspectsOf, defaultChecklist, loadWorkspaceModule } from '../lib/workspace.mjs';
 
 const STORAGE = `{ repos() {}, queuePath() {}, read() {}, write() {}, exists() {}, hash() {}, commit() {}, head() {}, diff() {}, changedSince() {} }`;
 
@@ -68,6 +68,12 @@ test('a workspace with no checklist plugin gets kirunak\'s default aspects; one 
   const own = await load({ 'a.mjs': plugin('a', `{ checklist: { aspects: () => [{ id: 'one' }] } }`) });
   assert.deepEqual((await aspectsOf(own)).map((a) => a.id), ['one']);
   assert.ok(!own.seams.loaded.some((l) => /checklist-default/.test(l.module)), 'the default is not merged in');
+});
+
+test('k doctor\'s default line names kirunak\'s own default only, never a workspace plugin with its file name (asilak/kirunak-checklist-default review-1)', async () => {
+  assert.equal(defaultChecklist(await load({})), true);
+  const copy = await load({ 'checklist-default.mjs': plugin('mine', `{ checklist: { aspects: () => [{ id: 'one' }] } }`) });
+  assert.equal(defaultChecklist(copy), false);
 });
 
 test('kirunak\'s default aspects each have a title, a question, an edge case and a source, and no id twice', async () => {
