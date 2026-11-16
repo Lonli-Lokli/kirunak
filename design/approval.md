@@ -321,8 +321,10 @@ gulnya/worktrees-on-close). A refusal or `--dry-run` removes nothing, and nothin
 acceptance. It looks, from no record, at every worktree of the workspace's repos and of the repos a `worktrees`
 plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones too. A worktree goes when:
 
-- its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`), by ancestry or
-  with nothing left in `git cherry`;
+- its branch is merged into its repo's main line (origin's HEAD branch, else `main`, else `master`) or that line's
+  upstream `origin/<main>`, by ancestry or with nothing left in `git cherry`, so a local main line behind origin still
+  counts a branch merged there (gulnya/worktree-sweep-keeps-stale AC-5); a kept line counts the commits against the
+  line that lacks fewest;
 - it is no bug's fix still being worked on (asilak/kirunak-worktrees-lsof-windows E-1): a `bug/<slug>` stays, "Quad
   Damage is on the bug <id>", while the live Quad Damage run is on that bug, whatever its commits; and "the bug <id>
   is still open and bug/<slug> has no commit of its own" while its bug is open (`lib/bugs.mjs` `list`) and its head is
@@ -374,8 +376,19 @@ mod passes its own by flag, since a `$.process.run` child carries none (`boards.
 detached run. With none, nothing is released and the removal runs as before; Quad Damage's run passes none.
 
 The main checkout never goes, nor a worktree locked by hand or by another tool, or one whose folder is gone. A
-detached one goes only when a plugin offers it and its HEAD is on a branch, remote branch or tag, so no commit is lost
-with it; a keep from any plugin wins. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
+detached one goes only when its HEAD is on a branch, remote branch or tag, so no commit is lost with it, and either a
+plugin offers it (a keep from any plugin wins) or, offered by none, its HEAD is on the main line or its upstream and it
+is over 3 days old (`DETACHED_DAYS`; gulnya/worktree-sweep-keeps-stale AC-3, D-2): "detached on master, 5 days old".
+Its age is the time since its own git folder's `HEAD` file was written (`git rev-parse --git-path HEAD` in it), which
+git does when the worktree is made and when its HEAD moves; never the index, which `git status` rewrites. A kept line
+names the test that kept it: "detached on master, 2 days old, not over 3 days", "detached, its HEAD 1a2b3c4 is not on
+master or origin/master", or that its age cannot be read; while a plugin failed, every detached one it did not offer
+stays, since it may be one the plugin keeps. A baseline a live step still needs is kept by naming it in a written
+file of its task or by `git worktree lock` (E-1). The detached worktrees a plugin offers are decided last: once the
+others are decided, the core asks the plugins' `candidates` again with `gone`, the paths removed (or that would be, in
+a dry run), and their second answer decides, so the games-core cache worktree only a removed checkout pinned goes in
+the same sweep and shows in the same dry run (D-3). While a plugin fails that second time, or none offers it again, it
+stays. Deepest first, each goes with `git worktree remove`, whole with the files git ignores in it; then its
 branch goes with `git branch -D`. It is never `--force` but for a removal cut short (killed partway, say by the
 phone's time limit): when its only changes are tracked files deleted, nothing of its own is left in it, and it goes
 with `--force`. Every git call but the removal has a time limit (two minutes; the look at processes one), and what one cannot tell in
