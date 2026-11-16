@@ -113,6 +113,24 @@ skipped silently is exactly what R2 forbids).
 A checklist plugin brings its own test (`build-order.md`): every aspect present, each with at least one source that
 names an existing file or document and at least one edge case.
 
+**kirunak's default checklist** (`plugins/checklist-default.mjs`, asilak/kirunak-checklist-default) serves a workspace
+whose plugins supply no checklist, so an intake runs on a machine with no rules of its own written yet; a workspace's
+own checklist replaces it whole, never merged with it. Its seven aspects are what any change to any software can be
+asked about, each aspect's source being this paragraph:
+
+| id | asks | proposed edge cases |
+| --- | --- | --- |
+| platforms | the same on every OS, device or runtime the project runs on | a command, call or signal one platform lacks; paths (separator, case, spaces); CRLF line endings |
+| tests | a test that fails without the change, run on every platform | a test that never runs on one platform; a suite that runs no test and passes |
+| data-kept | what the version before wrote still reads | a file from an older version; a setting the new code no longer knows |
+| failures | what it relies on fails or is slow | a timeout; a write cut off halfway; a command or permission denied |
+| concurrency | two sessions, processes or users at once | two writers of one file; a holder that died holding a lock |
+| security | secrets, personal data, outside input | a secret in a log or commit; outside input run as a command or path |
+| docs | what the change makes untrue | a doc describing the old behaviour; an error that names no way out |
+
+Judgement: these are the failures kirunak's own Windows bugs of 2026-11-03 and the lsof task met in turn; a
+workspace's own checklist names its own.
+
 ## 4. What the intake writes
 
 - `task.md` (draft until approval), `intake.md` (append-only), `notes.md` (background with `--from`).
