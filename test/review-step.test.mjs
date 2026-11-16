@@ -46,7 +46,9 @@ async function implemented(plan = PLAN) {
 }
 
 test('a review step refuses an input outside the three, an output with no review file, and a start with no session', async () => {
-  const w = await implemented(PLAN.replace('inputs: task, diff, evidence/', 'inputs: task, diff, evidence/, steps/S-1/report.md'));
+  // The wide plan is written once S-1 is done: k plan check refuses it too, and its gate would stop S-1's start.
+  const w = await implemented();
+  writeFileSync(join(w.p.dir, 'plan.md'), PLAN.replace('inputs: task, diff, evidence/', 'inputs: task, diff, evidence/, steps/S-1/report.md'));
   const outside = /S-2 is a review: steps\/S-1\/report\.md is outside its three inputs \(task, diff, evidence\/\)/;
   assert.match(k(w.home, ['step', 'brief', w.id, 'S-2']).stderr, outside);
   assert.match(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rev-1']).stderr, outside);

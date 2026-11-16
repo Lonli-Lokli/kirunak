@@ -112,6 +112,29 @@ test('a plan with no review step fails k plan check, and a task already running 
   assert.match(next.stderr, new RegExp(`cannot run a step:\n {2}plan\\.md line 1: ${problem.replace(/[()]/g, '\\$&')}`));
 });
 
+// gulnya/chooser-quality S-17 (2026-11-08): plan check passed a review reading review.md, and its brief refused it.
+test('a review step reading more than task, diff and evidence/ fails k plan check, as its brief would', async () => {
+  const w = await fixture();
+  writeFileSync(join(w.p.dir, 'review.md'), 'an earlier review\n');
+  const wide = PLAN.replace('inputs: task, diff, evidence/\noutputs: review.md', 'inputs: task, diff, evidence/, review.md\noutputs: review-2.md');
+  const problem = 'S-3 is a review: review.md is outside its three inputs (task, diff, evidence/)';
+  assert.deepEqual(problemsOf(w, wide), [problem]);
+  assert.deepEqual(problemsOf(w, PLAN), []);
+});
+
+// The brief's other refusal (review-1 of gulnya/plan-check-review-inputs): a review whose outputs name no review file.
+test('a review step whose outputs name no review file fails k plan check, as its brief would', async () => {
+  const w = await fixture();
+  writeFileSync(join(w.p.dir, 'review.md'), 'an earlier review\n');
+  const none = PLAN.replace('inputs: task, diff, evidence/\noutputs: review.md', 'inputs: task, diff, evidence/\noutputs: report.md');
+  assert.notEqual(none, PLAN);
+  assert.deepEqual(problemsOf(w, none), ['S-3 is a review: its outputs name no review file (review.md, review-2.md, ...)']);
+  const both = PLAN.replace('inputs: task, diff, evidence/\noutputs: review.md', 'inputs: task, diff, evidence/, review.md\noutputs: report.md');
+  assert.deepEqual(problemsOf(w, both), [
+    'S-3 is a review: review.md is outside its three inputs (task, diff, evidence/); its outputs name no review file (review.md, review-2.md, ...)',
+  ]);
+});
+
 test('an unknown id fails', async () => {
   const w = await fixture();
   assert.deepEqual(problemsOf(w, PLAN.replace('AC-2, E-1', 'AC-2, E-1, E-3')), ['S-1 covers E-3, which the task does not have']);
@@ -133,7 +156,15 @@ test('an input no step produces fails; one a step produces or the repo has passe
 
 test('an input naming a step\'s needs.json fails, there or not, naming the needs-<k>.json it moved to; that one passes', async () => {
   const w = await fixture();
-  const naming = (input) => PLAN.replace('inputs: task, diff, evidence/', `inputs: task, diff, evidence/, ${input}`);
+  // S-3 reads the request as an agent step: a review reads task, diff and evidence/ alone, so S-4 reviews.
+  const base = `${PLAN.replace('### S-3 Review [review]', '### S-3 Read the evidence [agent, opus, high]')}
+### S-4 Review [review]
+needs: S-3
+covers: all
+inputs: task, diff, evidence/
+outputs: review-2.md
+`;
+  const naming = (input) => base.replace('inputs: task, diff, evidence/', `inputs: task, diff, evidence/, ${input}`);
   const problem = (use) => `S-3 input steps/S-1/needs.json: a needs.json is S-1's request while its run goes on, and it moves to needs-<k>.json when that run ends; name ${use}, or notes.md, which holds the owner's answer`;
   assert.deepEqual(problemsOf(w, naming('steps/S-1/needs.json')), [problem('the needs-<k>.json it moves to')]);
   // A live request is refused as well: by the time S-3 starts, S-1's run has ended and the file has moved.

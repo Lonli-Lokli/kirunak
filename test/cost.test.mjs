@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compare, costOf, runFields, summary } from '../lib/cost.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
@@ -159,4 +160,14 @@ test('sessions whose files hold no cost say cost not tracked, never 0.00 USD; a 
   assert.match(costMarkdown(ID, both), /\nInteractive sessions 2, 0\.42 USD, 1 of them not tracked\.\n/);
   // A done.json written before `tracked` was counted keeps the cost.md it was committed with.
   assert.match(costMarkdown(ID, { ...both, interactive: { sessions: 1, usd: 0 } }), /\nInteractive sessions 1, 0\.00 USD\.\n/);
+});
+
+test('records skips a file in steps/ whose name starts with S-, such as a step brief', async () => {
+  const { records } = await import('../lib/cost.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-records-'));
+  mkdirSync(join(dir, 'steps', 'S-1'), { recursive: true });
+  writeFileSync(join(dir, 'steps', 'S-1', 'run-1.json'), JSON.stringify(RECORDS['S-1/run-1.json']));
+  writeFileSync(join(dir, 'steps', 'S-3-brief.md'), '# a brief\n');
+  const recs = records(dir);
+  assert.deepEqual(recs.map((r) => `${r.step}/${r.file}`), ['S-1/run-1.json']);
 });

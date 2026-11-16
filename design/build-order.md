@@ -68,7 +68,9 @@ test/fixtures/              an invented workspace: two repos, a checklist plugin
 
 - writes the PreToolUse block into `~/.claude/settings.json` (or `--settings <path>`), with `<kirunak>` replaced by
   this repo's absolute path, keeping every other hook; run again, it changes nothing, and a block of its own with
-  another command, matcher or timeout it rewrites to its own:
+  another command, matcher or timeout it rewrites to its own. It knows its own hooks by a `hooks` folder, either
+  separator (Windows writes `\`) and the file's name (`lib/os.mjs` builds every such pattern), and folds copies of one
+  on the same event, which an install that missed its own command added, into the first; `k doctor` names such copies:
 
 ```json
 { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Skill",

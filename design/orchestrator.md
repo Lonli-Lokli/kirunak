@@ -75,8 +75,10 @@ outputs: review.md
 - `covers:` names AC and E ids (or `all`). `k plan check <id>` refuses a plan that leaves an AC or E uncovered, names
   an id the task does not have, or has a step whose `inputs:` no earlier step produces and no file in the repo
   matches (R8, R9) or name a step's `needs.json` (only a run still going has one, §2 `failed`; the check names the
-  `needs-<k>.json` to use, or `notes.md`, which holds the owner's answer), and a plan with no step of kind `review`,
-  since `k accept` takes only a review (`review.md` §3).
+  `needs-<k>.json` to use, or `notes.md`, which holds the owner's answer), a plan with no step of kind `review`,
+  since `k accept` takes only a review (`review.md` §3), and a review step naming an input but `task`, `diff` and
+  `evidence/`, or no review file (`review.md`, `review-2.md`, ...) among its outputs (`review.md` §1): the same
+  rule its brief applies, so a plan that passes the check never has its review refused at its brief.
   Every step start runs the same check (`k step start`, `k run`), so a task already running whose plan has no review
   step is refused at its next step, naming the problem, and `k list` shows it blocked (`task-files.md` §4). `task`
   and `diff` are the two named inputs (`task` the frozen file; `diff` the patch from the task's first approval, the
