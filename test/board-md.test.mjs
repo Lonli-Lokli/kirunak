@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
 import { bugBullet, bullet, counts, cut, draftBullet, one, renderCard, renderMarkdown } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
-import { addTask, bugAt, bugsAt, draftsAt, fixture, guardStub, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, bugsAt, draftsAt, fixture, guardStub, NOW, queuedAndParked, RELEASE, releaseAt, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const board = async (w) => renderMarkdown(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
@@ -369,4 +369,33 @@ test('k board --card <bug id> answers with the bug\'s card: its fix, its task, i
     '',
   ].join('\n'));
   assert.equal(k(w.home, ['board', '--card', 'hub/nope']).status, 1, 'no task, no bug and no draft');
+});
+
+// gulnya/fast-heavy-queue AC-9: a release before the owner's sign-off, signed off, after a final step failed, closed.
+const release = async (phase) => {
+  const w = await fixture();
+  releaseAt(w, phase);
+  guardStub(w.ws);
+  return { w, list: await rows(w.ws, { all: true }), st: await snapshot(w.ws) };
+};
+
+test('k board --markdown: a release in the final state under final steps with how many are left; a running final step marked final', async () => {
+  const lines = (md) => md.split('\n');
+  for (const phase of ['before', 'failed']) {
+    const r = await release(phase);
+    const md = lines(renderMarkdown(r.list, r.st, NOW));
+    assert.ok(md.includes('- weather/release: A release with its store set (3 met)'), phase);
+    assert.ok(!md.some((l) => l.startsWith('## final steps')), phase);
+  }
+  const { list, st } = await release('signed');
+  const md = lines(renderMarkdown(list, st, NOW));
+  const at = md.indexOf('## final steps (1)');
+  assert.ok(at > 0, md.join('\n'));
+  assert.match(md[at + 2], /^- weather\/release: A release .*\(final steps, 1 left; 3 met\)$/);
+  const running = lines(renderMarkdown(list, { ...st, running: [{ task: RELEASE, step: 'S-4', session: '9d2' }] }, NOW));
+  assert.ok(running.some((l) => /weather\/release final S-4, session 9d2/.test(l)), running.join('\n'));
+  const card = lines(renderCard(list, { ...st, running: [{ task: RELEASE, step: 'S-4', session: '9d2' }] }, RELEASE, NOW));
+  assert.ok(card.some((l) => /worked on by step final S-4 running/.test(l)), card.join('\n'));
+  const closed = await release('closed');
+  assert.ok(lines(renderMarkdown(closed.list, closed.st, NOW)).includes('- weather/release: A release with its store set (3 met)'));
 });

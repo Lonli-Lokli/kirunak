@@ -10,7 +10,7 @@ import { renderMarkdown } from '../lib/board-md.mjs';
 import { fixLine, quadDamagePath } from '../lib/bugs.mjs';
 import { rows } from '../lib/list.mjs';
 import { STATES } from '../lib/state.mjs';
-import { bugAt, bugsAt, draftsAt, fixture, guardJobs, guardStub, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { bugAt, bugsAt, draftsAt, fixture, guardJobs, guardStub, NOW, queuedAndParked, RELEASE, releaseAt, sessionsAt } from './board-fixture.mjs';
 
 async function page(w, opts) {
   return renderHtml(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW, opts);
@@ -423,4 +423,28 @@ test('a resource guard that does not answer leaves no lock, queue or claim inven
   assert.match(await page(w), /<p>the resource guard did not answer: status\(\): heavy-lock unreadable; resources\(\): devices\.mjs list failed<\/p>/);
   guardStub(w.ws, { held: { session: 'kirunak:weather/x', what: 'S-3: unit tests (max 10 min)', since: '2026-11-07T11:50:00Z' } });
   assert.match(await page(w), /<p>lock: S-3: unit tests \(max 10 min\) \(session kirunak:weather\/x, since/, 'a step shows as itself');
+});
+
+// gulnya/fast-heavy-queue AC-9: a release before the owner's sign-off, signed off, after a final step failed, closed.
+const release = async (phase) => {
+  const w = await fixture();
+  releaseAt(w, phase);
+  guardStub(w.ws);
+  return { w, list: await rows(w.ws, { all: true }), st: await snapshot(w.ws) };
+};
+
+test('the page: a release\'s state word reads final steps with how many are left in the running colour, and its final steps carry the word final', async () => {
+  const want = {
+    before: ['<span class="s-waits">reviewed</span>, S-2 done', 'final steps S-3, S-4: wait for the owner&#39;s sign-off, k accept'],
+    signed: ['<span class="s-running">final steps, 1 left</span>, final S-3 done', 'final steps S-3, S-4: 1 left, S-4'],
+    failed: ['<span class="s-waits">reviewed</span>, final S-3 failed', 'final steps S-3, S-4: wait for the owner&#39;s sign-off, k accept'],
+    closed: ['<span class="s-done">done</span>, 3 of 3 met', 'final steps S-3, S-4: passed'],
+  };
+  for (const [phase, [summary, fact]] of Object.entries(want)) {
+    const { list, st } = await release(phase);
+    const html = renderHtml(list, st, NOW);
+    assert.ok(html.includes(`<b>weather/release</b>: ${summary}`), phase);
+    assert.ok(html.includes(`<p class="meta">${fact}</p>`), phase);
+    if (phase === 'signed') assert.match(html, /<h2>final steps <span class="n">\(1\)<\/span><\/h2>/);
+  }
 });

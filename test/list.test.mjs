@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { hashBytes } from '../lib/approval.mjs';
 import { format, rows } from '../lib/list.mjs';
-import { guardJobs, guardStub } from './board-fixture.mjs';
+import { guardJobs, guardStub, RELEASE, releaseAt } from './board-fixture.mjs';
 import { k, makeWorkspace, reviewsRan } from './helpers.mjs';
 
 const taskText = (id, title, { q = false } = {}) => `---
@@ -243,4 +243,31 @@ test('k list --json reaches a pipe whole past 64 KiB, as the mod reads it', asyn
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.length > 65536, `only ${r.stdout.length} bytes: too few to test the pipe`);
   assert.equal(JSON.parse(r.stdout).rows.length, 155);
+});
+
+// gulnya/fast-heavy-queue AC-9: a release's final steps carry the word final, and the final state reads how many are left.
+test('k list marks a release\'s final steps and reads the final state as final steps left, in each phase', async () => {
+  const want = {
+    before: ['reviewed', { finals: ['S-3', 'S-4'], left: ['S-3', 'S-4'], signed: false }, /S-2 finished \(review\.md\), verdict: met, final steps S-3, S-4: wait for the owner's sign-off, k accept$/],
+    signed: ['final', { finals: ['S-3', 'S-4'], left: ['S-4'], signed: true }, /^ {4}final steps, 1 left {2}weather\/release {2}A release with its store set {2}final S-3 finished, verdict: met$/],
+    failed: ['reviewed', { finals: ['S-3', 'S-4'], left: ['S-3', 'S-4'], signed: false }, /sign-off withdrawn: final S-3 failed, verdict: met, final steps S-3, S-4: wait for the owner's sign-off, k accept$/],
+    closed: ['done', { finals: ['S-3', 'S-4'], left: [], signed: true }, /^ {4}done {2}weather\/release {2}A release with its store set {2}2026-11-07$/],
+  };
+  for (const [phase, [state, release, line]] of Object.entries(want)) {
+    const w = await fixture();
+    releaseAt(w, phase);
+    guardStub(w.ws);
+    const r = (await rows(w.ws, { all: true })).find((x) => x.id === RELEASE);
+    assert.equal(r.state, state, phase);
+    assert.deepEqual(r.release, release, phase);
+    assert.match(format([r]), line, phase);
+    if (phase !== 'signed') continue;
+    const cli = k(w.home, ['list', '--json']);
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.deepEqual(JSON.parse(cli.stdout).rows.find((x) => x.id === RELEASE).release, release, 'k list --json carries it');
+    assert.match(k(w.home, ['list']).stdout, /final steps, 1 left {2}weather\/release .*final S-3 finished/);
+  }
+  const w = await fixture();
+  guardStub(w.ws);
+  assert.ok((await rows(w.ws, { all: true })).every((r) => r.release === null), 'a task with no final steps has no release');
 });

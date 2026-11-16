@@ -7,10 +7,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { snapshot } from '../lib/board.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
+import { renderCard } from '../lib/board-md.mjs';
 import { entry, lastStepShort, metLine } from '../lib/board-model.mjs';
 import { rows } from '../lib/list.mjs';
 import { STATES } from '../lib/state.mjs';
-import { addTask, bugAt, bugsAt, draftsAt, fixture, guardStub, NOW, queuedAndParked, sessionsAt } from './board-fixture.mjs';
+import { addTask, bugAt, bugsAt, draftsAt, fixture, guardStub, NOW, queuedAndParked, RELEASE, releaseAt, sessionsAt } from './board-fixture.mjs';
 import { k } from './helpers.mjs';
 
 const brief = async (w) => renderBrief(await rows(w.ws, { all: true }), (await snapshot(w.ws)), NOW);
@@ -215,4 +216,35 @@ test('the bugs before the drafts: a group Bugs, k waiting\'s line first, then on
   assert.ok(b.text.includes(`weather/recent: done, 0 of 3 met\n\nBugs (2)\n${lines.join('\n')}\n\nDrafts (2)\n`), b.text);
   assert.deepEqual(b.ids, b.groups.flatMap((g) => g.ids));
   assert.deepEqual(b.ids.slice(-4), ['hub/queue-stuck', 'weather/rain-icon', 'weather/wind-alerts', 'hub/short-jobs']);
+});
+
+// gulnya/fast-heavy-queue AC-9: a release before the owner's sign-off, signed off, after a final step failed, closed.
+const release = async (phase) => {
+  const w = await fixture();
+  releaseAt(w, phase);
+  guardStub(w.ws);
+  return { w, list: await rows(w.ws, { all: true }), st: await snapshot(w.ws) };
+};
+
+test('the brief board and a release\'s card mark its final steps with the word final, and the final state reads how many are left', async () => {
+  const want = {
+    before: ['Reviewed (1)', 'weather/release: reviewed, S-2 done, 3 of 3 met', "- final steps S-3, S-4: wait for the owner's sign-off, k accept"],
+    signed: ['Final steps (1)', 'weather/release: final steps, 1 left, final S-3 done, 3 of 3 met', '- final steps S-3, S-4: 1 left, S-4'],
+    failed: ['Reviewed (1)', 'weather/release: reviewed, final S-3 failed, 3 of 3 met', "- final steps S-3, S-4: wait for the owner's sign-off, k accept"],
+    closed: ['Done this week (2)', 'weather/release: done, 3 of 3 met', '- final steps S-3, S-4: passed'],
+  };
+  const states = { before: 'reviewed', signed: 'final steps, 1 left', failed: 'reviewed', closed: 'done' };
+  const steps = { before: 'S-2 finished (review.md)', signed: 'final S-3 finished', failed: 'sign-off withdrawn: final S-3 failed', closed: 'final S-4 finished' };
+  for (const [phase, [group, line, fact]] of Object.entries(want)) {
+    const { list, st } = await release(phase);
+    const b = renderBrief(list, st, NOW);
+    const g = b.groups.find((x) => x.ids.includes(RELEASE));
+    assert.equal(`${g.name} (${g.count})`, group, phase);
+    assert.ok(g.lines.includes(line), `${phase}: ${g.lines.join(' | ')}`);
+    assert.doesNotMatch(b.text, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u, 'no emoji');
+    const card = renderCard(list, st, RELEASE, NOW).split('\n');
+    assert.ok(card.includes(`- state: ${states[phase]}`), `${phase}: ${card.join(' | ')}`);
+    assert.ok(card.some((l) => l.startsWith('- step: ') && l.endsWith(steps[phase])), `${phase}: ${card.join(' | ')}`);
+    assert.ok(card.includes(fact), `${phase}: ${card.join(' | ')}`);
+  }
 });

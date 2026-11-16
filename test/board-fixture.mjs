@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hashBytes } from '../lib/approval.mjs';
-import { makeWorkspace, sh } from './helpers.mjs';
+import { makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 // The board's fixture (test/board.test.mjs, test/board-md.test.mjs): four tasks beside the workspace's own, one
 // reviewed, one done this week, one done long ago, one queued and started.
@@ -137,4 +137,30 @@ export async function guardJobs(ws, jobs) {
     });
   }
   return { free: () => writeFileSync(flag, ''), ended: Promise.all(runs) };
+}
+
+// A release with two final steps, S-3 and S-4 (gulnya/fast-heavy-queue AC-9), in one of its phases: 'before' the
+// owner's sign-off (reviewed), 'signed' off with S-3 passed and S-4 left (final), S-3 'failed' after the sign-off,
+// which withdrew it (reviewed again), and 'closed' once both passed (done). → the task's folder.
+export const RELEASE = 'weather/release';
+export function releaseAt(w, phase) {
+  const dir = join(w.weather, 'kirunak', 'tasks', 'release');
+  addTask(w.weather, RELEASE, 'A release with its store set', {
+    approved: '2026-11-01T09:00:00Z',
+    files: { 'review.md': '---\ntask: weather/release\nhead: 9ab1c2d\n---\n\n| id | verdict | evidence |\n| --- | --- | --- |\n| AC-1 | met | test A.one (test/a.test.mjs:3) |\n| AC-2 | met | test A.two (test/a.test.mjs:9) |\n| E-1 | met | test A.gap (test/a.test.mjs:12) |\n\nverdict: met\n' },
+  });
+  reviewsRan(dir);
+  const plan = readFileSync(join(dir, 'plan.md'), 'utf8');
+  const finals = ['3 Store screenshots', '4 Play feature graphic'].map((t) => `### S-${t} [agent]\nfinal: yes\nneeds: S-2\ninputs: task\noutputs: steps/S-${t[0]}/report.md\n`);
+  writeFileSync(join(dir, 'plan.md'), ['---\nrelease: yes\n---\n', plan, ...finals].join('\n'));
+  const signed = '2026-11-07 09:30 signed off by the owner: final steps S-3, S-4 queued (session 7c1)\n2026-11-07 09:31 S-3 started (opus, session 9d2)\n';
+  const lines = {
+    before: '',
+    signed: `${signed}2026-11-07 10:10 S-3 finished\n`,
+    failed: `${signed}2026-11-07 10:10 S-3 failed (exit 1)\n2026-11-07 10:10 sign-off withdrawn: S-3 failed\n`,
+    closed: `${signed}2026-11-07 10:10 S-3 finished\n2026-11-07 10:11 S-4 started (opus, session 9d2)\n2026-11-07 10:40 S-4 finished\n`,
+  }[phase];
+  writeFileSync(join(dir, 'progress.md'), readFileSync(join(dir, 'progress.md'), 'utf8') + lines);
+  if (phase === 'closed') writeFileSync(join(dir, 'done.json'), '{"task":"weather/release","accepted":"2026-11-07T10:41:00Z","via":"sign-off"}\n');
+  return dir;
 }
