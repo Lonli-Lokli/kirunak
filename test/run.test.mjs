@@ -11,6 +11,7 @@ import { renderBrief } from '../lib/board-brief.mjs';
 import { snapshot } from '../lib/board.mjs';
 import { card } from '../lib/board-md.mjs';
 import { rows } from '../lib/list.mjs';
+import { FAST_QUEUE_SINCE } from '../lib/plan.mjs';
 import { stoppedFor } from '../lib/waiting.mjs';
 import * as queue from '../lib/queue.mjs';
 import * as steps from '../lib/steps.mjs';
@@ -528,7 +529,7 @@ test('a resumable [heavy] step or needs.json job reaches the guard as pieceMinut
     status: () => ({ held: null, queued: [], estimateMinutes: 0 }), claim() {}, release() {}, resources: () => [],
   });
   const heavyPlan = (extra) => PLAN.replace('### S-1 Keep the last forecast on disk [agent]\ncovers: AC-1, AC-2, E-1\ninputs: task, docs/offline.md\n', `### S-1 Keep the last forecast on disk [heavy]\ncovers: AC-1, AC-2, E-1\ncommand: npm test\nmax-minutes: 90\n${extra}`);
-  for (const [extra, short, want] of [['resumable: yes\n', 30, 30], ['', 30, undefined], ['resumable: yes\n', undefined, undefined]]) {
+  for (const [extra, short, want] of [['resumable: yes\n', 30, 30], ['long: one release bundle\n', 30, undefined], ['resumable: yes\n', undefined, undefined]]) {
     const w = await approvedWorkspace(heavyPlan(extra));
     w.ws.plan = short ? { shortMinutes: short } : null;
     const jobs = [];
@@ -1268,8 +1269,17 @@ test('a dead k run\'s claude pid that a later process holds is left running; the
   }
 });
 
+// A task first approved before the heavy and store-set rules, whose plan keeps a [heavy] step beside an agent step:
+// the rules are warnings there, so a crash test can run both at once.
+const approvedBeforeFastQueue = (w) => {
+  const record = JSON.parse(readFileSync(w.p.record, 'utf8'));
+  const day = new Date(Date.parse(FAST_QUEUE_SINCE) - 86400000).toISOString().slice(0, 10);
+  writeFileSync(w.p.record, JSON.stringify({ ...record, history: [{ ...record.history[0], approved: `${day}T10:00:00+00:00` }] }));
+};
+
 test('a heavy step a dead k run left running is failed and run again; its started line names its k run', async () => {
   const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
+  approvedBeforeFastQueue(w);
   const dead = spawnSync('true').pid;
   await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${dead}` });
   const jobs = [];
@@ -1286,6 +1296,7 @@ test('a heavy step a dead k run left running is failed and run again; its starte
 
 test('a step whose k run\'s pid is now another process is failed and retried, as is a heavy step, whose line records no start', async () => {
   const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
+  approvedBeforeFastQueue(w);
   const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
   try {
     const sid = randomUUID();
