@@ -347,13 +347,17 @@ flowchart TD
   c5 -- "no" --> r5["Refused: not a review k accept takes"]
   c5 -- "yes" --> c6{"Its verdict is not met?"}
   c6 -- "yes" --> r6["Refused: a not met verdict"]
-  c6 -- "no" --> c7{"The task's work changed after the review's head?"}
+  c6 -- "no" --> c6b{"Every repos.md line names a repo, branch or range kirunak can read?"}
+  c6b -- "no" --> r6b["Refused: each such line named"]
+  c6b -- "yes" --> c7{"The task's work changed after the review's head?"}
   c7 -- "yes" --> r7["Refused: each such file named with its commit"]
   c7 -- "no" --> c8{"A file of the folder uncommitted, new or deleted?"}
   c8 -- "yes" --> r8["Refused: each such file named"]
   c8 -- "no" --> c9{"A checklist item unticked or not written yet, and no #45;#45;checklist-open?"}
   c9 -- "yes" --> r9["Refused: each item named"]
-  c9 -- "no" --> ok["Accepted: done.json committed (a release with final steps not yet signed off is signed off instead)"]
+  c9 -- "no" --> c10{"A git hook refused the commit of done.json and cost.md?"}
+  c10 -- "yes" --> r10["Refused: the hook's message shown, both files put back"]
+  c10 -- "no" --> ok["Accepted: done.json committed (a release with final steps not yet signed off is signed off instead)"]
 ```
 
 | Refusal | What clears it |
@@ -365,9 +369,11 @@ flowchart TD
 | No review | Add a review step to `plan.md` and run it. |
 | The review fails `k review check`, its step has not finished, or it was changed after its step finished | Let the review step finish, or run a new review (a review step whose output is the next `review-<n>.md`). |
 | The verdict is `not met` | Amend the task (`k amend new <id> --title "<a few words>"`) and review again, or run a new review. No flag waives it. |
+| `repos.md` names a repo, branch or range kirunak cannot read | Fix or remove the line it names, then accept again. |
 | The task's work changed after the review's head (a later commit to a file the task's own commits touched, or one naming the task; in another repo, after the head the review saw there) | Run a new review. No flag waives it. |
 | A file of the task's folder uncommitted, new or deleted | `k records <id>` commits them; raw output moves out (into evidence/, or a rule in `kirunak/tasks/.gitignore`) or is deleted. |
-| A checklist item unticked, or a review row with no item yet | `k checklist <id>` writes the missing items and the owner ticks them, or the owner accepts with `--checklist-open "<why>"`, recorded with the items it leaves open. |
+| A checklist item unticked, or a review row with no item yet | `k checklist <id>` writes the missing items and the owner ticks them, or the owner accepts with `--checklist-open "<why>"`, recorded with the items it leaves open; an empty reason is refused before any check. |
+| A git hook refused the accept's own commit of `done.json` and `cost.md` | Both files are put back as they were: fix what the hook named, then accept again. |
 
 ### Cheaper steps: `verify:` and `tools: all`
 
