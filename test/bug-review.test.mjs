@@ -214,6 +214,35 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   assert.equal(e.outcome, 'merged');
 });
 
+// gulnya/worktree-sweep-keeps-stale AC-6, the owner's ruling 2026-11-16 ("Remove it at Review & merge"): the plugins
+// are asked before the merge, so the games-core cache worktrees (weather's, another repo than the fix's) only the fix's
+// worktree or its branch's lock pinned go with the fix's worktree; one another lock pins, and one already free, stay.
+test('worktree-sweep-keeps-stale AC-6: a clean review removes, with the fix\'s worktree, the cache worktrees only it or its branch pinned', async () => {
+  const w = await bugWorkspace();
+  const tree = realpathSync(w.tree);
+  const [byTree, byBranch, other, free] = ['tree', 'branch', 'other', 'free'].map((n) => {
+    git(w.weather, 'worktree', 'add', '-q', '--detach', join(w.root, `cache-${n}`), 'master');
+    return realpathSync(join(w.root, `cache-${n}`));
+  });
+  const merged = () => sh(w.fix, 'git', ['branch', '--list', BRANCH]).trim() === '' || sh(w.fix, 'git', ['branch', '--merged', 'master', '--list', BRANCH]).trim() !== '';
+  const pin = (path, by) => (by ? { path, remove: false, why: `games-core cache, pinned by ${by}` } : { path, remove: true, why: 'games-core cache, and no games-core.lock pins it' });
+  w.ws.seams.worktrees = [{
+    repos: () => [],
+    buildOutput: () => [],
+    candidates: ({ gone }) => [pin(byTree, gone?.has(tree) ? null : tree), pin(byBranch, merged() ? null : BRANCH), pin(other, 'weather master'), pin(free, null)],
+  }];
+  w.ws.seams.runner = fakeRunner(({ head, base }) => answer('clean', head, base));
+  const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
+  assert.equal(r.outcome, 'merged', JSON.stringify(r.problems));
+  assert.deepEqual(r.problems, []);
+  const why = 'games-core cache, and no games-core.lock pins it';
+  assert.deepEqual(Object.fromEntries(r.worktrees.removed.map((x) => [x.path, x.why])), { [tree]: `${BRANCH} merged into master`, [byTree]: why, [byBranch]: why });
+  assert.deepEqual(r.worktrees.kept, []);
+  assert.deepEqual(r.worktrees.problems, []);
+  assert.equal(existsSync(byTree) || existsSync(byBranch), false);
+  assert.ok(existsSync(other) && existsSync(free));
+});
+
 // asilak/kirunak-worktrees-lsof-windows AC-18: the session that runs Review & merge, as k passes it, is taken out of
 // every worktree's lock before the fix's worktree is looked at.
 const LIVE = '2099-01-01T00:00:00.000Z';
