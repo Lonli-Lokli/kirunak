@@ -1,0 +1,25 @@
+# The line-ending tests on Windows with core.autocrlf true, where a clone without .gitattributes checks its templates
+# out with CRLF, and on Linux. Only test/line-endings.test.mjs runs here.
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  line-endings:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Turn CRLF conversion on before the checkout
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Line-ending tests
+        run: node --test test/line-endings.test.mjs
