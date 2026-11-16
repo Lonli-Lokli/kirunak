@@ -56,6 +56,14 @@ const CASES = {
     reviewsRan(dir);
     put('checklist.md', '- [ ] E-1 Read: the age line reads naturally (review.md)\n');
   },
+  // A release the owner signed off while its final steps run (gulnya/fast-heavy-queue AC-7); withdrawn, it is reviewed
+  // again.
+  final: ({ dir, put }) => {
+    put('review.md', SOUND('verdict: met'));
+    reviewsRan(dir);
+    put('plan.md', `---\nrelease: yes\n---\n\n${readFileSync(join(dir, 'plan.md'), 'utf8')}\n### S-3 Store screenshots [agent]\nfinal: yes\nneeds: S-2\ninputs: task\noutputs: steps/S-3/report.md\n`);
+    put('progress.md', `${readFileSync(join(dir, 'progress.md'), 'utf8')}2026-11-07 11:30 signed off by the owner: final steps S-3 queued (session 7c1)\n`);
+  },
   done: ({ put }) => put('done.json', '{"task":"weather/offline-forecast"}\n'),
   'on hold': ({ put }) => put('hold.md', 'Waiting for the provider. 2026-11-04\n'),
   stale: ({ put }) => put('task.md', readFileSync(join(SRC, 'task.md'), 'utf8').replace('three days', 'two days')),
@@ -150,4 +158,12 @@ test('in review while the latest review fails the grammar or no finished review 
     put('review.md', SOUND('verdict: met'));
   }), id }), 'in review', 'its step failed and escalated');
   assert.equal(stateOf({ ...folder(({ put }) => put('review.md', SOUND('verdict: met'))), id }), 'in review', 'no plan, no review step');
+});
+
+test('a release whose sign-off a final step withdrew is reviewed again, not final (gulnya/fast-heavy-queue AC-7)', () => {
+  const f = folder(({ dir, put }) => {
+    CASES.final({ dir, put });
+    put('progress.md', `${readFileSync(join(dir, 'progress.md'), 'utf8')}2026-11-07 12:00 S-3 started\n2026-11-07 12:20 S-3 failed: the upload refused\n2026-11-07 12:20 sign-off withdrawn: S-3 failed\n`);
+  });
+  assert.equal(stateOf({ ...f, id: 'weather/offline-forecast' }), 'reviewed');
 });

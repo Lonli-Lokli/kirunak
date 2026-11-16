@@ -126,7 +126,7 @@ test('a failed final step withdraws the sign-off; the next accept runs every fin
   assert.equal(signOff(readFileSync(join(dir, 'progress.md'), 'utf8')).session, 'sess-2');
   // A stop is no failure: it withdraws nothing.
   appendFileSync(join(dir, 'progress.md'), '2026-11-08 08:10 S-3 started (opus, session cc)\n');
-  assert.equal(steps.fail({ ws, id: ID, step: 'S-3', why: `${steps.UNFINISHED}the captions`, now: NOV8 }).withdrawn, false);
+  assert.equal(steps.fail({ ws, id: ID, step: 'S-3', why: `${steps.UNFINISHED}the captions`, now: NOV8 }).withdrawn, undefined);
   assert.equal(stateNow(ws, dir), 'final');
 });
 
