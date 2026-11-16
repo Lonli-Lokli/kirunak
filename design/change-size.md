@@ -148,8 +148,11 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   add printed, as for pre-commit (`approval.md` §3). It writes `commit-msg` the same way (`exec node
   <kirunak>/hooks/git-commit-msg.mjs "$@"`), the check of an accepted task on the message the commit keeps; a repo's
   own `commit-msg` gets the line printed, to add before its first `exit`. It writes the starter `.slapignore` (§2)
-  when the repo has none, keeps one that is there, and registers the repo in the record, so `--all` finds it.
-  `--print` shows the starter. It writes `kirunak/tasks/.gitignore` with niva's lines for raw run output (game-minesweeper
+  when the repo has none, keeps one that is there, and registers the repo in the record, so `--all` finds it, by its
+  main folder (the key `register` and `registered` in `lib/slapignore.mjs` share, so a trailing slash names the same
+  repo). A repo the record lists already gets `<repo> is already registered in <slapignore.json>`, from `--print`
+  and the real install alike, and the record is not written; `--print` says `would register` only for one it does
+  not list (gulnya/kirunak-install-dry-run AC-2, AC-3, E-3). `--print` shows the starter. It writes `kirunak/tasks/.gitignore` with niva's lines for raw run output (game-minesweeper
   bd58b693), or appends only the pattern lines a file there lacks, the owner's kept; never the root `.gitignore`
   (gulnya/close-leaves-untracked-step-files AC-3, E-1). The owner commits it.
 - **Rolling out to repos that already have the hooks**: run `k install --git` on each (the hooks are already there;
