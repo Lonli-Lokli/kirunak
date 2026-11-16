@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
 import { processPaths } from '../lib/os.mjs';
-import { holdsLine, worktrees } from '../lib/worktrees.mjs';
+import { holdsLine, pluginsBefore, worktrees } from '../lib/worktrees.mjs';
 import { gitCommitAll, gitInit, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && key !== 'KIRUNAK_HOME') delete process.env[key];
@@ -190,9 +190,10 @@ test('worktree-sweep-keeps-stale AC-1, E-2: a log, evidence, a brief, a diff or 
   assert.deepEqual(paths(look.removed).sort(), [...wts].sort());
 });
 
-test('worktree-sweep-keeps-stale AC-2: a worktree an open task names in task.md, plan.md, notes.md, progress.md, review.md, or a step\'s report.md or needs.json stays', async () => {
+test('worktree-sweep-keeps-stale AC-2: a worktree an open task names in task.md, plan.md, notes.md, progress.md, review.md, or a step\'s report.md or needs.json stays, the step\'s folder any step id the plan reads (S-13a, S-14-M1)', async () => {
   const { ws, root, weather } = await makeWorkspace();
-  const files = ['task.md', 'plan.md', 'notes.md', 'progress.md', 'review.md', 'steps/S-1/report.md', 'steps/S-12/needs.json'];
+  const files = ['task.md', 'plan.md', 'notes.md', 'progress.md', 'review.md', 'steps/S-1/report.md', 'steps/S-12/needs.json',
+    'steps/S-13a/report.md', 'steps/S-14-M1/needs.json', 'steps/S-13c-2/report.md', 'steps/S-13-look/report.md'];
   const wts = files.map((_, i) => add(weather, join(root, `w${i}`), `w${i}`));
   openTask(weather, 'written', Object.fromEntries(files.map((f, i) => [f, `# written\nwork in ${wts[i]}\n`])));
   const look = await worktrees({ ws, processes: none });
@@ -755,4 +756,95 @@ test('E-1: the bugs and the run are read only when a bug/<slug> is a candidate, 
     throw new Error('no bugs here');
   };
   assert.deepEqual(whys((await worktrees({ ws, processes: none, openBugs: failing })).kept), { [fresh]: 'cannot tell whether its bug is open: no bugs here' });
+});
+
+// gulnya/worktree-sweep-keeps-stale AC-6, the owner's ruling 2026-11-16 ("Remove it at Review & merge"): Review &
+// merge's own removal (`only`) takes the cache worktrees it freed and nothing else. The fix repo is weather; the cache
+// worktrees and a stale detached one no plugin offers are hub's, a repo `only` does not look in.
+async function mergedBug({ merged = true } = {}) {
+  const w = await makeWorkspace();
+  const { root, weather, hub } = w;
+  const fix = add(weather, join(root, 'fix'), 'bug/fix');
+  const head = commitIn(fix, 'fix.txt');
+  if (merged) mergeNoFf(weather, 'bug/fix');
+  const staying = add(weather, join(root, 'staying'), 'staying');
+  commitIn(staying, 's.txt');
+  const [freed, pinned, free, byBranch, stray] = ['freed', 'pinned', 'free', 'branch', 'stray'].map((n) => add(hub, join(root, `cache-${n}`), null));
+  for (const c of [freed, pinned, free, byBranch, stray]) aged(c, 5);
+  const asked = [];
+  const pin = (path, by) => (by ? { path, remove: false, why: `games-core cache, pinned by the games-core.lock of ${by}` } : { path, remove: true, why: 'games-core cache, and no games-core.lock pins it' });
+  // As gulnya's plugin reads them: a checkout's own file pins until it is in gone, a branch's lock until it is merged.
+  const branchMerged = () => sh(weather, 'git', ['branch', '--merged', 'master', '--list', 'bug/fix']).trim() !== '' || sh(weather, 'git', ['branch', '--list', 'bug/fix']).trim() === '';
+  const plugin = {
+    repos: () => [],
+    buildOutput: () => [],
+    candidates: ({ gone }) => {
+      asked.push(gone && [...gone].sort());
+      return [
+        pin(freed, gone?.has(fix) ? null : `${fix}, as checked out`),
+        pin(pinned, gone?.has(staying) ? null : `${staying}, as checked out`),
+        pin(free, null),
+        pin(byBranch, branchMerged() ? null : 'weather bug/fix'),
+      ];
+    },
+  };
+  w.ws.seams.worktrees = [plugin];
+  return { ...w, fix, head, staying, freed, pinned, free, byBranch, stray, asked, plugin };
+}
+
+test('worktree-sweep-keeps-stale AC-6: Review & merge (only) removes the cache worktree only the merged branch\'s removed worktree pinned, in the dry run too; a cache worktree a staying checkout pins, one already free and a stale detached one no plugin offers are not touched', async () => {
+  const { ws, weather, fix, freed, pinned, free, byBranch, stray, asked } = await mergedBug();
+  const only = { root: weather, branch: 'bug/fix' };
+  const removed = { [fix]: 'bug/fix merged into master', [freed]: 'games-core cache, and no games-core.lock pins it' };
+  const look = await worktrees({ ws, processes: none, only });
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(asked, [undefined, [fix]], 'asked first with no gone, then with what would go');
+  assert.deepEqual(whys(look.removed), removed);
+  assert.deepEqual(look.kept, [], 'a cache worktree still pinned, or not freed by this removal, is no line of it');
+  for (const p of [fix, freed]) assert.ok(existsSync(p), 'a dry run removes nothing');
+
+  asked.length = 0;
+  const r = await worktrees({ ws, remove: true, processes: none, only });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(asked, [undefined, [fix]]);
+  assert.deepEqual(whys(r.removed), removed);
+  assert.deepEqual(r.kept, []);
+  assert.equal(existsSync(fix) || existsSync(freed), false);
+  assert.equal(branchExists(weather, 'bug/fix'), false);
+  for (const p of [pinned, free, byBranch, stray]) assert.ok(existsSync(p), p);
+  // The two left stale are a full sweep's: it takes them.
+  const sweep = await worktrees({ ws, processes: none });
+  assert.deepEqual(paths(sweep.removed).filter((p) => [free, byBranch, stray].includes(p)).sort(), [byBranch, free, stray].sort());
+});
+
+test('worktree-sweep-keeps-stale AC-6: under only, a plugin failing on either ask keeps the cache worktree, as does any usual check (changes)', async () => {
+  for (const failOn of [0, 1]) {
+    const { ws, weather, fix, freed, plugin } = await mergedBug();
+    let calls = 0;
+    ws.seams.worktrees = [{ ...plugin, candidates: (a) => { if (calls++ === failOn) throw new Error('no cache folder'); return plugin.candidates(a); } }];
+    const r = await worktrees({ ws, remove: true, processes: none, only: { root: weather, branch: 'bug/fix' } });
+    assert.deepEqual(whys(r.removed), { [fix]: 'bug/fix merged into master' }, `failing on ask ${failOn + 1}`);
+    assert.deepEqual(r.problems, ['a worktrees plugin failed: no cache folder']);
+    assert.ok(existsSync(freed), `failing on ask ${failOn + 1}`);
+  }
+  const { ws, weather, fix, freed } = await mergedBug();
+  writeFileSync(join(freed, 'README.md'), 'changed\n');
+  const r = await worktrees({ ws, remove: true, processes: none, only: { root: weather, branch: 'bug/fix' } });
+  assert.deepEqual(whys(r.removed), { [fix]: 'bug/fix merged into master' });
+  assert.deepEqual(whys(r.kept), { [freed]: '1 uncommitted change' });
+  assert.ok(existsSync(freed));
+});
+
+test('worktree-sweep-keeps-stale AC-6: with the plugins asked before the merge (only.before), the cache worktree only the merged branch\'s lock pinned goes too; asked only after it, that one reads as free before and stays', async () => {
+  for (const ahead of [true, false]) {
+    const { ws, weather, fix, freed, pinned, free, byBranch, stray } = await mergedBug({ merged: false });
+    const before = ahead ? await pluginsBefore({ ws, root: weather }) : undefined;
+    mergeNoFf(weather, 'bug/fix');
+    const r = await worktrees({ ws, remove: true, processes: none, only: { root: weather, branch: 'bug/fix', ...(before ? { before } : {}) } });
+    assert.deepEqual(r.problems, []);
+    const why = 'games-core cache, and no games-core.lock pins it';
+    assert.deepEqual(whys(r.removed), { [fix]: 'bug/fix merged into master', [freed]: why, ...(ahead ? { [byBranch]: why } : {}) }, `before given: ${ahead}`);
+    assert.equal(existsSync(byBranch), !ahead);
+    for (const p of [pinned, free, stray]) assert.ok(existsSync(p), p);
+  }
 });
