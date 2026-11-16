@@ -1,7 +1,7 @@
 // The worktrees an acceptance removes (approval.md §4), on fixture repos: lib/worktrees.mjs, `k worktrees`, `k accept`.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
@@ -31,6 +31,13 @@ const ignore = (repo, ...names) => writeFileSync(join(repo, '.git', 'info', 'exc
 const branchExists = (repo, b) => sh(repo, 'git', ['branch', '--list', b]).trim() !== '';
 const paths = (list) => list.map((w) => w.path);
 const whys = (list) => Object.fromEntries(list.map((w) => [w.path, w.why]));
+// A detached worktree's age (gulnya/worktree-sweep-keeps-stale D-2) is its own git folder's HEAD file's mtime: set
+// here `days` and an hour back.
+function aged(wt, days) {
+  const head = sh(wt, 'git', ['rev-parse', '--path-format=absolute', '--git-path', 'HEAD']).trim();
+  const t = new Date(Date.now() - days * 86_400_000 - 3_600_000);
+  utimesSync(head, t, t);
+}
 
 test('AC-1, AC-3, E-2, E-5: a merged, clean worktree goes whole with its branch, deepest first; unmerged or changed ones stay, and no main checkout is ever listed', async () => {
   const { ws, root, weather, hub } = await makeWorkspace();
@@ -84,6 +91,29 @@ test('E-1: a branch whose every change is in the main line counts as merged; one
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).removed), { [picked]: 'picked merged into master' });
   commitIn(picked, 'd.txt');
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [picked]: 'picked has 1 commit not in master' });
+});
+
+test('worktree-sweep-keeps-stale AC-5: with the local master behind origin/master, a branch origin/master holds (merged, or every change picked) counts as merged; one more commit keeps it', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const merged = add(weather, join(root, 'merged'), 'merged');
+  commitIn(merged, 'm.txt');
+  const picked = add(weather, join(root, 'picked'), 'picked');
+  const sha = commitIn(picked, 'p.txt');
+  // origin/master: master, another commit, merged merged in and picked's change picked; the local master stays behind
+  sh(weather, 'git', ['checkout', '-q', '-b', 'upstream']);
+  commitIn(weather, 'other.txt');
+  sh(weather, 'git', ['merge', '-q', '--no-ff', 'merged', '-m', 'merge merged']);
+  sh(weather, 'git', ['cherry-pick', sha]);
+  sh(weather, 'git', ['update-ref', 'refs/remotes/origin/master', 'upstream']);
+  sh(weather, 'git', ['checkout', '-q', 'master']);
+  sh(weather, 'git', ['branch', '-D', 'upstream']);
+  let look = await worktrees({ ws, processes: none });
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(whys(look.kept), {});
+  assert.deepEqual(whys(look.removed), { [merged]: 'merged merged into origin/master', [picked]: 'picked merged into origin/master' });
+  commitIn(picked, 'q.txt');
+  look = await worktrees({ ws, processes: none });
+  assert.deepEqual(whys(look.kept), { [picked]: 'picked has 1 commit not in origin/master' });
 });
 
 test("the main line is origin's HEAD branch when there is one; a worktree on the main line itself stays", async () => {
@@ -216,11 +246,11 @@ test('AC-1: a worktree a process works in stays (lsof), and so does every one wh
   assert.deepEqual(whys((await worktrees({ ws, processes: () => null })).kept), { [busy]: 'cannot tell whether a process works in it or runs from it (lsof gave no answer)' });
 });
 
-test('E-6: a detached worktree goes only when a plugin offers it; a keep from any plugin wins; a plugin adds repos; a failing plugin removes nothing', async () => {
+test('E-6: a detached worktree a plugin offers goes or stays as the plugin says; a keep from any plugin wins; a plugin adds repos; a failing plugin removes nothing', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const cache = add(weather, join(root, 'cache'), null);
   const merged = add(weather, join(root, 'merged'), 'merged');
-  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [cache]: 'detached (no branch), and no plugin offers it' });
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [cache]: 'detached on master, under an hour old, not over 3 days' });
 
   const extra = join(root, 'extra');
   mkdirSync(extra);
@@ -242,6 +272,88 @@ test('E-6: a detached worktree goes only when a plugin offers it; a keep from an
   look = await worktrees({ ws, processes: none });
   assert.deepEqual(paths(look.removed), [merged]);
   assert.deepEqual(look.problems, ['a worktrees plugin failed: no cache folder']);
+});
+
+test('worktree-sweep-keeps-stale AC-3, AC-4, E-1: a clean detached worktree no plugin offers, on master or origin/master and over 3 days old, goes; a younger, locked, changed, named or off-master one stays, each line saying why', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const old = add(weather, join(root, 'old'), null);
+  const young = add(weather, join(root, 'young'), null);
+  const locked = add(weather, join(root, 'locked'), null);
+  sh(weather, 'git', ['worktree', 'lock', '--reason', 'a baseline S-4 needs', locked]);
+  const off = add(weather, join(root, 'off'), null);
+  const offSha = commitIn(off, 'o.txt');
+  const changed = add(weather, join(root, 'changed'), null);
+  writeFileSync(join(changed, 'README.md'), 'changed\n');
+  const named = add(weather, join(root, 'named'), null);
+  writeFileSync(join(taskDir(weather), 'plan.md'), `S-4 compares against ${named}\n`);
+  // origin/master one commit ahead of the local master, a worktree detached on it
+  const ahead = add(weather, join(root, 'ahead'), null);
+  sh(weather, 'git', ['update-ref', 'refs/remotes/origin/master', commitIn(ahead, 'u.txt')]);
+  for (const w of [old, locked, off, changed, named, ahead]) aged(w, 5);
+  aged(young, 2);
+  const kept = {
+    [young]: 'detached on master, 2 days old, not over 3 days',
+    [locked]: 'locked: a baseline S-4 needs',
+    [off]: `detached, its HEAD ${offSha.slice(0, 7)} is not on master or origin/master`,
+    [changed]: '1 uncommitted change',
+    [named]: `the open task ${ID} names it (plan.md)`,
+  };
+  const look = await worktrees({ ws, processes: none });
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(whys(look.removed), { [old]: 'detached on master, 5 days old', [ahead]: 'detached on origin/master, 5 days old' });
+  assert.deepEqual(whys(look.kept), kept);
+  assert.ok(existsSync(old) && existsSync(ahead), 'a look removes nothing');
+  const r = await worktrees({ ws, remove: true, processes: none });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(whys(r.removed), { [old]: 'detached on master, 5 days old', [ahead]: 'detached on origin/master, 5 days old' });
+  assert.deepEqual(whys(r.kept), kept);
+  assert.equal(existsSync(old) || existsSync(ahead), false);
+  for (const p of Object.keys(kept)) assert.ok(existsSync(p), p);
+});
+
+test('worktree-sweep-keeps-stale AC-6, D-3: the plugins are asked again with gone once the other worktrees are decided, so the cache worktree only a removed worktree pinned goes in the same sweep and shows in the same dry run; a plugin that fails keeps every detached worktree', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const cache = add(weather, join(root, 'cache'), null);
+  const kept = add(weather, join(root, 'kept'), null);
+  for (const w of [cache, kept]) aged(w, 5);
+  const pinner = add(weather, join(root, 'pinner'), 'pinner');
+  const staying = add(weather, join(root, 'staying'), 'staying');
+  commitIn(staying, 's.txt');
+  const asked = [];
+  // Each cache worktree pinned by one checkout's own file, as gulnya's plugin reads it: free once that one is gone.
+  const pin = (gone, path, by) =>
+    gone?.has(by) ? { path, remove: true, why: 'games-core cache, and no games-core.lock pins it' } : { path, remove: false, why: `games-core cache, pinned by the games-core.lock of ${by}, as checked out` };
+  const plugin = { repos: () => [], buildOutput: () => [], candidates: ({ gone }) => (asked.push(gone && [...gone].sort()), [pin(gone, cache, pinner), pin(gone, kept, staying)]) };
+
+  // Failing the first time, or the second, the plugin's detached worktrees stay, whatever their age.
+  ws.seams.worktrees = [{ ...plugin, candidates: () => { throw new Error('no cache folder'); } }];
+  let look = await worktrees({ ws, processes: none });
+  assert.deepEqual(whys(look.removed), { [pinner]: 'pinner merged into master' });
+  for (const w of [cache, kept]) assert.equal(whys(look.kept)[w], 'detached, and a worktrees plugin failed, so whether one offers it cannot be told');
+  let calls = 0;
+  ws.seams.worktrees = [{ ...plugin, candidates: (a) => { if (calls++) throw new Error('no cache folder'); return plugin.candidates(a); } }];
+  look = await worktrees({ ws, processes: none });
+  assert.deepEqual(whys(look.removed), { [pinner]: 'pinner merged into master' });
+  assert.equal(whys(look.kept)[cache], `a worktrees plugin failed when asked again (it first said: games-core cache, pinned by the games-core.lock of ${pinner}, as checked out)`);
+  assert.deepEqual(look.problems, ['a worktrees plugin failed: no cache folder']);
+
+  ws.seams.worktrees = [plugin];
+  asked.length = 0;
+  look = await worktrees({ ws, processes: none });
+  assert.deepEqual(asked, [undefined, [pinner]], 'asked first with no gone, then with what would go');
+  const removed = { [pinner]: 'pinner merged into master', [cache]: 'games-core cache, and no games-core.lock pins it' };
+  const stay = { [staying]: 'staying has 1 commit not in master', [kept]: `games-core cache, pinned by the games-core.lock of ${staying}, as checked out` };
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(whys(look.removed), removed);
+  assert.deepEqual(whys(look.kept), stay);
+  assert.ok(existsSync(pinner) && existsSync(cache), 'a look removes nothing');
+  asked.length = 0;
+  const r = await worktrees({ ws, remove: true, processes: none });
+  assert.deepEqual(asked, [undefined, [pinner]]);
+  assert.deepEqual(whys(r.removed), removed);
+  assert.deepEqual(whys(r.kept), stay);
+  assert.equal(existsSync(pinner) || existsSync(cache), false);
+  assert.ok(existsSync(staying) && existsSync(kept));
 });
 
 test('a worktree holding another checkout stays while that one stays, and goes after it', async () => {
