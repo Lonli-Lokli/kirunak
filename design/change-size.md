@@ -102,14 +102,20 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   on 2026-10-27 as L, SLAP 61, for the 518 lines of k cost's numbers in its `done.json`, which a starter
   `.slapignore` does not list. Judgement: like a replay, such a commit is no change a person or an agent wrote; the
   owner's command writes it whole, and the work it records was measured commit by commit.
-- **A step's records are skipped too** (gulnya/close-leaves-untracked-step-files, AC-5, D-1): `k step finish`'s
-  records commit, made under `KIRUNAK_RECORDING=<id>`, whose every path is that task's `progress.md` or a file under
-  its `steps/` (a brief, a report, a review's `given.json`), decided by `stepsRecords` in
-  `hooks/git-prepare-commit-msg.mjs`, the variable naming the task by its id or its slug. One more path and the whole
-  commit is measured; the step's evidence commit, made with no variable, is measured as before. `KIRUNAK_RECORDING` is
-  no owner's variable: the pre-commit hook never lets it stage the owner's records, and the SLAP hook does not count
-  them as a step's. Evidence: a review step's `given.json` runs to about 500 lines (the task's bug.md), L on its own.
-  Judgement (the owner's D-1, 2026-11-15): kirunak's own commits of its records are not measured; the owner's
+- **A task folder's records are skipped too** (gulnya/close-leaves-untracked-step-files, AC-5, D-1; widened by
+  gulnya/accept-leaves-task-files, AC-5): a records commit made under `KIRUNAK_RECORDING=<id>`, whose every path is
+  in that task's folder (`kirunak/tasks/<slug>/`), `task.md` aside, decided by `taskRecords` in
+  `hooks/git-prepare-commit-msg.mjs`, the variable naming the task by its id or its slug. Two commands make one:
+  `k step finish` (`progress.md` and the step's brief, report and `given.json`) and `k records <id> [<file>...]`
+  (every changed, new or deleted file of the folder: notes, reviews, the checklist, evidence, screenshots, and after
+  the accept the handoff alone, `task-files.md`). One path outside the folder, or `task.md`, and the whole commit is
+  measured; the step's evidence commit, made with no variable, is measured as before. `KIRUNAK_RECORDING` is no
+  owner's variable: the pre-commit hook never lets it stage the owner's records, and the SLAP hook never counts them
+  as the task's (`done.json`, `cost.md`, `hold.md`, an approval record, an amendment whose `applied:`/`declined:`
+  stamps grew: `ownersOnly` in `hooks/git-pre-commit.mjs`), so one of them keeps the commit measured. Evidence: a
+  review step's `given.json` runs to about 500 lines (the task's bug.md), L on its own, and a task's notes, review
+  and handoff each run to hundreds of lines. Judgement (the owner's D-1, 2026-11-15, and Q-1 and Q-8 of
+  gulnya/accept-leaves-task-files): kirunak's own commits of a task's records are not measured; the owner's
   `.slapignore` stays as it is.
 - **It fails closed**: if the hook cannot run (kirunak moved, git failed, the record unreadable), the commit is refused
   with the error. Judgement: R22 has no override, so a gate that silently lets everything through when broken would

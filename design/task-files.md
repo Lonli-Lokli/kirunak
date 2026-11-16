@@ -296,6 +296,19 @@ parser of about a hundred lines with no dependency.
   and a heavy job's `heavy-<k>.json` and log; the brief and the step's outputs are the session's to commit, and so
   is a review step's `given.json`, what kirunak gave the review (`review.md` §1).
 
+Who commits these records (gulnya/accept-leaves-task-files): `k step finish` commits a step's evidence, then its
+`progress.md` line with the step's brief, report and `given.json`, and no more of the folder. The rest (notes, plan,
+reviews, the checklist, evidence and screenshots the owner looked at, a file deleted) is committed by `k records <id>
+[<file>...] [--dry-run]`: it lists every changed, new or deleted file of the folder, `task.md`, `done.json`,
+`cost.md` and ignored files aside, then commits exactly those paths in one commit, `kirunak: <id> records`, under
+`KIRUNAK_RECORDING=<id>` (`git commit -- <paths>`, so what other sessions staged in the same index stays out, E-1).
+`<file>...`, relative to the folder, narrows it; `--dry-run` only lists; with nothing to commit it says so. A git hook
+that refuses the commit is printed whole, the index and the files left as they were. It is no owner's verb: a session
+runs it, on an accepted task too. The `k-done` skill runs it once the owner confirms the task done, the list shown
+first, so `k accept`, which refuses while any file of the folder is uncommitted (`approval.md` §4), finds none; after
+the accept it writes the handoff and commits it alone with `k records <id> handoff.md` (AC-3). The SLAP gate does not
+measure such a commit (`change-size.md` §3).
+
 ## 4. States and who moves a task
 
 The state is **derived from the records**; there is no state field to go stale. Judgement: checkboxes in a task list

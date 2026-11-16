@@ -244,7 +244,8 @@ Code hook refuses an agent's edit of it.
 `k slap --staged` measures what you are about to commit, and `k slap <range>` a stretch of history. Over M, split
 the commit: `git restore --staged <file>` takes a file out, `git add -p` stages part of one. The check runs in git's
 prepare-commit-msg hook, so `--no-verify` does not skip it; merges, reverts and cherry-picks are not measured,
-nor are the records `k approve`, `k accept` and `k hold` commit for their task when the commit holds nothing else.
+nor are the records `k approve`, `k accept` and `k hold` commit for their task when the commit holds nothing else,
+nor the task folder's records `k step finish` and `k records` commit (`task.md` and the owner's records aside).
 
 ## Working a task
 
@@ -272,11 +273,14 @@ task is started by hand, one task per session:
    since. When the same line is `not met` in two reviews in a row, the next review does not start: the step is
    marked `[escalate]`, and `steps/<step>/repeat.md` holds both rows and your three ways on (amend the line, accept
    a ratio by an amendment, or let one more fix run). `design/review.md` §1 and §2.
-6. When the owner judges the task done, `/k-done` in that session, and the owner types `! k accept <id>` (with the
+6. When the owner judges the task done, `/k-done` in that session: it commits the task folder's records with
+   `k records <id>` (`--dry-run` lists them first; `<file>...` narrows it to those files, as the handoff written
+   after the accept, `k records <id> handoff.md`), and the owner types `! k accept <id>` (with the
    mod, `/k-accept <id>`, also from the phone; `/k-accept` alone lists what waits for you to accept, the one you
    pick showing what still blocks it, and `/k-accept 1` takes the first). It refuses
    unless the latest review passes `k review check` and its review step finished, refuses a `not met` verdict and a
-   task with no review, and refuses while a checklist item is unticked; the owner may accept with checklist items
+   task with no review, refuses while a file of the task's folder is uncommitted (a deletion too, named as deleted),
+   and refuses while a checklist item is unticked; the owner may accept with checklist items
    open by adding `--checklist-open "<why>"`, which is recorded and never waives a `not met` verdict. It also refuses
    when the task's own work changed after the review: a later commit to a file the task's own commits touched, or one
    that names the task; and when its work in another repo changed after the head the review saw there, that file

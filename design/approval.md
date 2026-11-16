@@ -271,7 +271,12 @@ with `KIRUNAK_ACCEPTING`, removes the task from the queue. A task is already acc
 `done.json`; a `done.json` or `cost.md` on disk or staged that git does not hold, left by an accept refused before
 the fix of bug gulnya/accept-refused-by-slap, is written over and committed. When the commit is refused, `done.json`
 and `cost.md` are put back as they were, on disk and in the index, so the retry meets nothing of the refused try;
-`k hold` and `k resume` do the same with `hold.md` (`lib/git.mjs` `writeAndCommit`). It commits on the branch the main checkout has, and so do `k approve`, `k hold` and `k resume`;
+`k hold` and `k resume` do the same with `hold.md` (`lib/git.mjs` `writeAndCommit`). Before the checklist it also
+refuses while any file of the task's folder is uncommitted: untracked and not ignored, changed, or a tracked file
+deleted and not committed, staged (`git rm`) or not, each named, a deletion as `<path> (deleted)`; `done.json` and
+`cost.md` left by a refused accept aside (gulnya/close-leaves-untracked-step-files AC-1, gulnya/accept-leaves-task-files
+AC-2). `k accept --dry-run` and `k waiting` name the same files. It commits none of them: `k records <id>`, which the
+`k-done` skill runs once the owner confirms the task done, does (`task-files.md`). It commits on the branch the main checkout has, and so do `k approve`, `k hold` and `k resume`;
 when that is not the repo's main line (`lib/worktrees.mjs` `mainLine`: origin's HEAD branch, else `main`, else
 `master`, when a local branch has that name), each of the four adds a line after its own saying so, `committed on
 settings, not master: master has it only once settings is merged into it`, or from a detached HEAD `committed on a
