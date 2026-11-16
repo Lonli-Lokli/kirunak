@@ -65,8 +65,9 @@ You need Node 22 or later, git and Claude Code.
    ```
 
 2. Write a **workspace module** in a repo of yours (not in this one): the repos kirunak serves, where the queue file
-   lives, and your plugins. A checklist plugin is required: the aspects your own rules ask of every change (platforms,
-   themes, locales, offline, and so on), each with its sources and the edge cases that went wrong before. Shape:
+   lives, and your plugins. A checklist plugin holds the aspects your own rules ask of every change (platforms,
+   themes, locales, offline, and so on), each with its sources and the edge cases that went wrong before; with none,
+   the intake walks kirunak's default checklist, seven aspects any change can be asked about. Shape:
    `design/plugins.md` §3; the checklist: `design/intake.md` §3.
 
    ```js

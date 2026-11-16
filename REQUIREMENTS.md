@@ -73,7 +73,9 @@ validation, archives) then go unused, and what the owner needs is not in it:
   one question at a time, edge cases proposed, every ruling recorded; it relies on no skill kirunak does not ship.
 - R2 The interview walks a checklist of aspects; the checklist is a plugin. A workspace's checklist names what its own
   rules ask of every change (for example the platforms, both themes, large text, right-to-left, locales, offline,
-  low-end devices and memory, screen readers, purchases, data kept across versions, the release gates).
+  low-end devices and memory, screen readers, purchases, data kept across versions, the release gates). A workspace
+  whose plugins supply no checklist gets the core's default one, never mixed with a workspace's own
+  (asilak/kirunak-checklist-default).
 - R3 For each aspect the interview proposes edge cases; the owner rules each in or out, and what is out is written down.
 - R4 Every line of a task names its source: the owner's answer (dated), research (linked), or a default the owner
   accepted. A task cannot become ready with an open question.

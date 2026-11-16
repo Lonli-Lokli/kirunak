@@ -78,11 +78,12 @@ test('start writes the skeleton with every aspect ? [open], an empty intake.md, 
   assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '?? kirunak/');
 });
 
-test('start refuses an existing task folder and a workspace with no checklist', async () => {
+test('start refuses an existing task folder, and a loaded checklist that gives no aspect, naming that cause (asilak/kirunak-checklist-default review-1)', async () => {
   const { ws } = await makeWorkspace();
   await assert.rejects(start({ ws, id: ID, title: TITLE, now: NOV2 }), /exists already/);
-  const bare = { ...ws, seams: { ...ws.seams, checklist: [] } };
-  await assert.rejects(start({ ws: bare, id: 'weather/new-task', now: NOV2 }), /no checklist plugin is loaded/);
+  const empty = { ...ws, seams: { ...ws.seams, checklist: [{ aspects: () => [] }] } };
+  await assert.rejects(start({ ws: empty, id: 'weather/new-task', now: NOV2 }), (e) =>
+    /the workspace's checklist gives no aspect for weather\/new-task/.test(e.message) && !/no checklist plugin is loaded/.test(e.message));
 });
 
 test('start --from writes notes.md with the headings, the unchecked items and what may have landed, touching nothing under openspec/', async () => {
