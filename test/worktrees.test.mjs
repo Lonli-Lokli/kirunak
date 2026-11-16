@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
 import { processPaths } from '../lib/os.mjs';
@@ -127,39 +127,79 @@ function openTask(weather, slug, files) {
   const dir = join(weather, 'kirunak/tasks', slug);
   mkdirSync(join(dir, 'evidence'), { recursive: true });
   writeFileSync(join(dir, 'task.md'), `# ${slug}\n`);
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), text);
+  }
   return dir;
 }
 
-test('read-oom AC-1, AC-2: with open tasks holding more text than the heap, k worktrees --closing finishes, and a worktree a text file names still stays', async () => {
+test('worktree-sweep-keeps-stale AC-1, E-2: a log, evidence, a brief, a diff or any file not a written one names nothing; the cache prune\'s "kept <sha>: locked by" line keeps nothing', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const sha = sh(weather, 'git', ['rev-parse', 'HEAD']).trim();
+  // Each file names a worktree of its own, so each is seen naming nothing.
+  const lines = {
+    'steps/S-1/bump.log': (p) => `gradle ran in ${p}\n`,
+    'evidence/S-1-live.txt': (p) => `would keep ${p}: the open task weather/x names it (plan.md)\n`,
+    'steps/S-2/cache-prune.log': (p) => `kept ${sha}: locked by ${p}/games-core.lock\nkept ${sha}: locked by ${p}\n`,
+    'steps/S-1/brief.md': (p) => `work in ${p}\n`,
+    'steps/S-1/diff.patch': (p) => `+ cd ${p}\n`,
+    'steps/S-1/report.md.log': (p) => `${p}\n`,
+    'steps/S-1/evidence/report.md': (p) => `${p}\n`,
+    'steps/notes/report.md': (p) => `${p}\n`,
+    'evidence/plan.md': (p) => `${p}\n`,
+    'evidence/S-1/needs.json': (p) => `{ "unfinished": "${p}" }\n`,
+    'amendments/A-1.md': (p) => `${p}\n`,
+    'handoff.md': (p) => `${p}\n`,
+  };
+  const wts = Object.keys(lines).map((_, i) => add(weather, join(root, `s${i}`), `s${i}`));
+  openTask(weather, 'stale', Object.fromEntries(Object.entries(lines).map(([f, line], i) => [f, line(wts[i])])));
+  const look = await worktrees({ ws, processes: none });
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(whys(look.kept), {});
+  assert.deepEqual(paths(look.removed).sort(), [...wts].sort());
+});
+
+test('worktree-sweep-keeps-stale AC-2: a worktree an open task names in task.md, plan.md, notes.md, progress.md, review.md, or a step\'s report.md or needs.json stays', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const files = ['task.md', 'plan.md', 'notes.md', 'progress.md', 'review.md', 'steps/S-1/report.md', 'steps/S-12/needs.json'];
+  const wts = files.map((_, i) => add(weather, join(root, `w${i}`), `w${i}`));
+  openTask(weather, 'written', Object.fromEntries(files.map((f, i) => [f, `# written\nwork in ${wts[i]}\n`])));
+  const look = await worktrees({ ws, processes: none });
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(paths(look.removed), []);
+  assert.deepEqual(whys(look.kept), Object.fromEntries(wts.map((w, i) => [w, `the open task weather/written names it (${files[i]})`])));
+});
+
+test('read-oom AC-1, AC-2: with the written files of open tasks holding more text than the heap, k worktrees --closing finishes, and a worktree a written file names still stays', async () => {
   const { root, weather, home } = await makeWorkspace();
   const free = add(weather, join(root, 'free'), 'free');
   const named = add(weather, join(root, 'named'), 'named');
-  const big = 'a line of evidence that names no worktree\n'.repeat(75_000); // 3.2 MB
-  const files = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`evidence/log-${i}.txt`, big]));
-  openTask(weather, 'heavy', { ...files, 'evidence/notes.md': `work in ${named}\n` });
+  const big = 'a line of a report that names no worktree\n'.repeat(75_000); // 3.2 MB
+  const files = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`steps/S-${i + 1}/report.md`, big]));
+  openTask(weather, 'heavy', { ...files, 'steps/S-31/report.md': `work in ${named}\n` });
   const r = k(home, ['worktrees', '--closing', ID], { NODE_OPTIONS: '--max-old-space-size=48' });
   assert.equal(r.status, 0, r.stderr.split('\n').find((l) => /heap|FATAL/.test(l)) ?? r.stderr);
   assert.match(r.stdout, new RegExp(`^would remove ${free} \\(free merged into master\\): `, 'm'));
-  assert.match(r.stdout, new RegExp(`^would keep ${named}: the open task weather/heavy names it \\(evidence/notes\\.md\\)$`, 'm'));
+  assert.match(r.stdout, new RegExp(`^would keep ${named}: the open task weather/heavy names it \\(steps/S-31/report\\.md\\)$`, 'm'));
 });
 
 test('read-oom AC-3, E-1: a binary file naming a worktree names nothing, and a file that cannot be read is skipped, never a stop', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const shot = add(weather, join(root, 'shot'), 'shot');
-  const dir = openTask(weather, 'shots', { 'evidence/shot.png': Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n\0\0'), Buffer.from(`made in ${shot}\n`)]) });
+  const dir = openTask(weather, 'shots', { 'steps/S-1/report.md': Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n\0\0'), Buffer.from(`made in ${shot}\n`)]) });
   let look = await worktrees({ ws, processes: none });
   assert.deepEqual(paths(look.removed), [shot], 'a NUL byte in the first 8,000 bytes: binary');
-  writeFileSync(join(dir, 'evidence', 'locked.md'), `work in ${shot}\n`);
-  chmodSync(join(dir, 'evidence', 'locked.md'), 0o000);
+  writeFileSync(join(dir, 'notes.md'), `work in ${shot}\n`);
+  chmodSync(join(dir, 'notes.md'), 0o000);
   try {
     look = await worktrees({ ws, processes: none });
     assert.deepEqual(look.problems, []);
     assert.deepEqual(paths(look.removed), [shot]);
   } finally {
-    chmodSync(join(dir, 'evidence', 'locked.md'), 0o644);
+    chmodSync(join(dir, 'notes.md'), 0o644);
   }
-  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [shot]: `the open task weather/shots names it (evidence/locked.md)` });
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [shot]: `the open task weather/shots names it (notes.md)` });
 });
 
 test('AC-1: a worktree a process works in stays (lsof), and so does every one when lsof cannot tell', async () => {
