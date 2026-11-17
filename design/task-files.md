@@ -369,7 +369,10 @@ The forecast provider now returns hourly data (commit 9ab1c2d). [research docs/p
 
 - `Changes` holds operations only: `replace <id>: <new line>`, `add <section id>: <new line>`, `remove <id>`.
   Each new line carries its own source tag (rule 1 above). Judgement: operations, not a rewritten task, so the owner
-  reads exactly what changes and the command applies it without a merge.
+  reads exactly what changes and the command applies it without a merge. `replace <aspect>: <ruling>` changes an
+  aspect's ruling; `add <aspect>: <ruling>` adds one the checklist gained after the approval, written as `- <aspect>:
+  <ruling>` at the end of Aspects, and is refused for an aspect the task has (a replace) or one the task's checklist
+  lacks (gulnya/amend-cannot-add-aspect).
 - `title:` is the few words the amendment goes by in every list (kirunak-phone A-8): `k amend new <id> --title
   "<title>"` writes it between `proposed:` and `by:` and refuses without it, and `k amend check` refuses an amendment
   neither applied nor declined that has none, so it cannot be approved until it gets one; a stamped amendment is

@@ -160,13 +160,13 @@ async function approvalProblems(ws, id, typedAmendment) {
     const removed = removedIds(amendmentTexts(p.dir));
     const taskText = readFileSync(p.task, 'utf8');
     const amendmentText = readFileSync(file, 'utf8');
-    const own = amend.checkAmendment(taskText, amendmentText, { removed });
+    const taskAspects = (await aspectsOf(ws, { id, text: taskText })).map((a) => a.id);
+    const own = amend.checkAmendment(taskText, amendmentText, { removed, aspectIds: taskAspects });
     for (const x of own) {
       out.push(typeof x === 'string' ? x : `${x.line ? `${amendmentId}.md line ${x.line}: ` : ''}${x.problem}`);
     }
     // Then the task check on the amended text, as the approval runs it (gulnya/amend-check-task-check).
     if (!own.length) {
-      const taskAspects = (await aspectsOf(ws, { id, text: taskText })).map((a) => a.id);
       const after = approval.amendedProblems({ dir: p.dir, id, aspectIds: taskAspects, taskText, aid: amendmentId, amendmentText });
       for (const x of after.problems) out.push(`with ${amendmentId} applied, line ${x.line}: ${x.problem}`);
     }
