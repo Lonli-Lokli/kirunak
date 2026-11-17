@@ -350,11 +350,12 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
   time, so a task's writing costs time, never memory; one over 4 MB, a binary one (a NUL byte in its first 8,000
   bytes, git's own test, read no further) and one that cannot be read name nothing (gulnya/worktrees-read-oom);
 - no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
-  Linux `/proc/<pid>/cwd` and `exe`, on Windows one PowerShell `Get-CimInstance Win32_Process` call, whose
-  ExecutablePath inside it is a process running from it and whose CommandLine naming it (as a task's file would) is a
-  process working in it. Windows gives no other process's current folder, so before the removal the folder is moved
-  aside (`<path>.kirunak-removing`) and straight back: Windows refuses that while a process works in it, and the
-  worktree stays whole, known to git with its branch, for a later pass. When the reader cannot tell, none goes;
+  Linux `/proc/<pid>/cwd` and `exe`. On Windows no process is asked about: kirunak runs no Windows tool for it
+  (asilak/kirunak-cross-platform AC-3, AC-10), and Windows gives no other process's current folder anyway. There the
+  session locks below tell a worktree in use, and before the removal the folder is moved aside
+  (`<path>.kirunak-removing`) and straight back: Windows refuses that while a process works in it, and the worktree
+  stays whole, known to git with its branch, for a later pass. When the reader of macOS or Linux cannot tell, none
+  goes;
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
 
