@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
+import { shell } from '../lib/os.mjs';
 import { run, timed, verifyStep } from '../lib/run.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { snapshot } from '../lib/board.mjs';
@@ -1655,8 +1656,26 @@ test('a verify command that cannot start is the step\'s failure, with its error 
   assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8'), /It exited 127\.\n\nIts last lines:\n\n```\n.*no-such-check.*\n```/);
   // A shell that cannot be spawned at all (here, in a folder that is gone) says its own error.
   const gone = await verifyStep('true', join(w.p.root, 'no-such-folder'));
-  assert.deepEqual([gone.ok, gone.why], [false, 'its verify command could not start: spawn /bin/sh ENOENT: true']);
-  assert.match(gone.detail, /It could not start: spawn \/bin\/sh ENOENT\.\n\nIt printed nothing\./);
+  assert.deepEqual([gone.ok, gone.why], [false, `its verify command could not start: spawn ${shell()} ENOENT: true`]);
+  assert.match(gone.detail, new RegExp(`It could not start: spawn ${escape(shell())} ENOENT\\.\\n\\nIt printed nothing\\.`));
+});
+
+test('AC-9: a [heavy] step\'s job and a verify command run through shell(); on this machine `echo ok > out.txt` writes its file both ways (asilak/kirunak-cross-platform S-2)', async () => {
+  const w = await approvedWorkspace(heavyIn('echo ok > out.txt'));
+  const jobs = [];
+  const dir = mkdtempSync(join(tmpdir(), 'kirunak-heavy-'));
+  heavyGuard(w, jobs, (n) => {
+    const [cmd, ...args] = jobs[n - 1].command;
+    const r = spawnSync(cmd, args, { cwd: dir, encoding: 'utf8' });
+    return { exitCode: r.status, log: `${r.stdout}${r.stderr}` };
+  });
+  fakeRunner(w);
+  await run({ ws: w.ws, id: w.id });
+  assert.deepEqual(jobs[0].command, [shell(), '-c', 'echo ok > out.txt']);
+  assert.equal(readFileSync(join(dir, 'out.txt'), 'utf8'), 'ok\n');
+  const here = mkdtempSync(join(tmpdir(), 'kirunak-verify-'));
+  assert.deepEqual(await verifyStep('echo ok > out.txt && test -f out.txt', here), { ok: true, why: null, detail: '' });
+  assert.equal(readFileSync(join(here, 'out.txt'), 'utf8'), 'ok\n');
 });
 
 test('an agent step starts with only Read, Edit, Write, Bash, Glob, Grep and Skill, kept in its run record (gulnya/k-run-step-models AC-4)', async () => {

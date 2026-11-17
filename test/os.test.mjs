@@ -1,10 +1,11 @@
 // What differs between operating systems (lib/os.mjs): each reader of processPaths() over a fake `run` or a fake
-// /proc, and the platform's fold of paths.
+// /proc, the platform's fold of paths, and the shell a step's command runs through.
 import assert from 'node:assert/strict';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fold, insidePath, inUse, processPaths, readerName, samePath } from '../lib/os.mjs';
+import { fold, insidePath, inUse, NO_SHELL, processPaths, readerName, samePath, shell } from '../lib/os.mjs';
 import { tempDir } from './helpers.mjs';
 
 // A fake `run` that answers every call with `result` and records the calls.
@@ -114,4 +115,51 @@ test('A-1: inUse moves a folder aside and back only on win32, and names a refusa
     throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
   };
   assert.equal(inUse('D:\\src\\app', { platform: 'win32', rename: busy }), 'Windows refuses to move it (EBUSY): a process works in it');
+});
+
+test('AC-9, E-6: shell() is /bin/sh off win32; on win32 Git Bash from CLAUDE_CODE_GIT_BASH_PATH, else from the install git --exec-path names; none says install Git for Windows', () => {
+  const never = () => assert.fail('no program runs');
+  for (const platform of ['darwin', 'linux']) assert.equal(shell({ platform, run: never }), '/bin/sh');
+  const files = new Set();
+  const exists = (p) => files.has(p);
+  const git = (stdout, status = 0) => {
+    const run = (cmd, args) => (run.calls.push([cmd, ...args]), { status, stdout });
+    run.calls = [];
+    return run;
+  };
+  // The variable, when it names a file; git is not asked.
+  files.add('D:\\tools\\Git\\bin\\bash.exe');
+  assert.equal(shell({ platform: 'win32', env: { CLAUDE_CODE_GIT_BASH_PATH: 'D:\\tools\\Git\\bin\\bash.exe' }, run: never, exists }), 'D:\\tools\\Git\\bin\\bash.exe');
+  // A variable naming no file, or none: the install three folders above git's exec path, its bin\bash.exe first.
+  files.clear();
+  files.add('C:\\Program Files\\Git\\bin\\bash.exe');
+  files.add('C:\\Program Files\\Git\\usr\\bin\\bash.exe');
+  const run = git('C:/Program Files/Git/ucrt64/libexec/git-core\n');
+  assert.equal(shell({ platform: 'win32', env: { CLAUDE_CODE_GIT_BASH_PATH: 'C:\\gone\\bash.exe' }, run, exists }), 'C:\\Program Files\\Git\\bin\\bash.exe');
+  assert.deepEqual(run.calls, [['git', '--exec-path']]);
+  files.clear();
+  files.add('C:\\Users\\me\\Git\\usr\\bin\\bash.exe');
+  assert.equal(shell({ platform: 'win32', env: {}, run: git('C:\\Users\\me\\Git\\mingw64\\libexec\\git-core'), exists }), 'C:\\Users\\me\\Git\\usr\\bin\\bash.exe');
+  // None: git fails, git cannot start, or its install has no bash.exe (WSL's System32 one is never taken).
+  files.clear();
+  files.add('C:\\Windows\\System32\\bash.exe');
+  for (const r of [git('', 1), () => ({ status: null, error: new Error('spawnSync git ENOENT') }), git('C:/Program Files/Git/ucrt64/libexec/git-core')]) {
+    assert.throws(() => shell({ platform: 'win32', env: {}, run: r, exists }), (e) => e.code === 'ENOSHELL' && e.message.startsWith(`${NO_SHELL} (`));
+  }
+  assert.equal(NO_SHELL, 'no POSIX shell: install Git for Windows');
+});
+
+test('AC-9: on this machine the shell runs a command, `echo ok > out.txt` writing its file; on win32 a .cmd shim named with its extension runs through it', () => {
+  const dir = tempDir('kirunak-shell-');
+  const sh = shell();
+  if (process.platform === 'win32') assert.match(sh, /\\(usr\\)?bin\\bash\.exe$/i);
+  else assert.equal(sh, '/bin/sh');
+  const r = spawnSync(sh, ['-c', 'echo ok > out.txt'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(dir, 'out.txt'), 'utf8'), 'ok\n');
+  if (process.platform !== 'win32') return;
+  writeFileSync(join(dir, 'hello.cmd'), '@echo shim ran %1\r\n');
+  const s = spawnSync(sh, ['-c', './hello.cmd world'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(s.status, 0, s.stderr);
+  assert.equal(s.stdout.trim(), 'shim ran world');
 });
