@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { breakEven, costOf, decide, readSession, record, removeSession, ruleFor, updateSession } from '../lib/keeper.mjs';
 import pricesDefault, { BASE } from '../plugins/prices-default.mjs';
+import { tempDir } from './helpers.mjs';
 
 const prices = (base) => ({ weights: () => base });
 const wsWith = (p = pricesDefault().provides.prices, keeper = { intervalMinutes: 50 }) => ({ seams: { prices: p }, keeper });
@@ -77,7 +77,7 @@ test('what a keep-alive, a hit and a miss cost, in weight', async () => {
 });
 
 test('a session file is merged and written whole; a bad id is refused; keeper.jsonl gets one line each', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-keeper-'));
+  const home = tempDir('kirunak-keeper-');
   updateSession(home, 's-1', { task: 'weather/x', step: null });
   updateSession(home, 's-1', { context: 5, ttl: '1h' });
   assert.deepEqual(readSession(home, 's-1'), { task: 'weather/x', step: null, context: 5, ttl: '1h' });

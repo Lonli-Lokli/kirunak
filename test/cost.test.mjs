@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compare, costOf, runFields, summary } from '../lib/cost.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
-import { k, makeWorkspace, RESULT } from './helpers.mjs';
+import { k, makeWorkspace, RESULT, tempDir } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
 const A = 'aaaaaaaa-0000-4000-8000-000000000001';
@@ -164,7 +163,7 @@ test('sessions whose files hold no cost say cost not tracked, never 0.00 USD; a 
 
 test('records skips a file in steps/ whose name starts with S-, such as a step brief', async () => {
   const { records } = await import('../lib/cost.mjs');
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-records-'));
+  const dir = tempDir('kirunak-records-');
   mkdirSync(join(dir, 'steps', 'S-1'), { recursive: true });
   writeFileSync(join(dir, 'steps', 'S-1', 'run-1.json'), JSON.stringify(RECORDS['S-1/run-1.json']));
   writeFileSync(join(dir, 'steps', 'S-3-brief.md'), '# a brief\n');

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,27 @@ export const KIRUNAK = fileURLToPath(new URL('../', import.meta.url));
 
 export const sh = (cwd, cmd, args, env) =>
   execFileSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+
+// A new folder in the OS temp folder, removed when this process ends, its tests passed or failed (`node --test` runs
+// each test file in a process of its own): a run of the suite leaves $TMPDIR as it found it. Every temp folder a test
+// makes comes from here (test/temp-cleanup.test.mjs checks it); once, they stayed, 14.6 GB in a day
+// (gulnya/kirunak-tests-leave-temp). An exit handler, not node:test's `after`, so a folder a fixture script makes in a
+// process with no tests goes too, and one made inside a test lives until the file is done with it.
+const made = new Set();
+process.once('exit', () => {
+  for (const dir of made) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // A file another process still holds open (Windows): the folder stays, the run's result does not change.
+    }
+  }
+});
+export function tempDir(prefix = 'kirunak-') {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  made.add(dir);
+  return dir;
+}
 
 export function gitInit(dir) {
   sh(dir, 'git', ['init', '-q', '-b', 'master']);
@@ -28,7 +49,7 @@ export function gitCommitAll(dir, message = 'fixture') {
 // A copy of the invented workspace (two git repos, a checklist, a queue, the finished task) in a temp
 // folder, with its own $KIRUNAK_HOME and pointer. Options: { finished: false } leaves the task out.
 export async function makeWorkspace({ finished = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'kirunak-'));
+  const root = tempDir('kirunak-');
   cpSync(join(FIXTURES, 'workspace'), root, { recursive: true });
   if (!finished) {
     execFileSync('rm', ['-rf', join(root, 'weather', 'kirunak')]);
@@ -54,7 +75,7 @@ export const RESULT = readFileSync(join(FIXTURES, 'run', 'result.json'), 'utf8')
 
 // A fake `claude`: it records its argv, stdin, cwd and the step's variables, and prints the fixture result.
 export function fakeClaude(result = RESULT) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-fake-claude-')));
+  const dir = realpathSync(tempDir('kirunak-fake-claude-'));
   const bin = join(dir, 'claude');
   writeFileSync(join(dir, 'result.json'), result);
   writeFileSync(bin, `#!${process.execPath}
@@ -71,7 +92,7 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}
 // A fake `ps` first on PATH until the returned function is called: 'fails' exits 2, 'garbled' prints no elapsed time,
 // 'gone' says no such process (exit 1), 'missing' leaves nothing on PATH at all, so no ps.
 export function fakePs(kind) {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-ps-'));
+  const dir = tempDir('kirunak-ps-');
   const body = { fails: 'echo "ps: cannot get process info" >&2\nexit 2', garbled: 'echo "not a time"', gone: 'exit 1' }[kind];
   if (body) {
     writeFileSync(join(dir, 'ps'), `#!/bin/sh\n${body}\n`);
@@ -112,7 +133,7 @@ export const events = (home) =>
 // A workspace module of its own in a temp folder, with no repos and the given keys (a ladder, hook switches, models),
 // loaded with its own $KIRUNAK_HOME: { dir, home, modulePath, ws }.
 export async function ladderWorkspace(extra = {}) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-ladder-')));
+  const dir = realpathSync(tempDir('kirunak-ladder-'));
   const modulePath = join(dir, 'workspace.mjs');
   writeFileSync(modulePath, `export default ${JSON.stringify({ repos: [], queue: './queue.md', ...extra }, null, 2)};\n`);
   const home = join(dir, 'state');

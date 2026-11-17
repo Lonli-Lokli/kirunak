@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { blockLines } from '../hooks/escalate-state.mjs';
 import { decide } from '../hooks/kirunak-freeze.mjs';
+import { tempDir } from './helpers.mjs';
 
 // D7: the PreToolUse hook refuses the model's writes to what only the owner's commands write (approval.md §2).
 
@@ -17,7 +18,7 @@ const ID = 'weather/offline-forecast';
 
 // A repo named `weather` holding a frozen task (with its approval record) and a draft.
 function makeRepo() {
-  const top = mkdtempSync(join(tmpdir(), 'kirunak-freeze-'));
+  const top = tempDir('kirunak-freeze-');
   const repo = join(top, 'weather');
   for (const slug of [FROZEN, DRAFT]) {
     const dir = join(repo, 'kirunak', 'tasks', slug);
@@ -482,7 +483,7 @@ const fitsPhone = (reason) => {
 
 // A home whose session s1 is blocked as the escalation hook leaves it, with config.json as k install writes it.
 function blockedHome({ hook = {}, lifted = null } = {}) {
-  const home = join(mkdtempSync(join(tmpdir(), 'kirunak-freeze-block-')), 'home');
+  const home = join(tempDir('kirunak-freeze-block-'), 'home');
   mkdirSync(join(home, 'escalate'), { recursive: true });
   writeFileSync(join(home, 'escalate', 'config.json'), JSON.stringify({ hook: { enabled: true, block: true, repeats: 2, commands: [], ...hook } }));
   const rung = { from: 'claude-opus-5-5', up: 'fable', agents: ['fable-step', 'domain-deep'] };
@@ -567,7 +568,7 @@ test('decide: the Skill call of k-go-on, a prompt or message carrying /k-go-on, 
 });
 
 test('decide: the escalation hook\'s state files and log are refused to every edit tool and to shell writes (R5.2)', () => {
-  const home = join(mkdtempSync(join(tmpdir(), 'kirunak-freeze-state-')), 'home');
+  const home = join(tempDir('kirunak-freeze-state-'), 'home');
   const was = process.env.KIRUNAK_HOME;
   process.env.KIRUNAK_HOME = home;
   try {

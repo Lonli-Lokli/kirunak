@@ -1,7 +1,6 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { gitCommitAll, gitInit, sh } from '../../helpers.mjs';
+import { gitCommitAll, gitInit, sh, tempDir } from '../../helpers.mjs';
 
 export const writeJson = (path, value) => {
   mkdirSync(dirname(path), { recursive: true });
@@ -14,7 +13,7 @@ export const writeJson = (path, value) => {
 // the user's config folder `claude` with `user` as its settings.json (null: no file). Real paths, as k install
 // writes the roots.
 export function makeRepos({ window = 183000, user = { autoCompactWindow: 500000 } } = {}) {
-  const top = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-compact-')));
+  const top = realpathSync(tempDir('kirunak-compact-'));
   const repo = (name) => {
     const root = join(top, name);
     mkdirSync(join(root, 'sub'), { recursive: true });

@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkReview, evidenceWords, parseEvidence, verdictOf, verdictText } from '../lib/review.mjs';
 import { parseTask } from '../lib/task.mjs';
 import { taskPaths } from '../lib/workspace.mjs';
-import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
+import { gitCommitAll, k, makeWorkspace, reviewsRan, sh, tempDir } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
 
@@ -352,7 +351,7 @@ test('the words of a row\'s evidence that may name a path', () => {
 // once per word of its evidence, for each head, so a long kirunak took two minutes and the mod's /k-approve failed.
 test('a carried row\'s check reads each head\'s paths once, however many words its evidence has', async () => {
   const w = await rereviewed();
-  const bin = mkdtempSync(join(tmpdir(), 'kirunak-git-count-'));
+  const bin = tempDir('kirunak-git-count-');
   const log = join(bin, 'calls.log');
   const real = sh(w.weather, 'sh', ['-c', 'command -v git']).trim();
   writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> '${log}'\nexec '${real}' "$@"\n`);

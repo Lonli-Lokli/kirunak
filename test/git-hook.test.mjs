@@ -1,7 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -10,7 +9,7 @@ import { check } from '../hooks/git-pre-commit.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
 import { defaultBranch, mainOnDefault } from '../lib/records.mjs';
 import { repoInfo } from '../lib/slap.mjs';
-import { makeWorkspace } from './helpers.mjs';
+import { makeWorkspace, tempDir } from './helpers.mjs';
 
 // D7: the git hook refuses a commit whose frozen task no longer matches its approval (approval.md §3).
 
@@ -45,7 +44,7 @@ function commit(dir, env = {}) {
 
 // A repo with the hook installed and one approved task, committed as `k approve` commits it.
 function makeRepo() {
-  const dir = join(mkdtempSync(join(tmpdir(), 'kirunak-git-')), 'weather');
+  const dir = join(tempDir('kirunak-git-'), 'weather');
   mkdirSync(dir);
   git(dir, ['init', '-q', '-b', 'master']);
   git(dir, ['config', 'user.email', 'test@example.com']);
@@ -321,7 +320,7 @@ test('the hook lets a clean merge naming an accepted task through (E-4), and wit
   const merge = spawnSync('git', ['merge', '-q', '--no-ff', '-m', `${SLUG}'s side, merged`, 'side'], { cwd: w.weather, env: cleanEnv({ KIRUNAK_HOME: w.home }), encoding: 'utf8' });
   assert.equal(merge.status, 0, merge.stderr);
 
-  const nowhere = mkdtempSync(join(tmpdir(), 'kirunak-home-'));
+  const nowhere = tempDir('kirunak-home-');
   put(w.weather, 'src/again.ts', 'export {};\n');
   const r = commitAs({ home: nowhere }, w.weather, `${SLUG}: once more`, { KIRUNAK_TASK: ID });
   assert.equal(r.status, 0, r.stderr);
@@ -330,7 +329,7 @@ test('the hook lets a clean merge naming an accepted task through (E-4), and wit
 
 // An editor that puts KIRUNAK_TEST_LINES before what git wrote in the message file: git's status comments stay below.
 function editor() {
-  const file = join(mkdtempSync(join(tmpdir(), 'kirunak-editor-')), 'edit.sh');
+  const file = join(tempDir('kirunak-editor-'), 'edit.sh');
   writeFileSync(file, '#!/bin/sh\n{ printf "%s\\n" "$KIRUNAK_TEST_LINES"; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n');
   chmodSync(file, 0o755);
   return file;
@@ -548,7 +547,7 @@ function replayOf(w, dir, args, env = {}) {
 
 // An executable sh script of `body`, for an editor git runs.
 function script(body) {
-  const file = join(mkdtempSync(join(tmpdir(), 'kirunak-script-')), 'run.sh');
+  const file = join(tempDir('kirunak-script-'), 'run.sh');
   writeFileSync(file, `#!/bin/sh\n${body}\n`);
   chmodSync(file, 0o755);
   return file;

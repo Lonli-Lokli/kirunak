@@ -2,10 +2,9 @@
 // from invented transcripts, step lines, a run record and two session files; never this machine's own.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { k, makeWorkspace, RESULT } from './helpers.mjs';
+import { k, makeWorkspace, RESULT, tempDir } from './helpers.mjs';
 import { weight } from '../lib/usage/common.mjs';
 
 const FROM = '2026-10-18T14:00:00.000Z', TO = '2026-10-25T15:00:00.000Z';
@@ -47,7 +46,7 @@ async function week() {
   writeFileSync(join(w.home, 'sessions', `${L}.json`), JSON.stringify({ task: 'weather/offline-forecast', step: null, since: '2026-10-22T08:00:00.000Z' }));
   writeFileSync(join(w.home, 'sessions', `${N}.json`), JSON.stringify({ cache: { at: 1 } })); // the statusline's: no task
 
-  const config = mkdtempSync(join(tmpdir(), 'kirunak-claude-'));
+  const config = tempDir('kirunak-claude-');
   const proj = join(config, 'projects', `${realpathSync(w.root).replace(/[^a-zA-Z0-9]/g, '-')}-weather`);
   mkdirSync(join(proj, I, 'subagents'), { recursive: true });
   const put = (f, lines) => writeFileSync(join(proj, f), [user(lines[0][0]), ...lines.map(([ts, mid, model]) => call(ts, mid, model))].join('\n') + '\n');
@@ -109,7 +108,7 @@ test('k usage weighs the week per task and step, heaviest first, no task last, t
 
 test('k usage: a week with no task and no calls prints the no-task row alone', async () => {
   const w = await makeWorkspace({ finished: false });
-  const config = mkdtempSync(join(tmpdir(), 'kirunak-claude-'));
+  const config = tempDir('kirunak-claude-');
   mkdirSync(join(config, 'projects'), { recursive: true });
   const out = join(w.root, 'empty');
   const r = k(w.home, ['usage', '--from', FROM, '--to', TO, '--out', out], { CLAUDE_CONFIG_DIR: config, TZ: 'UTC' });

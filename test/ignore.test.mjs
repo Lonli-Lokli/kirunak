@@ -1,9 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { gitInit, sh } from './helpers.mjs';
+import { gitInit, sh, tempDir } from './helpers.mjs';
 import { compile, ignored } from '../lib/ignore.mjs';
 
 // `.slapignore` is matched as git matches a .gitignore (gitignore(5)); git itself is the oracle.
@@ -44,14 +43,17 @@ vendor/
 `;
 
 test('the patterns match what git leaves out', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-ignore-'));
+  // The repo and, outside it so git does not see it, its pattern file, both in one temp folder that goes at the end.
+  const top = tempDir('kirunak-ignore-');
+  const dir = join(top, 'repo');
+  mkdirSync(dir);
   gitInit(dir);
   for (const p of PATHS) {
     mkdirSync(join(dir, p, '..'), { recursive: true });
     writeFileSync(join(dir, p), 'x\n');
   }
   sh(dir, 'git', ['add', '-A']);
-  const file = join(dir, '..', `${dir.split('/').pop()}.slapignore`);
+  const file = join(top, 'repo.slapignore');
   writeFileSync(file, PATTERNS);
   const git = sh(dir, 'git', ['-c', 'core.ignorecase=false', 'ls-files', '-z', '-c', '-i', `--exclude-from=${file}`])
     .split('\0').filter(Boolean).sort();

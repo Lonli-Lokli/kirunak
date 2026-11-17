@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { start } from '../lib/handoff.mjs';
 import { fromStatusline } from '../hooks/statusline-track.mjs';
-import { FIXTURES, KIRUNAK, makeWorkspace } from './helpers.mjs';
+import { FIXTURES, KIRUNAK, makeWorkspace, tempDir } from './helpers.mjs';
 
 const INPUT = readFileSync(join(FIXTURES, 'keeper', 'statusline.json'), 'utf8');
 const SID = '5f0c9a1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b';
@@ -14,7 +13,7 @@ const hook = (home, stdin) =>
   spawnSync(process.execPath, [join(KIRUNAK, 'hooks', 'statusline-track.mjs')], { input: stdin, encoding: 'utf8', env: { ...process.env, KIRUNAK_HOME: home } });
 
 test('the session file is written from the status line JSON, and the hook prints nothing', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-statusline-'));
+  const home = tempDir('kirunak-statusline-');
   const r = hook(home, INPUT);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, '', 'the status line shows only what the user\'s own command prints');
@@ -57,7 +56,7 @@ test('a cold cache, a compaction and a 5-minute lifetime', () => {
 });
 
 test('bad input writes nothing and still exits 0', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-statusline-'));
+  const home = tempDir('kirunak-statusline-');
   for (const stdin of ['', 'not json', '{"session_id":"../../escape"}', '{"cost":{}}']) {
     const r = hook(home, stdin);
     assert.deepEqual([r.status, r.stdout], [0, '']);

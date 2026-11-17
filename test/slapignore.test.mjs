@@ -1,18 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { install } from '../lib/install.mjs';
 import { approve, marked, register, starter, status, STARTER } from '../lib/slapignore.mjs';
 import { readRecords, recordFile } from '../lib/slap.mjs';
-import { KIRUNAK, gitInit, gitCommitAll } from './helpers.mjs';
+import { gitCommitAll, gitInit, KIRUNAK, tempDir } from './helpers.mjs';
 
 // R21, R23: the starter `k install --git` writes, the registry, and the owner's approval (design/change-size.md §4).
 
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-slapignore-'));
+  const dir = tempDir('kirunak-slapignore-');
   const repo = join(dir, 'weather');
   mkdirSync(join(repo, 'src'), { recursive: true });
   gitInit(repo);
@@ -46,7 +45,7 @@ test('the starter: A-7\'s list, the case variants, the binary files the repo tra
 
 test('k install --git writes the starter, registers the repo, and keeps a .slapignore that is there', () => {
   const s = setup();
-  const kirunakRoot = mkdtempSync(join(tmpdir(), 'kirunak-root-'));
+  const kirunakRoot = tempDir('kirunak-root-');
   for (const n of ['k-intake', 'k-done']) mkdirSync(join(kirunakRoot, 'skills', n), { recursive: true });
   const opts = { settingsPath: join(s.dir, 'settings.json'), skillsDir: join(s.dir, 'skills'), agentsDir: join(s.dir, 'agents'), kirunakRoot, home: s.home, git: s.repo };
   const printed = install({ ...opts, print: true }).actions.join('\n');

@@ -1,9 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeWorkspace } from './helpers.mjs';
+import { makeWorkspace, tempDir } from './helpers.mjs';
 import { kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, defaultChecklist, loadWorkspaceModule } from '../lib/workspace.mjs';
 
@@ -11,7 +10,7 @@ const STORAGE = `{ repos() {}, queuePath() {}, read() {}, write() {}, exists() {
 
 // A workspace module in a temp folder with the given plugin sources.
 async function load(plugins) {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-plugins-'));
+  const dir = tempDir('kirunak-plugins-');
   const names = Object.keys(plugins);
   for (const [name, src] of Object.entries(plugins)) writeFileSync(join(dir, name), src);
   writeFileSync(join(dir, 'ws.mjs'), `export default { repos: [{ name: 'weather', root: '.' }], queue: './queue.md', plugins: ${JSON.stringify(names.map((n) => './' + n))} };`);

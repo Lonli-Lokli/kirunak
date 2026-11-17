@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import runnerClaude, { claudeArgs, KEEP_ALIVE_PROMPT, limitsArgs, LIMITS_PROMPT, parseResult, readLimits } from '../plugins/runner-claude.mjs';
-import { fakeClaude, FIXTURES, RESULT } from './helpers.mjs';
+import { fakeClaude, FIXTURES, RESULT, tempDir } from './helpers.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -68,7 +68,7 @@ test('the result parser reads the documented JSON result, a stream, and a line a
 
 test('start: the brief on stdin, the repo as cwd, the step in the environment, a minted session id, the result parsed', async () => {
   const fake = fakeClaude();
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-repo-')));
+  const cwd = realpathSync(tempDir('kirunak-repo-'));
   const runner = runnerClaude({ runner: { permissionMode: 'acceptEdits' } }, { bin: fake.bin }).provides.runner;
   const run = runner.start({ prompt: '# the brief\n', cwd, maxTurns: 100, maxBudgetUsd: 3, env: { KIRUNAK_TASK: 'weather/x', KIRUNAK_STEP: 'S-1' } });
   assert.match(run.sessionId, UUID);
@@ -124,7 +124,7 @@ const WEEK_ONLY = { type: 'rate_limit_event', rate_limit_info: { status: 'allowe
 
 // A node script as `claude`, for what fakeClaude cannot do: fail, or never end.
 function fakeBin(body) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-fake-claude-')));
+  const dir = realpathSync(tempDir('kirunak-fake-claude-'));
   writeFileSync(join(dir, 'claude'), `#!${process.execPath}\n${body}\n`);
   chmodSync(join(dir, 'claude'), 0o755);
   return join(dir, 'claude');

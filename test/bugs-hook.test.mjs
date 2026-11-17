@@ -1,13 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { updateSession } from '../lib/keeper.mjs';
 import { noticeFrom } from '../hooks/kirunak-bugs.mjs';
 import { bugsAt } from './board-fixture.mjs';
-import { KIRUNAK, makeWorkspace } from './helpers.mjs';
+import { KIRUNAK, makeWorkspace, tempDir } from './helpers.mjs';
 
 // The SessionStart notice of the bugs (gulnya/kirunak-bugs AC-7, E-7): what a session the owner starts is told.
 const START = { session_id: 'abc123', transcript_path: '/tmp/abc123.jsonl', cwd: '/work/weather', hook_event_name: 'SessionStart', source: 'startup' };
@@ -43,7 +41,7 @@ test('no line when no bug waits, nor for a k run step\'s session or a bug\'s rev
 });
 
 test('the hook never stops a session: bad input, no workspace, nothing printed and exit 0', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-bugs-hook-'));
+  const home = tempDir('kirunak-bugs-hook-');
   for (const input of ['not json', '', JSON.stringify(START), JSON.stringify({ ...START, session_id: '../x' })]) {
     const r = hook(home, input);
     assert.deepEqual([r.status, r.stdout], [0, ''], input);

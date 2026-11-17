@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { limitsLine, logLimits } from '../lib/limits.mjs';
+import { tempDir } from './helpers.mjs';
 
 // gulnya/quad-damage AC-9, AC-10: a limits reading appended to the log the status line keeps, in its own format.
 
@@ -18,7 +18,7 @@ test('the line: the UTC time to the second, the week, the 5-hour window, each cu
 });
 
 test('logLimits appends to the workspace\'s bugs.limitsLog, beside its module, and writes nothing without one', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-limits-'));
+  const dir = tempDir('kirunak-limits-');
   const ws = { modulePath: join(dir, 'workspace.mjs'), bugs: { limitsLog: 'state/rate-limits.log' } };
   const log = join(dir, 'state', 'rate-limits.log');
   assert.equal(logLimits(ws, READING, { label: 'quad-damage', now: AT }), `2026-10-27T23:18:51Z\t53\t1\tquad-damage\t${RESETS}`);
@@ -37,7 +37,7 @@ test('logLimits appends to the workspace\'s bugs.limitsLog, beside its module, a
 });
 
 test('logLimits: a plan with no 5-hour window (fiveHour null) logs -1 for it, as the status line tracker does (gulnya/five-hour-optional)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-limits-'));
+  const dir = tempDir('kirunak-limits-');
   const ws = { modulePath: join(dir, 'workspace.mjs'), bugs: { limitsLog: 'rate-limits.log' } };
   const line = logLimits(ws, { ...READING, fiveHour: null }, { label: 'quad-damage', now: AT });
   assert.deepEqual(line.split('\t').slice(0, 4), ['2026-10-27T23:18:51Z', '53', '-1', 'quad-damage']);

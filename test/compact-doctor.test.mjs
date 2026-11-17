@@ -1,11 +1,10 @@
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { compactChecks } from '../lib/doctor.mjs';
 import { configPath } from '../lib/install.mjs';
-import { sh } from './helpers.mjs';
+import { sh, tempDir } from './helpers.mjs';
 import { json, LOCAL, put, setup, stepTask } from './fixtures/compact/install.mjs';
 
 // k doctor's lines on the handover (orchestrator.md §5, R8.3), after k install into scratch repos.
@@ -113,7 +112,7 @@ test('inside a k run step the variable is k run\'s own: ok at the window k run s
 
 test('here: outside the roots the user\'s own window, under the variable its value, never blocking; the session\'s model and its window', () => {
   const s = installed();
-  const out = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-compact-outside-')));
+  const out = realpathSync(tempDir('kirunak-compact-outside-'));
   const here = (o) => s.check(o).find(([, l]) => l.startsWith('here'));
   const never = 'not a workspace root\'s handover window, so the compact hook never blocks here';
   assert.deepEqual(here({ cwd: out }), [true, `here (${out}): the user's own window 500000 from ${s.paths.settingsPath}; ${never}`]);

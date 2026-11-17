@@ -2,20 +2,20 @@
 // repos and a fixed clock, and the freeze and SessionEnd hooks that run it.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { holdFor, leasesOf, releaseAll, rootsFrom, worktreeOf } from '../lib/worktree-lock.mjs';
-import { gitCommitAll, gitInit, sh } from './helpers.mjs';
+import { gitCommitAll, gitInit, sh, tempDir } from './helpers.mjs';
 
 const NOW = new Date('2026-11-10T09:00:00.000Z');
 const later = (minutes) => new Date(NOW.getTime() + minutes * 60_000);
 
 // A repo with one commit, its linked worktree `wt` on branch `wt`, and a second repo no workspace names.
 function repos() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-lock-')));
+  const root = realpathSync(tempDir('kirunak-lock-'));
   const repo = join(root, 'app');
   mkdirSync(repo);
   gitInit(repo);
@@ -116,7 +116,7 @@ test('AC-1: the main checkout, a path outside any checkout, a repo the workspace
 });
 
 test('AC-1: a submodule-like .git file that names no worktree is no linked worktree', () => {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-lock-sub-')));
+  const dir = realpathSync(tempDir('kirunak-lock-sub-'));
   writeFileSync(join(dir, '.git'), 'gitdir: ../.git/modules/sub\n');
   assert.equal(worktreeOf(join(dir, 'x.txt')), null);
 });
