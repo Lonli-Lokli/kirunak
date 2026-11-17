@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn as spawnNode, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -502,10 +502,22 @@ test('k bugs quad-damage: refused with no marked bug; else a detached run that r
   assert.equal(waited.stdout, `${progressFile(out.folder)}${k(w.home, ['bugs', 'quad-damage', '--summary']).stdout}`);
 });
 
-test('keepAwake: caffeinate -i -w on macOS, nothing elsewhere (E-2)', () => {
-  assert.equal(keepAwake(123, { platform: 'linux' }), null);
-  const c = keepAwake(123, { platform: 'darwin', bin: '/usr/bin/true' });
-  assert.deepEqual(c.spawnargs, ['/usr/bin/true', '-i', '-w', '123']);
+test('keepAwake: caffeinate -i -w on macOS, systemd-inhibit holding tail --pid on Linux, nothing on Windows (E-2, asilak/kirunak-cross-platform AC-12)', () => {
+  const spawned = [];
+  const spawn = (cmd, args, opts) => {
+    spawned.push([cmd, args, opts.detached]);
+    return { on: () => {}, unref: () => {} };
+  };
+  assert.equal(keepAwake(123, { platform: 'win32', spawn }), null);
+  assert.ok(keepAwake(123, { platform: 'darwin', spawn }));
+  assert.ok(keepAwake(123, { platform: 'linux', spawn }));
+  assert.deepEqual(spawned, [
+    ['caffeinate', ['-i', '-w', '123'], true],
+    ['systemd-inhibit', ['--what=sleep:idle', '--who=kirunak', '--why=Quad Damage runs', '--mode=block', 'tail', '--pid=123', '-f', '/dev/null'], true],
+  ]);
+  // Where systemd-inhibit is not there, its spawn fails quietly.
+  const missing = keepAwake(process.pid, { platform: 'linux', spawn: (cmd, args, opts) => spawnNode('no-such-inhibit-tool', args, opts) });
+  assert.ok(missing);
 });
 
 // --- gulnya/quad-damage S-4: one bug's work, with the fake runner of fixtures/quad-damage (no claude anywhere) ---

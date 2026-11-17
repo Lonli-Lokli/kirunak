@@ -1344,6 +1344,22 @@ test('E-4: a k run\'s task lock and step record written before leases (pidStart,
   }
 });
 
+test('AC-11: with no machine.freeMemoryMB a k run says once what memory is free before its first session; with a margin met it says nothing of memory', async () => {
+  const w = await approvedWorkspace(PLAN);
+  fakeRunner(w);
+  const lines = [];
+  await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  const said = lines.filter((l) => l.includes('MB of memory free'));
+  assert.equal(said.length, 1, lines.join('\n'));
+  assert.ok(said[0].startsWith(`${w.id} S-`) && said[0].endsWith(' MB of memory free (no machine.freeMemoryMB to wait for)'), said[0]);
+  const v = await approvedWorkspace(PLAN);
+  v.ws.machine = { ...v.ws.machine, freeMemoryMB: 1 };
+  fakeRunner(v);
+  const quiet = [];
+  await run({ ws: v.ws, id: v.id, out: (l) => quiet.push(l) });
+  assert.deepEqual(quiet.filter((l) => l.includes('memory')), []);
+});
+
 test('AC-6: a step whose k run is dead and whose session\'s wrapper still holds the session\'s lease is that session: it is ended with its claude, the step failed and its running file gone', async () => {
   const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
   const sid = randomUUID();
