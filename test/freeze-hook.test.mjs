@@ -394,6 +394,9 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['k --session s1 accept x', 'accept'],
     ['k --json --via mod bug review weather/stale-tiles', 'bug review'],
     ['k --why later queue remove x', 'queue'],
+    // The command `k heavy --` runs is read as if typed bare (asilak/kirunak-cross-platform AC-7).
+    ['k heavy --session s1 -- k approve x', 'approve'],
+    ['k heavy -- node bin/k.mjs bugs quad-damage --stop', 'bugs quad-damage --stop'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -419,6 +422,8 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'k queue add x --dry-run',
     'k queue show',
     'k --via mod queue show',
+    'k heavy --session s1 -- npm test',
+    'k heavy -- k queue show',
     'k --json approve x --dry-run',
     'k amend new weather/offline-forecast',
     'k amend check weather/offline-forecast A-1',

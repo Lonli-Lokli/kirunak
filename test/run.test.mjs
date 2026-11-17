@@ -16,8 +16,10 @@ import { stoppedFor } from '../lib/waiting.mjs';
 import * as queue from '../lib/queue.mjs';
 import * as steps from '../lib/steps.mjs';
 import { register, unregister } from '../plugins/machine-guard-pids.mjs';
-import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
+import { alive, groupAlive, killTree } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
+import { read as readLease } from '../lib/lease.mjs';
+import { sessionLease, wrapped } from '../lib/wrap.mjs';
 import { approvedWorkspace, events, fakeClaude, k, KIRUNAK, repeatedWorkspace, tempDir } from './helpers.mjs';
 
 // The user's settings folder of every step this file runs: empty, so a step's window is the one R7.4 gives with no
@@ -1339,6 +1341,35 @@ test('E-4: a k run\'s task lock and step record written before leases (pidStart,
     assert.equal(calls.length, 0, 'nothing started');
   } finally {
     other.kill();
+  }
+});
+
+test('AC-6: a step whose k run is dead and whose session\'s wrapper still holds the session\'s lease is that session: it is ended with its claude, the step failed and its running file gone', async () => {
+  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const lease = sessionLease(w.ws.home || w.home, sid);
+  const [bin, ...args] = wrapped([process.execPath, '-e', 'setTimeout(() => {}, 30000)'], { lease });
+  const wrapper = spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  const start = new Date().toISOString();
+  try {
+    const t0 = Date.now();
+    while (!readLease(lease)?.holder?.child && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 20));
+    const claude = readLease(lease).holder.child;
+    register(w.ws, wrapper.pid, { task: w.id, step: 'S-1', session: sid, since: start });
+    const dead = await deadPid();
+    put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: wrapper.pid, started: start, ended: null, result: false } }));
+    fakeRunner(w);
+    const lines = [];
+    await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped, and its session (pid ${wrapper.pid}) was ended`), lines.join('\n'));
+    assert.equal(alive(wrapper.pid), false, 'its wrapper is ended');
+    assert.equal(alive(claude), false, 'and the claude under it');
+    assert.equal(existsSync(join(w.home, 'running', `${wrapper.pid}.json`)), false, 'its running file goes');
+    assert.match(progress(w), /S-1 failed/);
+  } finally {
+    unregister(w.ws, wrapper.pid);
+    if (alive(wrapper.pid)) await killTree(wrapper.pid, 300);
   }
 });
 

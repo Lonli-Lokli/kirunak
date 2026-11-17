@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fold, insidePath, inUse, NO_SHELL, processPaths, readerName, samePath, shell } from '../lib/os.mjs';
+import { commandArgv, fold, insidePath, inUse, NO_SHELL, processPaths, readerName, samePath, shell } from '../lib/os.mjs';
 import { tempDir } from './helpers.mjs';
 
 // A fake `run` that answers every call with `result` and records the calls.
@@ -162,4 +162,23 @@ test('AC-9: on this machine the shell runs a command, `echo ok > out.txt` writin
   const s = spawnSync(sh, ['-c', './hello.cmd world'], { cwd: dir, encoding: 'utf8' });
   assert.equal(s.status, 0, s.stderr);
   assert.equal(s.stdout.trim(), 'shim ran world');
+});
+
+test('AC-7, E-1: commandArgv runs one word as a command line and more as a program with its arguments; on win32 an .exe or .com straight, found on PATH, else through the shell', () => {
+  const sh = '/bin/sh';
+  assert.deepEqual(commandArgv(['make && make test'], { platform: 'linux', sh }), [sh, '-c', 'make && make test']);
+  assert.deepEqual(commandArgv(['npm', 'test', '/x'], { platform: 'darwin', sh }), [sh, '-c', 'exec "$0" "$@"', 'npm', 'test', '/x']);
+  const w = String.raw;
+  const bash = w`C:\Git\bin\bash.exe`;
+  const node = w`C:\node\node.exe`;
+  const files = new Set([node, w`C:\node\npm.cmd`, w`C:\tools\gradle.com`, w`D:\w\bin\run.exe`]);
+  const win = { platform: 'win32', env: { PATH: w`C:\tools;C:\node` }, exists: (p) => files.has(p), cwd: w`D:\w`, sh: bash };
+  assert.deepEqual(commandArgv(['node', '--test', '/x'], win), [node, '--test', '/x'], 'an .exe straight, its arguments as given');
+  assert.deepEqual(commandArgv(['gradle', 'build'], win), [w`C:\tools\gradle.com`, 'build'], '.com before .exe, the PATH folders in turn');
+  assert.deepEqual(commandArgv(['bin/run.exe', 'a'], win), [w`D:\w\bin\run.exe`, 'a'], 'a path from the folder it runs in');
+  assert.deepEqual(commandArgv([node, '-v'], win), [node, '-v']);
+  assert.deepEqual(commandArgv(['npm', 'test'], win), [bash, '-c', 'exec "$0" "$@"', 'npm', 'test'], 'a .cmd shim through the shell');
+  assert.deepEqual(commandArgv(['./gradlew.bat', 'test'], win), [bash, '-c', 'exec "$0" "$@"', './gradlew.bat', 'test']);
+  assert.deepEqual(commandArgv(['node -v'], win), [bash, '-c', 'node -v'], 'one word is a command line on win32 too');
+  assert.deepEqual(commandArgv(['node', '-v'], { ...win, env: { Path: w`C:\node` } }), [node, '-v'], 'Path as Windows spells it');
 });
