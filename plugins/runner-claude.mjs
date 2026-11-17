@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants, tmpdir } from 'node:os';
+import { kirunakHome } from '../lib/home.mjs';
 import { signalGroup } from '../lib/os.mjs';
+import { leftBy, sessionLease, wrapped } from '../lib/wrap.mjs';
 
 // The core's default `runner` (orchestrator.md §3): a headless `claude -p`, every flag from cli-reference.md and
-// headless.md. Not --bare: a step needs the repo's CLAUDE.md, the PreToolUse hooks and the subscription. The process
-// gets its own process group, so the orchestrator's timeout can kill its tree.
+// headless.md. Not --bare: a step needs the repo's CLAUDE.md, the PreToolUse hooks and the subscription. It runs under
+// the wrapper (lib/wrap.mjs), which holds the session's lease and gets its own process group, so the orchestrator's
+// timeout can kill its tree with killTree on every OS (asilak/kirunak-cross-platform AC-6).
 
 export const KEEP_ALIVE_PROMPT = 'keep-alive: reply with the word ok';
 export const LIMITS_PROMPT = 'reply with the word ok';
@@ -99,8 +102,8 @@ export function readLimits(stdout, { exitCode = 0, stderr = '' } = {}) {
 }
 
 // onMessage(message), when given, gets each line of stdout that parses as a JSON object, as it comes; what it throws
-// is ignored, so a reader's fault never ends the session.
-function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null }) {
+// is ignored, so a reader's fault never ends the session. `lease`, the session's (sessionLease), is held by its wrapper.
+function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null, lease = null }) {
   let out = '';
   let err = '';
   let part = '';
@@ -117,7 +120,8 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null
   const cap = (s, b) => (s.length + b.length > OUTPUT_CAP ? (s + b).slice(-OUTPUT_CAP) : s + b);
   let child;
   try {
-    child = spawn(bin, args, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const [node, ...wrap] = wrapped([bin, ...args], { lease });
+    child = spawn(node, wrap, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   } catch (e) {
     return { pid: undefined, done: Promise.resolve({ exitCode: 127, result: null, usage: null, stderr: e.message, ...(raw ? { stdout: '' } : {}) }) };
   }
@@ -132,6 +136,7 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null
   const done = new Promise((resolve) => {
     child.on('error', (e) => resolve({ exitCode: 127, result: null, usage: null, stderr: err + e.message, ...(raw ? { stdout: out } : {}) }));
     child.on('exit', async (code, signal) => {
+      leftBy(lease, child.pid);
       await Promise.race([closed, new Promise((r) => setTimeout(r, 1000))]);
       if (onMessage && part) read('\n');
       const result = parseResult(out);
@@ -144,6 +149,7 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null
 // runnerClaude(ws, { bin }): `bin` is the command, `claude` unless a test passes a fake.
 export default function runnerClaude(ws, { bin = 'claude' } = {}) {
   const mode = () => ws?.runner?.permissionMode || 'auto';
+  const leaseOf = (sessionId) => sessionLease(ws?.home || kirunakHome(), sessionId);
   return {
     name: 'runner-claude',
     version: '1',
@@ -153,12 +159,13 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
         // seam's fields: prompt (the brief's text, or the resume prompt), sessionId, maxBudgetUsd, permissionMode,
         // addDirs, deny (a review's) and env (KIRUNAK_TASK, KIRUNAK_STEP); and onMessage(message), when the caller
         // reads the session as it goes (gulnya/quad-damage AC-11): the session then streams, each message handed to it.
-        // The caller ends a session by killing the group of its pid.
+        // The caller ends a session with killTree(pid), its wrapper's; the wrapper holds sessionLease(home, sessionId)
+        // while the session runs.
         start(step) {
           const sessionId = step.resume || step.sessionId || randomUUID();
           const onMessage = typeof step.onMessage === 'function' ? step.onMessage : null;
           const args = claudeArgs({ ...step, prompt: step.prompt ?? step.brief, sessionId, permissionMode: step.permissionMode || mode(), stream: !!onMessage });
-          const run = spawnClaude(bin, args, { cwd: step.cwd, env: step.env, stdin: step.resume ? '' : step.prompt ?? step.brief, onMessage });
+          const run = spawnClaude(bin, args, { cwd: step.cwd, env: step.env, stdin: step.resume ? '' : step.prompt ?? step.brief, onMessage, lease: leaseOf(sessionId) });
           return { pid: run.pid, sessionId, done: run.done };
         },
 
@@ -168,7 +175,7 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
         // saved as the step's keep-<k>.json.
         keepAlive(sessionId, cwd, step = {}) {
           const args = claudeArgs({ ...step, resume: sessionId, prompt: KEEP_ALIVE_PROMPT, maxTurns: 1, maxBudgetUsd: null, permissionMode: step.permissionMode || mode() });
-          const run = spawnClaude(bin, args, { cwd, env: step.env });
+          const run = spawnClaude(bin, args, { cwd, env: step.env, lease: leaseOf(sessionId) });
           return { pid: run.pid, done: run.done.then(({ exitCode, result, usage }) => ({ exitCode, result, usage })) };
         },
 

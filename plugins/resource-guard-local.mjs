@@ -5,9 +5,10 @@ import { constants } from 'node:os';
 import { join } from 'node:path';
 import { refuse } from '../lib/errors.mjs';
 import { kirunakHome } from '../lib/home.mjs';
-import { read as readLease, RENEW_MS, take as takeLease } from '../lib/lease.mjs';
+import { live as liveLease, read as readLease, RENEW_MS, take as takeLease } from '../lib/lease.mjs';
 import { alive, groupAlive, killTree, signalGroup } from '../lib/os.mjs';
 import { onStop } from '../lib/stop.mjs';
+import { leftBy, wrapped } from '../lib/wrap.mjs';
 
 // The process calls live in lib/os.mjs (asilak/kirunak-cross-platform AC-1); these stay importable from here.
 export { alive, groupAlive, killTree };
@@ -17,7 +18,8 @@ export { alive, groupAlive, killTree };
 // guard/queue, one JSON line each, each waiter holding its own lease in guard/waiting/<id>; every job appends a line to
 // guard/log.jsonl; claims are in guard/claims.json. An owner or a waiter is alive while its pid answers kill 0 and its
 // lease is fresh, so a pid another process took since is dead within a minute; no process's start time is read
-// (asilak/kirunak-cross-platform AC-4, AC-5).
+// (asilak/kirunak-cross-platform AC-4, AC-5). Each job runs under the wrapper (lib/wrap.mjs), which holds the job's own
+// lease, guard/jobs/<the owner's id>, while it runs (AC-6).
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LOG_TAIL = 5 * 1024 * 1024;
@@ -39,13 +41,15 @@ const readJson = (p, fallback = null) => {
   }
 };
 
-// A gone owner's job that may still run: kirunak cannot tell that its pid is still the job, so it is believed to run,
-// waited for and never killed (E-5). Its process group on macOS and Linux, the pid itself on Windows.
+// A gone owner's job that may still run with no lease of its wrapper to tell it: kirunak cannot tell that its pid is
+// still the job, so it is believed to run, waited for and never killed (E-5). Its process group on macOS and Linux,
+// the pid itself on Windows.
 const jobRuns = (pid) => groupAlive(pid) || alive(pid);
 
-// Runs argv in its own process group with maxMinutes as a deadline: past it, the group is killed, exit code 124.
-// onSpawn(pid) is called as soon as the group exists.
-export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10000, onSpawn } = {}) {
+// Runs argv under the wrapper (lib/wrap.mjs), holding `lease` when one is named, in its own process group with
+// maxMinutes as a deadline: past it, the tree is killed, exit code 124. onSpawn(pid), the wrapper's, is called as soon
+// as the group exists. output(chunk, 'stdout' | 'stderr'), when given, gets the command's output as it comes.
+export function runCommand({ command, cwd, maxMinutes, env, output }, { killAfterMs = 10000, onSpawn, lease = null } = {}) {
   return new Promise((resolve) => {
     let log = '';
     const keep = (b) => {
@@ -59,7 +63,8 @@ export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10
     };
     let child;
     try {
-      child = spawn(command[0], command.slice(1), { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const [node, ...wrap] = wrapped(command, { lease });
+      child = spawn(node, wrap, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch (e) {
       return end({ exitCode: 127, log: e.message });
     }
@@ -67,14 +72,23 @@ export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10
     const closed = new Promise((r) => child.on('close', r));
     let killing = null;
     const timer = maxMinutes > 0 ? setTimeout(() => (killing = killTree(child.pid, killAfterMs)), maxMinutes * 60000) : null;
-    child.stdout.on('data', keep);
-    child.stderr.on('data', keep);
+    const pass = (stream) => (b) => {
+      keep(b);
+      if (typeof output === 'function') {
+        try {
+          output(b, stream);
+        } catch {}
+      }
+    };
+    child.stdout.on('data', pass('stdout'));
+    child.stderr.on('data', pass('stderr'));
     child.on('error', (e) => {
       clearTimeout(timer);
       end({ exitCode: 127, log: log + e.message });
     });
     child.on('exit', async (code, signal) => {
       clearTimeout(timer);
+      leftBy(lease, child.pid);
       if (killing) await killing;
       // A child left in the group may hold the pipes open; read what is there, then let go.
       await Promise.race([closed, sleep(1000)]);
@@ -90,7 +104,16 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
   const at = () => {
     const d = join(ws?.home || kirunakHome(), 'guard');
     mkdirSync(d, { recursive: true });
-    return { d, lock: join(d, 'lock'), owner: join(d, 'lock', 'owner.json'), queue: join(d, 'queue'), waiting: join(d, 'waiting'), edit: join(d, 'queue.edit'), claims: join(d, 'claims.json'), log: join(d, 'log.jsonl') };
+    return { d, lock: join(d, 'lock'), owner: join(d, 'lock', 'owner.json'), queue: join(d, 'queue'), waiting: join(d, 'waiting'), jobs: join(d, 'jobs'), edit: join(d, 'queue.edit'), claims: join(d, 'claims.json'), log: join(d, 'log.jsonl') };
+  };
+  // The lease the wrapper of the owner's job holds: guard/jobs/<owner's id>.
+  const jobLease = (P, owner) => (typeof owner?.id === 'string' && /^[\w-]+$/.test(owner.id) ? join(P.jobs, owner.id) : null);
+  // A gone owner's job: { pid, wrapped: true } while its wrapper holds its lease alive, so that pid is the job's
+  // wrapper and may be ended; { pid } while its pid may still be the job with no lease to tell (E-5); else null.
+  const goneJob = (P, owner) => {
+    const l = jobLease(P, owner) && liveLease(jobLease(P, owner));
+    if (l) return { pid: l.holder.pid, wrapped: true };
+    return owner?.job && jobRuns(owner.job) ? { pid: owner.job } : null;
   };
   const fresh = (dir, file) => {
     const l = readLease(dir, { file });
@@ -126,8 +149,9 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
   }
 
   // The head of the queue takes the lock, or takes it over once its owner is gone: → the lock's lease, false, or
-  // { orphan: pid } while a gone owner's job may still run, which is waited for and never killed (E-5): nobody will
-  // collect its result, and kirunak cannot tell that pid is still the job.
+  // { orphan: pid, wrapped } while a gone owner's job may still run. Nobody will collect its result. Its wrapper's live
+  // lease tells that pid is the job's wrapper, which the caller ends (wrapped); with none, kirunak cannot tell that pid
+  // is still the job, which is waited for and never killed (E-5).
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
@@ -140,8 +164,10 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
       if (existsSync(P.lock)) {
         const owner = readJson(P.owner);
         if (ownerLive(P, owner)) return false;
-        if (owner?.job && jobRuns(owner.job)) return { orphan: owner.job };
+        const gone = goneJob(P, owner);
+        if (gone) return { orphan: gone.pid, wrapped: !!gone.wrapped };
         rmSync(P.lock, { recursive: true, force: true });
+        if (jobLease(P, owner)) rmSync(jobLease(P, owner), { recursive: true, force: true });
       }
       const held = takeLease(P.lock, { id: me.id, lease: 1, session: me.session, what: me.what, since: new Date().toISOString(), expectMinutes: me.expectMinutes, maxMinutes: me.maxMinutes }, { file: 'owner.json' });
       if (!held) return false;
@@ -189,6 +215,13 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
                 held = t;
                 break;
               }
+              // Its wrapper's lease tells the gone owner's job is still that job: it is ended, and the lock taken next.
+              if (t?.wrapped) {
+                appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: 'ended', session: job.session, pid: t.orphan, reason: "the owner is gone; its job's wrapper holds the job's lease" }) + '\n');
+                job.say?.(`ends the job (pid ${t.orphan}) of the lock's holder, which is gone: its wrapper's lease tells it is that job`);
+                await killTree(t.orphan, killAfterMs);
+                continue;
+              }
               // A wait on a gone owner's job lasts as long as that job: said once, in the log and to the caller.
               if (t?.orphan && !told) {
                 told = true;
@@ -234,6 +267,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           try {
             r = await runCommand(job, {
               killAfterMs,
+              lease: jobLease(P, held.holder),
               onSpawn: (p) => {
                 pid = p;
                 held.update({ job: p });
@@ -261,7 +295,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           const owner = readJson(P.owner);
           const minutesSince = (iso) => (Date.now() - Date.parse(iso)) / 60000;
           const job = ({ session, what, since }) => ({ session, what, since, estimateMinutes: estimate(P, what) });
-          const h = !owner ? null : ownerLive(P, owner) ? job(owner) : owner.job && jobRuns(owner.job) ? { ...job(owner), orphan: true } : null;
+          const h = !owner ? null : ownerLive(P, owner) ? job(owner) : goneJob(P, owner) ? { ...job(owner), orphan: true } : null;
           const queued = readQueue(P).filter((e) => e && waiterLive(P, e)).map(job);
           const left = h ? Math.max(0, h.estimateMinutes - minutesSince(h.since)) : 0;
           return { held: h, queued, estimateMinutes: Math.round((left + queued.reduce((s, q) => s + q.estimateMinutes, 0)) * 100) / 100 };
@@ -277,7 +311,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
             session: e.session, what: e.what, [at]: e.since ?? null, pid: Number.isInteger(e.pid) ? e.pid : null,
             expectMinutes: minutesOr(e.expectMinutes), maxMinutes: minutesOr(e.maxMinutes), kind: null, usualMinutes: usual(P, e.what),
           });
-          const live = owner && (ownerLive(P, owner) || (owner.job && jobRuns(owner.job)));
+          const live = owner && (ownerLive(P, owner) || goneJob(P, owner));
           return {
             now: new Date().toISOString(),
             first: null,
