@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import resourceGuardLocal, { alive, killTree } from '../plugins/resource-guard-local.mjs';
+import { read as readLease } from '../lib/lease.mjs';
 import { shell } from '../lib/os.mjs';
+import { wrapped } from '../lib/wrap.mjs';
 import { tempDir } from './helpers.mjs';
 
 function guard(opts = {}) {
@@ -82,14 +84,26 @@ test('a job\'s started is called once the guard holds the lock for it, just befo
   assert.deepEqual(readFileSync(f, 'utf8').trim().split('\n'), ['started-a', 'start-a', 'end-a', 'started-b', 'start-b', 'end-b']);
 });
 
+// A node job that starts a child of its own attached, writes its pid to the file named and stays, on every OS.
+const PARENT = `const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
+require('fs').writeFileSync(process.argv[1], String(c.pid));
+setTimeout(() => {}, 30000);`;
+
+// Windows has no process groups, no TERM a process can ignore and no signal one process can send another: those
+// tests run on macOS and Linux, and test/wrap.test.mjs ends a wrapper's tree on every OS (asilak/kirunak-cross-platform
+// E-3).
+const POSIX_ONLY = process.platform === 'win32' && 'Windows has no process groups and no signal but an end at once';
+
 test('past maxMinutes the job and its children are killed, exit code 124', async () => {
   const { home, g } = guard({ killAfterMs: 500 });
   const pidFile = join(home, 'child.pid');
   const t0 = Date.now();
-  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 0.01, cwd: home, command: sh(`sleep 30 & echo $! > ${pidFile}; sleep 30`) });
+  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 0.01, cwd: home, command: [process.execPath, '-e', PARENT, pidFile] });
   assert.equal(r.exitCode, 124);
   assert.ok(Date.now() - t0 < 5000, 'killed at the deadline, not after the sleep');
-  assert.equal(alive(Number(readFileSync(pidFile, 'utf8'))), false, 'the background child is gone too');
+  const child = Number(readFileSync(pidFile, 'utf8'));
+  await until(() => !alive(child), 3000).catch(() => {});
+  assert.equal(alive(child), false, 'the job\'s child is gone too');
   assert.equal(logOf(home)[0].exitCode, 124);
   assert.equal(existsSync(join(home, 'guard', 'lock')), false);
 });
@@ -102,7 +116,7 @@ const c = require('child_process').spawn('/bin/sh', ['-c', (stubborn ? 'trap "" 
 require('fs').writeFileSync(f, String(c.pid));
 setTimeout(() => {}, 30000);`;
 
-test('past maxMinutes a grandchild in a process group of its own is killed too', async () => {
+test('past maxMinutes a grandchild in a process group of its own is killed too', { skip: POSIX_ONLY && `${POSIX_ONLY}: a grandchild started detached outlives its job there, the known gap` }, async () => {
   const { home, g } = guard({ killAfterMs: 500 });
   const pidFile = join(home, 'grandchild.pid');
   const r = await g.run({ session: 's', what: 'hang', maxMinutes: 0.01, cwd: home, command: [process.execPath, '-e', DETACHES, pidFile] });
@@ -112,7 +126,7 @@ test('past maxMinutes a grandchild in a process group of its own is killed too',
   assert.equal(groupAlive(grandchild), false, 'the grandchild\'s group is gone');
 });
 
-test('killTree ends every descendant whatever its group, KILLing what ignores TERM, and leaves the rest alone', async () => {
+test('killTree ends every descendant whatever its group, KILLing what ignores TERM, and leaves the rest alone', { skip: POSIX_ONLY }, async () => {
   const dir = tempDir('kirunak-kill-');
   const pidFile = join(dir, 'grandchild.pid');
   const step = spawn(process.execPath, ['-e', DETACHES, pidFile, 'stubborn'], { detached: true, stdio: 'ignore' });
@@ -183,7 +197,7 @@ test('claims: one holder at a time, released by its holder, every resource ever 
   assert.equal(g.claim('phone', 'kirunak:b', 'other test').by, 'kirunak:b');
 });
 
-test('a k run stopped by SIGINT ends its job\'s process group and frees the lock within a second', async () => {
+test('a k run stopped by SIGINT ends its job\'s process group and frees the lock within a second', { skip: POSIX_ONLY && `${POSIX_ONLY}: a SIGINT sent there ends k run at once` }, async () => {
   const home = tempDir('kirunak-guard-');
   const src = `import g from ${JSON.stringify(GUARD)};
 g({ home: ${JSON.stringify(home)} }, { pollMs: 20 }).provides.resourceGuard.run({ session: 's', what: 'build', maxMinutes: 1, cwd: ${JSON.stringify(home)}, command: ['/bin/sh', '-c', 'sleep 30 & sleep 30'] });`;
@@ -232,6 +246,49 @@ test('E-5: a gone owner\'s job that may still run holds the lock, is waited for 
   } finally {
     job.kill();
   }
+});
+
+test('AC-6: a gone owner\'s job whose wrapper still holds the job\'s lease is that job: it is ended with its child, said once, and the lock taken', async () => {
+  const { home, g } = guard({ killAfterMs: 300 });
+  const lock = join(home, 'guard', 'lock');
+  mkdirSync(lock, { recursive: true });
+  const lease = join(home, 'guard', 'jobs', 'o');
+  const pidFile = join(home, 'child.pid');
+  const [bin, ...args] = wrapped([process.execPath, '-e', PARENT, pidFile], { lease });
+  const job = spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  try {
+    await until(() => existsSync(pidFile) && readLease(lease)?.holder?.child);
+    const child = Number(readFileSync(pidFile, 'utf8'));
+    writeFileSync(join(lock, 'owner.json'), JSON.stringify({ id: 'o', lease: 1, session: 'owner', what: 'build', since: new Date().toISOString(), pid: await deadPid(), job: job.pid }));
+    assert.equal(g.status().held.orphan, true, 'held while its wrapper runs');
+    const said = [];
+    const r = await g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: [process.execPath, '-e', "console.log('ran')"], say: (l) => said.push(l) });
+    assert.equal(r.exitCode, 0, r.log);
+    assert.match(r.log, /ran/);
+    assert.equal(alive(job.pid), false, 'the gone owner\'s job is ended');
+    await until(() => !alive(child), 3000).catch(() => {});
+    assert.equal(alive(child), false, 'and its child');
+    assert.deepEqual(said, [`ends the job (pid ${job.pid}) of the lock's holder, which is gone: its wrapper's lease tells it is that job`]);
+    assert.deepEqual(logOf(home).map((x) => [x.what, x.pid ?? null]), [['ended', job.pid], ['x', null]]);
+    assert.equal(existsSync(lease), false, 'its lease goes, by its wrapper or with the lock');
+  } finally {
+    if (alive(job.pid)) await killTree(job.pid, 300);
+  }
+});
+
+test('AC-6: a job runs under the wrapper, which holds guard/jobs/<the owner\'s id> naming the job while it runs; its output goes to job.output as it comes', async () => {
+  const { home, g } = guard();
+  const chunks = [];
+  const script = "const fs = require('fs'); const [jobs, owner] = process.argv.slice(1); const [id] = fs.readdirSync(jobs); " +
+    "const h = JSON.parse(fs.readFileSync(jobs + '/' + id + '/holder.json', 'utf8')); const o = JSON.parse(fs.readFileSync(owner, 'utf8')); " +
+    "console.log(id === o.id, h.child === process.pid, o.job === h.pid); console.error('to stderr');";
+  const command = [process.execPath, '-e', script, join(home, 'guard', 'jobs'), join(home, 'guard', 'lock', 'owner.json')];
+  const r = await g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command, output: (b, stream) => chunks.push([stream, String(b)]) });
+  assert.equal(r.exitCode, 0, r.log);
+  const of = (stream) => chunks.filter(([s]) => s === stream).map(([, b]) => b).join('');
+  assert.equal(of('stdout'), 'true true true\n', 'the owner\'s id names the lease, which names the wrapper and its command');
+  assert.match(of('stderr'), /to stderr/);
+  assert.deepEqual(readdirSync(join(home, 'guard', 'jobs')), [], 'the lease is let go');
 });
 
 test('AC-5: alive(pid) is kill 0 on every OS: this process and a running child are alive, an ended one is not, and no pid at all is not', async () => {
