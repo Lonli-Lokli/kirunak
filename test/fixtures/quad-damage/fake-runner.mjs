@@ -31,7 +31,8 @@ function review(step, script) {
   if (typeof next === 'object' && next.sleep != null) {
     const child = spawn('sleep', [String(next.sleep)], { detached: true, stdio: 'ignore' });
     const done = new Promise((resolve) => child.on('exit', (code, signal) => {
-      if (signal) return resolve({ exitCode: 128 + 15, result: null });
+      // Killed: by a signal on macOS and Linux, on Windows ended with exit 1.
+      if (signal || code !== 0) return resolve({ exitCode: signal ? 128 + 15 : code, result: null });
       script.verdicts.unshift(next.verdict ?? 'clean');
       resolve(review(step, script).done);
     }));
@@ -87,7 +88,8 @@ export function fake(script = {}) {
       const calls = act.calls ?? 3;
       const child = spawn('sleep', [String(act.sleep ?? 0.05)], { detached: true, stdio: 'ignore' });
       const done = new Promise((resolve) => child.on('exit', (code, signal) => {
-        if (signal) return resolve({ exitCode: 128 + 15, result: null, stderr: '' });
+        // Killed: by a signal on macOS and Linux, on Windows ended with exit 1.
+        if (signal || code !== 0) return resolve({ exitCode: signal ? 128 + 15 : code, result: null, stderr: '' });
         try {
           play(step, act);
         } catch (e) {
