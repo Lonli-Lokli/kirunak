@@ -1,5 +1,6 @@
-# The line-ending tests on Windows with core.autocrlf true, where a clone without .gitattributes checks its templates
-# out with CRLF, and on Linux. Only test/line-endings.test.mjs runs here.
+# kirunak's whole suite on macOS, Linux and Windows (asilak/kirunak-cross-platform AC-13): R19a asks that it passes on
+# all three before a change merges. Windows runs with core.autocrlf true, so a checkout gets CRLF wherever
+# .gitattributes does not hold it to LF. A run that reports no test fails: a glob that matches nothing is no pass.
 name: test
 
 on:
@@ -7,11 +8,11 @@ on:
   pull_request:
 
 jobs:
-  line-endings:
+  suite:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Turn CRLF conversion on before the checkout
@@ -21,5 +22,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Line-ending tests
-        run: node --test test/line-endings.test.mjs
+      - name: A git identity for the tests' own repos
+        run: |
+          git config --global user.name "kirunak ci"
+          git config --global user.email "ci@example.com"
+      - name: The suite
+        shell: bash
+        run: |
+          code=0
+          node --test --test-reporter=tap "test/*.test.mjs" > tap.txt || code=$?
+          grep -E '^not ok' tap.txt || true
+          grep -E '^# (tests|pass|fail|skipped|cancelled|todo)' tap.txt
+          grep -qE '^# tests [1-9]' tap.txt || { echo "::error::the suite ran no test"; exit 1; }
+          exit $code
+      - name: Keep the TAP output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tap-${{ matrix.os }}
+          path: tap.txt
