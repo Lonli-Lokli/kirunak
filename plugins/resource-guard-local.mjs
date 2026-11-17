@@ -1,11 +1,15 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { join } from 'node:path';
 import { refuse } from '../lib/errors.mjs';
 import { kirunakHome } from '../lib/home.mjs';
+import { alive, groupAlive, isStill, killTree, signalGroup } from '../lib/os.mjs';
 import { onStop } from '../lib/stop.mjs';
+
+// The process calls live in lib/os.mjs (asilak/kirunak-cross-platform AC-1); these stay importable from here.
+export { alive, groupAlive, isStill, killTree };
 
 // The core's default `resourceGuard` (plugins.md §2): one heavy job at a time on this machine. The lock is
 // guard/lock, a directory made with mkdir (atomic) holding owner.json; waiting jobs queue first in, first out in
@@ -31,129 +35,12 @@ const readJson = (p, fallback = null) => {
   }
 };
 
-// A pid this user cannot signal (EPERM) is not alive: nothing of kirunak's runs as another user, so it is never ours,
-// and waiting for it would be waiting for ever.
-export function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// A pid of 0 or 1 would name this process's own group or every process: never a job's group.
-const isGroup = (pid) => Number.isInteger(pid) && pid > 1;
-
-// A group this user cannot signal (EPERM) is no job's or claude's of kirunak's and could not be killed anyway: not
-// alive, as alive() says of a single pid.
-export const groupAlive = (pid) => {
-  if (!isGroup(pid)) return false;
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-// ps's elapsed time, [[dd-]hh:]mm:ss (the same on macOS and Linux, whatever the locale), in seconds.
-const elapsed = (s) => {
-  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(s.trim());
-  return m ? ((Number(m[1] || 0) * 24 + Number(m[2] || 0)) * 60 + Number(m[3])) * 60 + Number(m[4]) : null;
-};
-
-// A pid read from a file may name another process by now (pids are reused). True only while pid runs and started
-// within slackMs of startIso: now less its elapsed time is its start. No start recorded, or no such process (ps exits
-// 1), is false. Null when ps could not answer (it did not start, failed otherwise, or printed no elapsed time): the
-// pid may be that process or another, so callers neither kill it nor read it as gone.
-// A minute of slack: a start recorded late by a fork or a write on a loaded machine must still match, and a pid is
-// not reused within a minute of the start of the process that held it.
-export function isStill(pid, startIso, slackMs = 60000) {
-  const recorded = Date.parse(startIso);
-  if (!isGroup(pid) || Number.isNaN(recorded)) return false;
-  const ps = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
-  if (ps.status === 1) return false;
-  const s = ps.status === 0 ? elapsed(ps.stdout) : null;
-  if (s === null) return null;
-  return Math.abs(Date.now() - s * 1000 - recorded) <= slackMs;
-}
-
 // This process's start, written beside its pid wherever kirunak writes that pid to a file, for isStill to read.
 export const OWN_START = new Date(Date.now() - process.uptime() * 1000).toISOString();
 
 // A pid of kirunak's read from a file: alive, and still the process that started at startIso. No start is dead. A
 // pid whose start ps cannot tell now is believed to run, so nothing is taken over or failed on a guess.
 export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso) !== false;
-
-// Every process now, from one `ps`: pid, ppid, pgid and its start (now less its elapsed time, in ms). Null when ps
-// cannot answer.
-function processes() {
-  const ps = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid=,etime='], { encoding: 'utf8' });
-  if (ps.status !== 0) return null;
-  const now = Date.now();
-  const all = [];
-  for (const line of ps.stdout.split('\n')) {
-    const [pid, ppid, pgid, etime] = line.trim().split(/\s+/);
-    const s = etime ? elapsed(etime) : null;
-    if (s !== null) all.push({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), start: now - s * 1000 });
-  }
-  return all;
-}
-
-// The processes of the group pid leads and every descendant of theirs, whatever its group: a child may start one
-// in a group of its own (Claude Code does, for a background Bash job), which a kill of -pid misses and which, once
-// its parent dies, is reparented and no descendant any more. So they are found before the first signal.
-function treeOf(all, roots) {
-  const kids = new Map();
-  for (const p of all) kids.set(p.ppid, [...(kids.get(p.ppid) || []), p]);
-  const found = new Map(all.filter((p) => roots.has(p.pgid) || roots.has(p.pid)).map((p) => [p.pid, p]));
-  for (const p of found.values()) for (const k of kids.get(p.pid) || []) if (!found.has(k.pid)) found.set(k.pid, k);
-  return found;
-}
-
-// TERM to the process group and to every descendant found (each pid, and each group one of them leads), then KILL
-// after graceMs to what is left, again looking for descendants started meanwhile. A pid whose start is not the one
-// found is another process by now (pids are reused) and is not signalled; this process's own group never is.
-export async function killTree(pid, graceMs = 10000) {
-  if (!isGroup(pid)) return;
-  const own = new Set([process.pid, process.ppid]);
-  const ownGroup = processes()?.find((p) => p.pid === process.pid)?.pgid;
-  let tree = treeOf(processes() || [], new Set([pid]));
-  const send = (signal) => {
-    try {
-      process.kill(-pid, signal);
-    } catch {}
-    for (const p of tree.values()) {
-      if (own.has(p.pid)) continue;
-      if (p.pgid === p.pid && p.pid !== ownGroup && isGroup(p.pid)) {
-        try {
-          process.kill(-p.pid, signal);
-        } catch {}
-      }
-      try {
-        process.kill(p.pid, signal);
-      } catch {}
-    }
-  };
-  // The tree as it is now: what still runs with the start it was found with, and its descendants since.
-  const still = () => {
-    const all = processes();
-    if (!all) return tree;
-    const now = new Map(all.map((p) => [p.pid, p]));
-    const kept = new Set([pid, ...[...tree.values()].filter((p) => now.has(p.pid) && Math.abs(now.get(p.pid).start - p.start) <= 2000).map((p) => p.pid)]);
-    return treeOf(all, kept);
-  };
-  send('SIGTERM');
-  const until = Date.now() + graceMs;
-  const left = () => groupAlive(pid) || [...tree.values()].some((p) => !own.has(p.pid) && alive(p.pid));
-  while (left() && Date.now() < until) await sleep(50);
-  if (left()) {
-    tree = still();
-    send('SIGKILL');
-  }
-}
 
 // Runs argv in its own process group with maxMinutes as a deadline: past it, the group is killed, exit code 124.
 // onSpawn(pid) is called as soon as the group exists.
@@ -338,9 +225,7 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           // next take ends what is left of it; with nothing running, release now (outside the mutex: takes allow it).
           const onExit = () => {
             if (!groupAlive(pid)) return release();
-            try {
-              process.kill(-pid, 'SIGTERM');
-            } catch {}
+            signalGroup(pid, 'SIGTERM');
           };
           process.on('exit', onExit);
           try {

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants, tmpdir } from 'node:os';
+import { signalGroup } from '../lib/os.mjs';
 
 // The core's default `runner` (orchestrator.md §3): a headless `claude -p`, every flag from cli-reference.md and
 // headless.md. Not --bare: a step needs the repo's CLAUDE.md, the PreToolUse hooks and the subscription. The process
@@ -179,9 +180,7 @@ export default function runnerClaude(ws, { bin = 'claude' } = {}) {
           let timer;
           const late = new Promise((resolve) => {
             timer = setTimeout(() => {
-              try {
-                process.kill(-run.pid, 'SIGKILL');
-              } catch {}
+              signalGroup(run.pid, 'SIGKILL');
               resolve({ error: `no reading in ${timeoutMs / 1000} s: the session was stopped` });
             }, timeoutMs);
           });
