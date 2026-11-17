@@ -1,11 +1,12 @@
 // Leases (lib/lease.mjs, asilak/kirunak-cross-platform AC-4, E-8, E-9): a directory made with mkdir, its holder file
 // touched by its holder, stale when untouched for a minute. Staleness is made here by setting a file's time back.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { read, STALE_MS, take } from '../lib/lease.mjs';
+import { besideOf, hold, holderLive, letGo, read, STALE_MS, take } from '../lib/lease.mjs';
 
 const place = () => join(mkdtempSync(join(tmpdir(), 'kirunak-lease-')), 'lock');
 const age = (path, ms) => {
@@ -107,4 +108,50 @@ test('update() rewrites the holder file beside the id while the lease is this ho
   const h = JSON.parse(readFileSync(join(dir, 'holder.json'), 'utf8'));
   assert.deepEqual([h.id, h.job, h.what], [a.holder.id, 4242, 'build']);
   a.release();
+});
+
+// A process that runs until killed, and the pid of one that has ended, on every OS.
+const idle = () => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore' });
+async function deadPid() {
+  const c = spawn(process.execPath, ['-e', '']);
+  await new Promise((r) => c.on('exit', r));
+  return c.pid;
+}
+
+test('AC-4: a file held by the lease beside it: hold() makes and keeps it, holderLive() reads it, letGo() removes it', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-held-')), 'run.json');
+  writeFileSync(path, '{}');
+  assert.ok(hold(path));
+  assert.equal(existsSync(besideOf(path)), true);
+  assert.equal(read(besideOf(path)).holder.pid, process.pid);
+  assert.equal(holderLive(path, process.pid), true);
+  age(join(besideOf(path), 'holder.json'), STALE_MS + 1000);
+  assert.equal(holderLive(path, process.pid), false, 'a stale lease: its holder is gone, though the pid runs');
+  letGo(path);
+  assert.equal(existsSync(besideOf(path)), false);
+});
+
+test('E-4: a file with no lease beside it, written before leases, is read by its pid alone', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-held-')), 'run.json');
+  writeFileSync(path, '{}');
+  assert.equal(holderLive(path, process.pid), true);
+  assert.equal(holderLive(path, await deadPid()), false);
+  assert.equal(holderLive(path, 77, { isAlive: () => true }), true, 'the caller\'s own pid check');
+});
+
+test('hold() refuses a fresh lease whose holder runs, and takes one over at once whose holder is gone or is the one handing it on', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-held-')), 'lock.json');
+  const other = idle();
+  try {
+    take(besideOf(path), { pid: other.pid });
+    assert.equal(hold(path), null, 'held by a live holder');
+    assert.ok(hold(path, {}, { from: other.pid }), 'handed on');
+    letGo(path);
+    take(besideOf(path), { pid: await deadPid() });
+    assert.ok(hold(path), 'its holder is gone');
+    assert.equal(read(besideOf(path)).holder.pid, process.pid);
+    letGo(path);
+  } finally {
+    other.kill();
+  }
 });
