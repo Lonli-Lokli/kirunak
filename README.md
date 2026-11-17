@@ -17,7 +17,8 @@ is done.
 - **A board**: `k list` in the terminal, a generated page (`k board`), and on the phone a brief board, in the chat
   (`/k-board`: the groups, then a group's tasks, then a task's card) or as a private page you open (`/k-board-page`).
   Beside it the heavy queue: `k heavy` (`/k-heavy` in the chat) shows the job holding the lock and each job waiting,
-  in the order they will run, with its task, its step, its length and when it should end.
+  in the order they will run, with its task, its step, its length and when it should end; `k heavy -- <command>` runs
+  a command of your own in that queue, its output as it comes, on macOS, Linux and Windows.
 - **Drafts.** An idea for a task that comes up in the middle of other work is kept in git as a draft, not lost in
   scratch files: `k draft new <id> --title "..."` writes the skeleton in `kirunak/drafts/`, `k draft check <id>` holds
   its shape, `k draft drop <id> --why "..."` removes it with the reason in the commit, and `k drafts` lists them. A
@@ -85,7 +86,8 @@ You need Node 22 or later, git and Claude Code.
    fixing session and a review start without (default Agent, Artifact, Workflow, AskUserQuestion, Skill,
    ScheduleWakeup, SendFeedback, ReportFindings, ListAgents and ReadNotifications, the ones Claude Code loads whole
    that a session with no person there cannot use; Agent stays off whatever the list; any other tool loads through
-   ToolSearch when the session needs it), `heavyLock` the command a heavy test runs behind, and `limitsLog` a file,
+   ToolSearch when the session needs it), `heavyLock` the command a heavy test runs behind (with none,
+   `k heavy --session <id> -- <command>`), and `limitsLog` a file,
    relative to the module, where Quad Damage appends each limits reading (time, week %, 5-hour %, `quad-damage`),
    beside what your status line writes.
 
