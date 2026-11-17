@@ -1,11 +1,10 @@
 import { strict as assert } from 'node:assert';
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { checkCompact, compactConfig, DEFAULT_COMPACT, rootsOf } from '../lib/compact.mjs';
 import { escalateConfig } from '../lib/install.mjs';
-import { gitCommitAll, gitInit, ladderWorkspace, sh } from './helpers.mjs';
+import { gitCommitAll, gitInit, ladderWorkspace, sh, tempDir } from './helpers.mjs';
 
 // The handover's workspace settings (orchestrator.md §5, R7.1-R7.3): the defaults, the checks at load, the folders
 // and config.json's `compact` block.
@@ -51,7 +50,7 @@ test('each value out of its range is refused at load, with its message', async (
 
 // A scratch git repo with a worktree, and a link to it: { dir, repo, worktree, link }.
 function scratch() {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-compact-roots-')));
+  const dir = realpathSync(tempDir('kirunak-compact-roots-'));
   const repo = join(dir, 'repo');
   mkdirSync(repo);
   gitInit(repo);

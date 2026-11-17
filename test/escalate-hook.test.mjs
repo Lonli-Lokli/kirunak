@@ -1,7 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -16,6 +15,7 @@ import { escalateConfig } from '../lib/install.mjs';
 import { familyOf } from '../lib/ladder.mjs';
 import { EFFORTS } from '../lib/plan.mjs';
 import { stopNotice } from '../lib/notice.mjs';
+import { tempDir } from './helpers.mjs';
 
 // The escalation hook counts a build or test failing again on the same test or error after an edit, and says so once
 // (design/approval.md §7).
@@ -207,7 +207,7 @@ const TRANSCRIPTS = {
   ],
 };
 const transcriptOf = (name) => `${TRANSCRIPTS[name].join('\n')}\n`;
-const TRANSCRIPT_DIR = mkdtempSync(join(tmpdir(), 'kirunak-transcripts-'));
+const TRANSCRIPT_DIR = tempDir('kirunak-transcripts-');
 const transcriptPath = (name) => join(TRANSCRIPT_DIR, `transcript-${name}.jsonl`);
 for (const name of Object.keys(TRANSCRIPTS)) writeFileSync(transcriptPath(name), transcriptOf(name));
 
@@ -332,7 +332,7 @@ test('rungFor: by id, then by family; a model on no rung or none is the lowest, 
 });
 
 test('modelOf: the recorded model, else the transcript\'s newest; a subagent\'s from its launch, else its own transcript', () => {
-  const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
+  const top = tempDir('kirunak-escalate-');
   const transcript = join(top, 's1.jsonl');
   writeFileSync(transcript, transcriptOf('session'));
   mkdirSync(join(top, 's1', 'subagents'), { recursive: true });
@@ -351,7 +351,7 @@ test('notificationOf reads a background command\'s end (S-1 §8); any other prom
 });
 
 test('prune removes state files untouched for 14 days and leaves config.json and fresh ones', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
+  const home = tempDir('kirunak-escalate-');
   mkdirSync(join(home, 'escalate'));
   const old = (Date.now() - 15 * 24 * 3600 * 1000) / 1000;
   for (const name of ['config.json', 'old.json', 'old.a1.json', 'fresh.json', 'old.json.123.tmp', 'notes.txt']) {
@@ -369,7 +369,7 @@ const DEFAULT = [{ model: 'sonnet' }, { model: 'opus', effort: 'high', mode: 'bu
 
 // A home with config.json as k install writes it, a repo `hub` holding the task, and session s1 on that task.
 function makeHome(hook = {}, ladder = DEFAULT) {
-  const top = mkdtempSync(join(tmpdir(), 'kirunak-escalate-'));
+  const top = tempDir('kirunak-escalate-');
   const home = join(top, 'home');
   const repo = join(top, 'hub');
   mkdirSync(join(repo, 'kirunak', 'tasks', 'escalation-by-failures'), { recursive: true });

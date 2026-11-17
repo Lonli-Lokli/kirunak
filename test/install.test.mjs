@@ -1,17 +1,16 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { BUGS_MATCHER, FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
 import { unlockHookLine } from '../lib/doctor.mjs';
 import { DEFAULT_HOOK } from '../lib/ladder.mjs';
-import { gitInit, KIRUNAK } from './helpers.mjs';
+import { gitInit, KIRUNAK, tempDir } from './helpers.mjs';
 
 // A temp home: a settings file with someone else's hooks, an empty skills folder, a kirunak checkout.
 function home() {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-install-'));
+  const dir = tempDir('kirunak-install-');
   const kirunakRoot = join(dir, 'kirunak');
   for (const s of SKILLS) mkdirSync(join(kirunakRoot, 'skills', s), { recursive: true });
   const settingsPath = join(dir, '.claude', 'settings.json');

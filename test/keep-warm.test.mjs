@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { atResume, CLOCK, fromRun, jobWait, keepWarm, readLines, readSession, track } from '../lib/keeper.mjs';
 import pricesDefault from '../plugins/prices-default.mjs';
+import { tempDir } from './helpers.mjs';
 
 const T0 = new Date('2026-11-03T12:00:00Z');
 const at = (m) => new Date(T0.getTime() + m * 60000).toISOString();
-const ws = () => ({ home: mkdtempSync(join(tmpdir(), 'kirunak-warm-')), seams: { prices: pricesDefault().provides.prices }, keeper: { intervalMinutes: 50 } });
+const ws = () => ({ home: tempDir('kirunak-warm-'), seams: { prices: pricesDefault().provides.prices }, keeper: { intervalMinutes: 50 } });
 
 // A clock whose sleep moves time on at once.
 function fakeClock() {

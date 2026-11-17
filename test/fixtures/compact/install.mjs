@@ -1,16 +1,15 @@
 import { strict as assert } from 'node:assert';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_COMPACT } from '../../../lib/compact.mjs';
 import { install } from '../../../lib/install.mjs';
 import { DEFAULT_HOOK, DEFAULT_LADDER } from '../../../lib/ladder.mjs';
-import { FIXTURES, gitCommitAll, gitInit, KIRUNAK } from '../../helpers.mjs';
+import { FIXTURES, gitCommitAll, gitInit, KIRUNAK, tempDir } from '../../helpers.mjs';
 
 // The scratch workspace k install's and k doctor's compact tests share (orchestrator.md §5, R8.2, R8.3).
 
 // This machine's own git excludes stay out: a scratch global config whose excludes file is empty.
-const GIT = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-compact-git-')));
+const GIT = realpathSync(tempDir('kirunak-compact-git-'));
 writeFileSync(join(GIT, 'ignore'), '');
 writeFileSync(join(GIT, 'gitconfig'), `[core]\n\texcludesFile = ${join(GIT, 'ignore')}\n`);
 process.env.GIT_CONFIG_GLOBAL = join(GIT, 'gitconfig');
@@ -28,7 +27,7 @@ export const put = (p, x) => {
 // Two scratch repos (weather, hub), a user file with the owner's 500000, the hooks wired once before any case, so the
 // user file's bytes are known: { ..., go(opts) → actions, local(name), user() }.
 export function setup({ compact = {}, repos = null, user = {} } = {}) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kirunak-compact-install-')));
+  const dir = realpathSync(tempDir('kirunak-compact-install-'));
   const root = (name) => {
     const r = join(dir, name);
     mkdirSync(r);
