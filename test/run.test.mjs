@@ -2,8 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
 import { run, timed, verifyStep } from '../lib/run.mjs';
@@ -18,11 +17,11 @@ import * as steps from '../lib/steps.mjs';
 import { register } from '../plugins/machine-guard-pids.mjs';
 import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK, repeatedWorkspace } from './helpers.mjs';
+import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK, repeatedWorkspace, tempDir } from './helpers.mjs';
 
 // The user's settings folder of every step this file runs: empty, so a step's window is the one R7.4 gives with no
 // user window (orchestrator.md §5), whatever this machine's own settings say.
-const CONFIG_DIR = mkdtempSync(join(tmpdir(), 'kirunak-run-config-'));
+const CONFIG_DIR = tempDir('kirunak-run-config-');
 process.env.CLAUDE_CONFIG_DIR = CONFIG_DIR;
 const STEP_WINDOW = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' };
 
@@ -368,7 +367,7 @@ test('a heavy step has no rung: its second failure stops the task with every rep
 // gulnya/heavy-retry-unchanged: a git checkout a [heavy] step's command cds into, a guard that records each job and
 // answers with `answer(n)` for the n-th, and the plan with S-1 that step.
 function checkoutFixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-checkout-'));
+  const dir = tempDir('kirunak-checkout-');
   const g = (...a) => spawnSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' });
   const commit = (text) => (writeFileSync(join(dir, 'a.txt'), text), g('add', '.'), g('commit', '-qm', text));
   g('init', '-q');
@@ -1021,7 +1020,7 @@ const until = async (ok, what) => {
 test('k run stopped by a signal kills its claude, fails the step, frees the lock and exits with the signal; the next k run retries the step', async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run in a child, with a fake claude on PATH that says its pid and sleeps.
-  const bin = mkdtempSync(join(tmpdir(), 'kirunak-sleepy-claude-'));
+  const bin = tempDir('kirunak-sleepy-claude-');
   writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho $$ > "${bin}/pid"\nexec sleep 30\n`);
   chmodSync(join(bin, 'claude'), 0o755);
   const child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: 'ignore' });
@@ -1051,7 +1050,7 @@ test('k run --watch stopped by a signal while a step is left undecided exits wit
   const dead = spawnSync('true').pid;
   put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
   // Nothing should start; a claude that did would fail at once rather than reach the real one.
-  const bin = mkdtempSync(join(tmpdir(), 'kirunak-no-claude-'));
+  const bin = tempDir('kirunak-no-claude-');
   writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(bin, 'claude'), 0o755);
   const restore = fakePs('fails');
@@ -1082,7 +1081,7 @@ test('k run --watch stopped by a signal while a step is left undecided exits wit
 test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run --watch in a child, with a fake claude on PATH that asks for a long job.
-  const bin = mkdtempSync(join(tmpdir(), 'kirunak-heavy-claude-'));
+  const bin = tempDir('kirunak-heavy-claude-');
   const jobPid = join(bin, 'job.pid');
   const needs = JSON.stringify({ heavy: { what: 'a long build', command: ['/bin/sh', '-c', `echo $$ > ${jobPid}; sleep 30`], maxMinutes: 1 }, then: 'resume' });
   writeFileSync(join(bin, 'claude'), `#!/bin/sh
@@ -1118,7 +1117,7 @@ echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,
 
 // The real k run in a child, with a fake claude on PATH that copies `ask` (if any) to the step's needs.json.
 function childRun(w, ask = null) {
-  const bin = mkdtempSync(join(tmpdir(), 'kirunak-asking-claude-'));
+  const bin = tempDir('kirunak-asking-claude-');
   if (ask) writeFileSync(join(bin, 'needs.json'), ask);
   writeFileSync(join(bin, 'claude'), `#!/bin/sh
 sid=""; for a in "$@"; do [ "$prev" = "--session-id" ] && sid="$a"; prev="$a"; done
@@ -1136,7 +1135,7 @@ echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,
 test('k run stopped while a resume waits for a machine slot, its job done, leaves the step waiting; the next k run runs the job again and resumes', async () => {
   const w = await approvedWorkspace(PLAN);
   // The job lowers the machine's cap to none, so the resume after it waits for a slot.
-  const full = join(mkdtempSync(join(tmpdir(), 'kirunak-full-')), 'machine.json');
+  const full = join(tempDir('kirunak-full-'), 'machine.json');
   writeFileSync(full, JSON.stringify({ maxAgents: 0 }));
   const { child, said, exited } = childRun(w, JSON.stringify({ heavy: { what: 'a build', command: ['cp', full, join(w.home, 'machine.json')], maxMinutes: 1 }, then: 'resume' }));
   await until(() => existsSync(join(w.p.dir, 'progress.md')) && /S-1 heavy job ended/.test(progress(w)), 'the job never ended');
@@ -1611,7 +1610,7 @@ test('k run stops before a review whose two latest counting reviews repeat a not
 });
 
 test('a step ended on its budget leaves no background job running, though the job is in a process group of its own', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-timed-'));
+  const dir = tempDir('kirunak-timed-');
   const pidFile = join(dir, 'job.pid');
   // The step's claude, leading its own group as the runner starts it, keeps a background job in another group.
   const js = `const c = require('child_process').spawn('/bin/sh', ['-c', 'sleep 60'], { detached: true, stdio: 'ignore' });

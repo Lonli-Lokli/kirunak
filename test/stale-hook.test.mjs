@@ -7,20 +7,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { advice, lastCall, reply } from '../hooks/kirunak-stale.mjs';
 import { limitsOf, track } from '../hooks/statusline-track.mjs';
 import { install } from '../lib/install.mjs';
 import { logLimits } from '../lib/limits.mjs';
 import { loadWorkspace } from '../lib/workspace.mjs';
-import { KIRUNAK, makeWorkspace } from './helpers.mjs';
+import { KIRUNAK, makeWorkspace, tempDir } from './helpers.mjs';
 
 const SID = '7a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
 const NOW = Date.parse('2026-11-03T15:00:00Z');
 const MIN = 60_000;
-const tmp = () => mkdtempSync(join(tmpdir(), 'kirunak-stale-'));
+const tmp = () => tempDir('kirunak-stale-');
 
 // An invented transcript: a user line, an assistant call `ago` minutes before NOW holding `context` tokens, and a
 // synthetic call after it, which never counts.

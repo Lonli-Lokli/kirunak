@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { KIRUNAK, approvedWorkspace, gitInit, k, sh } from './helpers.mjs';
+import { approvedWorkspace, gitInit, k, KIRUNAK, sh, tempDir } from './helpers.mjs';
 import { hashBytes, recordFile, repoInfo } from '../lib/slap.mjs';
 
 // The gate's other refusals (R22, R23, design/change-size.md §3): an unapproved .slapignore, an unlisted binary
@@ -12,12 +11,12 @@ import { hashBytes, recordFile, repoInfo } from '../lib/slap.mjs';
 
 // A temp repo with the hook installed as k install writes it, and its own state folder.
 function repo() {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-slap-'));
+  const dir = tempDir('kirunak-slap-');
   gitInit(dir);
   const hook = join(dir, '.git', 'hooks', 'prepare-commit-msg');
   writeFileSync(hook, `#!/bin/sh\nexec node ${JSON.stringify(join(KIRUNAK, 'hooks', 'git-prepare-commit-msg.mjs'))} "$@"\n`);
   chmodSync(hook, 0o755);
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-slap-home-'));
+  const home = tempDir('kirunak-slap-home-');
   return { dir, home };
 }
 
@@ -90,7 +89,7 @@ test('a worktree shares the approval of its repo', () => {
   put(r, '.slapignore', '*.md\n');
   approve(r);
   assert.equal(commit(r, 'root').status, 0);
-  const wt = { dir: join(mkdtempSync(join(tmpdir(), 'kirunak-wt-')), 'wt'), home: r.home };
+  const wt = { dir: join(tempDir('kirunak-wt-'), 'wt'), home: r.home };
   assert.equal(git(r, ['worktree', 'add', '-q', '-b', 'side', wt.dir]).status, 0);
   put(wt, 'notes.md', lines(500));
   const res = commit(wt, 'Notes');

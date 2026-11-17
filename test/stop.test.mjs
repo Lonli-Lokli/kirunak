@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from './helpers.mjs';
 
 const STOP = new URL('../lib/stop.mjs', import.meta.url).href;
 
 // A child that runs `body` with onStop imported and `out` a file to append to, says ready, and stays up.
 function child(body) {
-  const out = join(mkdtempSync(join(tmpdir(), 'kirunak-stop-')), 'out.txt');
+  const out = join(tempDir('kirunak-stop-'), 'out.txt');
   const src = `import { appendFileSync } from 'node:fs'; import { onStop } from ${JSON.stringify(STOP)};
 const out = ${JSON.stringify(out)}; const say = (l) => appendFileSync(out, l + '\\n');
 ${body}

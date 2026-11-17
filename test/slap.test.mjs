@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { KIRUNAK, gitInit, sh } from './helpers.mjs';
+import { gitInit, KIRUNAK, sh, tempDir } from './helpers.mjs';
 import { limit, measure, parseDiff, patternFor, score, tier } from '../lib/slap.mjs';
 import { compile } from '../lib/ignore.mjs';
 
@@ -55,7 +54,7 @@ test('the pattern a binary file names', () => {
 
 // A temp repo with the hook installed as k install writes it.
 function repo() {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-slap-'));
+  const dir = tempDir('kirunak-slap-');
   gitInit(dir);
   const hook = join(dir, '.git', 'hooks', 'prepare-commit-msg');
   writeFileSync(hook, `#!/bin/sh\nexec node ${JSON.stringify(join(KIRUNAK, 'hooks', 'git-prepare-commit-msg.mjs'))} "$@"\n`);
@@ -152,7 +151,7 @@ test('an amend given -m or -F gets the line --amend --no-edit writes for the sam
   const head = sh(dir, 'git', ['rev-parse', 'HEAD']).trim();
   put(dir, 'src/b.mjs', lines(10, 'b'));
   git(dir, ['add', '-A']);
-  const file = join(mkdtempSync(join(tmpdir(), 'kirunak-slap-msg-')), 'msg');
+  const file = join(tempDir('kirunak-slap-msg-'), 'msg');
   writeFileSync(file, 'Add a and b\n');
   const got = [];
   for (const how of [['--no-edit'], ['-m', 'Add a and b'], ['-F', file]]) {

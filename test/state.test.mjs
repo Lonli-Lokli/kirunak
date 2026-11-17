@@ -1,9 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { FIXTURES, reviewsRan } from './helpers.mjs';
+import { FIXTURES, reviewsRan, tempDir } from './helpers.mjs';
 import { hashBytes } from '../lib/approval.mjs';
 import { STATES, stateOf } from '../lib/state.mjs';
 
@@ -12,7 +11,7 @@ const ASPECTS = ['platforms', 'large-text', 'offline'];
 
 // One folder per state, built from the finished task (task-files.md §4).
 function folder(setup) {
-  const dir = join(mkdtempSync(join(tmpdir(), 'kirunak-state-')), 'offline-forecast');
+  const dir = join(tempDir('kirunak-state-'), 'offline-forecast');
   cpSync(SRC, dir, { recursive: true });
   const record = { task: 'weather/offline-forecast', hash: hashBytes(readFileSync(join(dir, 'task.md'))) };
   const put = (name, text) => {

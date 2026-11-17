@@ -3,10 +3,9 @@
 // counted (E-1), and the review's own checks moved from gulnya's quality.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { k, makeWorkspace } from './helpers.mjs';
+import { k, makeWorkspace, tempDir } from './helpers.mjs';
 import { loadWorkspace } from '../lib/workspace.mjs';
 import { DEFAULT_USAGE, lastWeek, weekTo, windowOf, zoned } from '../lib/usage/week.mjs';
 import { scanCalls } from '../lib/usage/calls.mjs';
@@ -86,7 +85,7 @@ const call = (ts, id, model = 'claude-opus-5-5', extra = {}) => JSON.stringify({
 const user = (ts, text) => JSON.stringify({ type: 'user', timestamp: ts, entrypoint: 'cli', message: { role: 'user', content: text } });
 
 function transcripts(root) {
-  const config = mkdtempSync(join(tmpdir(), 'kirunak-claude-'));
+  const config = tempDir('kirunak-claude-');
   // Claude Code names the folder after the session's cwd, a real path (/private/var/..., not /var/...).
   const proj = join(config, 'projects', `${realpathSync(root).replace(/[^a-zA-Z0-9]/g, '-')}-weather`);
   mkdirSync(proj, { recursive: true });
@@ -292,7 +291,7 @@ test('the baseline\'s week is read from its header: the Monday on or after its f
 });
 
 test('a message over several lines counts its largest output once, with that line\'s thinking (gulnya/usage-first-line-output)', async () => {
-  const config = mkdtempSync(join(tmpdir(), 'kirunak-claude-'));
+  const config = tempDir('kirunak-claude-');
   const proj = join(config, 'projects', 'p-weather');
   mkdirSync(proj, { recursive: true });
   // Claude Code writes one line per content block, each with a usage; a first line's output can be partial.
