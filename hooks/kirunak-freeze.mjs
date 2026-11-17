@@ -287,6 +287,16 @@ function kArgs(words) {
   return ['k', 'k.mjs'].includes(base(w[0])) ? w.slice(1) : null;
 }
 
+/** The words after `k` of the k command `k heavy -- <command>` runs, else null. */
+function heavyRuns(args) {
+  try {
+    const { pos, rest } = parseArgs(args);
+    return pos[0] === 'heavy' && rest ? kArgs(parse(rest).words) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** k's verb and what follows it, read as the CLI reads them: a valued flag's value is no verb (`k --via mod approve x`
  * runs approve, gulnya/freeze-flag-before-verb); a line the CLI refuses keeps every plain word, the stricter reading. */
 function verbWords(args) {
@@ -298,6 +308,9 @@ function verbWords(args) {
 }
 
 function ownerVerbOf(args) {
+  // `k heavy -- <command>` runs its command: k's own verbs there are read as if typed bare.
+  const inner = heavyRuns(args);
+  if (inner) return ownerVerbOf(inner);
   if (args.includes('--dry-run')) return null;
   const [verb, sub] = verbWords(args);
   if (verb === 'queue' && sub === 'show') return null;
