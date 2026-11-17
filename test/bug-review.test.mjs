@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { list, reviewLockPath, reviewing } from '../lib/bugs.mjs';
-import { checkReview, firstCall, lock, review, spent } from '../lib/bug-review.mjs';
+import { checkReview, firstCall, lock, review, spent, unlock } from '../lib/bug-review.mjs';
 import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
 
 // gulnya/kirunak-bugs S-2: `k bug review <id>`, Review & merge, with a fake runner that writes the review file in
@@ -370,6 +370,30 @@ test('a second Review & merge is refused while the first lives, naming its pid a
   const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
   assert.equal(r.outcome, 'merged');
   assert.ok(!existsSync(reviewLockPath(w.home, BUG)));
+});
+
+test('AC-4, E-9: a review lock held by the lease beside it refuses while that lease is fresh, and is taken over once it went stale though its pid runs (another process\'s by now)', async () => {
+  const w = await bugWorkspace();
+  const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore' });
+  try {
+    const path = reviewLockPath(w.home, BUG);
+    const holder = join(`${path}.lease`, 'holder.json');
+    put(path, JSON.stringify({ pid: other.pid, started: '2026-10-27T09:00:00.000Z' }) + '\n');
+    mkdirSync(`${path}.lease`);
+    writeFileSync(holder, JSON.stringify({ id: 'x', pid: other.pid }));
+    assert.throws(() => lock(w.home, BUG), /in Review & merge already/);
+    assert.equal(reviewing(w.home, BUG)?.pid, other.pid);
+    const old = new Date(Date.now() - 61000);
+    utimesSync(holder, old, old);
+    assert.equal(reviewing(w.home, BUG), null, 'stale: nobody reviews');
+    assert.equal(lock(w.home, BUG).pid, process.pid);
+    assert.equal(JSON.parse(readFileSync(holder, 'utf8')).pid, process.pid, 'the lease is this process\'s now');
+    assert.equal(reviewing(w.home, BUG)?.pid, process.pid);
+    unlock(w.home, BUG);
+    assert.deepEqual([existsSync(path), existsSync(`${path}.lease`)], [false, false]);
+  } finally {
+    other.kill();
+  }
 });
 
 test('a fix in another repo than the bug\'s merges there, and the bug closes in its own repo', async () => {

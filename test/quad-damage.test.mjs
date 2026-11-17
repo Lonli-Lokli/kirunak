@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -260,6 +260,22 @@ test('run: a bug marked during the run joins it; a bug another live pid holds is
   assert.equal(summaryFile(r), 'Quad Damage, 23:40 to 23:40: 0 merged, 3 wait, 0 not reached\n- hub/a: waits: being reviewed\n' +
     '- hub/c: waits: not ready\n- hub/d: waits: not ready\n');
   assert.equal(reviewing(w.home, 'hub/a').pid, OTHER);
+});
+
+test('AC-4, E-9: the run file held by the lease beside it refuses a second run while that lease is fresh, and is taken over once it went stale though its pid runs', async () => {
+  const w = await qdWorkspace();
+  const path = quadDamagePath(w.home);
+  const holder = join(`${path}.lease`, 'holder.json');
+  writeRun(w.home, { pid: OTHER, started: '2026-10-27T21:00:00+00:00' });
+  mkdirSync(`${path}.lease`);
+  writeFileSync(holder, JSON.stringify({ id: 'x', pid: OTHER }));
+  assert.throws(() => claim(w.home), /Quad Damage runs already: pid/);
+  const old = new Date(Date.now() - 61000);
+  utimesSync(holder, old, old);
+  assert.equal(claim(w.home).pid, process.pid);
+  assert.equal(JSON.parse(readFileSync(holder, 'utf8')).pid, process.pid, 'the lease is this process\'s now');
+  release(w.home);
+  assert.deepEqual([existsSync(path), existsSync(`${path}.lease`)], [false, false]);
 });
 
 test('claim: a second run while the first lives is refused, naming it; a dead one is taken over (E-3)', async () => {
