@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { refuse } from '../lib/errors.mjs';
 import { kirunakHome } from '../lib/home.mjs';
 import { read as readLease, RENEW_MS, take as takeLease } from '../lib/lease.mjs';
-import { alive, groupAlive, isStill, killTree, signalGroup } from '../lib/os.mjs';
+import { alive, groupAlive, killTree, signalGroup } from '../lib/os.mjs';
 import { onStop } from '../lib/stop.mjs';
 
 // The process calls live in lib/os.mjs (asilak/kirunak-cross-platform AC-1); these stay importable from here.
-export { alive, groupAlive, isStill, killTree };
+export { alive, groupAlive, killTree };
 
 // The core's default `resourceGuard` (plugins.md §2): one heavy job at a time on this machine. The lock is
 // guard/lock, a lease (lib/lease.mjs) whose holder file is owner.json; waiting jobs queue first in, first out in
@@ -38,14 +38,6 @@ const readJson = (p, fallback = null) => {
     return fallback;
   }
 };
-
-// This process's start, written beside its pid wherever kirunak writes that pid to a file, for isStill to read. The
-// guard no longer reads it; k run's run file, its step lines and the machine guard still do until their leases (S-4).
-export const OWN_START = new Date(Date.now() - process.uptime() * 1000).toISOString();
-
-// A pid of kirunak's read from a file: alive, and still the process that started at startIso. No start is dead. A
-// pid whose start ps cannot tell now is believed to run, so nothing is taken over or failed on a guess.
-export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso) !== false;
 
 // A gone owner's job that may still run: kirunak cannot tell that its pid is still the job, so it is believed to run,
 // waited for and never killed (E-5). Its process group on macOS and Linux, the pid itself on Windows.

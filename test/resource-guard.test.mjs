@@ -4,9 +4,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
-import resourceGuardLocal, { alive, isStill, killTree, OWN_START, stillRuns } from '../plugins/resource-guard-local.mjs';
+import resourceGuardLocal, { alive, killTree } from '../plugins/resource-guard-local.mjs';
 import { shell } from '../lib/os.mjs';
-import { fakePs, tempDir } from './helpers.mjs';
+import { tempDir } from './helpers.mjs';
 
 function guard(opts = {}) {
   const home = tempDir('kirunak-guard-');
@@ -14,6 +14,8 @@ function guard(opts = {}) {
 }
 
 const sh = (script) => [shell(), '-c', script];
+// The start a file written before leases recorded beside its pid (E-4): read by nothing now.
+const OLD_START = new Date(Date.now() - process.uptime() * 1000).toISOString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logOf = (home) => readFileSync(join(home, 'guard', 'log.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
@@ -139,7 +141,7 @@ test('a dead owner\'s lock is taken over; a live owner\'s is waited for', async 
   assert.match(r.log, /ok/);
 
   mkdirSync(lock, { recursive: true });
-  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ session: 'other', what: 'build', pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() }));
+  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ session: 'other', what: 'build', pid: process.pid, pidStart: OLD_START, since: new Date().toISOString() }));
   let done = false;
   const waiting = g.run({ session: 's', what: 'x', maxMinutes: 1, cwd: home, command: sh('echo ok') }).then((x) => ((done = true), x));
   await sleep(200);
@@ -162,8 +164,8 @@ test('the estimate: the median of the last ten jobs with the same what, 15 minut
   const lines = [...Array(12)].map((_, i) => ({ what: 'tests', minutes: i + 1, exitCode: 0 }));
   writeFileSync(join(home, 'guard', 'log.jsonl'), [...lines, { what: 'build', minutes: 100, exitCode: 0 }].map((x) => JSON.stringify(x) + '\n').join(''));
   mkdirSync(join(home, 'guard', 'lock'));
-  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 'a', what: 'tests', pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() }));
-  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'q', session: 'b', what: 'lint', pid: process.pid, pidStart: OWN_START, since: new Date().toISOString() }) + '\n');
+  writeFileSync(join(home, 'guard', 'lock', 'owner.json'), JSON.stringify({ session: 'a', what: 'tests', pid: process.pid, pidStart: OLD_START, since: new Date().toISOString() }));
+  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'q', session: 'b', what: 'lint', pid: process.pid, pidStart: OLD_START, since: new Date().toISOString() }) + '\n');
   const st = g.status();
   assert.equal(st.held.estimateMinutes, 7.5, 'the last ten are 3..12');
   assert.equal(st.queued[0].estimateMinutes, 15);
@@ -232,50 +234,15 @@ test('E-5: a gone owner\'s job that may still run holds the lock, is waited for 
   }
 });
 
-test('isStill answers for the process that started at the recorded time only', async () => {
-  const p = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
-  const start = new Date().toISOString();
-  assert.equal(isStill(p.pid, start), true);
-  assert.equal(isStill(p.pid, new Date(Date.now() + 30000).toISOString()), true, 'a start recorded 30 s late still matches');
-  assert.equal(isStill(p.pid, new Date(Date.now() - 3600000).toISOString()), false);
-  assert.equal(isStill(p.pid, undefined), false);
+test('AC-5: alive(pid) is kill 0 on every OS: this process and a running child are alive, an ended one is not, and no pid at all is not', async () => {
+  const p = idle();
+  assert.equal(alive(process.pid), true);
+  assert.equal(alive(p.pid), true);
   const gone = new Promise((r) => p.on('exit', r));
   p.kill();
   await gone;
-  assert.equal(isStill(p.pid, start), false, 'no such process');
-  assert.equal(stillRuns(p.pid, start), false);
-});
-
-test('while ps cannot answer (it fails, prints no time, or is missing) isStill is null and a live pid still runs', () => {
-  const p = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
-  const start = new Date().toISOString();
-  try {
-    for (const kind of ['fails', 'garbled', 'missing']) {
-      const restore = fakePs(kind);
-      try {
-        assert.equal(isStill(p.pid, start), null, kind);
-        assert.equal(stillRuns(p.pid, start), true, kind);
-        assert.equal(stillRuns(p.pid, undefined), false, `${kind}: no start recorded is still dead`);
-      } finally {
-        restore();
-      }
-    }
-  } finally {
-    p.kill();
-  }
-});
-
-test('a ps that answers no such process (exit 1) is believed: the pid is gone', () => {
-  const p = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
-  const start = new Date().toISOString();
-  const restore = fakePs('gone');
-  try {
-    assert.equal(isStill(p.pid, start), false);
-    assert.equal(stillRuns(p.pid, start), false);
-  } finally {
-    restore();
-    p.kill();
-  }
+  assert.equal(alive(p.pid), false);
+  for (const no of [0, -1, null, undefined, 1.5, 'x']) assert.equal(alive(no), false, String(no));
 });
 
 test('E-4: owner.json and a queue line written before leases (a pid and pidStart, no lease) are read by their pid alone, held while it runs and dropped once it goes', async () => {
@@ -429,7 +396,7 @@ test('queue(): the holder and the live waiters in the order they came, with thei
   // A waiter whose process is gone, queued between them: heavy-lock and this guard drop it, and so does queue().
   const dead = await deadPid();
   const lines = readFileSync(join(home, 'guard', 'queue'), 'utf8');
-  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'x', session: 'gone', what: 'old', pid: Number(dead), pidStart: OWN_START, since: new Date().toISOString(), maxMinutes: 5 }) + '\n' + lines);
+  writeFileSync(join(home, 'guard', 'queue'), JSON.stringify({ id: 'x', session: 'gone', what: 'old', pid: Number(dead), pidStart: OLD_START, since: new Date().toISOString(), maxMinutes: 5 }) + '\n' + lines);
   const q = g.queue();
   assert.ok(Date.parse(q.now) > 0);
   assert.equal(q.first, null);
