@@ -216,6 +216,24 @@ test('k draft drop: a draft never committed is only deleted; a refused commit pu
   assert.equal(c.git('status', '--porcelain'), 'M kirunak/drafts/wind-alerts.md');
 });
 
+// gulnya/draft-drop-staged-deletion: a drop whose commit met another session's .git/index.lock left the deletion staged
+// (its reset met the lock too), and run again it read the draft as never committed and committed nothing.
+test('k draft drop run again after a commit that failed with the deletion staged: the draft is in HEAD, so it commits the deletion', async () => {
+  for (const inTree of [true, false]) {
+    const c = await committedDraft();
+    c.git('rm', '-q', '--cached', '--', 'kirunak/drafts/wind-alerts.md');
+    if (!inTree) rmSync(fileOf(c));
+    const before = c.git('rev-parse', 'HEAD');
+    const r = drop({ ws: c.ws, id: ID, why: 'landed already' });
+    assert.notEqual(r.commit, null, `inTree=${inTree}: a draft in HEAD is committed away`);
+    assert.equal(c.git('rev-parse', 'HEAD~1'), before);
+    assert.equal(c.git('log', '-1', '--format=%s'), 'kirunak: drop the draft weather/wind-alerts: landed already');
+    assert.equal(c.git('show', '--name-status', '--format=', 'HEAD'), 'D\tkirunak/drafts/wind-alerts.md');
+    assert.equal(existsSync(fileOf(c)), false);
+    assert.equal(c.git('status', '--porcelain'), '');
+  }
+});
+
 test('k drafts: every draft in every repo, by date written then id, an undated one last; other files are no drafts', async () => {
   const w = await makeWorkspace();
   const put = (repo, slug, front) => {
