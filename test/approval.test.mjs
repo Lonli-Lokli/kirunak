@@ -360,6 +360,41 @@ test('k amend check refuses what k approve --amendment would: the task check on 
   await approve({ ws, id: ID, amendment: 'A-1', now: NOV6 });
 });
 
+test('an amendment adds an aspect the checklist gained after the approval, and only such an aspect (gulnya/amend-cannot-add-aspect)', async () => {
+  const { ws, home, weather, hub } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  const run = (args) => k(home, args, { CLAUDE_CODE_SESSION_ID: '' });
+  // The checklist gains an aspect after the task was approved: every amendment's check now asks for it.
+  const plugin = join(hub, 'kirunak/plugins/checklist.mjs');
+  writeFileSync(plugin, readFileSync(plugin, 'utf8').replace('\n];', `
+  { id: 'privacy', title: 'What leaves the device', question: 'Does this change send anything off the device?', sources: ['docs/privacy.md'] },
+];`));
+  const a = newAmendment({ ws, id: ID, title: 'Privacy ruled', now: NOV6 });
+  fill(a.path, 'The checklist asks about privacy now. [research docs/privacy.md]', ['- add privacy: n/a: nothing leaves the device [research docs/privacy.md]']);
+
+  // Unit: the add passes against the checklist and writes the aspect line into Aspects.
+  const task = readFileSync(taskFile(weather), 'utf8');
+  const am = readFileSync(a.path, 'utf8');
+  const ASPECTS2 = [...ASPECTS, 'privacy'];
+  assert.deepEqual(checkAmendment(task, am, { aspectIds: ASPECTS2 }), []);
+  const after = applyAmendment(task, am);
+  assert.ok(after.includes('- offline: in (AC-1, E-1) [default 2026-11-02]\n- privacy: n/a: nothing leaves the device [research docs/privacy.md]\n'), after);
+  assert.deepEqual(checkTask(parseTask(after), ASPECTS2), []);
+
+  // Still refused: an aspect the task has (that is a replace), one the checklist lacks, one added twice.
+  const problems = (line) => checkAmendment(task, am.replace(/## Changes\n[\s\S]*$/, `## Changes\n${line}\n`), { aspectIds: ASPECTS2 }).map((x) => x.problem);
+  assert.deepEqual(problems('- add offline: n/a: no network [research docs/offline.md]'), ['add offline: the task has offline already; change it with replace offline']);
+  assert.deepEqual(problems('- add weather-alerts: n/a: none [research docs/offline.md]'), ['add weather-alerts: weather-alerts is not an aspect of the checklist']);
+  assert.deepEqual(problems('- add privacy: n/a: none [research docs/privacy.md]\n- add privacy: n/a: none [research docs/privacy.md]'), ['add privacy: the task has privacy already; change it with replace privacy']);
+
+  // The command: k amend check passes, and the owner's approval applies it.
+  const check = run(['amend', 'check', ID, 'A-1']);
+  assert.deepEqual([check.status, check.stdout], [0, `${ID} A-1: check passes\n`], check.stderr);
+  const approved = run(['approve', ID, '--amendment', 'A-1']);
+  assert.equal(approved.status, 0, approved.stderr);
+  assert.match(readFileSync(taskFile(weather), 'utf8'), /\n- privacy: n\/a: nothing leaves the device \[research docs\/privacy\.md\]\n/);
+});
+
 test('k amend check takes the A-n as the approval does: typed a-n, the amendment\'s own removals still count (gulnya/amend-check-task-check review-1)', async () => {
   const { ws, home } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
