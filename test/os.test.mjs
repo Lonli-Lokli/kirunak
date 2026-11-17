@@ -51,43 +51,10 @@ test('AC-6: linux reads /proc/<pid>/cwd and exe, its command from comm; an entry
   assert.equal(readerName('linux'), '/proc');
 });
 
-const PS = (list) => ({ status: 0, stdout: JSON.stringify(list) });
-
-test('AC-3: win32 makes one PowerShell call and reads each process as exe and cmdline; one process alone is a list of one', () => {
-  const { run, calls } = fake(
-    PS([
-      { ProcessId: 4, Name: 'System', ExecutablePath: null, CommandLine: null },
-      { ProcessId: 120, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: '"C:\\Program Files\\nodejs\\node.exe" D:\\src\\app\\serve.js' },
-      { ProcessId: 130, Name: 'cmd.exe', ExecutablePath: 'C:\\Windows\\System32\\cmd.exe', CommandLine: null },
-    ]),
-  );
-  assert.deepEqual(processPaths({ platform: 'win32', run }), [
-    { pid: 120, command: 'node.exe', kind: 'exe', path: 'C:\\Program Files\\nodejs\\node.exe' },
-    { pid: 120, command: 'node.exe', kind: 'cmdline', text: '"C:\\Program Files\\nodejs\\node.exe" D:\\src\\app\\serve.js' },
-    { pid: 130, command: 'cmd.exe', kind: 'exe', path: 'C:\\Windows\\System32\\cmd.exe' },
-  ]);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].cmd, 'powershell');
-  assert.deepEqual(calls[0].args, [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    'Get-CimInstance Win32_Process | Select-Object ProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress',
-  ]);
-  assert.equal(calls[0].opts.timeout, 60_000, 'a minute at most');
-  const one = processPaths({ platform: 'win32', run: fake(PS({ ProcessId: 9, Name: 'app.exe', ExecutablePath: 'D:\\src\\app\\app.exe', CommandLine: null })).run });
-  assert.deepEqual(one, [{ pid: 9, command: 'app.exe', kind: 'exe', path: 'D:\\src\\app\\app.exe' }]);
-  assert.equal(readerName('win32'), 'PowerShell');
-});
-
-test('AC-9: win32 gives null when PowerShell fails to start, exits non-zero, times out or prints what is not JSON', () => {
-  const nul = (result) => processPaths({ platform: 'win32', run: fake(result).run });
-  assert.equal(nul({ error: Object.assign(new Error('spawnSync powershell ENOENT'), { code: 'ENOENT' }), status: null, stdout: '' }), null, 'fails to start');
-  assert.equal(nul({ status: 1, stdout: '', stderr: 'Get-CimInstance : Access denied' }), null, 'exits non-zero');
-  assert.equal(nul({ error: Object.assign(new Error('spawnSync powershell ETIMEDOUT'), { code: 'ETIMEDOUT' }), status: null, signal: 'SIGTERM', stdout: '[{"Proc' }), null, 'times out');
-  assert.equal(nul({ status: 0, stdout: 'WARNING: something\r\n' }), null, 'junk');
-  assert.equal(nul({ status: 0, stdout: '' }), null, 'nothing');
-  assert.equal(nul({ status: 0, stdout: '42' }), null, 'JSON, but no process');
+test('AC-10, AC-3: win32 asks nothing: processPaths runs no program and its look is empty, never "cannot tell"', () => {
+  const run = () => assert.fail('no program runs on win32');
+  assert.deepEqual(processPaths({ platform: 'win32', run }), []);
+  assert.equal(readerName('win32'), null);
 });
 
 test('E-2: on win32 paths compare in any case with either slash, and a longer name is another folder', () => {

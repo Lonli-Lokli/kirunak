@@ -477,51 +477,31 @@ test("AC-18: k accept takes the session that runs it ($CLAUDE_CODE_SESSION_ID he
   assert.equal(sh(weather, 'git', ['worktree', 'list', '--porcelain']).match(/^locked (.*)$/m)?.[1], 'kirunak s2 2099-01-01T00:00:00.000Z');
 });
 
-// asilak/kirunak-worktrees-lsof-windows: the cleanup as Windows reads it, PowerShell's answer faked over real repos.
-const win = (path) => path.replaceAll('/', '\\');
-const powershell = (list) => (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: JSON.stringify(list) }) });
+// asilak/kirunak-worktrees-lsof-windows, asilak/kirunak-cross-platform AC-10: the cleanup as Windows reads it over
+// real repos. Windows is asked about no process: the session locks and the move aside alone tell a worktree in use.
+const asksNothing = (o) => processPaths({ ...o, run: () => assert.fail('Windows is asked nothing') });
 
-test('AC-7: on win32 a merged worktree no process names goes, and its branch with it', async () => {
+test('AC-7: on win32 a merged worktree goes, and its branch with it, no process asked about', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const free = add(weather, join(root, 'free'), 'free');
-  const processes = powershell([
-    { ProcessId: 4, Name: 'System', ExecutablePath: null, CommandLine: null },
-    { ProcessId: 50, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: `node.exe ${win(free)}-capture\\serve.js` },
-  ]);
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing });
   assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [[free, 'free merged into master', true]]);
   assert.deepEqual(r.kept, []);
   assert.equal(existsSync(free), false);
   assert.equal(branchExists(weather, 'free'), false);
 });
 
-test('AC-4, AC-8, E-2: on win32 a worktree a process runs from, or whose path a command line names, stays and the line names the pid', async () => {
+test('AC-10: on win32 the empty look is no "cannot tell": a worktree a session\'s lock holds stays, the one no lock holds goes', async () => {
   const { ws, root, weather } = await makeWorkspace();
-  const runs = add(weather, join(root, 'runs'), 'runs');
-  const named = add(weather, join(root, 'named'), 'named');
-  const processes = powershell([
-    { ProcessId: 61, Name: 'app.exe', ExecutablePath: `${win(runs).toUpperCase()}\\BIN\\APP.EXE`, CommandLine: null },
-    { ProcessId: 62, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: `"C:\\Program Files\\nodejs\\node.exe" ${win(named)}\\serve.js` },
-  ]);
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
-  assert.deepEqual(whys(r.kept), {
-    [named]: 'node.exe (pid 62) works in it: its command line names it',
-    [runs]: 'app.exe (pid 61) runs from it',
-  });
-  assert.deepEqual(r.removed, []);
-  assert.ok(existsSync(runs) && existsSync(named) && branchExists(weather, 'runs') && branchExists(weather, 'named'));
-});
-
-test('AC-9: on win32, when PowerShell gives no answer every candidate stays', async () => {
-  const { ws, root, weather } = await makeWorkspace();
-  const a = add(weather, join(root, 'a'), 'a');
-  const b = add(weather, join(root, 'b'), 'b');
-  const processes = (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: 'Get-CimInstance : not recognized' }) });
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
-  const why = 'cannot tell whether a process works in it or runs from it (PowerShell gave no answer)';
-  assert.deepEqual(whys(r.kept), { [a]: why, [b]: why });
-  assert.deepEqual(r.removed, []);
-  assert.ok(existsSync(a) && existsSync(b));
+  const held = add(weather, join(root, 'held'), 'held');
+  const free = add(weather, join(root, 'free'), 'free');
+  sh(weather, 'git', ['worktree', 'lock', '--reason', 'kirunak s1 2099-01-01T00:00:00.000Z', held]);
+  const until = new Date('2099-01-01T00:00:00.000Z');
+  const hhmm = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`;
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing });
+  assert.deepEqual(whys(r.kept), { [held]: `locked: session s1 works in it until ${hhmm}` });
+  assert.deepEqual(paths(r.removed), [free]);
+  assert.ok(existsSync(held) && branchExists(weather, 'held'));
 });
 
 // A rename that refuses as Windows does while a process works in the folder.
@@ -533,11 +513,11 @@ test('AC-5 (A-1): on win32 a worktree Windows refuses to move aside is kept whol
   const { ws, root, weather } = await makeWorkspace();
   const held = add(weather, join(root, 'held'), 'held');
   let tried = 0;
-  const look = await worktrees({ ws, platform: 'win32', processes: powershell([]), rename: () => tried++ });
+  const look = await worktrees({ ws, platform: 'win32', processes: asksNothing, rename: () => tried++ });
   assert.deepEqual(paths(look.removed), [held]);
   assert.equal(tried, 0, 'a look moves nothing');
 
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename: refuses('EBUSY') });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing, rename: refuses('EBUSY') });
   assert.deepEqual(r.removed, []);
   assert.deepEqual(whys(r.kept), { [held]: 'Windows refuses to move it (EBUSY): a process works in it' });
   assert.ok(existsSync(join(held, 'README.md')), 'whole');
@@ -549,7 +529,7 @@ test('AC-5 (A-1): on win32 a worktree Windows refuses to move aside is kept whol
     renameSync(from, to);
     moves.push([from, to, existsSync(held)]);
   };
-  const later = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename });
+  const later = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing, rename });
   const aside = `${held}.kirunak-removing`;
   assert.deepEqual(moves, [[held, aside, false], [aside, held, true]], 'aside and straight back, at its own path before the removal');
   assert.deepEqual(later.removed.map((w) => [w.path, w.branchDeleted]), [[held, true]]);
@@ -565,7 +545,7 @@ test('A-1: on win32 a worktree Windows moves aside but not back is kept, the lin
     if (from === aside) refuses('EPERM')();
     renameSync(from, to);
   };
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing, rename });
   assert.deepEqual(whys(r.kept), {
     [stuck]: `moved to ${aside} to see whether a process works in it, and Windows refuses to move it back to ${stuck} (EPERM): move it back by hand`,
   });

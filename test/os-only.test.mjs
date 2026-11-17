@@ -64,3 +64,23 @@ test('lib/os.mjs makes them, so the check has something to keep in one place', (
     assert.ok(own.includes(what), `${OS} ${what}`);
   }
 });
+
+// asilak/kirunak-cross-platform AC-3: kirunak calls no PowerShell and no taskkill, often blocked where kirunak runs; no
+// file of lib, plugins, hooks or bin names either, lib/os.mjs included, comments too.
+const WINDOWS_TOOLS = /\b(powershell|pwsh|taskkill)\b/i;
+const named = (text) => text.split('\n').flatMap((line, i) => (WINDOWS_TOOLS.test(line) ? [`${i + 1} ${WINDOWS_TOOLS.exec(line)[1]}`] : []));
+
+test('the AC-3 check sees PowerShell and taskkill in any case, in code or a comment', () => {
+  assert.deepEqual(named("run('powershell', ['-Command', x])\n// taskkill /T /F\nspawn('pwsh.exe')\nconst PowerShell = 1;"), ['1 powershell', '2 taskkill', '3 pwsh', '4 PowerShell']);
+  assert.deepEqual(named('const powershells = 0; // a cmdlet'), []);
+});
+
+test('no file of lib, plugins, hooks or bin names PowerShell or taskkill (AC-3)', () => {
+  const found = [];
+  for (const top of ['lib', 'plugins', 'hooks', 'bin']) {
+    for (const path of files(join(ROOT, top))) {
+      for (const n of named(readFileSync(path, 'utf8'))) found.push(`${relative(ROOT, path).replaceAll('\\', '/')}:${n}`);
+    }
+  }
+  assert.deepEqual(found, [], `kirunak names no PowerShell or taskkill:\n${found.join('\n')}`);
+});
