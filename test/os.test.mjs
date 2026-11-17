@@ -1,11 +1,11 @@
 // What differs between operating systems (lib/os.mjs): each reader of processPaths() over a fake `run` or a fake
 // /proc, and the platform's fold of paths.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fold, insidePath, inUse, processPaths, readerName, samePath } from '../lib/os.mjs';
+import { tempDir } from './helpers.mjs';
 
 // A fake `run` that answers every call with `result` and records the calls.
 function fake(result) {
@@ -29,7 +29,7 @@ test("darwin: lsof's -F output, each process's cwd and txt; null when lsof fails
 });
 
 test('AC-6: linux reads /proc/<pid>/cwd and exe, its command from comm; an entry it cannot read is skipped; null with no /proc', () => {
-  const proc = mkdtempSync(join(tmpdir(), 'kirunak-proc-'));
+  const proc = tempDir('kirunak-proc-');
   const entry = (pid, comm, links) => {
     mkdirSync(join(proc, pid));
     if (comm !== null) writeFileSync(join(proc, pid, 'comm'), `${comm}\n`);

@@ -1,17 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { check, checkDir } from '../promo/capture/check.mjs';
 import { COLS, ROWS, aheadOf, collect, enter, loggedInOf, record, refusal } from '../promo/capture/fresh-home.mjs';
-import { gitCommitAll, gitInit, sh } from './helpers.mjs';
+import { gitCommitAll, gitInit, sh, tempDir } from './helpers.mjs';
 import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
 const START = Date.UTC(2026, 9, 22, 9, 0);
 const NAMES = ['someones-mac'];
-const temp = () => mkdtempSync(join(tmpdir(), 'capture-'));
+const temp = () => tempDir('capture-');
 const jsonl = (file) => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 const lines = (pieces) => pieces.map((p) => JSON.stringify(p) + '\n').join('');
 

@@ -1,13 +1,12 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   above, agentsOf, attemptsOf, buildRungFor, checkLadder, DEFAULT_HOOK, DEFAULT_LADDER, describeLadder, familyOf, modeOf, rungOf,
 } from '../lib/ladder.mjs';
 import { escalateConfig, install } from '../lib/install.mjs';
-import { ladderWorkspace } from './helpers.mjs';
+import { ladderWorkspace, tempDir } from './helpers.mjs';
 
 // design/plugins.md §3: the ladder's shape, its refusals at load, and the rules that read it.
 
@@ -177,7 +176,7 @@ test('modes and attempts default to build and 1; k doctor\'s line names attempts
 
 test('E-18: Haiku at the bottom makes sonnet-step and opus-step, and a failed Haiku step climbs to Sonnet', () => {
   assert.equal(above(HAIKU, rungOf(HAIKU, 'claude-haiku-4-5')).model, 'sonnet');
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-e18-'));
+  const dir = tempDir('kirunak-e18-');
   const agentsDir = join(dir, 'agents');
   install({ settingsPath: join(dir, 'settings.json'), skillsDir: join(dir, 'skills'), agentsDir, kirunakRoot: dir, home: join(dir, 'state'), ws: { ladder: HAIKU } });
   assert.ok(!existsSync(join(agentsDir, 'haiku-step.md')));

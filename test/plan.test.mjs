@@ -1,13 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { budgetOf, checkPlan, FAST_QUEUE_SINCE, fastQueue, parseBudget, parsePlan, VERIFY_SINCE } from '../lib/plan.mjs';
 import { gate, load } from '../lib/steps.mjs';
 import { parseTask } from '../lib/task.mjs';
 import { checkPlanSettings, taskPaths } from '../lib/workspace.mjs';
-import { approvedWorkspace, k, makeWorkspace } from './helpers.mjs';
+import { approvedWorkspace, k, makeWorkspace, tempDir } from './helpers.mjs';
 
 const ID = 'weather/offline-forecast';
 
@@ -378,7 +377,7 @@ test('AC-2: a heavy step that states no length is judged at the minutes k run qu
   assert.deepEqual(fq(heavy('max-minutes: 20'), ws), []);
   assert.deepEqual(fq(heavy(), { ...ws, budget: { minutes: 25 } }), [], 'a workspace budget under the line');
   assert.deepEqual(fq(heavy()), [], 'no plan.shortMinutes');
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-ac2-'));
+  const dir = tempDir('kirunak-ac2-');
   try {
     const record = join(dir, 'approval.json');
     writeFileSync(record, JSON.stringify({ history: [{ approved: '2026-11-01T09:00:00Z' }] }));

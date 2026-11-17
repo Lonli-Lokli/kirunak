@@ -1,15 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import machineGuardPids, { admit, register, release, unregister } from '../plugins/machine-guard-pids.mjs';
 import pricesDefault from '../plugins/prices-default.mjs';
-import { fakePs, makeWorkspace } from './helpers.mjs';
+import { fakePs, makeWorkspace, tempDir } from './helpers.mjs';
 
 const fresh = (machine) => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-machine-'));
+  const home = tempDir('kirunak-machine-');
   const ws = { home, machine };
   return { home, ws, mg: machineGuardPids(ws).provides.machineGuard };
 };

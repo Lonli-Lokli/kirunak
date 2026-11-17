@@ -2,13 +2,13 @@
 // core.autocrlf true) as from one with LF. The .gitattributes keeps the working tree LF; readText() (lib/os.mjs) turns
 // CRLF into LF for a clone made before it, or a file copied in by hand. The CI workflow runs this file on Windows.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { skeleton } from '../lib/bugs.mjs';
 import { readText } from '../lib/os.mjs';
+import { tempDir } from './helpers.mjs';
 
 const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
 const LIB = fileURLToPath(new URL('../lib/', import.meta.url));
@@ -17,7 +17,7 @@ const names = readdirSync(TEMPLATES).filter((n) => n.endsWith('.md')).sort();
 // A copy of templates/<name> with every line ending CRLF, in a fresh temp folder.
 function crlfCopy(name) {
   const lf = readFileSync(join(TEMPLATES, name), 'utf8').replaceAll('\r\n', '\n');
-  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-crlf-')), name);
+  const path = join(tempDir('kirunak-crlf-'), name);
   writeFileSync(path, lf.replaceAll('\n', '\r\n'));
   return { path, lf };
 }
@@ -55,7 +55,7 @@ for (const name of names) {
 }
 
 test('readText leaves LF text as it is and takes a file URL', () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-lf-')), 'a.md');
+  const path = join(tempDir('kirunak-lf-'), 'a.md');
   writeFileSync(path, 'a\nb\n');
   assert.equal(readText(path), 'a\nb\n');
   assert.equal(readText(pathToFileURL(path)), 'a\nb\n');

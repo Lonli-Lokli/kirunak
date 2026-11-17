@@ -1,15 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import resourceGuardLocal, { alive, isStill, killTree, OWN_START, stillRuns } from '../plugins/resource-guard-local.mjs';
-import { fakePs } from './helpers.mjs';
+import { fakePs, tempDir } from './helpers.mjs';
 
 function guard(opts = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-guard-'));
+  const home = tempDir('kirunak-guard-');
   return { home, g: resourceGuardLocal({ home }, { pollMs: 20, ...opts }).provides.resourceGuard };
 }
 
@@ -111,7 +110,7 @@ test('past maxMinutes a grandchild in a process group of its own is killed too',
 });
 
 test('killTree ends every descendant whatever its group, KILLing what ignores TERM, and leaves the rest alone', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kirunak-kill-'));
+  const dir = tempDir('kirunak-kill-');
   const pidFile = join(dir, 'grandchild.pid');
   const step = spawn(process.execPath, ['-e', DETACHES, pidFile, 'stubborn'], { detached: true, stdio: 'ignore' });
   const bystander = spawn('/bin/sh', ['-c', 'sleep 30'], { detached: true, stdio: 'ignore' });
@@ -182,7 +181,7 @@ test('claims: one holder at a time, released by its holder, every resource ever 
 });
 
 test('a k run stopped by SIGINT ends its job\'s process group and frees the lock within a second', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-guard-'));
+  const home = tempDir('kirunak-guard-');
   const src = `import g from ${JSON.stringify(GUARD)};
 g({ home: ${JSON.stringify(home)} }, { pollMs: 20 }).provides.resourceGuard.run({ session: 's', what: 'build', maxMinutes: 1, cwd: ${JSON.stringify(home)}, command: ['/bin/sh', '-c', 'sleep 30 & sleep 30'] });`;
   const run = spawn(process.execPath, ['--input-type=module', '-e', src], { stdio: 'ignore' });

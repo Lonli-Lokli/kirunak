@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { updateSession } from '../lib/keeper.mjs';
 import { lineFrom } from '../hooks/kirunak-session.mjs';
-import { KIRUNAK } from './helpers.mjs';
+import { KIRUNAK, tempDir } from './helpers.mjs';
 
 // hooks.md's example: a session resumed 90 minutes after its last response.
 const RESUME = {
@@ -19,7 +18,7 @@ const hook = (home, input, env = {}) =>
 const lines = (home) => (existsSync(join(home, 'keeper.jsonl')) ? readFileSync(join(home, 'keeper.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
 
 test('a resume records a miss or a hit with the context, the session\'s task and lifetime, and prints nothing', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-session-'));
+  const home = tempDir('kirunak-session-');
   updateSession(home, 'abc123', { task: 'weather/offline-forecast', step: null, ttl: '1h' });
   const r = hook(home, RESUME);
   assert.deepEqual([r.status, r.stdout], [0, ''], 'a SessionStart hook\'s output would enter the conversation');
@@ -35,7 +34,7 @@ test('a resume records a miss or a hit with the context, the session\'s task and
 });
 
 test('anything but a resume with the cache fields records nothing, and bad input still exits 0', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-session-'));
+  const home = tempDir('kirunak-session-');
   for (const input of [{ ...RESUME, source: 'startup' }, { ...RESUME, source: 'compact' }, { ...RESUME, context_tokens: undefined }, 'not json', '']) {
     const r = hook(home, input);
     assert.deepEqual([r.status, r.stdout], [0, '']);
@@ -46,7 +45,7 @@ test('anything but a resume with the cache fields records nothing, and bad input
 });
 
 test('a headless step\'s resume records nothing: the step\'s env, or a session file of kind headless', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-session-'));
+  const home = tempDir('kirunak-session-');
   updateSession(home, 'abc123', { task: 'weather/offline-forecast', step: 'S-1', ttl: '1h' });
   const r = hook(home, RESUME, { KIRUNAK_TASK: 'weather/offline-forecast', KIRUNAK_STEP: 'S-1' });
   assert.deepEqual([r.status, r.stdout], [0, '']);
