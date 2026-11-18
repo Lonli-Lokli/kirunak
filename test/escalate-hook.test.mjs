@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -1073,7 +1074,7 @@ test('fire, block, the rung agent finishes: its tokens beside the lift, for the 
 test('a rung agent that ends twice, first unfinished, then handed back: a second row with its whole run, lifted; a third stop logs nothing (AC-21, R6.2)', () => {
   const h = blocked();
   hook(launchOf('fable-step', 'atwice'), h.home);
-  hook(stopOf('fable-step', 'atwice', '/dev/null', { stop_hook_active: false }), h.home);
+  hook(stopOf('fable-step', 'atwice', devNull, { stop_hook_active: false }), h.home);
   assert.equal(h.state().block.lifted, null, 'an unfinished run lifts nothing');
   hook(stopOf('fable-step', 'atwice', COSTED, { stop_hook_active: true }), h.home);
   hook(stopOf('fable-step', 'atwice', COSTED, { stop_hook_active: true }), h.home);
@@ -1111,7 +1112,7 @@ test('costOf counts an API message split into entries once, skips Claude Code\'s
     '{"type":"assistant","message":{"id":"msg_02","model":"<synthetic>","content":[{"type":"text","text":"No response requested."}],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}',
   ].join('\n')}\n`);
   assert.deepEqual(costOf(split), { tokens: { input: 4, output: 210, cacheRead: 900, cacheWrite: 60 }, model: 'claude-opus-5-5' });
-  assert.deepEqual(costOf('/dev/null'), { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, model: null });
+  assert.deepEqual(costOf(devNull), { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, model: null });
   assert.deepEqual(costOf(join(TRANSCRIPT_DIR, 'missing.jsonl')), { tokens: null, model: null });
   const h = blocked();
   goOn(h.home);

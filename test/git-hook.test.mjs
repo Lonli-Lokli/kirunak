@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -327,12 +327,15 @@ test('the hook lets a clean merge naming an accepted task through (E-4), and wit
   assert.match(said(w.weather), /\nTask: weather\/offline-forecast$/);
 });
 
+// A script's path as git's shell runs it from GIT_EDITOR: with `/`, since that shell reads a Windows `\` as an escape.
+const forShell = (file) => file.replaceAll('\\', '/');
+
 // An editor that puts KIRUNAK_TEST_LINES before what git wrote in the message file: git's status comments stay below.
 function editor() {
   const file = join(tempDir('kirunak-editor-'), 'edit.sh');
   writeFileSync(file, '#!/bin/sh\n{ printf "%s\\n" "$KIRUNAK_TEST_LINES"; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n');
   chmodSync(file, 0o755);
-  return file;
+  return forShell(file);
 }
 
 function editAs(w, dir, lines, extra = [], env = {}) {
@@ -550,7 +553,7 @@ function script(body) {
   const file = join(tempDir('kirunak-script-'), 'run.sh');
   writeFileSync(file, `#!/bin/sh\n${body}\n`);
   chmodSync(file, 0o755);
-  return file;
+  return forShell(file);
 }
 
 // An editor that replaces the whole message by KIRUNAK_TEST_LINES.
@@ -583,7 +586,7 @@ test('after `git revert -n` of an accepted task\'s commit, a commit naming it is
   // The same replay, its commit staging only the task's handoff (E-1).
   git(w.weather, ['restore', '-q', '--source', 'HEAD', '--staged', '--worktree', 'src/cache.ts']);
   git(w.weather, ['rm', '-q', '--cached', 'src/x.ts']);
-  execFileSync('rm', [join(w.weather, 'src/x.ts')]);
+  rmSync(join(w.weather, 'src/x.ts'));
   put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
   assert.ok(existsSync(join(w.weather, '.git', 'REVERT_HEAD')));
   const records = commitAs(w, w.weather, `${SLUG}: the handoff`);
@@ -600,7 +603,7 @@ test('after `git cherry-pick -n` of an accepted task\'s commit, a commit naming 
   assert.equal(m.status, 1);
   assert.equal(m.stderr.trim(), REFUSAL);
   git(w.weather, ['reset', '-q', '--hard']);
-  execFileSync('rm', ['-f', join(w.weather, 'src/x.ts')]);
+  rmSync(join(w.weather, 'src/x.ts'), { force: true });
   assert.equal(replayOf(w, w.weather, ['cherry-pick', '-n', w.c]).status, 0);
   const kept = editAs(w, w.weather, '', [], { GIT_EDITOR: 'true' });
   assert.equal(kept.status, 1);
@@ -630,7 +633,7 @@ test('code staged at a pick\'s stop under git\'s message is the commit\'s own an
   assert.equal(extra.status, 1);
   assert.equal(extra.stderr.trim(), REFUSAL);
   assert.equal(replayOf(w, w.weather, ['cherry-pick', '--abort']).status, 0);
-  execFileSync('rm', ['-f', join(w.weather, 'src/extra.ts')]);
+  rmSync(join(w.weather, 'src/extra.ts'), { force: true });
   // git writes the pick's tree before its editor runs, and runs no commit-msg after it (S-16 design §1.1, case 8).
   git(w.weather, ['checkout', '-q', '-b', 'port', `${w.c}^`]);
   const stage = script(`printf 'export {};\\n' > "${join(w.weather, 'src/extra.ts')}" && git -C "${w.weather}" add src/extra.ts`);
@@ -734,7 +737,7 @@ test('git revert of an accepted task\'s commit is refused, its revert left stage
   assert.equal(commitAs(w, w.weather, 'another line').status, 0);
   const other = head(w.weather);
   const r = replayOf(w, w.weather, ['revert', '--no-edit', w.c]);
-  assert.equal(r.status, 128);
+  assert.notEqual(r.status, 0, r.stderr); // 128 from git on macOS, 1 from Git for Windows
   assert.ok(r.stderr.includes(REFUSAL), r.stderr);
   assert.equal(head(w.weather), other);
   assert.equal(staged(w.weather), 'src/cache.ts');
@@ -773,7 +776,7 @@ test('a merge naming an accepted task passes when clean, by its -m or its branch
   const evil = commitAs(w, w.weather, `${SLUG}: join`);
   assert.equal(evil.status, 1);
   assert.equal(evil.stderr.trim(), REFUSAL);
-  execFileSync('rm', [join(w.weather, 'src/evil.ts')]);
+  rmSync(join(w.weather, 'src/evil.ts'));
   put(w.weather, `kirunak/tasks/${SLUG}/handoff.md`, '# Handoff\n');
   const records = commitAs(w, w.weather, `${SLUG}: join`);
   assert.equal(records.status, 0, records.stderr);
@@ -820,7 +823,7 @@ test('an octopus naming an accepted task is judged against the join git\'s octop
   const evil = commitAs(w, w.weather, `${SLUG}: two at once`);
   assert.equal(evil.status, 1, 'code of its own beside the heads');
   assert.equal(evil.stderr.trim(), REFUSAL);
-  execFileSync('rm', [join(w.weather, 'src/evil.ts')]);
+  rmSync(join(w.weather, 'src/evil.ts'));
   const clean = commitAs(w, w.weather, `${SLUG}: two at once`);
   assert.equal(clean.status, 0, clean.stderr);
   assert.equal(parents(), 3);

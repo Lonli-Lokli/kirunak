@@ -13,7 +13,7 @@ for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && ke
 const none = () => [];
 const add = (repo, path, branch) => {
   sh(repo, 'git', ['worktree', 'add', '-q', ...(branch ? ['-b', branch] : ['--detach']), path, 'master']);
-  return realpathSync(path);
+  return realpathSync.native(path);
 };
 const commitIn = (dir, file) => {
   writeFileSync(join(dir, file), file);
@@ -63,14 +63,16 @@ test('a checkout at any depth inside an ignored folder keeps the worktree', asyn
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [outer]: `it holds the checkout ${clone}` });
 });
 
-test('an open task naming the worktree in another case keeps it on macOS', { skip: process.platform !== 'darwin' }, async () => {
+test('an open task naming the worktree in another case keeps it on macOS and Windows', { skip: process.platform === 'linux' && 'Linux tells file names apart by case' }, async () => {
   const { ws, root, weather } = await makeWorkspace();
   const named = add(weather, join(root, 'Named'), 'named');
   writeFileSync(join(weather, 'kirunak/tasks/offline-forecast/plan.md'), `work in ${named.toLowerCase()} first\n`);
   assert.deepEqual(paths((await worktrees({ ws, processes: none })).kept), [named]);
 });
 
-test('a worktree a program runs from stays, wherever the program works', async () => {
+// Windows is asked about no process, and moves a folder a program runs from aside: only a program working in the
+// worktree, or a file held open there, is seen (worktrees.test.mjs).
+test('a worktree a program runs from stays, wherever the program works', { skip: process.platform === 'win32' && 'Windows is asked about no process, and a program running from a folder does not stop its move aside' }, async () => {
   const { ws, root, weather } = await makeWorkspace();
   ignore(weather, 'bin');
   const tools = add(weather, join(root, 'tools'), 'tools');

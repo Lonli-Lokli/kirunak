@@ -7,15 +7,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { samePath } from '../lib/os.mjs';
 import { holdFor, leasesOf, releaseAll, rootsFrom, worktreeOf } from '../lib/worktree-lock.mjs';
 import { gitCommitAll, gitInit, sh, tempDir } from './helpers.mjs';
 
 const NOW = new Date('2026-11-10T09:00:00.000Z');
 const later = (minutes) => new Date(NOW.getTime() + minutes * 60_000);
 
-// A repo with one commit, its linked worktree `wt` on branch `wt`, and a second repo no workspace names.
+// A repo with one commit, its linked worktree `wt` on branch `wt`, and a second repo no workspace names. The root as
+// git writes it: the case on disk, and on Windows no short 8.3 name.
 function repos() {
-  const root = realpathSync(tempDir('kirunak-lock-'));
+  const root = realpathSync.native(tempDir('kirunak-lock-'));
   const repo = join(root, 'app');
   mkdirSync(repo);
   gitInit(repo);
@@ -33,14 +35,14 @@ function repos() {
   return { root, repo, wt, other, otherWt };
 }
 
-// The lock reason git holds for the worktree at `path`, or null.
+// The lock reason git holds for the worktree at `path`, or null. Git writes the path with `/` on Windows too.
 function lockOn(repo, path) {
   const fields = sh(repo, 'git', ['worktree', 'list', '--porcelain', '-z']).split('\0');
   let at = null;
   for (const f of fields) {
     if (f.startsWith('worktree ')) at = f.slice(9);
-    else if (at === path && f === 'locked') return '';
-    else if (at === path && f.startsWith('locked ')) return f.slice(7);
+    else if (at !== null && samePath(at, path) && f === 'locked') return '';
+    else if (at !== null && samePath(at, path) && f.startsWith('locked ')) return f.slice(7);
   }
   return null;
 }

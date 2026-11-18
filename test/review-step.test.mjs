@@ -7,6 +7,7 @@ import { accept, hashBytes } from '../lib/approval.mjs';
 import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
+import { shFolder } from '../lib/os.mjs';
 import { approvedWorkspace, events, k, reviewsRan, sh } from './helpers.mjs';
 
 const PLAN = `---
@@ -230,9 +231,10 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   assert.equal(impl.deny, undefined);
   // The implementing step and the review start with the narrow tool list (gulnya/k-run-step-models AC-4).
   for (const c of calls) assert.deepEqual(c.tools, ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'Skill']);
-  const S1 = join(w.p.dir, 'steps', 'S-1');
+  // On Windows Claude Code reads D:\x as /d/x before it matches a rule.
+  const S1 = shFolder(join(w.p.dir, 'steps', 'S-1'));
   const deny = [
-    ...['progress.md', 'notes.md', 'plan.md'].map((f) => `Read(/${join(w.p.dir, f)})`),
+    ...['progress.md', 'notes.md', 'plan.md'].map((f) => `Read(/${shFolder(join(w.p.dir, f))})`),
     `Read(/${S1})`, `Read(/${S1}/**)`, 'Read(~/.claude/projects)', 'Read(~/.claude/projects/**)',
   ];
   for (const c of [first, retry]) {
