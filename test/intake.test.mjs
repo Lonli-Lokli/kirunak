@@ -66,7 +66,7 @@ function commitAt(dir, message, when) {
 test('start writes the skeleton with every aspect ? [open], an empty intake.md, and commits nothing', async () => {
   const { ws, weather } = await makeWorkspace({ finished: false });
   const r = await start({ ws, id: ID, title: TITLE, now: NOV2 });
-  assert.deepEqual(r, { dir: ws.repos[0].root + '/kirunak/tasks/offline-forecast', aspects: 3 });
+  assert.deepEqual(r, { dir: join(ws.repos[0].root, 'kirunak', 'tasks', 'offline-forecast'), aspects: 3 });
   const text = readFileSync(join(dirOf(weather), 'task.md'), 'utf8');
   assert.equal(text, SKELETON);
   assert.ok(!text.includes('\r') && text.endsWith('\n') && !text.endsWith('\n\n'));
@@ -323,7 +323,7 @@ test('k intake start --from a draft never committed renames it, and says where i
   writeDraft(weather);
   const r = k(home, ['intake', 'start', ID, '--from', DRAFT_REL, '--title', 'Offline forecast']);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /started weather\/offline-forecast: .*kirunak\/tasks\/offline-forecast \(3 aspects open\); the draft is now kirunak\/tasks\/offline-forecast\/draft\.md: commit it with the intake/);
+  assert.match(r.stdout, /started weather\/offline-forecast: .*kirunak[\\/]tasks[\\/]offline-forecast \(3 aspects open\); the draft is now kirunak\/tasks\/offline-forecast\/draft\.md: commit it with the intake/);
   assert.equal(readFileSync(join(dirOf(weather), 'draft.md'), 'utf8'), DRAFT);
   assert.equal(existsSync(join(weather, DRAFT_REL)), false);
   assert.match(readFileSync(join(dirOf(weather), 'task.md'), 'utf8'), /^title: Offline forecast$/m);
@@ -500,7 +500,7 @@ test('k intake start --from a bug never committed, and with no folder, renames i
   writeBug(weather);
   const r = k(home, ['intake', 'start', ID, '--from', BUG_REL]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /started weather\/offline-forecast: .*kirunak\/tasks\/offline-forecast \(3 aspects open\); the bug is now kirunak\/tasks\/offline-forecast\/bug\.md: commit it with the intake/);
+  assert.match(r.stdout, /started weather\/offline-forecast: .*kirunak[\\/]tasks[\\/]offline-forecast \(3 aspects open\); the bug is now kirunak\/tasks\/offline-forecast\/bug\.md: commit it with the intake/);
   assert.equal(readFileSync(join(dirOf(weather), 'bug.md'), 'utf8'), BUG);
   assert.equal(existsSync(join(dirOf(weather), 'bug')), false);
   // The CLI reads it today.

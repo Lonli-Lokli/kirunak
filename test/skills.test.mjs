@@ -62,7 +62,8 @@ test('the skills stay short', () => {
   assert.ok(read('skills/k-done/SKILL.md').split('\n').length <= 60);
   assert.ok(read('skills/k-board-page/SKILL.md').split('\n').length <= 40);
   assert.ok(read('skills/k-draft/SKILL.md').split('\n').length <= 80);
-  assert.ok(read('skills/k-bug/SKILL.md').split('\n').length <= 80);
+  // 81 since a heavy test names `k heavy` when the workspace has no bugs.heavyLock (asilak/kirunak-cross-platform S-5).
+  assert.ok(read('skills/k-bug/SKILL.md').split('\n').length <= 81);
   assert.ok(read('skills/k-go-on/SKILL.md').split('\n').length <= 20);
   assert.ok(read('skills/usage-review/SKILL.md').split('\n').length <= 60);
   assert.ok(read('skills/k-heavy/SKILL.md').split('\n').length <= 28);
