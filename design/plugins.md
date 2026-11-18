@@ -90,7 +90,7 @@ export default {
   queue: '~/code/hub/kirunak/queue.md',
   records: [],                        // more of kirunak's records (approval.md §3); a folder ends with a slash
   plugins: ['./plugins/checklist.mjs'],
-  machine: { maxAgents: 2, maxHeavy: 1 },  // freeMemoryMB: optional; a heavy job or a session waits while less is free
+  machine: { maxAgents: 2, maxHeavy: 1 },  // freeMemoryMB: optional; a heavy job or a session waits while less is free (on Windows, the commit left)
   models: {},                         // per step kind: { model, effort }; empty means Claude Code's own defaults
   budget: { calls: 100, minutes: 40, usd: 3 },
   runner: { permissionMode: 'auto' },
