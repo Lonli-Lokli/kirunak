@@ -6,6 +6,8 @@ import { checkCompact, compactConfig, DEFAULT_COMPACT, rootsOf } from '../lib/co
 import { escalateConfig } from '../lib/install.mjs';
 import { gitCommitAll, gitInit, ladderWorkspace, sh, tempDir } from './helpers.mjs';
 
+const WIN = process.platform === 'win32';
+
 // The handover's workspace settings (orchestrator.md §5, R7.1-R7.3): the defaults, the checks at load, the folders
 // and config.json's `compact` block.
 
@@ -67,7 +69,11 @@ test('alsoIn is expanded and made real at load; a worktree root is its main chec
   const { ws } = await ladderWorkspace({ compact: { alsoIn: [s.link, join(s.dir, 'gone')] } });
   assert.deepEqual(ws.compact.alsoIn, [s.repo, join(s.dir, 'gone')], 'the link made real; a folder not there kept as written');
   const two = { repos: [{ name: 'side', root: s.worktree }], compact: { ...DEFAULT_COMPACT, alsoIn: [s.repo] } };
-  assert.deepEqual(rootsOf(two), [{ name: 'side', root: s.worktree, dir: s.repo }], 'the worktree reads the main checkout\'s file');
+  // On Windows Claude Code keeps the local file in the starting directory (projectRoot's ownedRoot): the worktree is
+  // its own root, and the main checkout another.
+  const roots = WIN ? [{ name: 'side', root: s.worktree, dir: s.worktree }, { name: s.repo, root: s.repo, dir: s.repo }]
+    : [{ name: 'side', root: s.worktree, dir: s.repo }];
+  assert.deepEqual(rootsOf(two), roots, WIN ? 'the worktree reads its own file' : 'the worktree reads the main checkout\'s file');
   assert.deepEqual(rootsOf(null), []);
 });
 

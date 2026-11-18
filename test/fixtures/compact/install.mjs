@@ -11,7 +11,8 @@ import { FIXTURES, gitCommitAll, gitInit, KIRUNAK, tempDir } from '../../helpers
 // This machine's own git excludes stay out: a scratch global config whose excludes file is empty.
 const GIT = realpathSync(tempDir('kirunak-compact-git-'));
 writeFileSync(join(GIT, 'ignore'), '');
-writeFileSync(join(GIT, 'gitconfig'), `[core]\n\texcludesFile = ${join(GIT, 'ignore')}\n`);
+// git's config reads `\` as an escape, so a Windows path is written with `/`, which git takes there too.
+writeFileSync(join(GIT, 'gitconfig'), `[core]\n\texcludesFile = ${join(GIT, 'ignore').replaceAll('\\', '/')}\n`);
 process.env.GIT_CONFIG_GLOBAL = join(GIT, 'gitconfig');
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 delete process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;

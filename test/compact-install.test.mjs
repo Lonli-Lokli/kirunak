@@ -6,6 +6,8 @@ import { compactEvents, configPath, install } from '../lib/install.mjs';
 import { KIRUNAK, sh } from './helpers.mjs';
 import { json, LOCAL, put, read, setup, stepTask } from './fixtures/compact/install.mjs';
 
+const WIN = process.platform === 'win32';
+
 // k install's compact part (orchestrator.md §5, R8.1, R8.2): the compact hook's blocks in the user's file, and the
 // handover window in each root's own .claude/settings.local.json, in every case; the user's file never changes for it,
 // and its own window is named on every run.
@@ -13,7 +15,10 @@ import { json, LOCAL, put, read, setup, stepTask } from './fixtures/compact/inst
 test('R8.1: the compact hook on PreCompact, SessionEnd and four SessionStart parts, each its own block; a second run adds none', () => {
   const s = setup();
   const hooks = json(s.paths.settingsPath).hooks;
-  const command = (part) => `node ${join(KIRUNAK, 'hooks', 'kirunak-compact.mjs')}${part ? ` --part ${part}` : ''}`;
+  // On Windows k install quotes the path and doubles its backslashes.
+  const hook = join(KIRUNAK, 'hooks', 'kirunak-compact.mjs');
+  const path = WIN ? `"${hook.replaceAll('\\', '\\\\')}"` : hook;
+  const command = (part) => `node ${path}${part ? ` --part ${part}` : ''}`;
   assert.deepEqual(hooks.PreCompact, [{ matcher: 'auto|manual', hooks: [{ type: 'command', command: command(), timeout: 10 }] }]);
   assert.deepEqual(hooks.SessionEnd[0], { matcher: 'clear', hooks: [{ type: 'command', command: command(), timeout: 5 }] });
   assert.equal(hooks.SessionEnd.length, 2, "beside the worktree lock's release");
@@ -141,17 +146,19 @@ test('a root that is a worktree is written at its main checkout\'s file; --print
   const wt = join(s.dir, 'hub-wt');
   sh(s.hub, 'git', ['worktree', 'add', '-q', '-b', 'side', wt]);
   s.ws.repos = [{ name: 'side', root: wt }];
+  // On Windows Claude Code keeps the local file in the starting directory, so the worktree is its own root there.
+  const root = WIN ? wt : s.hub;
   const exclude = read(join(s.hub, '.git', 'info', 'exclude'));
   const printed = s.go({ print: true });
-  assert.ok(printed.includes(`${wt} is a worktree: sessions there read ${s.local(s.hub)}`));
-  assert.ok(printed.includes(`would set autoCompactWindow 183000 in ${s.local(s.hub)} (handover size 150000 + 33000)`));
+  if (!WIN) assert.ok(printed.includes(`${wt} is a worktree: sessions there read ${s.local(s.hub)}`));
+  assert.ok(printed.includes(`would set autoCompactWindow 183000 in ${s.local(root)} (handover size 150000 + 33000)`));
   assert.ok(printed.some((a) => a.startsWith('would add /.claude/settings.local.json to ')));
   assert.ok(printed.includes(`${s.paths.settingsPath}: autoCompactWindow 500000, yours (outside the workspace repos and in k run steps); kirunak never writes it`));
   assert.ok(printed.includes(`${s.paths.settingsPath}: modelSettings.opus.autoCompactWindow 400000, yours (for opus outside the workspace repos and in k run steps); kirunak never writes it`), '--print names the user\'s window as a run does');
   assert.ok(!existsSync(s.local(s.hub)) && !existsSync(join(wt, ...LOCAL)), 'nothing written');
   assert.equal(read(join(s.hub, '.git', 'info', 'exclude')), exclude);
   s.go();
-  assert.deepEqual(json(s.local(s.hub)), { autoCompactWindow: 183000 });
-  assert.ok(!existsSync(join(wt, ...LOCAL)), 'the worktree reads the main checkout\'s');
-  assert.deepEqual(json(configPath(s.paths.home)).compact.roots, [s.hub]);
+  assert.deepEqual(json(s.local(root)), { autoCompactWindow: 183000 });
+  if (!WIN) assert.ok(!existsSync(join(wt, ...LOCAL)), 'the worktree reads the main checkout\'s');
+  assert.deepEqual(json(configPath(s.paths.home)).compact.roots, [root]);
 });

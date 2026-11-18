@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { hold } from '../lib/approval.mjs';
+import { lastOf, signOff } from '../lib/final.mjs';
 import { approvedWorkspace, events, k, repeatedWorkspace, sh } from './helpers.mjs';
 
 export const PLAN = `---
@@ -625,4 +627,20 @@ test('k step finish leaves plan.md, notes.md and a deleted tracked file of the t
   assert.equal(git('show', '--name-only', '--format=', 'HEAD~1'), `${TASK}/evidence/S-1-cache-sizes.tsv`);
   assert.equal(sh(w.weather, 'git', ['status', '--porcelain', '--untracked-files=all', '--', TASK]).trimEnd(),
     [` D ${TASK}/old.md`, `?? ${TASK}/notes.md`, `?? ${TASK}/plan.md`].join('\n'));
+});
+
+test('E-2 (asilak/kirunak-cross-platform): progress.md checked out with CRLF reads as its LF lines', () => {
+  const lf = ['2026-11-03 14:02 S-1 started (sonnet, session s-main)', '2026-11-03 14:30 S-1 failed: exit 1',
+    '2026-11-03 14:31 S-1 started (sonnet, session s-main)', '2026-11-03 15:00 S-1 finished',
+    '2026-11-03 15:01 S-2 started (opus, session s-main)', '2026-11-03 15:02 signed off by the owner: final steps S-3 queued (session s-main)',
+    '2026-11-03 15:03 S-3 started (session s-main)', ''].join('\n');
+  const crlf = lf.replaceAll('\n', '\r\n');
+  assert.deepEqual(steps.events(crlf), steps.events(lf));
+  assert.equal(steps.events(crlf).length, 6);
+  assert.deepEqual(steps.historyOf(crlf, 'S-1'), steps.historyOf(lf, 'S-1'));
+  assert.equal(steps.historyOf(crlf, 'S-1').last, 'finished');
+  assert.deepEqual(steps.runningBy(crlf, ['s-main'], tmpdir()), ['S-2', 'S-3']);
+  assert.deepEqual(signOff(crlf), signOff(lf));
+  assert.deepEqual(signOff(crlf).steps, ['S-3']);
+  assert.equal(lastOf(crlf, 'S-3'), 'started');
 });

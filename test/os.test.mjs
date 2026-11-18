@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { commandArgv, fold, insidePath, inUse, NO_SHELL, processPaths, readerName, samePath, shell } from '../lib/os.mjs';
+import { commandArgv, fold, insidePath, inUse, NO_SHELL, processField, processPaths, readerName, samePath, shell, toolPath } from '../lib/os.mjs';
 import { tempDir } from './helpers.mjs';
 
 // A fake `run` that answers every call with `result` and records the calls.
@@ -29,14 +29,21 @@ test("darwin: lsof's -F output, each process's cwd and txt; null when lsof fails
   assert.equal(readerName('darwin'), 'lsof');
 });
 
-test('AC-6: linux reads /proc/<pid>/cwd and exe, its command from comm; an entry it cannot read is skipped; null with no /proc', () => {
+test('AC-6: linux reads /proc/<pid>/cwd and exe, its command from comm; an entry it cannot read is skipped; null with no /proc', (t) => {
   const proc = tempDir('kirunak-proc-');
   const entry = (pid, comm, links) => {
     mkdirSync(join(proc, pid));
     if (comm !== null) writeFileSync(join(proc, pid, 'comm'), `${comm}\n`);
     for (const [name, target] of Object.entries(links)) symlinkSync(target, join(proc, pid, name));
   };
-  entry('7', 'bash', { cwd: '/home/a/src/app', exe: '/usr/bin/bash' });
+  // Windows writes a link's absolute target resolved on this drive (/home/a as D:\home\a).
+  const linked = (p) => (process.platform === 'win32' ? resolve(p) : p);
+  try {
+    entry('7', 'bash', { cwd: '/home/a/src/app', exe: '/usr/bin/bash' });
+  } catch (e) {
+    if (e.code === 'EPERM') return t.skip('this Windows user may make no symbolic link (Developer Mode is off)');
+    throw e;
+  }
   entry('8', 'sshd', {}); // another user's: its links cannot be read
   entry('9', null, { cwd: '/tmp' }); // gone since the listing
   entry('self', 'bash', { cwd: '/home/a' });
@@ -44,8 +51,8 @@ test('AC-6: linux reads /proc/<pid>/cwd and exe, its command from comm; an entry
   const run = () => assert.fail('no program runs on linux');
   const list = processPaths({ platform: 'linux', run, procRoot: proc });
   assert.deepEqual(list, [
-    { pid: 7, command: 'bash', kind: 'cwd', path: '/home/a/src/app' },
-    { pid: 7, command: 'bash', kind: 'exe', path: '/usr/bin/bash' },
+    { pid: 7, command: 'bash', kind: 'cwd', path: linked('/home/a/src/app') },
+    { pid: 7, command: 'bash', kind: 'exe', path: linked('/usr/bin/bash') },
   ]);
   assert.equal(processPaths({ platform: 'linux', run, procRoot: join(proc, 'missing') }), null);
   assert.equal(readerName('linux'), '/proc');
@@ -148,4 +155,20 @@ test('AC-7, E-1: commandArgv runs one word as a command line and more as a progr
   assert.deepEqual(commandArgv(['./gradlew.bat', 'test'], win), [bash, '-c', 'exec "$0" "$@"', './gradlew.bat', 'test']);
   assert.deepEqual(commandArgv(['node -v'], win), [bash, '-c', 'node -v'], 'one word is a command line on win32 too');
   assert.deepEqual(commandArgv(['node', '-v'], { ...win, env: { Path: w`C:\node` } }), [node, '-v'], 'Path as Windows spells it');
+});
+
+test('E-2: toolPath reads a path as the freeze hook compares it: on win32 folded and /c/ as c:/; elsewhere as written', () => {
+  const w = String.raw;
+  assert.equal(toolPath(w`D:\Sources\Weather\Kirunak\Tasks`, 'win32'), 'd:/sources/weather/kirunak/tasks');
+  assert.equal(toolPath('/d/sources/weather', 'win32'), 'd:/sources/weather', "Git Bash's drive");
+  assert.equal(toolPath('/c', 'win32'), 'c:/');
+  assert.equal(toolPath('/tmp/x', 'win32'), '/tmp/x', 'a longer first name is no drive');
+  assert.equal(toolPath('/Users/A/Kirunak', 'darwin'), '/Users/A/Kirunak', 'macOS keeps its case here');
+  assert.equal(toolPath(w`/d/a\b`, 'linux'), w`/d/a\b`);
+});
+
+test('E-1: processField asks win32 nothing and throws, as when ps cannot answer; elsewhere ps answers', () => {
+  assert.throws(() => processField(process.pid, 'ppid=', { platform: 'win32' }));
+  if (process.platform === 'win32') return;
+  assert.equal(Number(processField(process.pid, 'ppid=')), process.ppid);
 });
