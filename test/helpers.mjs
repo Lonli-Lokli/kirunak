@@ -49,7 +49,9 @@ export function gitCommitAll(dir, message = 'fixture') {
 // A copy of the invented workspace (two git repos, a checklist, a queue, the finished task) in a temp
 // folder, with its own $KIRUNAK_HOME and pointer. Options: { finished: false } leaves the task out.
 export async function makeWorkspace({ finished = true } = {}) {
-  const root = tempDir('kirunak-');
+  // On Windows the long name, as git prints it, even when TEMP is a short (8.3) one such as C:\Users\RUNNER~1.
+  const made = tempDir('kirunak-');
+  const root = process.platform === 'win32' ? realpathSync.native(made) : made;
   cpSync(join(FIXTURES, 'workspace'), root, { recursive: true });
   if (!finished) {
     rmSync(join(root, 'weather', 'kirunak'), { recursive: true, force: true });
