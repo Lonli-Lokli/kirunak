@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { live, read } from '../lib/lease.mjs';
-import { alive, killTree } from '../lib/os.mjs';
+import { alive, killTree, programArgv } from '../lib/os.mjs';
 import { HELD, sessionLease, wrapped } from '../lib/wrap.mjs';
 
 // asilak/kirunak-cross-platform AC-6: the wrapper each session and heavy job runs under, on every OS.
@@ -106,6 +106,32 @@ test('killTree of a wrapper ends its command and the command\'s own child, on ev
   assert.equal(alive(child), false, 'its command is gone');
   assert.equal(alive(grandchild), false, 'the command\'s child is gone');
   assert.equal(live(lease), null, 'no live holder: let go on macOS and Linux, its holder gone on Windows');
+});
+
+// npm's shim of a Node program as npm writes it on Windows (cmd-shim), naming node_modules\fake\cli.js beside it.
+const CMD_SHIM = [
+  '@ECHO off', 'GOTO start', ':find_dp0', 'SET dp0=%~dp0', 'EXIT /b', ':start', 'SETLOCAL', 'CALL :find_dp0', '',
+  'IF EXIST "%dp0%\\node.exe" (', '  SET "_prog=%dp0%\\node.exe"', ') ELSE (', '  SET "_prog=node"', '  SET PATHEXT=%PATHEXT:;.JS;=;%', ')', '',
+  'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\fake\\cli.js" %*',
+].join('\r\n');
+
+test('on Windows a program npm installed ends with its wrapper: programArgv starts node and the script its shim names, no Git Bash between (asilak/kirunak-cross-platform S-9)', { skip: process.platform !== 'win32' && 'npm writes a .cmd shim on Windows alone' }, async () => {
+  const d = dir();
+  mkdirSync(join(d, 'node_modules', 'fake'), { recursive: true });
+  writeFileSync(join(d, 'fake.cmd'), CMD_SHIM);
+  writeFileSync(join(d, 'fake'), '#!/bin/sh\nexec node "$(dirname "$0")/node_modules/fake/cli.js" "$@"\n');
+  writeFileSync(join(d, 'node_modules', 'fake', 'cli.js'), "require('fs').writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 30000);");
+  const pidFile = join(d, 'cli.pid');
+  const argv = programArgv(['fake', pidFile], { env: { ...process.env, PATH: `${d};${process.env.PATH}` } });
+  assert.deepEqual(argv.slice(1), [join(d, 'node_modules', 'fake', 'cli.js'), pidFile], 'node and the script the shim names');
+  const wrapper = start(argv);
+  const exit = ended(wrapper);
+  await until(() => pidIn(pidFile));
+  const cli = pidIn(pidFile);
+  await killTree(wrapper.pid, 2000);
+  await exit;
+  await until(() => !alive(cli), 3000).catch(() => {});
+  assert.equal(alive(cli), false, 'the program is gone with its wrapper');
 });
 
 test('E-8: a wrapper whose lease was taken over while its machine slept gives way: its command is ended and it exits', async () => {

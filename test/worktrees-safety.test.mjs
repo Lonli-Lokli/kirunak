@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { holdsLine, worktrees } from '../lib/worktrees.mjs';
+import { holdsLine, ignoredFolders, worktrees } from '../lib/worktrees.mjs';
 import { gitInit, makeWorkspace, sh } from './helpers.mjs';
 
 for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && key !== 'KIRUNAK_HOME') delete process.env[key];
@@ -72,7 +72,7 @@ test('an open task naming the worktree in another case keeps it on macOS and Win
 
 // Windows is asked about no process, and moves a folder a program runs from aside: only a program working in the
 // worktree, or a file held open there, is seen (worktrees.test.mjs).
-test('a worktree a program runs from stays, wherever the program works', { skip: process.platform === 'win32' && 'Windows is asked about no process, and a program running from a folder does not stop its move aside' }, async () => {
+test('a worktree a program runs from stays, wherever the program works', { skip: process.platform === 'win32' && 'Windows is asked about no process: there the removal tells, the test after this' }, async () => {
   const { ws, root, weather } = await makeWorkspace();
   ignore(weather, 'bin');
   const tools = add(weather, join(root, 'tools'), 'tools');
@@ -84,6 +84,28 @@ test('a worktree a program runs from stays, wherever the program works', { skip:
   try {
     await new Promise((resolve, reject) => child.once('spawn', resolve).once('error', reject));
     assert.deepEqual(whys((await worktrees({ ws })).kept), { [tools]: `sleep (pid ${child.pid}) runs from it` });
+  } finally {
+    child.kill();
+  }
+});
+
+// Windows is asked about no process (S-7) and lets the folder of a running program move aside, so the removal opens its
+// program files for writing first: a removal that started would stop halfway, every file gone but the program.
+test('on Windows a worktree a program runs from stays at its removal, wherever the program works, every file kept (asilak/kirunak-cross-platform S-9)', { skip: process.platform !== 'win32' && 'off Windows processPaths() tells, as the test before this shows' }, async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  ignore(weather, 'bin');
+  const tools = add(weather, join(root, 'tools'), 'tools');
+  mkdirSync(join(tools, 'bin'));
+  const program = join(tools, 'bin', 'node.exe');
+  copyFileSync(process.execPath, program);
+  const child = spawn(program, ['-e', 'setTimeout(() => {}, 30000)'], { cwd: root, stdio: 'ignore' });
+  try {
+    await new Promise((resolve, reject) => child.once('spawn', resolve).once('error', reject));
+    const r = await worktrees({ ws, remove: true });
+    assert.deepEqual(whys(r.kept), { [tools]: 'Windows refuses to open bin/node.exe for writing (EBUSY): a program runs from it' });
+    assert.ok(!paths(r.removed).includes(tools));
+    assert.ok(existsSync(program), 'the program is there');
+    assert.equal(sh(tools, 'git', ['status', '--porcelain']), '', 'and every tracked file');
   } finally {
     child.kill();
   }
@@ -115,6 +137,9 @@ test('AC-4: a folder named like an option is sized; a size du cannot give is sho
   }
   const [w] = (await worktrees({ ws, sizes: true, processes: none })).removed;
   assert.match(w.holds, /^(-x\/ 2\dK, keep\/ 2\dK|keep\/ 2\dK, -x\/ 2\dK)$/);
+  // With no du at all (a Windows with Git's cmd folder alone on PATH), each folder is walked: the same sizes, never
+  // unknown (asilak/kirunak-cross-platform S-9).
+  assert.match(holdsLine(ignoredFolders(shots, new Set(), { du: 'kirunak-no-such-du' })), /^(-x\/ 2\dK, keep\/ 2\dK|keep\/ 2\dK, -x\/ 2\dK)$/);
   assert.equal(holdsLine([{ folder: 'a/', kb: 8 }, { folder: 'b/', kb: null }]), 'a/ 8K, b/ size unknown');
   const many = ['a', 'b', 'c', 'd', 'e', 'f'].map((f) => ({ folder: `${f}/`, kb: 4 }));
   assert.equal(holdsLine([...many, { folder: 'g/', kb: null }]), 'a/ 4K, b/ 4K, c/ 4K, d/ 4K, e/ 4K, and 2 more, 4K and 1 of unknown size');

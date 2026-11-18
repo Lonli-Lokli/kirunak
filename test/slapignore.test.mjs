@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { install } from '../lib/install.mjs';
 import { approve, marked, register, starter, status, STARTER } from '../lib/slapignore.mjs';
@@ -107,7 +107,9 @@ test('end to end: the starter refuses commits until the owner approves it throug
   assert.match(k(['slapignore', 'status'], s.home, s.repo).stdout, /^unapproved /);
   const r = k(['slapignore', 'approve', '--all'], s.home, s.repo);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^approved .*[\\/]weather[\\/]\.slapignore \(\d+ patterns, sha256:/);
+  const printed = /^approved (.+) \(\d+ patterns, sha256:/.exec(r.stdout)?.[1] ?? r.stdout;
+  assert.ok(printed.endsWith(join('weather', '.slapignore')), printed);
+  assert.ok(!printed.includes(sep === '/' ? '\\' : '/'), `one separator, the platform's: ${printed}`);
   const c = git(['commit', '-q', '-m', 'The starter']);
   assert.equal(c.status, 0, c.stderr);
   assert.equal(k(['slap', '--staged'], s.home, s.repo).status, 0);

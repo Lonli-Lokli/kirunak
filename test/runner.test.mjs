@@ -113,13 +113,22 @@ test('keepAlive: one turn on the conversation with the step\'s flags, its handle
   ]);
 });
 
-test('programArgv: claude as given on macOS and Linux; on Windows claude.exe straight, npm\'s shim or a script through Git Bash (asilak/kirunak-cross-platform S-9)', () => {
+test('programArgv: claude as given on macOS and Linux; on Windows claude.exe straight, npm\'s claude.cmd as node and its script, any other script through Git Bash (asilak/kirunak-cross-platform S-9)', () => {
   const words = ['claude', '-p', '--add-dir', 'D:\\w\\hub'];
   for (const platform of ['darwin', 'linux']) assert.deepEqual(programArgv(words, { platform, exists: () => true, sh: '/bin/sh' }), words);
-  const env = { PATH: 'C:\\npm;C:\\Users\\a\\.local\\bin' };
+  const env = { PATH: 'C:\\npm;C:\\Users\\a\\.local\\bin;C:\\nodejs' };
   const exe = 'C:\\Users\\a\\.local\\bin\\claude.exe';
   assert.deepEqual(programArgv(words, { platform: 'win32', env, exists: (p) => p === exe, sh: 'bash.exe' }), [exe, ...words.slice(1)]);
   assert.deepEqual(programArgv(words, { platform: 'win32', env, exists: () => false, sh: 'bash.exe' }), ['bash.exe', '-c', 'exec "$0" "$@"', ...words]);
+  // npm's shim, as cmd-shim writes it: its node.exe beside it when there is one, else node on PATH.
+  const shim = 'C:\\npm\\claude.cmd';
+  const read = (p) => (p === shim ? '@ECHO off\r\nSETLOCAL\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n' : assert.fail(`read ${p}`));
+  const cli = 'C:\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js';
+  const npm = (files) => programArgv(words, { platform: 'win32', env, exists: (p) => files.includes(p), read, sh: 'bash.exe' });
+  assert.deepEqual(npm([shim, exe, 'C:\\nodejs\\node.exe']), ['C:\\nodejs\\node.exe', cli, ...words.slice(1)], 'the first PATH folder\'s claude.cmd, node on PATH');
+  assert.deepEqual(npm([shim, 'C:\\npm\\node.exe', 'C:\\nodejs\\node.exe']), ['C:\\npm\\node.exe', cli, ...words.slice(1)], 'the node.exe beside the shim first');
+  const other = programArgv(words, { platform: 'win32', env, exists: (p) => p === shim, read: () => '@echo off\r\n"%~dp0\\tool.exe" %*\r\n', sh: 'bash.exe' });
+  assert.deepEqual(other, ['bash.exe', '-c', 'exec "$0" "$@"', ...words], 'any other .cmd through Git Bash');
   const script = 'D:\\t\\fake\\claude';
   assert.deepEqual(programArgv([script, '-p'], { platform: 'win32', env, exists: () => false, sh: 'bash.exe' }), ['bash.exe', '-c', 'exec "$0" "$@"', script, '-p']);
 });

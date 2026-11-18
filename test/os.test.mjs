@@ -2,8 +2,8 @@
 // /proc, the platform's fold of paths, and the shell a step's command runs through.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, openSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { commandArgv, fold, insidePath, inUse, NO_SHELL, processField, processPaths, readerName, samePath, shell, toolPath } from '../lib/os.mjs';
 import { tempDir } from './helpers.mjs';
@@ -91,6 +91,32 @@ test('A-1: inUse moves a folder aside and back only on win32, and names a refusa
   assert.equal(inUse('D:\\src\\app', { platform: 'win32', rename: busy }), 'Windows refuses to move it (EBUSY): a process works in it');
 });
 
+test('inUse on win32 opens each program file in the folder for writing first, at any depth: EBUSY keeps it unmoved, other refusals do not (asilak/kirunak-cross-platform S-9)', () => {
+  const dir = tempDir('kirunak-inuse-');
+  for (const f of ['bin/tool.exe', 'node_modules/x/build/addon.node', 'lib/Helper.DLL', 'readme.txt', 'run.sh']) {
+    mkdirSync(dirname(join(dir, f)), { recursive: true });
+    writeFileSync(join(dir, f), 'x');
+  }
+  const refuse = (code) => Object.assign(new Error(code), { code });
+  const opened = [];
+  const moves = [];
+  const rename = (from, to) => moves.push([from, to]);
+  const open = (busy, other = null) => (p, flags) => {
+    const rel = p.slice(dir.length + 1).replaceAll('\\', '/');
+    opened.push(`${rel} ${flags}`);
+    if (rel === busy) throw refuse('EBUSY');
+    if (rel === other) throw refuse('EPERM');
+    return openSync(p, flags);
+  };
+  assert.equal(inUse(dir, { platform: 'win32', rename, open: open('lib/Helper.DLL') }), 'Windows refuses to open lib/Helper.DLL for writing (EBUSY): a program runs from it');
+  assert.deepEqual(moves, [], 'a folder a program runs from is not moved');
+  opened.length = 0;
+  assert.equal(inUse(dir, { platform: 'win32', rename, open: open(null, 'bin/tool.exe') }), null, 'a refusal but EBUSY (a read-only file) does not keep it');
+  assert.deepEqual(opened.sort(), ['bin/tool.exe r+', 'lib/Helper.DLL r+', 'node_modules/x/build/addon.node r+'], 'program files only, node_modules too');
+  assert.equal(moves.length, 2, 'then the move aside and back');
+  assert.equal(inUse(dir, { platform: 'linux', rename, open: () => assert.fail('nothing opened off win32') }), null);
+});
+
 test('AC-9, E-6: shell() is /bin/sh off win32; on win32 Git Bash from CLAUDE_CODE_GIT_BASH_PATH, else from the install git --exec-path names; none says install Git for Windows', () => {
   const never = () => assert.fail('no program runs');
   for (const platform of ['darwin', 'linux']) assert.equal(shell({ platform, run: never }), '/bin/sh');
@@ -138,20 +164,23 @@ test('AC-9: on this machine the shell runs a command, `echo ok > out.txt` writin
   assert.equal(s.stdout.trim(), 'shim ran world');
 });
 
-test('AC-7, E-1: commandArgv runs one word as a command line and more as a program with its arguments; on win32 an .exe or .com straight, found on PATH, else through the shell', () => {
+test('AC-7, E-1: commandArgv runs one word as a command line and more as a program with its arguments; on win32 an .exe or .com straight, found on PATH, npm\'s shim as node and its script, else through the shell', () => {
   const sh = '/bin/sh';
   assert.deepEqual(commandArgv(['make && make test'], { platform: 'linux', sh }), [sh, '-c', 'make && make test']);
   assert.deepEqual(commandArgv(['npm', 'test', '/x'], { platform: 'darwin', sh }), [sh, '-c', 'exec "$0" "$@"', 'npm', 'test', '/x']);
   const w = String.raw;
   const bash = w`C:\Git\bin\bash.exe`;
   const node = w`C:\node\node.exe`;
-  const files = new Set([node, w`C:\node\npm.cmd`, w`C:\tools\gradle.com`, w`D:\w\bin\run.exe`]);
-  const win = { platform: 'win32', env: { PATH: w`C:\tools;C:\node` }, exists: (p) => files.has(p), cwd: w`D:\w`, sh: bash };
+  const files = new Set([node, w`C:\node\npm.cmd`, w`C:\node\vitest.cmd`, w`C:\tools\gradle.com`, w`D:\w\bin\run.exe`]);
+  // npm.cmd is npm's own, no cmd-shim; vitest.cmd is the shim npm writes for a Node program it installs.
+  const shims = { [w`C:\node\npm.cmd`]: w`@ECHO OFF` + '\r\n' + w`"%NODE_EXE%" "%NPM_CLI_JS%" %*`, [w`C:\node\vitest.cmd`]: w`"%_prog%"  "%dp0%\node_modules\vitest\vitest.mjs" %*` };
+  const win = { platform: 'win32', env: { PATH: w`C:\tools;C:\node` }, exists: (p) => files.has(p), cwd: w`D:\w`, sh: bash, read: (p) => shims[p] };
   assert.deepEqual(commandArgv(['node', '--test', '/x'], win), [node, '--test', '/x'], 'an .exe straight, its arguments as given');
   assert.deepEqual(commandArgv(['gradle', 'build'], win), [w`C:\tools\gradle.com`, 'build'], '.com before .exe, the PATH folders in turn');
   assert.deepEqual(commandArgv(['bin/run.exe', 'a'], win), [w`D:\w\bin\run.exe`, 'a'], 'a path from the folder it runs in');
   assert.deepEqual(commandArgv([node, '-v'], win), [node, '-v']);
-  assert.deepEqual(commandArgv(['npm', 'test'], win), [bash, '-c', 'exec "$0" "$@"', 'npm', 'test'], 'a .cmd shim through the shell');
+  assert.deepEqual(commandArgv(['npm', 'test'], win), [bash, '-c', 'exec "$0" "$@"', 'npm', 'test'], 'a .cmd not npm\'s shim through the shell');
+  assert.deepEqual(commandArgv(['vitest', 'run'], win), [node, w`C:\node\node_modules\vitest\vitest.mjs`, 'run'], 'npm\'s shim as node and its script, no shell between');
   assert.deepEqual(commandArgv(['./gradlew.bat', 'test'], win), [bash, '-c', 'exec "$0" "$@"', './gradlew.bat', 'test']);
   assert.deepEqual(commandArgv(['node -v'], win), [bash, '-c', 'node -v'], 'one word is a command line on win32 too');
   assert.deepEqual(commandArgv(['node', '-v'], { ...win, env: { Path: w`C:\node` } }), [node, '-v'], 'Path as Windows spells it');
