@@ -82,13 +82,14 @@ test('boundarySince: progress.md shorter than at the block, or no line recorded,
   assert.equal(boundarySince(text(21), ['s-main'], dir, { at: 'not a time', line: null }), false);
 });
 
-// Best of 5, so a cold start or a busy runner is not the measure.
+// Ten calls first and the best of 5, so neither the JIT's warm-up nor a busy runner is the measure: after one call it
+// took 4 to 8 ms in WSL, S-8's code as S-9's; warm, 2.
 test('runningBy: a 2,000-line progress.md in under 5 ms, best of 5', () => {
   const dir = makeRepos().top;
   const lines = [];
   for (let i = 0; i < 1000; i++) lines.push(`2026-01-05 10:00 S-${i} started (session s-main)`, `2026-01-05 10:01 S-${i} finished`);
   const text = `${lines.join('\n')}\n2026-01-05 11:00 S-9999 started (session s-main)\n`;
-  runningBy(text, ['s-main'], dir);
+  for (let i = 0; i < 10; i++) runningBy(text, ['s-main'], dir);
   let ms = Infinity;
   let got;
   for (let i = 0; i < 5; i++) {
