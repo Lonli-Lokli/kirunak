@@ -120,7 +120,8 @@ setTimeout(() => {}, 30000);`;
 test('past maxMinutes a grandchild in a process group of its own is killed too', { skip: POSIX_ONLY && `${POSIX_ONLY}: a grandchild started detached outlives its job there, the known gap` }, async () => {
   const { home, g } = guard({ killAfterMs: 500 });
   const pidFile = join(home, 'grandchild.pid');
-  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 0.01, cwd: home, command: [process.execPath, '-e', DETACHES, pidFile] });
+  // Two seconds, as above, so a slow start still writes the grandchild's pid before the deadline.
+  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 2 / 60, cwd: home, command: [process.execPath, '-e', DETACHES, pidFile] });
   assert.equal(r.exitCode, 124);
   const grandchild = Number(readFileSync(pidFile, 'utf8'));
   await until(() => !groupAlive(grandchild), 3000).catch(() => {});
