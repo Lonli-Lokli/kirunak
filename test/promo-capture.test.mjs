@@ -12,6 +12,8 @@ const START = Date.UTC(2026, 9, 22, 9, 0);
 const NAMES = ['someones-mac'];
 // The launcher and recorder are a macOS terminal's: /usr/bin/script, mkfifo and /bin/sh, none of them Windows'.
 const NO_SCRIPT = process.platform === 'win32' && 'Windows has no /usr/bin/script, mkfifo or /bin/sh';
+// Recording runs macOS's script -F; Linux's util-linux script has no -F, exits at once, and the fifo is never opened.
+const NO_BSD_SCRIPT = NO_SCRIPT || (process.platform !== 'darwin' && 'the recorder runs macOS\'s script -F, which Linux\'s script has not');
 const temp = () => tempDir('capture-');
 const jsonl = (file) => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 const lines = (pieces) => pieces.map((p) => JSON.stringify(p) + '\n').join('');
@@ -279,7 +281,7 @@ test('the login is what Claude Code in the home says, in the home\'s own environ
   assert.equal(loggedInOf(home, fake('echo not json')), false);
 });
 
-test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', { skip: NO_SCRIPT }, async () => {
+test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', { skip: NO_BSD_SCRIPT }, async () => {
   const raw = join(temp(), 'probe');
   const code = await record(raw, ['/bin/sh', '-c', 'printf "one\\n"; sleep 0.3; printf "two\\n"'], { env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'ignore', 'inherit'] });
   assert.equal(code, 0);
