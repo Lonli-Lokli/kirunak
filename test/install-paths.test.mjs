@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { bugsHookLine, compactChecks, ladderChecks, trackerLine, unlockHookLine } from '../lib/doctor.mjs';
-import { install, SKILLS } from '../lib/install.mjs';
+import { install, runsKirunakHook, SKILLS } from '../lib/install.mjs';
+import { shFolder } from '../lib/os.mjs';
 import { k, ladderWorkspace } from './helpers.mjs';
 
 // kirunak's own hooks whatever separator the OS wrote (bug asilak/kirunak-install-hook-paths-windows): k install on
@@ -14,6 +15,8 @@ import { k, ladderWorkspace } from './helpers.mjs';
 const WIN = 'D:\\sources\\kirunak';
 // The command k install writes on win32 for the hook `name`: quoted, each backslash doubled.
 const win = (name) => `node "${[...WIN.split('\\'), 'hooks', name].join('\\\\')}"`;
+// The command it writes on this machine for the hook at `path`: on Windows as win() writes it.
+const here = (path) => (process.platform === 'win32' ? `node "${path.replaceAll('\\', '\\\\')}"` : `node ${path}`);
 
 const OTHERS = {
   PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node C:\\tools\\guard.mjs', timeout: 5 }] }],
@@ -32,12 +35,11 @@ async function windows() {
   const read = () => JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
   put({ hooks: structuredClone(OTHERS) });
   install({ ...paths, kirunakRoot: root, home: w.home, ws: w.ws });
-  const here = `node ${join(root, 'hooks')}/`;
   const fixture = read();
   for (const h of Object.values(fixture.hooks).flat().flatMap((b) => b.hooks)) {
-    if (!h.command.startsWith(here)) continue;
-    const [name, ...rest] = h.command.slice(here.length).split(' ');
-    h.command = [win(name), ...rest].join(' ');
+    const [, name, rest] = /[\\/](kirunak-[\w-]+\.mjs)"?(.*)$/.exec(h.command) ?? [];
+    if (!name || !h.command.startsWith(here(join(root, 'hooks', name)))) continue;
+    h.command = win(name) + rest;
   }
   return { ...w, ...paths, root, put, read, fixture };
 }
@@ -109,7 +111,7 @@ test('a second k install on win32 plans nothing, and one from this machine point
   const after = w.read().hooks;
   for (const [event, list] of Object.entries(w.fixture.hooks)) assert.equal(after[event].length, list.length, `${event}: no block added`);
   assert.deepEqual(after.PreToolUse[0], OTHERS.PreToolUse[0]);
-  assert.equal(after.PreToolUse[1].hooks[0].command, `node ${join(w.root, 'hooks', 'kirunak-freeze.mjs')}`);
+  assert.equal(after.PreToolUse[1].hooks[0].command, here(join(w.root, 'hooks', 'kirunak-freeze.mjs')));
 });
 
 test('k install folds each kirunak block an earlier install added twice down to one; another tool\'s hooks stay as they were', async () => {
@@ -177,4 +179,22 @@ test('the status line\'s tracker written with backslashes is kirunak\'s to k ins
   assert.ok(actions.includes(`${w.settingsPath}: the status line already runs kirunak's tracker`), actions.at(-1));
   w.put({ ...w.fixture, statusLine: { type: 'command', command: 'node C:\\tools\\myhooks\\statusline-track.mjs' } });
   assert.equal(trackerLine({ settingsPath: w.settingsPath, kirunakRoot: WIN })[0], 'warn');
+});
+
+test('a git hook\'s line on win32 runs kirunak\'s hook with either separator, doubled or not, in any case, and through $HOME; elsewhere only as written', () => {
+  const hook = 'git-pre-commit.mjs';
+  const runs = (line, platform = 'win32') => runsKirunakHook(line, WIN, hook, 'D:\\', platform);
+  assert.ok(runs(`${win(hook)} || exit 1`), 'the line k install writes on win32');
+  assert.ok(runs('node D:/Sources/Kirunak/hooks/git-pre-commit.mjs || exit 1'));
+  assert.ok(runs('node "$HOME"/sources/kirunak/hooks/git-pre-commit.mjs || exit 1'));
+  assert.ok(!runs('node "$HOME"/sources/kirunak-other/hooks/git-pre-commit.mjs || exit 1'), 'another checkout');
+  assert.ok(!runs(`# ${win(hook)} || exit 1`), 'commented out');
+  assert.ok(!runs(`${win(hook)} || exit 1`, 'linux'));
+});
+
+test('a git hook\'s node fallback names node\'s folder on win32 as Git Bash does, its drive\'s colon never splitting PATH; elsewhere as it is', () => {
+  assert.equal(shFolder('C:\\Program Files\\nodejs', 'win32'), '/c/Program Files/nodejs');
+  assert.equal(shFolder('/opt/node/bin', 'win32'), '/opt/node/bin');
+  assert.equal(shFolder('C:\\Program Files\\nodejs', 'linux'), 'C:\\Program Files\\nodejs');
+  assert.equal(shFolder('/Users/a/.nvm/versions/node/v24/bin', 'darwin'), '/Users/a/.nvm/versions/node/v24/bin');
 });

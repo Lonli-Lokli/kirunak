@@ -11,7 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { advice, lastCall, reply } from '../hooks/kirunak-stale.mjs';
 import { limitsOf, track } from '../hooks/statusline-track.mjs';
-import { install } from '../lib/install.mjs';
+import { install, OWN_ESCALATE, OWN_STALE } from '../lib/install.mjs';
 import { logLimits } from '../lib/limits.mjs';
 import { loadWorkspace } from '../lib/workspace.mjs';
 import { KIRUNAK, makeWorkspace, tempDir } from './helpers.mjs';
@@ -117,6 +117,12 @@ test('a missing, empty or garbled transcript lets the prompt through silent, exi
   assert.match(out.systemMessage, /idle 10 hours/);
 });
 
+// The command k install writes for the file at `parts`: on Windows the path quoted, each backslash doubled.
+const node = (...parts) => {
+  const p = join(...parts);
+  return process.platform === 'win32' ? `node "${p.replaceAll('\\', '\\\\')}"` : `node ${p}`;
+};
+
 // An install into a temporary settings file, never the user's.
 function installInto(dir, extra = {}) {
   return install({
@@ -128,23 +134,23 @@ function installInto(dir, extra = {}) {
 test('k install wires the stale-session hook once on UserPromptSubmit beside the escalation hook, and --print shows it', () => {
   const dir = tmp();
   const printed = installInto(dir, { print: true }).actions.join('\n');
-  assert.match(printed, /would add to .*settings\.json hooks\.UserPromptSubmit: .*hooks\/kirunak-stale\.mjs/);
+  assert.match(printed, /would add to .*settings\.json hooks\.UserPromptSubmit: .*hooks[\\/]+kirunak-stale\.mjs/);
   installInto(dir);
   installInto(dir);
   const settings = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'));
   const commands = settings.hooks.UserPromptSubmit.flatMap((b) => b.hooks.map((h) => h.command));
-  assert.equal(commands.filter((c) => c.endsWith('hooks/kirunak-stale.mjs')).length, 1, 'once after two installs');
-  assert.equal(commands.filter((c) => c.endsWith('hooks/kirunak-escalate.mjs')).length, 1);
+  assert.equal(commands.filter((c) => OWN_STALE.test(c)).length, 1, 'once after two installs');
+  assert.equal(commands.filter((c) => OWN_ESCALATE.test(c)).length, 1);
   assert.match(installInto(dir, { print: true }).actions.join('\n'), /already has the kirunak UserPromptSubmit hook/);
   // An entry from another checkout is pointed here, never doubled.
   const old = structuredClone(settings);
-  old.hooks.UserPromptSubmit = old.hooks.UserPromptSubmit.map((b) => (b.hooks[0].command.endsWith('kirunak-stale.mjs')
+  old.hooks.UserPromptSubmit = old.hooks.UserPromptSubmit.map((b) => (OWN_STALE.test(b.hooks[0].command)
     ? { hooks: [{ type: 'command', command: 'node /old/kirunak/hooks/kirunak-stale.mjs', timeout: 5 }] } : b));
   writeFileSync(join(dir, 'settings.json'), JSON.stringify(old));
   installInto(dir);
   const after = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).hooks.UserPromptSubmit.flatMap((b) => b.hooks);
   assert.deepEqual(after.filter((h) => h.command.includes('kirunak-stale.mjs')),
-    [{ type: 'command', command: `node ${join(KIRUNAK, 'hooks', 'kirunak-stale.mjs')}`, timeout: 10 }]);
+    [{ type: 'command', command: node(KIRUNAK, 'hooks', 'kirunak-stale.mjs'), timeout: 10 }]);
   const config = JSON.parse(readFileSync(join(dir, 'home', 'escalate', 'config.json'), 'utf8'));
   assert.deepEqual(config.usage, { stale: { minutes: 60, context: 150000 }, limitsLog: null }, 'no workspace: the defaults');
 });
