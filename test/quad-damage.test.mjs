@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { spawn as spawnNode, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { lock, review } from '../lib/bug-review.mjs';
 import { checkBugText, drop, fixLine, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { start as intakeStart } from '../lib/intake.mjs';
+import { readText } from '../lib/os.mjs';
 import {
   claim, FIX_ENV, keepAwake, OWNER_STOP, OWNER_WHY, preview, progressCommand, progressOf, progressText, pushLine, release, run, runsDir, start,
   listenForStop, state, statusLine, stop, stopPath, summaryOf, summaryText, workBug,
@@ -484,16 +485,17 @@ test('k bugs quad-damage: refused with no marked bug; else a detached run that r
   assert.deepEqual(out.bugs, ['hub/c']);
   assert.equal(out.log, join(out.folder, 'run.log'));
   assert.equal(dirname(out.folder), runsDir(w.home));
-  for (let i = 0; i < 400 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
-  for (let i = 0; i < 100 && existsSync(quadDamagePath(w.home)); i++) await new Promise((done) => setTimeout(done, 50));
+  // Up to four minutes: its dozens of git calls are slow on a busy Windows machine.
+  for (let i = 0; i < 4800 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
+  for (let i = 0; i < 600 && existsSync(quadDamagePath(w.home)); i++) await new Promise((done) => setTimeout(done, 50));
   assert.match(readFileSync(join(out.folder, 'summary.md'), 'utf8'), /^Quad Damage, \d\d:\d\d to \d\d:\d\d: 1 merged, 0 waits?, 0 not reached\n- hub\/c: merged [0-9a-f]{7} into hub's master\n/);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n', 'the fake fix merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n', 'the fake fix merged');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'c.md')), false, 'the bug closed');
   assert.equal(existsSync(quadDamagePath(w.home)), false);
   const log = readFileSync(out.log, 'utf8');
   assert.match(log, /^--- Quad Damage, \S+ \(via mod\)\n/);
   assert.match(log, new RegExp(`Quad Damage runs: pid ${out.pid}, via mod`));
-  assert.deepEqual(readdirSync(runsDir(w.home)), [out.folder.split('/').pop()]);
+  assert.deepEqual(readdirSync(runsDir(w.home)), [basename(out.folder)]);
   assert.equal(k(w.home, ['bugs', 'quad-damage', 'x']).status, 2);
   // AC-16: its progress, and the session's wait on it, which ends at once with the summary.
   assert.match(progressFile(out.folder), /^\d\d:\d\d hub\/c: started\n\d\d:\d\d hub\/c: fix committed [0-9a-f]{7}\n\d\d:\d\d hub\/c: review clean, merged [0-9a-f]{7} into hub\n\d\d:\d\d Quad Damage done: 1 merged, 0 wait, 0 not reached\n$/);
@@ -584,7 +586,7 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.ok(!fix.brief.includes('This is the retry'));
   const [rv] = reviewsRun(w);
   assert.ok(rv.brief.includes(`\`heavy run --session ${rv.sessionId} --\``), 'AC-14: the review\'s own session id too');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false);
   assert.equal(existsSync(`${w.hubRoot}-quad-a`), false, 'its worktree removed');
   assert.match(gitIn(w.hubRoot, 'log', '-1', '--format=%s'), /^kirunak: close the bug hub\/a: bug\/a merged into hub's master/);
@@ -655,7 +657,7 @@ test('findings, then the retry from them, then clean: merged; the retry\'s brief
   const head1 = /^head: (\S+)$/m.exec(reviewsRun(w)[0].brief)[1];
   assert.match(retry.brief, /^# Quad Damage: the bug hub\/a, try 2$/m);
   assert.ok(retry.brief.includes(`This is the retry after a review: kirunak/bugs/a/review-1.md (${join(w.hubRoot, 'kirunak', 'bugs', 'a', 'review-1.md')}) judged the head ${head1} of bug/a`), retry.brief);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: as the forecast\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: as the forecast\n');
   assert.equal(reviewsRun(w).length, 2);
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a')), false, 'closed with its reviews');
   const said = progressLines(r.folder);
@@ -681,7 +683,7 @@ test('findings twice: the bug waits with both reviews and the run goes on; a con
   assert.match(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md'), 'utf8'), /^verdict: conflict$/m);
   assert.equal(reviewsRun(w).length, 2, 'a conflict runs no review session');
   assert.equal(fixes(w).length, 3);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: a day\n', 'nothing merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: a day\n', 'nothing merged');
   assert.deepEqual(gitIn(w.hubRoot, 'log', '--format=%s', `${master}..master`).split('\n'), [
     'kirunak: the bug hub/c: bug/c no longer merges onto master, review-1.md', 'master moves on',
     'kirunak: review-2.md of the bug hub/a: findings', 'kirunak: review-1.md of the bug hub/a: findings',
@@ -709,7 +711,8 @@ test('the 150th call\'s result ends the session, and so do its minutes: the bug 
     { id: 'hub/c', outcome: 'waits', why: 'its fixing session, try 1, reached 0.005 minutes; what holds is on bug/c in hub' },
   ]);
   const a = JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8'));
-  assert.deepEqual([a.calls, a.ended, a.exit], [150, 'calls', 143]);
+  // Its session's end: TERM on macOS and Linux, the end at once on Windows.
+  assert.deepEqual([a.calls, a.ended, a.exit], [150, 'calls', process.platform === 'win32' ? 1 : 143]);
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'c', 'fix-1.json'), 'utf8')).ended, 'minutes');
   assert.equal(reviewsRun(w).length, 0);
   assert.deepEqual(readdirSync(join(w.home, 'running')), [], 'each session unregistered');
@@ -743,8 +746,8 @@ test('a fix in another repo than the bug\'s: run there with the bug\'s repo adde
   assert.equal(fix.cwd, w.self);
   assert.deepEqual(fix.addDirs, [w.hubRoot, r.folder]);
   assert.match(fix.brief, /^Its fix repo: kirunak, at /m);
-  assert.equal(readFileSync(join(w.self, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(readText(join(w.self, 'tiles.txt')), 'cache: one hour\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: forever\n');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false);
   assert.match(summaryFile(r), /- hub\/a: merged [0-9a-f]{7} into kirunak's master\n/);
 });
@@ -786,7 +789,7 @@ test('E-7 for the review: a review session that wrote nothing before working sto
   ].map(({ stop, ...b }) => b));
   assert.equal(r.stopped, 'a review session failed: the login is gone: Invalid API key · Please run /login');
   assert.equal(fixes(w).length, 1, 'no retry');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: forever\n');
 
   // A crash with no result, and a session of one turn, stop it too.
   for (const [verdict, why] of [
@@ -828,11 +831,11 @@ function ear() {
   return e;
 }
 
-// Until `ok()`, at most 10 s.
+// Until `ok()`, at most 30 s: git's work before it is slow on a busy Windows machine.
 async function until(ok) {
-  const ends = Date.now() + 10000;
+  const ends = Date.now() + 30000;
   while (!ok()) {
-    if (Date.now() > ends) throw new Error('waited 10 s in vain');
+    if (Date.now() > ends) throw new Error('waited 30 s in vain');
     await new Promise((r) => setTimeout(r, 20));
   }
 }
@@ -874,9 +877,9 @@ test('stop while fixing: k bugs quad-damage --stop writes the request and sends 
       off();
     };
   };
-  const t = Date.now();
   const going = run({ ws: w.ws, ...seams(), runner: w.runner, listen, work: (ctx) => workBug({ ...ctx, processes: NOBODY }) });
   await until(() => fixes(w).length === 1);
+  const t = Date.now();
   assert.equal(ears, 1, 'the run listens');
   assert.equal(state(w.home).phase, 'fixing');
   // The real verb and the real ear (fs.watch and its look), to this process's run (asilak/kirunak-cross-platform AC-8).
@@ -958,10 +961,11 @@ listenForStop(() => {}, { home: ${JSON.stringify(home)} });`;
 test('stop while reviewing: the review session is ended and nothing of it kept; the bug waits with its branch', async () => {
   const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], { fixes: [fixed()], verdicts: [{ verdict: 'clean', sleep: 30 }] });
   const e = ear();
-  const t = Date.now();
   const going = run({ ws: w.ws, ...seams(), runner: w.runner, listen: e.listen, work: (ctx) => workBug({ ...ctx, processes: NOBODY }) });
   await until(() => reviewsRun(w).length === 1);
   assert.equal(state(w.home).phase, 'reviewing');
+  // From the stop on: the fix before it is git's work, slow on a busy Windows machine.
+  const t = Date.now();
   e.stop(w.home);
   const r = await going;
   assert.ok(Date.now() - t < 10000, 'the review killed, not waited for');
@@ -970,7 +974,7 @@ test('stop while reviewing: the review session is ended and nothing of it kept; 
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a', 'review-1.md')), false, 'no review kept');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), true);
   assert.match(gitIn(w.hubRoot, 'rev-parse', '--verify', 'bug/a'), /^[0-9a-f]{40}$/, 'its branch kept');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n', 'nothing merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: forever\n', 'nothing merged');
   assert.equal(events(w.home).filter((x) => x.kind === 'bug-review').at(-1).outcome, 'stopped');
 });
 
@@ -987,7 +991,7 @@ test('stop during a merge: the merge under way finishes and the bug counts merge
   assert.deepEqual(phases, ['merging']);
   assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome]), [['hub/a', 'merged'], ['hub/c', 'not-reached']]);
   stoppedByOwner(w, r);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n', 'merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n', 'merged');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false, 'the bug closed');
   assert.equal(fixes(w).length, 1, 'hub/c never started');
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: review clean: merging\n/);

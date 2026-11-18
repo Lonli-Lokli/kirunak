@@ -52,7 +52,7 @@ export async function makeWorkspace({ finished = true } = {}) {
   const root = tempDir('kirunak-');
   cpSync(join(FIXTURES, 'workspace'), root, { recursive: true });
   if (!finished) {
-    execFileSync('rm', ['-rf', join(root, 'weather', 'kirunak')]);
+    rmSync(join(root, 'weather', 'kirunak'), { recursive: true, force: true });
   }
   for (const repo of ['weather', 'hub']) {
     gitInit(join(root, repo));
@@ -73,19 +73,26 @@ export const k = (home, args, env = {}) =>
 
 export const RESULT = readFileSync(join(FIXTURES, 'run', 'result.json'), 'utf8');
 
+// A `claude` in `dir` that runs the node script `body`: a sh script, as npm's shim beside claude.cmd is, so kirunak
+// starts it as it starts a real one on every OS (on Windows through Git Bash, programArgv in lib/os.mjs). → its path.
+export function nodeClaude(dir, body) {
+  const q = (s) => `'${s.replaceAll("'", `'\\''`)}'`;
+  writeFileSync(join(dir, 'claude.cjs'), body);
+  writeFileSync(join(dir, 'claude'), `#!/bin/sh\nexec ${q(process.execPath)} ${q(join(dir, 'claude.cjs'))} "$@"\n`);
+  chmodSync(join(dir, 'claude'), 0o755);
+  return join(dir, 'claude');
+}
+
 // A fake `claude`: it records its argv, stdin, cwd and the step's variables, and prints the fixture result.
 export function fakeClaude(result = RESULT) {
   const dir = realpathSync(tempDir('kirunak-fake-claude-'));
-  const bin = join(dir, 'claude');
   writeFileSync(join(dir, 'result.json'), result);
-  writeFileSync(bin, `#!${process.execPath}
-const fs = require('fs');
+  const bin = nodeClaude(dir, `const fs = require('fs');
 const calls = fs.existsSync(${JSON.stringify(join(dir, 'calls.json'))}) ? JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, 'calls.json'))}, 'utf8')) : [];
 calls.push({ argv: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8'), cwd: process.cwd(), task: process.env.KIRUNAK_TASK, step: process.env.KIRUNAK_STEP });
 fs.writeFileSync(${JSON.stringify(join(dir, 'calls.json'))}, JSON.stringify(calls));
 process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}, 'utf8'));
 `);
-  chmodSync(bin, 0o755);
   return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
 }
 

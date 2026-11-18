@@ -98,7 +98,8 @@ test('past maxMinutes the job and its children are killed, exit code 124', async
   const { home, g } = guard({ killAfterMs: 500 });
   const pidFile = join(home, 'child.pid');
   const t0 = Date.now();
-  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 0.01, cwd: home, command: [process.execPath, '-e', PARENT, pidFile] });
+  // Two seconds, so a slow start (a busy Windows, a node behind the wrapper's node) still writes the child's pid.
+  const r = await g.run({ session: 's', what: 'hang', maxMinutes: 2 / 60, cwd: home, command: [process.execPath, '-e', PARENT, pidFile] });
   assert.equal(r.exitCode, 124);
   assert.ok(Date.now() - t0 < 5000, 'killed at the deadline, not after the sleep');
   const child = Number(readFileSync(pidFile, 'utf8'));
@@ -335,7 +336,7 @@ test('a gone owner whose job has ended holds nothing, and the next job takes the
   assert.equal(r?.exitCode, 0);
 });
 
-test('a dead owner\'s job pid that names a group this user cannot signal is not waited on', async (t) => {
+test('a dead owner\'s job pid that names a group this user cannot signal is not waited on', { skip: POSIX_ONLY }, async (t) => {
   // A root-owned group leader stands in for a job pid reused since the owner died.
   const rows = spawnSync('ps', ['-axo', 'pid=,pgid=,uid='], { encoding: 'utf8' }).stdout.trim().split('\n').map((l) => l.trim().split(/\s+/));
   const other = rows.find(([pid, pgid, uid]) => pid === pgid && uid === '0' && Number(pid) > 1);
@@ -351,7 +352,7 @@ test('a dead owner\'s job pid that names a group this user cannot signal is not 
   assert.equal(r?.exitCode, 0, `the job waited behind group ${other[0]}`);
 });
 
-test('a pid of another user is not alive: it is never kirunak\'s, so nothing waits for it', (t) => {
+test('a pid of another user is not alive: it is never kirunak\'s, so nothing waits for it', { skip: process.platform === 'win32' && 'Windows has no ps to name a process of another user' }, (t) => {
   const rows = spawnSync('ps', ['-axo', 'pid=,uid='], { encoding: 'utf8' }).stdout.trim().split('\n').map((l) => l.trim().split(/\s+/));
   const root = rows.find(([pid, uid]) => uid === '0' && Number(pid) > 1);
   if (!root || process.getuid() === 0) return t.skip('no process of another user');

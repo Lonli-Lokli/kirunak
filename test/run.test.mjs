@@ -1028,7 +1028,10 @@ const until = async (ok, what) => {
   for (const t0 = Date.now(); !ok(); await new Promise((r) => setTimeout(r, 20))) assert.ok(Date.now() - t0 < 10000, what);
 };
 
-test('k run stopped by a signal kills its claude, fails the step, frees the lock and exits with the signal; the next k run retries the step', async () => {
+// k run in a child stopped as Ctrl-C stops it: a SIGINT sent to the child.
+const NO_SIGINT = process.platform === 'win32' && 'Windows cannot send a child SIGINT: its kill ends k run at once';
+
+test('k run stopped by a signal kills its claude, fails the step, frees the lock and exits with the signal; the next k run retries the step', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run in a child, with a fake claude on PATH that says its pid and sleeps.
   const bin = tempDir('kirunak-sleepy-claude-');
@@ -1051,7 +1054,7 @@ test('k run stopped by a signal kills its claude, fails the step, frees the lock
   assert.doesNotMatch(calls[0].prompt, /failure-1\.md|the last attempt failed/, 'a stop is not the attempt\'s failure');
 });
 
-test('k run --watch stopped by a signal while a step is left undecided exits with the signal and leaves that step and its claude', async () => {
+test('k run --watch stopped by a signal while a step is left undecided exits with the signal and leaves that step and its claude', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
@@ -1083,7 +1086,7 @@ test('k run --watch stopped by a signal while a step is left undecided exits wit
   }
 });
 
-test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', async () => {
+test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run --watch in a child, with a fake claude on PATH that asks for a long job.
   const bin = tempDir('kirunak-heavy-claude-');
@@ -1137,7 +1140,7 @@ echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,
   return { bin, child, said: () => said, exited: new Promise((r) => child.on('exit', (code, signal) => r({ code, signal }))) };
 }
 
-test('k run stopped while a resume waits for a machine slot, its job done, leaves the step waiting; the next k run runs the job again and resumes', async () => {
+test('k run stopped while a resume waits for a machine slot, its job done, leaves the step waiting; the next k run runs the job again and resumes', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   // The job lowers the machine's cap to none, so the resume after it waits for a slot.
   const full = join(tempDir('kirunak-full-'), 'machine.json');
@@ -1160,7 +1163,7 @@ test('k run stopped while a resume waits for a machine slot, its job done, leave
   assert.match(progress(w), /S-1 heavy job ended: .*\n.*S-1 heavy job ended: .*\n.*S-1 resumed \(session /);
 });
 
-test('k run stopped while the owner\'s answer waits for a machine slot leaves the step waiting for the owner; the next k run resumes it', async () => {
+test('k run stopped while the owner\'s answer waits for a machine slot leaves the step waiting for the owner; the next k run resumes it', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w, (step, n) => (n > 1 ? 'write' : (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing')));
   assert.equal((await watch(w)).stopped, 'S-1 waits for the owner: Three days or a week?');
@@ -1180,7 +1183,7 @@ test('k run stopped while the owner\'s answer waits for a machine slot leaves th
   assert.equal(progress(w).match(/resumed/g).length, 1);
 });
 
-test('k run stopped releases the device its step holds: a resume waiting for a machine slot leaves the device free', async () => {
+test('k run stopped releases the device its step holds: a resume waiting for a machine slot leaves the device free', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ndevice: ios.low'));
   fakeRunner(w, () => (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));
   await run({ ws: w.ws, id: w.id });
@@ -1505,11 +1508,12 @@ test('a keep-alive that never ends is killed at its deadline, and the step resum
   let ended = 'still running';
   w.ws.seams.runner.keepAlive = () => {
     const child = spawn('sleep', ['30'], { detached: true });
-    const done = new Promise((r) => child.on('exit', (code, signal) => ((ended = signal), release(), r({ exitCode: 143, result: null }))));
+    const done = new Promise((r) => child.on('exit', (code, signal) => ((ended = signal ?? code), release(), r({ exitCode: 143, result: null }))));
     return { pid: child.pid, done };
   };
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, keepAliveMinutes: 0.002 });
-  assert.equal(ended, 'SIGTERM', 'the keep-alive was killed at its deadline');
+  // TERM on macOS and Linux; on Windows the end at once, exit 1.
+  assert.equal(ended, process.platform === 'win32' ? 1 : 'SIGTERM', 'the keep-alive was killed at its deadline');
   assert.deepEqual(r.states, BOTH);
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.deepEqual(readLines(w.home)[0].reason, 'the keep-alive did not end within 0.002 minutes');
@@ -1629,7 +1633,7 @@ test('k run stops before a review whose two latest counting reviews repeat a not
   assert.match(r3.stopped, /^S-5 AC-2 not met in review-2 and review-3; the owner decides: read steps\/S-5\/repeat\.md\n  review-2: \| AC-2 \| not met \| AC-2 still fails in review-2\.md: the cache keeps one day \|\n  review-3: \| AC-2 \| not met \| AC-2 still fails in review-3\.md: the cache keeps one day \|$/);
 });
 
-test('a step ended on its budget leaves no background job running, though the job is in a process group of its own', async () => {
+test('a step ended on its budget leaves no background job running, though the job is in a process group of its own', { skip: process.platform === 'win32' && 'Windows has no process groups: a job started detached outlives its step there, the known gap' }, async () => {
   const dir = tempDir('kirunak-timed-');
   const pidFile = join(dir, 'job.pid');
   // The step's claude, leading its own group as the runner starts it, keeps a background job in another group.

@@ -193,7 +193,8 @@ test('AC-6, AC-7: k heavy past --max-minutes ends the program and the child it s
   const pidFile = join(w.home, 'child.pid');
   const parent = "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' }); require('fs').writeFileSync(process.argv[1], String(c.pid)); setTimeout(() => {}, 30000);";
   const t0 = Date.now();
-  const r = k(w.home, ['heavy', '--max-minutes', '0.01', '--', process.execPath, '-e', parent, pidFile]);
+  // Three seconds, so a slow start (a busy Windows, a node behind the wrapper's node) still writes the child's pid.
+  const r = k(w.home, ['heavy', '--max-minutes', '0.05', '--', process.execPath, '-e', parent, pidFile]);
   assert.equal(r.status, 124, r.stderr);
   assert.ok(Date.now() - t0 < 20000, `ended in ${Date.now() - t0} ms`);
   const child = Number(readFileSync(pidFile, 'utf8'));

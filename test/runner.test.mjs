@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { programArgv } from '../lib/os.mjs';
 import runnerClaude, { claudeArgs, KEEP_ALIVE_PROMPT, limitsArgs, LIMITS_PROMPT, parseResult, readLimits } from '../plugins/runner-claude.mjs';
-import { fakeClaude, FIXTURES, RESULT, tempDir } from './helpers.mjs';
+import { fakeClaude, FIXTURES, nodeClaude, RESULT, tempDir } from './helpers.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -97,7 +98,9 @@ test('a run that prints no result ends with its exit code and no result', async 
 test('keepAlive: one turn on the conversation with the step\'s flags, its handle\'s done the whole result', async () => {
   const fake = fakeClaude();
   const runner = runnerClaude({}, { bin: fake.bin }).provides.runner;
-  const handle = runner.keepAlive('abc-session', fake.dir, { addDirs: ['/w/hub'] });
+  // A folder as this OS writes one: Git Bash, which starts the fake on Windows, rewrites a POSIX path there.
+  const hub = join(tmpdir(), 'w', 'hub');
+  const handle = runner.keepAlive('abc-session', fake.dir, { addDirs: [hub] });
   assert.ok(Number.isInteger(handle.pid), 'a pid, so a deadline can kill it');
   const { exitCode, result, usage } = await handle.done;
   assert.equal(exitCode, 0);
@@ -106,8 +109,19 @@ test('keepAlive: one turn on the conversation with the step\'s flags, its handle
   const [call] = fake.calls();
   assert.deepEqual(call.argv, [
     '-p', KEEP_ALIVE_PROMPT, '--output-format', 'json', '--permission-mode', 'auto', '--max-turns', '1',
-    '--disallowedTools', 'Agent', '--add-dir', '/w/hub', '--resume', 'abc-session',
+    '--disallowedTools', 'Agent', '--add-dir', hub, '--resume', 'abc-session',
   ]);
+});
+
+test('programArgv: claude as given on macOS and Linux; on Windows claude.exe straight, npm\'s shim or a script through Git Bash (asilak/kirunak-cross-platform S-9)', () => {
+  const words = ['claude', '-p', '--add-dir', 'D:\\w\\hub'];
+  for (const platform of ['darwin', 'linux']) assert.deepEqual(programArgv(words, { platform, exists: () => true, sh: '/bin/sh' }), words);
+  const env = { PATH: 'C:\\npm;C:\\Users\\a\\.local\\bin' };
+  const exe = 'C:\\Users\\a\\.local\\bin\\claude.exe';
+  assert.deepEqual(programArgv(words, { platform: 'win32', env, exists: (p) => p === exe, sh: 'bash.exe' }), [exe, ...words.slice(1)]);
+  assert.deepEqual(programArgv(words, { platform: 'win32', env, exists: () => false, sh: 'bash.exe' }), ['bash.exe', '-c', 'exec "$0" "$@"', ...words]);
+  const script = 'D:\\t\\fake\\claude';
+  assert.deepEqual(programArgv([script, '-p'], { platform: 'win32', env, exists: () => false, sh: 'bash.exe' }), ['bash.exe', '-c', 'exec "$0" "$@"', script, '-p']);
 });
 
 // gulnya/quad-damage AC-9, AC-10: the limits reading. limits.jsonl is a real session's stream (`claude -p` on Haiku,
@@ -123,12 +137,7 @@ const windows = (five, week) => ({ unifiedWindows: { five_hour: { utilization: f
 const WEEK_ONLY = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1794150000, rateLimitType: 'seven_day', overageStatus: 'rejected', overageDisabledReason: 'out_of_credits', isUsingOverage: false, unifiedWindows: { seven_day: { utilization: 0.01, resetsAt: 1794150000, status: 'allowed' } } }, uuid: '00000000-0000-4000-8000-000000000003', session_id: '00000000-0000-4000-8000-000000000000' };
 
 // A node script as `claude`, for what fakeClaude cannot do: fail, or never end.
-function fakeBin(body) {
-  const dir = realpathSync(tempDir('kirunak-fake-claude-'));
-  writeFileSync(join(dir, 'claude'), `#!${process.execPath}\n${body}\n`);
-  chmodSync(join(dir, 'claude'), 0o755);
-  return join(dir, 'claude');
-}
+const fakeBin = (body) => nodeClaude(realpathSync(tempDir('kirunak-fake-claude-')), `${body}\n`);
 
 test('limits: one turn on Haiku with no tools, read from the stream\'s rate_limit_event, used in percent', () => {
   assert.deepEqual(limitsArgs(), ['-p', LIMITS_PROMPT, '--model', 'haiku', '--max-turns', '1', '--output-format', 'stream-json', '--verbose', '--tools', '']);
@@ -185,7 +194,8 @@ test('limits(): the runner spawns the reading in the temporary folder and reads 
   assert.deepEqual(await failing.limits(), { error: 'the login is gone: Not logged in · Please run /login' });
   const missing = await runnerClaude({}, { bin: join(fake.dir, 'no-such-claude') }).provides.runner.limits();
   assert.match(missing.error, /^the session failed \(exit 127\)/);
-  const hung = runnerClaude({}, { bin: fakeBin('setInterval(() => {}, 1000);') }).provides.runner;
+  // A hang that ends by itself later: on Windows the node Git Bash started outlives the session's end (lib/wrap.mjs).
+  const hung = runnerClaude({}, { bin: fakeBin('setTimeout(() => {}, 3000);') }).provides.runner;
   assert.deepEqual(await hung.limits({ timeoutMs: 300 }), { error: 'no reading in 0.3 s: the session was stopped' });
 });
 
