@@ -48,7 +48,7 @@ own implementations live in the workspace's repo, beside its config (D2).
   session, what, pid, pidStart, job, jobStart, since; pid is the waiting kirunak process and pidStart its start, job
   the command's process group and jobStart its start) and a first-in-first-out queue file `guard/queue` beside it,
   one line per waiting process with the same id, pid and pidStart. `run` waits its turn, runs the command with
-  the job's `maxMinutes` as a deadline (past it, TERM to the process group and to every descendant, found by ppid from one `ps` before the first signal, whatever its group, each pid and each group one leads, then KILL after 10 s to what is left, its start checked against pid reuse; exit code 124), and
+  the job's `maxMinutes` as a deadline (past it, TERM to the process group and to every descendant, found by ppid from one `ps` before the first signal, whatever its group, each pid and each group one leads, then KILL after 10 s to what is left, its start checked against pid reuse; on Windows, at once, `taskkill /PID <pid> /T /F` of the job's wrapper, which ends what its command started through Git Bash too; exit code 124), and
   releases however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first
   (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from a file can name another
   process by now (pids are reused): a pid is the same process only while it started when the file says (`isStill`:
