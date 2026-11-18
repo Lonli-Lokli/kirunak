@@ -2,7 +2,7 @@
 // k: kirunak's command line. `k <verb> [args] [--json] [--dry-run]`; exit 0 ok, 1 refused (the reason on stderr), 2 usage.
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { KError, refuse, usage } from '../lib/errors.mjs';
@@ -482,7 +482,7 @@ const VERBS = {
     // from an agent's Bash tool.
     if (sub === 'stop') {
       const r = steps.stop({ ws, id, step, why });
-      return { ...r, text: `${id} ${step}: stopped by the owner, no failure counted, ${taskPaths(ws, id).rel(`steps/${step}/${r.report.split('/').at(-1)}`)}` };
+      return { ...r, text: `${id} ${step}: stopped by the owner, no failure counted, ${taskPaths(ws, id).rel(`steps/${step}/${basename(r.report)}`)}` };
     }
     if (steps.isOwnerStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is the owner's stop: only \`k step stop\`, the owner's, writes it; say what went wrong`);
     // A stop's words, and an unfinished run's, are k run's own: such a failure would not count, a way around the two

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants, tmpdir } from 'node:os';
 import { kirunakHome } from '../lib/home.mjs';
-import { signalGroup } from '../lib/os.mjs';
+import { programArgv, signalGroup } from '../lib/os.mjs';
 import { leftBy, sessionLease, wrapped } from '../lib/wrap.mjs';
 
 // The core's default `runner` (orchestrator.md §3): a headless `claude -p`, every flag from cli-reference.md and
@@ -120,8 +120,9 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null
   const cap = (s, b) => (s.length + b.length > OUTPUT_CAP ? (s + b).slice(-OUTPUT_CAP) : s + b);
   let child;
   try {
-    const [node, ...wrap] = wrapped([bin, ...args], { lease });
-    child = spawn(node, wrap, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const all = { ...process.env, ...env };
+    const [node, ...wrap] = wrapped(programArgv([bin, ...args], { env: all, cwd }), { lease });
+    child = spawn(node, wrap, { cwd, env: all, detached: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   } catch (e) {
     return { pid: undefined, done: Promise.resolve({ exitCode: 127, result: null, usage: null, stderr: e.message, ...(raw ? { stdout: '' } : {}) }) };
   }
@@ -146,7 +147,8 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null
   return { pid: child.pid, done };
 }
 
-// runnerClaude(ws, { bin }): `bin` is the command, `claude` unless a test passes a fake.
+// runnerClaude(ws, { bin }): `bin` is the command, `claude` unless a test passes a fake, started by programArgv's rule
+// (lib/os.mjs): on Windows claude.exe straight, npm's shim through Git Bash.
 export default function runnerClaude(ws, { bin = 'claude' } = {}) {
   const mode = () => ws?.runner?.permissionMode || 'auto';
   const leaseOf = (sessionId) => sessionLease(ws?.home || kirunakHome(), sessionId);
