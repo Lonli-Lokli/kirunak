@@ -5,10 +5,12 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from '../lib/args.mjs';
 import { kirunakHome } from '../lib/home.mjs';
+import { toolPath } from '../lib/os.mjs';
 
 // PreToolUse (approval.md §2): refuses the model's write to what only the owner's commands write, and the owner's
 // verbs run through the Bash tool. A guard against mistakes, not against a deliberate bypass; it fails open.
-// It imports nothing but node: modules and lib/home.mjs, because it runs on every Edit, Write and Bash call.
+// It imports only node: modules, lib/home.mjs, lib/args.mjs and lib/os.mjs, because it runs on every Edit, Write and
+// Bash call. Every path it compares is a toolPath, so on Windows `\`, `/` and any case are the same (E-2).
 // For the escalation hook (approval.md §7) it refuses edits while the session's block is in
 // force, and every way the model could reach what lifts the block: the Skill call of k-go-on, a scheduled prompt or a
 // message carrying /k-go-on, an agent's prompt that starts with it, a claude run from the shell that would type it into
@@ -60,8 +62,8 @@ const BLOCKED = 'kirunak: edits are blocked: a test failed again after the hand-
 // guards a folder that holds them (rm -r, mv).
 function hookState(path, removing = false) {
   const home = kirunakHome();
-  const dir = join(home, 'escalate');
-  if (path === dir || path.startsWith(`${dir}/`) || path === join(home, 'escalate.log')) return true;
+  const dir = toolPath(join(home, 'escalate'));
+  if (path === dir || path.startsWith(`${dir}/`) || path === toolPath(join(home, 'escalate.log'))) return true;
   return removing && `${dir}/`.startsWith(path.endsWith('/') ? path : `${path}/`);
 }
 
@@ -113,7 +115,7 @@ function frozenReason(root, found) {
 function verdict(path, change, removing = false) {
   if (hookState(path, removing)) return HOOK_STATE;
   if (basename(path) === '.slapignore') return SLAPIGNORE;
-  if (path === join(kirunakHome(), 'slapignore.json')) return SLAP_RECORD;
+  if (path === toolPath(join(kirunakHome(), 'slapignore.json'))) return SLAP_RECORD;
   const at = locate(path);
   if (!at) {
     return removing && basename(path) === 'kirunak' && existsSync(join(path, 'approvals')) ? ownerOnly() : null;
@@ -274,7 +276,7 @@ function parse(tokens) {
   return { words: w, redirected };
 }
 
-const base = (word) => (word ?? '').split('/').pop();
+const base = (word) => toolPath(word ?? '').split('/').pop();
 const options = (words) => words.filter((w) => w && !w.startsWith('-'));
 
 /** The words after `k` when the segment runs kirunak's CLI (`k`, `k.mjs`, `node <path>/k.mjs`), else null. */
@@ -335,7 +337,7 @@ function absolute(path, dir) {
   const home = process.env.HOME || homedir();
   if (p === '~' || p.startsWith('~/')) p = home + p.slice(1);
   p = p.replace(/^\$\{?HOME\}?(?=\/|$)/, home);
-  return resolve(dir, p);
+  return toolPath(resolve(toolPath(dir), toolPath(p)));
 }
 
 const isDir = (abs) => {
@@ -350,7 +352,7 @@ const isDir = (abs) => {
 function into(target, sources, dir) {
   const abs = absolute(target, dir);
   if (!target.endsWith('/') && !(locate(abs) && isDir(abs))) return [abs];
-  return [abs, ...sources.map((s) => join(abs, basename(s)))];
+  return [abs, ...sources.map((s) => toolPath(join(abs, basename(s))))];
 }
 
 const WRITE_API = /\b(writeFileSync|appendFileSync|writeFile|appendFile|rmSync|unlinkSync|unlink|renameSync|rename|copyFileSync|cpSync|createWriteStream|truncateSync)\b/;
@@ -441,7 +443,7 @@ export function decide(input) {
     if (typeof path === 'string' && hookState(absolute(path, cwd))) return HOOK_STATE;
     const blocked = blockOf(input);
     if (blocked) return blocked;
-    if (typeof path !== 'string' || !/kirunak\/|\.slapignore$|slapignore\.json$/.test(path)) return null;
+    if (typeof path !== 'string' || !/kirunak\/|\.slapignore$|slapignore\.json$/.test(toolPath(path))) return null;
     return verdict(absolute(path, cwd), changeOf(tool, ti));
   }
   if (tool === 'Skill') {
