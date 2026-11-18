@@ -888,7 +888,7 @@ const VERBS = {
     if (sub !== 'approve') throw usage(`unknown slapignore verb ${sub}`);
     const dryRun = !!flags['dry-run'];
     const rows = slapignore.approve({ repos: pos.slice(1), all: !!flags.all, via: flags.via || 'shell', dryRun });
-    const text = rows.map((r) => `${r.already ? 'already approved' : dryRun ? 'would approve' : 'approved'} ${r.key}/.slapignore (${r.patterns} patterns, ${r.hash.slice(0, 19)}…)`).join('\n');
+    const text = rows.map((r) => `${r.already ? 'already approved' : dryRun ? 'would approve' : 'approved'} ${join(r.key, '.slapignore')} (${r.patterns} patterns, ${r.hash.slice(0, 19)}…)`).join('\n');
     return { rows, text: text || 'nothing to approve' };
   },
 

@@ -148,7 +148,7 @@ function spawnClaude(bin, args, { cwd, env, stdin, raw = false, onMessage = null
 }
 
 // runnerClaude(ws, { bin }): `bin` is the command, `claude` unless a test passes a fake, started by programArgv's rule
-// (lib/os.mjs): on Windows claude.exe straight, npm's shim through Git Bash.
+// (lib/os.mjs): on Windows claude.exe straight, npm's claude.cmd as node and its script, so either ends with its wrapper.
 export default function runnerClaude(ws, { bin = 'claude' } = {}) {
   const mode = () => ws?.runner?.permissionMode || 'auto';
   const leaseOf = (sessionId) => sessionLease(ws?.home || kirunakHome(), sessionId);
