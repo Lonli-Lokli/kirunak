@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { list, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { checkReview, firstCall, lock, review, spent, unlock } from '../lib/bug-review.mjs';
 import { readText, shFolder } from '../lib/os.mjs';
-import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
+import { events, gitCommitAll, gitInit, k, makeWorkspace, sh, sleeper } from './helpers.mjs';
 
 // gulnya/kirunak-bugs S-2: `k bug review <id>`, Review & merge, with a fake runner that writes the review file in
 // scratch repos: never a real claude, never the real KIRUNAK_HOME.
@@ -94,7 +94,7 @@ function fakeRunner(write, { first = null } = {}) {
       const head = /^head: (\S+)$/m.exec(step.brief)[1];
       const base = /^base: (\S+)$/m.exec(step.brief)[1];
       const out = /^## Write `([^`]+)`$/m.exec(step.brief)[1];
-      const child = spawn('sleep', ['0.05'], { detached: true });
+      const child = sleeper(0.05, { detached: true });
       const done = new Promise((resolve) => child.on('exit', () => {
         try {
           const text = write({ head, base, step });
@@ -352,7 +352,7 @@ test('a conflict merges nothing, runs no review, and is written beside the bug n
 
 test('a second Review & merge is refused while the first lives, naming its pid and start; a dead one\'s lock is taken over', async () => {
   const w = await bugWorkspace();
-  const first = spawn('sleep', ['30'], { detached: true });
+  const first = sleeper(30, { detached: true });
   try {
     put(reviewLockPath(w.home, BUG), JSON.stringify({ pid: first.pid, started: '2026-10-27T09:00:00.000Z' }) + '\n');
     w.ws.seams.runner = fakeRunner(() => assert.fail('no review runs while another does'));

@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,6 +66,12 @@ export async function makeWorkspace({ finished = true } = {}) {
   const ws = await loadWorkspace(join(home, 'workspace'));
   return { root, home, ws, weather: join(root, 'weather'), hub: join(root, 'hub'), modulePath };
 }
+
+// A process that does nothing for `seconds` (a fraction too) and then ends, started with spawn's `options`: node itself, as no OS has the same `sleep`.
+export const sleeper = (seconds, options) => spawn(process.execPath, ['-e', `setTimeout(() => {}, ${Math.round(Number(seconds) * 1000)})`], options);
+
+// The pid of a process that has ended already.
+export const endedPid = () => spawnSync(process.execPath, ['-e', '']).pid;
 
 // `k <args>` as the command, in a child with the given $KIRUNAK_HOME: { status, stdout, stderr }.
 export const k = (home, args, env = {}) =>

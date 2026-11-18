@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve, verify } from '../lib/approval.mjs';
@@ -189,7 +189,7 @@ test('E-4, E-6: k bug check finds the fix\'s commits in its fix repo, its own or
   put(bugFile(w), unknown);
   assert.deepEqual(checkBug(w.ws, BUG), [{ line: 5, problem: "fix-repo: unknown repo radio: name a repo of the workspace (weather, hub) or kirunak, kirunak's own checkout" }]);
   // A task not accepted any more is refused, as the drafts' bugs were (kirunak-spikes E-4).
-  sh(w.weather, 'rm', [join('kirunak', 'tasks', 'offline-forecast', 'done.json')]);
+  rmSync(join(w.weather, 'kirunak', 'tasks', 'offline-forecast', 'done.json'));
   put(bugFile(w), filled({ fix: null }));
   assert.deepEqual(checkBug(w.ws, BUG).map((p) => p.problem), [`bug-of: ${TASK} is not accepted yet: a bug found while a task is open goes into that task, through its review or an amendment (k amend new ${TASK} --title "...")`]);
   assert.throws(() => checkBug(w.ws, 'hub/none'), (e) => e.code === 1 && /^no bug hub\/none: /.test(e.message));

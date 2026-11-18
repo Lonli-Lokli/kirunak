@@ -340,7 +340,7 @@ test('start --from a draft refuses another id\'s draft naming both, and a draft 
     /is the draft weather\/other, not weather\/offline-forecast: its front matter says id: weather\/other/);
   assert.equal(existsSync(dirOf(weather)), false);
 
-  sh(weather, 'rm', ['-f', join(weather, DRAFT_REL)]);
+  rmSync(join(weather, DRAFT_REL), { force: true });
   await assert.rejects(start({ ws, id: ID, from: DRAFT_REL, now: NOV2 }),
     /the draft weather\/offline-forecast is gone: kirunak\/drafts\/offline-forecast\.md does not exist .*\(dropped, or its intake started elsewhere\); k drafts lists the drafts that wait/);
   assert.equal(existsSync(dirOf(weather)), false);

@@ -20,7 +20,7 @@ import { alive, groupAlive, killTree } from '../plugins/resource-guard-local.mjs
 import runnerClaude from '../plugins/runner-claude.mjs';
 import { read as readLease } from '../lib/lease.mjs';
 import { sessionLease, wrapped } from '../lib/wrap.mjs';
-import { approvedWorkspace, events, fakeClaude, k, KIRUNAK, repeatedWorkspace, tempDir } from './helpers.mjs';
+import { approvedWorkspace, endedPid, events, fakeClaude, k, KIRUNAK, repeatedWorkspace, sleeper, tempDir } from './helpers.mjs';
 
 // The user's settings folder of every step this file runs: empty, so a step's window is the one R7.4 gives with no
 // user window (orchestrator.md §5), whatever this machine's own settings say.
@@ -70,7 +70,7 @@ function fakeRunner(w, act = () => 'write') {
   const runner = {
     start(step) {
       const n = calls.push(step);
-      const child = spawn('sleep', [step.sleep || '0.05'], { detached: true });
+      const child = sleeper(step.sleep || 0.05, { detached: true });
       const sessionId = step.resume || step.sessionId;
       const done = new Promise((resolve) =>
         child.on('exit', (code, signal) => {
@@ -916,7 +916,7 @@ test('every needs-<k>.json takes its number from one index: heavy, the owner, he
 test('a step started by hand that asks for a job: k run runs it and starts no claude; one that asks the owner: k run stops', async () => {
   const w = await approvedWorkspace(PLAN);
   // Started by hand with its own session id, after an earlier k run's conversation that left a record.
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: 'an-earlier-run', num_turns: 2, kirunak: { krun: spawnSync('true').pid, claude: null, started: new Date().toISOString(), ended: new Date().toISOString(), result: true } }));
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: 'an-earlier-run', num_turns: 2, kirunak: { krun: endedPid(), claude: null, started: new Date().toISOString(), ended: new Date().toISOString(), result: true } }));
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: randomUUID() });
   put(w, 'steps/S-1/needs.json', HEAVY('weather unit tests'));
   const jobs = [];
@@ -949,7 +949,7 @@ test('a step started by hand that asks for a job: k run runs it and starts no cl
 test('k run refuses a step past the machine cap and says who runs', async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);
-  const others = [spawn('sleep', ['5']), spawn('sleep', ['5'])];
+  const others = [sleeper(5), sleeper(5)];
   try {
     others.forEach((c, i) => register(w.ws, c.pid, { task: 'hub/other', step: `S-${i + 1}`, session: `s${i}` }));
     const r = await run({ ws: w.ws, id: w.id });
@@ -1007,7 +1007,7 @@ test('one k run per task: a second refuses, naming the pid, and starts nothing; 
   await first;
   assert.equal(calls.length, 1, 'the second k run started nothing');
   assert.ok(!existsSync(lock), 'the lock goes when k run ends');
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   writeFileSync(lock, JSON.stringify({ pid: dead, task: w.id }));
   const lines = [];
   await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
@@ -1058,10 +1058,10 @@ test('k run --watch stopped by a signal while a step is left undecided exits wit
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const claude = sleeper(30, { detached: true, stdio: 'ignore' });
   const start = new Date().toISOString();
   register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, started: start, ended: null, result: false } }));
   // Nothing should start; a claude that did would fail at once rather than reach the real one.
   const bin = tempDir('kirunak-no-claude-');
@@ -1203,7 +1203,7 @@ test('a k run that died while a resume waited for its slot leaves the step waiti
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   const at = new Date().toISOString();
   put(w, 'steps/S-1/run-1.json', JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: sid, total_cost_usd: 0.1, kirunak: { krun: dead, krunStart: at, claude: dead, claudeStart: at, started: at, ended: at, exitCode: 0, result: true } }));
   put(w, 'steps/S-1/needs.json', HEAVY('tests'));
@@ -1261,7 +1261,7 @@ const approvedBeforeFastQueue = (w) => {
 test('a heavy step a dead k run left running is failed and run again; its started line names its k run', async () => {
   const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
   approvedBeforeFastQueue(w);
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${dead}` });
   const jobs = [];
   w.ws.seams.resourceGuard = { run: (job) => (jobs.push(job.what), job.say('waits: a line of the guard\'s'), put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
@@ -1507,7 +1507,7 @@ test('a keep-alive that never ends is killed at its deadline, and the step resum
   withCache(w);
   let ended = 'still running';
   w.ws.seams.runner.keepAlive = () => {
-    const child = spawn('sleep', ['30'], { detached: true });
+    const child = sleeper(30, { detached: true });
     const done = new Promise((r) => child.on('exit', (code, signal) => ((ended = signal ?? code), release(), r({ exitCode: 143, result: null }))));
     return { pid: child.pid, done };
   };
@@ -1590,7 +1590,7 @@ test('k run stops before a review whose two latest counting reviews repeat a not
   w.ws.seams.runner = {
     start(step) {
       calls.push(step);
-      const child = spawn('sleep', ['0.05'], { detached: true });
+      const child = sleeper(0.05, { detached: true });
       const done = new Promise((resolve) => child.on('exit', () => {
         w.review('review-3.md', ['AC-2']);
         resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });

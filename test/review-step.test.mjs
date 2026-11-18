@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { accept, hashBytes } from '../lib/approval.mjs';
@@ -8,7 +7,7 @@ import { run } from '../lib/run.mjs';
 import * as steps from '../lib/steps.mjs';
 import { costMarkdown } from '../lib/cost-md.mjs';
 import { shFolder } from '../lib/os.mjs';
-import { approvedWorkspace, events, k, reviewsRan, sh } from './helpers.mjs';
+import { approvedWorkspace, events, k, reviewsRan, sh, sleeper } from './helpers.mjs';
 
 const PLAN = `---
 task: weather/offline-forecast
@@ -203,7 +202,7 @@ test('k run runs a review in a fresh conversation on models.review, denied the i
   w.ws.seams.runner = {
     start(step) {
       const n = calls.push(step);
-      const child = spawn('sleep', ['0.05'], { detached: true });
+      const child = sleeper(0.05, { detached: true });
       const done = new Promise((resolve) => child.on('exit', () => {
         if (step.env.KIRUNAK_STEP === 'S-1') for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
         else put(w, 'review.md', review(n === 2 ? rows.slice(1) : rows));
@@ -258,7 +257,7 @@ test('a review that fails k review check twice climbs in build mode; its `not me
   w.ws.seams.runner = {
     start(step) {
       const n = calls.push(step);
-      const child = spawn('sleep', ['0.05'], { detached: true });
+      const child = sleeper(0.05, { detached: true });
       const done = new Promise((resolve) => child.on('exit', () => {
         if (step.env.KIRUNAK_STEP === 'S-1') for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
         else put(w, 'review.md', review(n <= 3 ? rows.slice(1) : rows));
@@ -282,7 +281,7 @@ test('an output check that throws fails the step, so the retry and [escalate] ap
   const w = await approvedWorkspace(PLAN);
   w.ws.seams.runner = {
     start(step) {
-      const child = spawn('sleep', ['0.05'], { detached: true });
+      const child = sleeper(0.05, { detached: true });
       const done = new Promise((resolve) => child.on('exit', () => {
         if (step.env.KIRUNAK_STEP === 'S-1') for (const o of ['steps/S-1/report.md', 'evidence/S-1-cache-sizes.tsv']) put(w, o);
         else mkdirSync(join(w.p.dir, 'review.md'), { recursive: true });

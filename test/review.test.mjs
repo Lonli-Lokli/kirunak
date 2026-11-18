@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkReview, evidenceWords, parseEvidence, verdictOf, verdictText } from '../lib/review.mjs';
 import { parseTask } from '../lib/task.mjs';
@@ -22,7 +22,7 @@ async function reviewed() {
   put(join(p.dir, 'evidence', 'S-1-cache-sizes.tsv'), 'days\tbytes\n3\t2048\n');
   gitCommitAll(w.weather, 'the work');
   const head = sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim();
-  const task = parseTask(sh(w.weather, 'cat', [p.task]));
+  const task = parseTask(readFileSync(p.task, 'utf8'));
   const check = (text) => checkReview(text, { task, id: ID, p });
   return { ...w, p, head, check };
 }
@@ -148,7 +148,7 @@ test('the head is a commit id, never a name that moves on after the review: HEAD
   for (const name of ['HEAD', 'master', 'HEAD~1', `${w.head}^`, w.head.slice(0, 6)]) {
     const want = [`head ${name} is not a commit id: write the reviewed commit's hash, 7 to 40 hex characters`];
     assert.deepEqual(problems(w.check(review(w.head).replace(`head: ${w.head}`, `head: ${name}`))), want, name);
-    assert.deepEqual(problems(checkReview(review(name), { task: parseTask(sh(w.weather, 'cat', [w.p.task])), id: ID, p: w.p, atHead: false })), want, `${name}, without git`);
+    assert.deepEqual(problems(checkReview(review(name), { task: parseTask(readFileSync(w.p.task, 'utf8')), id: ID, p: w.p, atHead: false })), want, `${name}, without git`);
   }
   sh(w.weather, 'git', ['branch', 'abcdef1']);
   assert.deepEqual(problems(w.check(review('abcdef1'))), ['head abcdef1 is not a commit of the repo'], 'a branch named like an id');
@@ -201,7 +201,7 @@ async function rereviewed() {
     repos: [{ name: 'hub', root: w.hub, ref: 'master', base: hubSeen, head: hubHead, files: ['cache.txt'] }],
     last: { file: 'review-2.md', review: 'review-2', head: w.head, repos: { hub: hubSeen } },
   };
-  const task = parseTask(sh(w.weather, 'cat', [w.p.task]));
+  const task = parseTask(readFileSync(w.p.task, 'utf8'));
   const carry = (rows, opts = {}) => checkReview(review(sh(w.weather, 'git', ['rev-parse', '--short', 'HEAD']).trim(), rows, 'verdict: ' + verdictText(verdictOf(rows.map((r) => ({ id: r.split('|')[1].trim(), verdict: r.split('|')[2].trim() }))))), { task, id: ID, p: w.p, given, ws: w.ws, ...opts });
   return { ...w, seen: w.head, hubSeen, head, hubHead, given, carry };
 }
@@ -351,27 +351,27 @@ test('the words of a row\'s evidence that may name a path', () => {
 // once per word of its evidence, for each head, so a long kirunak took two minutes and the mod's /k-approve failed.
 test('a carried row\'s check reads each head\'s paths once, however many words its evidence has', async () => {
   const w = await rereviewed();
-  const bin = tempDir('kirunak-git-count-');
-  const log = join(bin, 'calls.log');
-  const real = sh(w.weather, 'sh', ['-c', 'command -v git']).trim();
-  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> '${log}'\nexec '${real}' "$@"\n`);
-  chmodSync(join(bin, 'git'), 0o755);
+  // git's own trace counts its calls on every OS: one `built-in` line a git process (a script standing in for git on
+  // PATH cannot, on Windows, which starts only an .exe as git).
+  const log = join(tempDir('kirunak-git-count-'), 'trace.log');
   const calls = (evidence) => {
     writeFileSync(join(w.p.dir, 'review-2.md'), readFileSync(join(w.p.dir, 'review-2.md'), 'utf8').replace(/^\| AC-1 \| met \|.*$/m, `| AC-1 | met | ${evidence} |`));
     const rows = CARRIED_ROWS(w);
     rows[0] = `| AC-1 | met | carried from review-2: ${evidence} |`;
     writeFileSync(log, '');
-    const path = process.env.PATH;
-    process.env.PATH = `${bin}:${path}`;
+    const before = process.env.GIT_TRACE;
+    process.env.GIT_TRACE = log;
     try {
       assert.deepEqual(problems(w.carry(rows)), []);
     } finally {
-      process.env.PATH = path;
+      if (before === undefined) delete process.env.GIT_TRACE;
+      else process.env.GIT_TRACE = before;
     }
-    return readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+    return readFileSync(log, 'utf8').split('\n').filter((l) => / trace: built-in: git /.test(l)).length;
   };
   const short = calls('test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2)');
   const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
   const long = calls(`test OfflineForecastTest.opens on the last forecast (test/forecast.test.ts:2), ${words}`);
+  assert.ok(short > 0, 'the trace counts the check\'s git calls');
   assert.ok(long - short < 5, `40 more words cost ${long - short} more git calls (${short} for the short row, ${long} for the long one)`);
 });
