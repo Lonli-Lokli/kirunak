@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { accept, approve, hashBytes, hold, readRecord, resume, verify } from '../lib/approval.mjs';
 import { applyAmendment, checkAmendment, decline, newAmendment, parseAmendment } from '../lib/amend.mjs';
 import { log1 } from '../lib/git.mjs';
+import { shell } from '../lib/os.mjs';
 import * as queue from '../lib/queue.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
@@ -58,10 +59,13 @@ function editTask(weather, from, to) {
   writeFileSync(p, text.replace(from, to));
 }
 
+// shasum -a 256 where it is (macOS), sha256sum elsewhere (Linux, Git Bash on Windows), both through the shell, which
+// finds Git Bash's on Windows; the file comes on stdin, so no path is escaped in the output.
 test('the hash equals shasum -a 256 of task.md', async () => {
   const { ws, weather } = await makeWorkspace();
   const r = await approve({ ws, id: ID, now: NOV5 });
-  const shasum = sh(weather, 'shasum', ['-a', '256', taskFile(weather)]).split(/\s+/)[0];
+  const sum = 'if command -v shasum >/dev/null; then shasum -a 256; else sha256sum; fi < "$1"';
+  const shasum = sh(weather, shell(), ['-c', sum, 'sum', taskFile(weather)]).split(/\s+/)[0];
   assert.equal(r.hash, `sha256:${shasum}`);
   assert.equal(readRecord(weather, 'offline-forecast').hash, `sha256:${shasum}`);
 });
@@ -842,7 +846,8 @@ test('a refused accept leaves nothing behind: no done.json or cost.md, on disk o
   const head = headOf(weather);
   const allow = refusingHook(weather);
   for (const attempt of ['first', 'retry']) {
-    assert.throws(() => accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }), /git commit in .* failed: refused by the test/, attempt);
+    // A CRLF checkout (Windows, core.autocrlf true) has git warn of each LF file before the hook's refusal.
+    assert.throws(() => accept({ ws, id: ID, cost: { error: 'bad' }, now: NOV7 }), /git commit in .* failed: (?:warning: .*\n)*refused by the test/, attempt);
     assert.equal(existsSync(join(taskDir(weather), 'done.json')), false, attempt);
     assert.equal(existsSync(join(taskDir(weather), 'cost.md')), false, attempt);
     assert.equal(sh(weather, 'git', ['status', '--porcelain']).trim(), '', attempt);

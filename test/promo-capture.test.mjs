@@ -10,6 +10,8 @@ import { intakeDialogs, read } from '../promo/capture/read.mjs';
 
 const START = Date.UTC(2026, 9, 22, 9, 0);
 const NAMES = ['someones-mac'];
+// The launcher and recorder are a macOS terminal's: /usr/bin/script, mkfifo and /bin/sh, none of them Windows'.
+const NO_SCRIPT = process.platform === 'win32' && 'Windows has no /usr/bin/script, mkfifo or /bin/sh';
 const temp = () => tempDir('capture-');
 const jsonl = (file) => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 const lines = (pieces) => pieces.map((p) => JSON.stringify(p) + '\n').join('');
@@ -250,7 +252,7 @@ test('the W-3 gate finds a checkout ahead of origin and a branch with no upstrea
   assert.match(refusal({ capture: temp(), name: '01-setup', cols: COLS, rows: ROWS, ahead: aheadOf(checkout), loggedIn: true }), /not pushed \(promo\/capture, with no upstream/);
 });
 
-test('open refuses a home with no Claude Code login and names login, which enters the same clean home unrecorded', async () => {
+test('open refuses a home with no Claude Code login and names login, which enters the same clean home unrecorded', { skip: NO_SCRIPT }, async () => {
   const home = temp();
   const why = refusal({ home, capture: temp(), name: 'probe', cols: COLS, rows: ROWS, ahead: null, loggedIn: false });
   assert.match(why, /no Claude Code login yet/);
@@ -262,7 +264,7 @@ test('open refuses a home with no Claude Code login and names login, which enter
   assert.match(why, /or its keychain is locked \(HOME=\S+ security unlock-keychain \S+\/Library\/Keychains\/login\.keychain-db\)/);
 });
 
-test('the login is what Claude Code in the home says, in the home\'s own environment, keychain or file alike (S-4 probe 2)', () => {
+test('the login is what Claude Code in the home says, in the home\'s own environment, keychain or file alike (S-4 probe 2)', { skip: NO_SCRIPT && `${NO_SCRIPT}: its fake claude is a /bin/sh script` }, () => {
   const home = temp();
   const fake = (body) => {
     const file = join(temp(), 'claude');
@@ -277,7 +279,7 @@ test('the login is what Claude Code in the home says, in the home\'s own environ
   assert.equal(loggedInOf(home, fake('echo not json')), false);
 });
 
-test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', async () => {
+test('the recorder keeps every byte through script with each chunk timed, and ends with the exit', { skip: NO_SCRIPT }, async () => {
   const raw = join(temp(), 'probe');
   const code = await record(raw, ['/bin/sh', '-c', 'printf "one\\n"; sleep 0.3; printf "two\\n"'], { env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'ignore', 'inherit'] });
   assert.equal(code, 0);
@@ -291,7 +293,7 @@ test('the recorder keeps every byte through script with each chunk timed, and en
   assert.equal(marks.at(-1).end, true);
 });
 
-test('the recorder rejects when script cannot start, with the fifo removed and nothing left waiting on it', async () => {
+test('the recorder rejects when script cannot start, with the fifo removed and nothing left waiting on it', { skip: NO_SCRIPT }, async () => {
   const raw = join(temp(), 'probe');
   const sigint = process.listenerCount('SIGINT');
   await assert.rejects(record(raw, ['/bin/sh', '-c', 'true'], { cwd: join(raw, 'missing'), stdio: 'ignore' }), { code: 'ENOENT' });

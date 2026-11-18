@@ -15,6 +15,8 @@ const PATHS = [
   'name with space.kt', 'sq[1].kt', 'a1.kt', 'ab.kt', '#hash.kt', '!bang.kt', 'trail.kt', 'vendor/keep.kt',
   'vendor/lib/x.kt',
 ];
+// Windows names no file with `?` in it.
+const FILES = process.platform === 'win32' ? PATHS.filter((p) => !p.includes('?')) : PATHS;
 
 const PATTERNS = `# a comment
 *.md
@@ -48,7 +50,7 @@ test('the patterns match what git leaves out', () => {
   const dir = join(top, 'repo');
   mkdirSync(dir);
   gitInit(dir);
-  for (const p of PATHS) {
+  for (const p of FILES) {
     mkdirSync(join(dir, p, '..'), { recursive: true });
     writeFileSync(join(dir, p), 'x\n');
   }
@@ -57,9 +59,9 @@ test('the patterns match what git leaves out', () => {
   writeFileSync(file, PATTERNS);
   const git = sh(dir, 'git', ['-c', 'core.ignorecase=false', 'ls-files', '-z', '-c', '-i', `--exclude-from=${file}`])
     .split('\0').filter(Boolean).sort();
-  const ours = PATHS.filter((p) => ignored(compile(PATTERNS), p)).sort();
+  const ours = FILES.filter((p) => ignored(compile(PATTERNS), p)).sort();
   assert.deepEqual(ours, git);
-  assert.ok(ours.length > 15 && ours.length < PATHS.length - 5, 'the fixture exercises both sides');
+  assert.ok(ours.length > 15 && ours.length < FILES.length - 5, 'the fixture exercises both sides');
 });
 
 test('the rules, one by one', () => {

@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { list, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { checkReview, firstCall, lock, review, spent, unlock } from '../lib/bug-review.mjs';
+import { readText, shFolder } from '../lib/os.mjs';
 import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
 
 // gulnya/kirunak-bugs S-2: `k bug review <id>`, Review & merge, with a fake runner that writes the review file in
@@ -182,7 +183,7 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   assert.equal(step.env.KIRUNAK_BUG_REVIEW, BUG);
   assert.deepEqual(step.disallowedTools, ['Agent', 'Artifact', 'Workflow', 'AskUserQuestion', 'Skill', 'ScheduleWakeup', 'SendFeedback', 'ReportFindings', 'ListAgents', 'ReadNotifications'], 'gulnya/headless-tools AC-1');
   assert.equal('tools' in step, false, 'no --tools: every deferred tool stays loadable through ToolSearch (E-1)');
-  assert.ok(step.deny.includes(`Write(/${step.cwd}/**)`) && step.deny.includes('Read(~/.claude/projects/**)'), step.deny.join(' '));
+  assert.ok(step.deny.includes(`Write(/${shFolder(step.cwd)}/**)`) &&step.deny.includes('Read(~/.claude/projects/**)'), step.deny.join(' '));
   assert.match(step.brief, /git diff master\.\.\.bug\/stale-tiles/);
   assert.match(step.brief, /cache: one hour/);
   assert.match(step.brief, /Stale map tiles/);
@@ -197,7 +198,7 @@ test('a clean review merges the fix into master with --no-ff, closes the bug, re
   assert.equal(ps.length, 2);
   assert.equal(ps[1], w.head);
   assert.ok(git(w.hub, 'merge-base', '--is-ancestor', before, merge) === '');
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: one hour\n');
   assert.equal(git(w.hub, 'status', '--porcelain'), '');
   // The review committed beside the bug, then the bug and its folder removed in a commit naming the merge and review.
   assert.ok(!existsSync(w.bug) && !existsSync(review1(w)));
@@ -294,7 +295,7 @@ test('findings merge nothing: the review is committed beside the bug and the fix
   assert.equal(git(w.hub, 'rev-parse', 'master~1'), master, 'only the review was committed');
   assert.equal(git(w.hub, 'log', '-1', '--format=%s'), 'kirunak: review-1.md of the bug hub/stale-tiles: findings');
   assert.equal(git(w.hub, 'diff', '--name-only', 'master~1', 'master'), 'kirunak/bugs/stale-tiles/review-1.md');
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: forever\n');
   assert.ok(existsSync(w.bug) && existsSync(w.tree));
   const row = list(w.ws).find((x) => x.id === BUG);
   assert.equal(row.fixReady, false);
@@ -315,7 +316,7 @@ test('a malformed verdict is a finding: kirunak writes it so, quoting the sessio
     const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
     assert.equal(r.outcome, 'findings', String(problem));
     assert.equal(r.merged, null);
-    assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+    assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: forever\n');
     const text = readFileSync(review1(w), 'utf8');
     assert.match(text, /^verdict: findings$/m);
     assert.match(text, new RegExp(`^head: ${w.head}$`, 'm'));
@@ -344,7 +345,7 @@ test('a conflict merges nothing, runs no review, and is written beside the bug n
   assert.match(text, /^verdict: conflict$/m);
   assert.match(text, new RegExp(`^base: ${master}$`, 'm'));
   assert.match(text, /^- tiles\.txt$/m);
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: a day\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: a day\n');
   assert.equal(git(w.hub, 'status', '--porcelain'), '');
   assert.equal(list(w.ws).find((x) => x.id === BUG).fixReady, false);
 });
@@ -399,15 +400,15 @@ test('AC-4, E-9: a review lock held by the lease beside it refuses while that le
 
 test('a fix in another repo than the bug\'s merges there, and the bug closes in its own repo', async () => {
   const w = await bugWorkspace({ fixRepo: 'kirunak' });
-  const hubTiles = readFileSync(join(w.hub, 'tiles.txt'), 'utf8');
+  const hubTiles = readText(join(w.hub, 'tiles.txt'));
   const runner = fakeRunner(({ head, base }) => answer('clean', head, base));
   w.ws.seams.runner = runner;
   const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
   assert.equal(r.outcome, 'merged', JSON.stringify(r.problems));
   assert.equal(r.fixRepo, 'kirunak');
   assert.deepEqual(parents(w.self, 'master')[1], w.head);
-  assert.equal(readFileSync(join(w.self, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), hubTiles);
+  assert.equal(readText(join(w.self, 'tiles.txt')), 'cache: one hour\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), hubTiles);
   assert.match(git(w.hub, 'log', '-1', '--format=%s'), /^kirunak: close the bug hub\/stale-tiles: bug\/stale-tiles merged into kirunak's master as /);
   assert.ok(!existsSync(w.bug));
   assert.equal(git(w.self, 'log', '--format=%s', 'master').split('\n').filter((s) => s.startsWith('kirunak:')).length, 0, 'nothing of the bug in kirunak');
@@ -425,7 +426,7 @@ test('a dirty index in the master checkout is never swept into the merge; a merg
   assert.equal(r.outcome, 'merged', JSON.stringify(r));
   assert.equal(git(w.hub, 'diff', '--cached', '--name-only'), 'notes.txt');
   assert.equal(git(w.hub, 'log', '--format=%H', '--', 'notes.txt'), '');
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: one hour\n');
   assert.equal(git(w.hub, 'diff', '--name-only'), '', 'the checkout is brought up to the merge');
   assert.equal(parents(w.hub, r.merged)[1], w.head);
   assert.equal(git(w.hub, 'show', '--name-only', '--format=', r.closed), 'kirunak/bugs/stale-tiles.md\nkirunak/bugs/stale-tiles/review-1.md');
@@ -442,7 +443,7 @@ test('a dirty index in the master checkout is never swept into the merge; a merg
   assert.match(refused.why, /has changes of its own in files the merge changes \(tiles\.txt\)/);
   assert.equal(git(v.hub, 'rev-list', '--count', `${master}..master`), '2', 'the review and its refusal, no merge');
   assert.equal(git(v.hub, 'diff', '--cached', '--name-only'), 'tiles.txt');
-  assert.equal(readFileSync(join(v.hub, 'tiles.txt'), 'utf8'), 'cache: staged elsewhere\n');
+  assert.equal(readText(join(v.hub, 'tiles.txt')), 'cache: staged elsewhere\n');
   const text = readFileSync(review1(v), 'utf8');
   assert.match(text, /^verdict: clean$/m);
   assert.match(text, /^## Merge refused, /m);
@@ -456,7 +457,7 @@ test('a dirty index in the master checkout is never swept into the merge; a merg
   assert.equal(again.review.reused, true);
   assert.equal(again.review.rel, 'kirunak/bugs/stale-tiles/review-1.md');
   assert.equal(runner.calls.length, 1);
-  assert.equal(readFileSync(join(v.hub, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(readText(join(v.hub, 'tiles.txt')), 'cache: one hour\n');
 });
 
 test('a fix whose branch moves during the review is not merged', async () => {
@@ -469,7 +470,7 @@ test('a fix whose branch moves during the review is not merged', async () => {
   const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
   assert.equal(r.outcome, 'merge-refused');
   assert.match(r.why, /bug\/stale-tiles moved to [0-9a-f]+ while [0-9a-f]+ was reviewed/);
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: forever\n');
 });
 
 test('k bug review: no fix, a dry run, --json, and --detach returning at once with the lock held by the working process', async () => {
@@ -498,7 +499,8 @@ test('k bug review: no fix, a dry run, --json, and --detach returning at once wi
   assert.match(second.stderr, new RegExp(`in Review & merge already: pid ${started.pid}, started ${started.started}`));
   assert.equal(reviewing(w.home, BUG)?.pid, started.pid);
   writeFileSync(hold, '');
-  for (let i = 0; i < 300 && existsSync(reviewLockPath(w.home, BUG)); i++) await new Promise((r) => setTimeout(r, 50));
+  // Up to a minute: its git calls take seconds each on a busy Windows machine.
+  for (let i = 0; i < 1200 && existsSync(reviewLockPath(w.home, BUG)); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(!existsSync(reviewLockPath(w.home, BUG)), 'the detached review ends and lets its lock go');
   assert.equal(readFileSync(calls, 'utf8'), `${BUG}\n`);
   assert.match(readFileSync(started.log, 'utf8'), /review-1\.md found 1 thing; nothing merged.*\n {2}the review's session: \$0\.00\n/, 'gulnya/headless-tools AC-3');
@@ -516,5 +518,5 @@ test('k bug review: no fix, a dry run, --json, and --detach returning at once wi
   const done = JSON.parse(ok.stdout);
   assert.equal(done.outcome, 'merged');
   assert.equal(done.review.rel, 'kirunak/bugs/stale-tiles/review-2.md');
-  assert.equal(readFileSync(join(w.hub, 'tiles.txt'), 'utf8'), 'cache: as the forecast\n');
+  assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: as the forecast\n');
 });

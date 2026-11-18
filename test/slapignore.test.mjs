@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { install } from '../lib/install.mjs';
 import { approve, marked, register, starter, status, STARTER } from '../lib/slapignore.mjs';
-import { readRecords, recordFile } from '../lib/slap.mjs';
-import { gitCommitAll, gitInit, KIRUNAK, tempDir } from './helpers.mjs';
+import { gate, hashBytes, readRecords, recordFile } from '../lib/slap.mjs';
+import { gitCommitAll, gitInit, KIRUNAK, sh, tempDir } from './helpers.mjs';
 
 // R21, R23: the starter `k install --git` writes, the registry, and the owner's approval (design/change-size.md §4).
 
@@ -107,8 +107,21 @@ test('end to end: the starter refuses commits until the owner approves it throug
   assert.match(k(['slapignore', 'status'], s.home, s.repo).stdout, /^unapproved /);
   const r = k(['slapignore', 'approve', '--all'], s.home, s.repo);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^approved .*\/weather\/\.slapignore \(\d+ patterns, sha256:/);
+  assert.match(r.stdout, /^approved .*[\\/]weather[\\/]\.slapignore \(\d+ patterns, sha256:/);
   const c = git(['commit', '-q', '-m', 'The starter']);
   assert.equal(c.status, 0, c.stderr);
   assert.equal(k(['slap', '--staged'], s.home, s.repo).status, 0);
+});
+
+test('a .slapignore checked out with CRLF is approved as git stores it: the gate passes it, and the hash is the LF text\'s (E-2)', () => {
+  const s = setup();
+  const text = '*.md\n*.png\n';
+  writeFileSync(join(s.repo, '.slapignore'), text.replaceAll('\n', '\r\n'));
+  const [row] = approve({ home: s.home, repos: [s.repo], now: new Date('2026-11-17T10:00:00Z') });
+  assert.equal(row.hash, hashBytes(Buffer.from(text)), 'an approval made of the LF file on macOS or Linux stays valid');
+  assert.equal(status(s.home)[0].state, 'approved');
+  // A Windows checkout: git stores the CRLF file as LF.
+  sh(s.repo, 'git', ['-c', 'core.autocrlf=true', 'add', '.slapignore']);
+  assert.equal(sh(s.repo, 'git', ['show', ':.slapignore']), text);
+  assert.deepEqual(gate(s.repo, 'HEAD', s.home).refusals, []);
 });
