@@ -6,7 +6,7 @@ import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
 import { processPaths, readerName, samePath } from '../lib/os.mjs';
-import { holdsLine, pluginsBefore, worktrees } from '../lib/worktrees.mjs';
+import { holdsLine, pluginsBefore, tilde, worktrees } from '../lib/worktrees.mjs';
 import { gitCommitAll, gitInit, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && key !== 'KIRUNAK_HOME') delete process.env[key];
@@ -216,8 +216,8 @@ test('read-oom AC-1, AC-2: with the written files of open tasks holding more tex
   openTask(weather, 'heavy', { ...files, 'steps/S-31/report.md': `work in ${named}\n` });
   const r = k(home, ['worktrees', '--closing', ID], { NODE_OPTIONS: '--max-old-space-size=48' });
   assert.equal(r.status, 0, r.stderr.split('\n').find((l) => /heap|FATAL/.test(l)) ?? r.stderr);
-  assert.match(r.stdout, new RegExp(`^would remove ${re(free)} \\(free merged into master\\): `, 'm'));
-  assert.match(r.stdout, new RegExp(`^would keep ${re(named)}: the open task weather/heavy names it \\(steps/S-31/report\\.md\\)$`, 'm'));
+  assert.match(r.stdout, new RegExp(`^would remove ${re(tilde(free))} \\(free merged into master\\): `, 'm'));
+  assert.match(r.stdout, new RegExp(`^would keep ${re(tilde(named))}: the open task weather/heavy names it \\(steps/S-31/report\\.md\\)$`, 'm'));
 });
 
 test('read-oom AC-3: a binary file naming a worktree names nothing', async () => {
@@ -388,7 +388,7 @@ test('a worktree holding another checkout stays while that one stays, and goes a
   const inner = add(hub, join(outer, 'tmp', 'inner'), 'inner');
   commitIn(inner, 'i.txt');
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), {
-    [outer]: `it holds the checkout ${inner}`,
+    [outer]: `it holds the checkout ${tilde(inner)}`,
     [inner]: 'inner has 1 commit not in master',
   });
   sh(hub, 'git', ['merge', '-q', 'inner']);
@@ -467,18 +467,18 @@ test('AC-2, E-4, E-7: k accept removes after its commit and prints each removed 
 
     const preview = k(home, ['worktrees', '--closing', ID]);
     assert.equal(preview.status, 0);
-    assert.match(preview.stdout, new RegExp(`^would remove ${re(gone)} \\(gone merged into master\\): nothing besides build output$`, 'm'));
-    assert.match(preview.stdout, new RegExp(`^would keep ${re(stays)}: stays has 1 commit not in master$`, 'm'));
+    assert.match(preview.stdout, new RegExp(`^would remove ${re(tilde(gone))} \\(gone merged into master\\): nothing besides build output$`, 'm'));
+    assert.match(preview.stdout, new RegExp(`^would keep ${re(tilde(stays))}: stays has 1 commit not in master$`, 'm'));
     assert.ok(existsSync(gone), 'k worktrees removes nothing');
 
     const r = k(home, ['accept', ID]);
     assert.equal(r.status, 0, r.stderr);
     const out = r.stdout.trim().split('\n');
     assert.equal(out[0], `${ID}: done`);
-    assert.ok(out.includes(`removed ${gone} (gone merged into master, branch deleted)`), r.stdout);
+    assert.ok(out.includes(`removed ${tilde(gone)} (gone merged into master, branch deleted)`), r.stdout);
     const failed = process.platform === 'win32' ? 'Windows refuses to move it' : 'git worktree remove failed: ';
-    assert.ok(out.some((l) => l.startsWith(`kept ${stuck}: ${failed}`)), r.stdout);
-    assert.ok(out.includes(`kept ${stays}: stays has 1 commit not in master`), r.stdout);
+    assert.ok(out.some((l) => l.startsWith(`kept ${tilde(stuck)}: ${failed}`)), r.stdout);
+    assert.ok(out.includes(`kept ${tilde(stays)}: stays has 1 commit not in master`), r.stdout);
     assert.ok(existsSync(join(taskDir(weather), 'done.json')), 'E-4: the acceptance stands');
     assert.equal(existsSync(gone), false);
     assert.ok(existsSync(stays));
@@ -500,8 +500,8 @@ test("AC-18: k accept takes the session that runs it ($CLAUDE_CODE_SESSION_ID he
   gitCommitAll(weather, 'review');
   const r = k(home, ['accept', ID], { CLAUDE_CODE_SESSION_ID: 's1' });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.stdout.split('\n').includes(`removed ${mine} (mine merged into master, branch deleted)`), r.stdout);
-  assert.match(r.stdout, new RegExp(`^kept ${re(shared)}: locked: session s2 works in it until \\d\\d:\\d\\d$`, 'm'));
+  assert.ok(r.stdout.split('\n').includes(`removed ${tilde(mine)} (mine merged into master, branch deleted)`), r.stdout);
+  assert.match(r.stdout, new RegExp(`^kept ${re(tilde(shared))}: locked: session s2 works in it until \\d\\d:\\d\\d$`, 'm'));
   assert.equal(existsSync(mine), false);
   assert.equal(sh(weather, 'git', ['worktree', 'list', '--porcelain']).match(/^locked (.*)$/m)?.[1], 'kirunak s2 2099-01-01T00:00:00.000Z');
 });

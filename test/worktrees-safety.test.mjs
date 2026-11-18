@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { holdsLine, ignoredFolders, worktrees } from '../lib/worktrees.mjs';
+import { holdsLine, ignoredFolders, tilde, worktrees } from '../lib/worktrees.mjs';
 import { gitInit, makeWorkspace, sh } from './helpers.mjs';
 
 for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && key !== 'KIRUNAK_HOME') delete process.env[key];
@@ -60,7 +60,7 @@ test('a checkout at any depth inside an ignored folder keeps the worktree', asyn
   const clone = join(outer, 'tmp', '1', '2', '3', '4', '5', 'clone');
   mkdirSync(clone, { recursive: true });
   gitInit(clone);
-  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [outer]: `it holds the checkout ${clone}` });
+  assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [outer]: `it holds the checkout ${tilde(clone)}` });
 });
 
 test('an open task naming the worktree in another case keeps it on macOS and Windows', { skip: process.platform === 'linux' && 'Linux tells file names apart by case' }, async () => {

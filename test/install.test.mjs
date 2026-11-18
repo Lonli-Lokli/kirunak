@@ -371,7 +371,7 @@ test('a hook of only #!/bin/sh and kirunak\'s absolute line commented out is the
 test('a registered repo, given with a trailing slash, is "already registered" in the dry run and the real install, and slapignore.json is kept (AC-2, AC-3, AC-6, E-3)', () => {
   const h = home();
   const r = repo(h.dir, 'katyafm');
-  const key = realpathSync(r);
+  const key = realpathSync.native(r); // git spells the key: long names on Windows, not a short (8.3) one
   const file = join(h.home, 'slapignore.json');
   const first = install({ ...h, git: r }).actions;
   assert.ok(first.includes(`registered ${key} in ${file}`), `the first install: ${first.filter((a) => a.includes('regist'))}`);
@@ -392,7 +392,7 @@ test('a repo slapignore.json does not list gets "would register" in the dry run,
   const file = join(h.home, 'slapignore.json');
   const bytes = readFileSync(file);
   const dry = install({ ...h, git: r, print: true }).actions;
-  assert.ok(dry.includes(`would register ${realpathSync(r)} in ${file}`), `the dry run: ${dry.filter((a) => a.includes('regist'))}`);
+  assert.ok(dry.includes(`would register ${realpathSync.native(r)} in ${file}`), `the dry run: ${dry.filter((a) => a.includes('regist'))}`);
   assert.ok(!dry.some((a) => a.includes('already registered')));
   assert.deepEqual(readFileSync(file), bytes, 'the dry run writes nothing');
 });
