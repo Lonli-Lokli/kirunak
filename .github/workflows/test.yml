@@ -30,6 +30,12 @@ jobs:
           git config --global user.email "ci@example.com"
       - name: The suite
         shell: bash
+        # Windows' runner sets TEMP to the profile's short (8.3) name, C:\Users\RUNNER~1\...; the tests' repos go
+        # under the runner's own temp instead, a long name, as on a developer's machine. kirunak takes a short name
+        # where it makes a path relative to a repo (lib/git.mjs toplevel); the worktree sweep does not yet.
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: |
           code=0
           node --test --test-reporter=tap "test/*.test.mjs" > tap.txt || code=$?
