@@ -1633,22 +1633,26 @@ test('k run stops before a review whose two latest counting reviews repeat a not
   assert.match(r3.stopped, /^S-5 AC-2 not met in review-2 and review-3; the owner decides: read steps\/S-5\/repeat\.md\n  review-2: \| AC-2 \| not met \| AC-2 still fails in review-2\.md: the cache keeps one day \|\n  review-3: \| AC-2 \| not met \| AC-2 still fails in review-3\.md: the cache keeps one day \|$/);
 });
 
-test('a step ended on its budget leaves no background job running, though the job is in a process group of its own', { skip: process.platform === 'win32' && 'Windows has no process groups: a job started detached outlives its step there, the known gap' }, async () => {
+test('a step ended on its budget leaves no background job running, though the job is in a process group of its own; on Windows too, where taskkill /T ends it (amendment A-1)', async () => {
   const dir = tempDir('kirunak-timed-');
   const pidFile = join(dir, 'job.pid');
-  // The step's claude, leading its own group as the runner starts it, keeps a background job in another group.
-  const js = `const c = require('child_process').spawn('/bin/sh', ['-c', 'sleep 60'], { detached: true, stdio: 'ignore' });
+  // The step's claude, leading its own group as the runner starts it, keeps a background job in another group: on
+  // Windows, with no /bin/sh to start, a node started detached.
+  const js = `const [cmd, args] = process.platform === 'win32' ? [process.execPath, ['-e', 'setTimeout(() => {}, 60000)']] : ['/bin/sh', ['-c', 'sleep 60']];
+const c = require('child_process').spawn(cmd, args, { detached: true, stdio: 'ignore' });
 require('fs').writeFileSync(process.argv[1], String(c.pid));
 setTimeout(() => {}, 60000);`;
   const child = spawn(process.execPath, ['-e', js, pidFile], { detached: true, stdio: 'ignore' });
   const done = new Promise((r) => child.on('exit', (code) => r({ exitCode: code })));
-  const o = await timed({ pid: child.pid, done }, 0.01);
+  // Two seconds, so a slow start still writes the job's pid before the budget ends.
+  const o = await timed({ pid: child.pid, done }, 2 / 60);
   assert.equal(o.exitCode, 124);
   assert.equal(o.timedOut, true);
   const job = Number(readFileSync(pidFile, 'utf8'));
+  const running = () => (process.platform === 'win32' ? alive(job) : groupAlive(job));
   const end = Date.now() + 2000;
-  while (groupAlive(job) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(groupAlive(job), false, 'the background job is gone with its step');
+  while (running() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(running(), false, 'the background job is gone with its step');
 });
 
 // gulnya/k-run-step-models: S-1 proves its work with a verify command, run in the task's repo as its agent ends.

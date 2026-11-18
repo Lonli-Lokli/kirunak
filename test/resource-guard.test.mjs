@@ -111,21 +111,25 @@ test('past maxMinutes the job and its children are killed, exit code 124', async
 
 // A node process that starts a grandchild in a process group of its own (as Claude Code starts a background Bash
 // job), writes its pid to pidFile and stays alive, as the step's claude does while its job runs. The grandchild
-// ignores TERM when stubborn, so only a KILL ends it.
+// ignores TERM when stubborn, so only a KILL ends it. On Windows, with no /bin/sh to start, the grandchild is a node,
+// started detached as well.
 const DETACHES = `const [f, stubborn] = process.argv.slice(1);
-const c = require('child_process').spawn('/bin/sh', ['-c', (stubborn ? 'trap "" TERM; ' : '') + 'sleep 30'], { detached: true, stdio: 'ignore' });
+const [cmd, args] = process.platform === 'win32' ? [process.execPath, ['-e', 'setTimeout(() => {}, 30000)']] : ['/bin/sh', ['-c', (stubborn ? 'trap "" TERM; ' : '') + 'sleep 30']];
+const c = require('child_process').spawn(cmd, args, { detached: true, stdio: 'ignore' });
 require('fs').writeFileSync(f, String(c.pid));
 setTimeout(() => {}, 30000);`;
+// Whether a grandchild started detached still runs: its group on macOS and Linux, the pid itself on Windows.
+const treeAlive = (pid) => (process.platform === 'win32' ? alive(pid) : groupAlive(pid));
 
-test('past maxMinutes a grandchild in a process group of its own is killed too', { skip: POSIX_ONLY && `${POSIX_ONLY}: a grandchild started detached outlives its job there, the known gap` }, async () => {
+test('past maxMinutes a grandchild in a process group of its own is killed too, on Windows too, where taskkill /T ends it (amendment A-1)', async () => {
   const { home, g } = guard({ killAfterMs: 500 });
   const pidFile = join(home, 'grandchild.pid');
   // Two seconds, as above, so a slow start still writes the grandchild's pid before the deadline.
   const r = await g.run({ session: 's', what: 'hang', maxMinutes: 2 / 60, cwd: home, command: [process.execPath, '-e', DETACHES, pidFile] });
   assert.equal(r.exitCode, 124);
   const grandchild = Number(readFileSync(pidFile, 'utf8'));
-  await until(() => !groupAlive(grandchild), 3000).catch(() => {});
-  assert.equal(groupAlive(grandchild), false, 'the grandchild\'s group is gone');
+  await until(() => !treeAlive(grandchild), 3000).catch(() => {});
+  assert.equal(treeAlive(grandchild), false, 'the grandchild is gone');
 });
 
 test('killTree ends every descendant whatever its group, KILLing what ignores TERM, and leaves the rest alone', { skip: POSIX_ONLY }, async () => {

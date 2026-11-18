@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { live, read } from '../lib/lease.mjs';
-import { alive, killTree, programArgv } from '../lib/os.mjs';
+import { alive, killTree, programArgv, shell } from '../lib/os.mjs';
 import { HELD, sessionLease, wrapped } from '../lib/wrap.mjs';
 
 // asilak/kirunak-cross-platform AC-6: the wrapper each session and heavy job runs under, on every OS.
@@ -132,6 +132,24 @@ test('on Windows a program npm installed ends with its wrapper: programArgv star
   await exit;
   await until(() => !alive(cli), 3000).catch(() => {});
   assert.equal(alive(cli), false, 'the program is gone with its wrapper');
+});
+
+// asilak/kirunak-kill-tree-windows: Claude Code's Bash tool runs each command through Git Bash, whose children break
+// away from Node's job object, so the wrapper's end alone left them running (cmd, PowerShell, wsl.exe on 2026-11-03).
+test('on Windows killTree of a wrapper ends what its session started through Git Bash, and what that started in turn (AC-3, AC-6 as amendment A-1 words them)', { skip: process.platform !== 'win32' && 'only Windows lets a process break away from its tree; macOS and Linux end it by its group' }, async () => {
+  const d = dir();
+  writeFileSync(join(d, 'child.js'), "require('fs').writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 30000);");
+  // The session runs one Bash-tool command: node straight from Git Bash, and node under cmd.exe from Git Bash.
+  const command = 'node child.js bash.pid & cmd //c "node child.js cmd.pid" & wait';
+  const session = `require('child_process').spawn(${JSON.stringify(shell())}, ['-c', ${JSON.stringify(command)}], { cwd: ${JSON.stringify(d)}, stdio: 'ignore' }); setTimeout(() => {}, 30000);`;
+  const wrapper = start(node(session));
+  const exit = ended(wrapper);
+  await until(() => pidIn(join(d, 'bash.pid')) && pidIn(join(d, 'cmd.pid')), 15000);
+  const started = [pidIn(join(d, 'bash.pid')), pidIn(join(d, 'cmd.pid'))];
+  await killTree(wrapper.pid, 2000);
+  await exit;
+  await until(() => started.every((p) => !alive(p)), 5000).catch(() => {});
+  assert.deepEqual(started.map((p) => alive(p)), [false, false], 'node from Git Bash and node from its cmd.exe are gone');
 });
 
 test('E-8: a wrapper whose lease was taken over while its machine slept gives way: its command is ended and it exits', async () => {

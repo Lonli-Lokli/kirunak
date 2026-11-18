@@ -65,8 +65,9 @@ test('lib/os.mjs makes them, so the check has something to keep in one place', (
   }
 });
 
-// asilak/kirunak-cross-platform AC-3: kirunak calls no PowerShell and no taskkill, often blocked where kirunak runs; no
-// file of lib, plugins, hooks or bin names either, lib/os.mjs included, comments too.
+// asilak/kirunak-cross-platform AC-3, as amendment A-1 words it: kirunak calls no PowerShell, often blocked where
+// kirunak runs, and no file of lib, plugins, hooks or bin names it, comments too; taskkill, which ends a tree on
+// Windows, lib/os.mjs alone names.
 const WINDOWS_TOOLS = /\b(powershell|pwsh|taskkill)\b/i;
 const named = (text) => text.split('\n').flatMap((line, i) => (WINDOWS_TOOLS.test(line) ? [`${i + 1} ${WINDOWS_TOOLS.exec(line)[1]}`] : []));
 
@@ -75,12 +76,14 @@ test('the AC-3 check sees PowerShell and taskkill in any case, in code or a comm
   assert.deepEqual(named('const powershells = 0; // a cmdlet'), []);
 });
 
-test('no file of lib, plugins, hooks or bin names PowerShell or taskkill (AC-3)', () => {
+test('no file of lib, plugins, hooks or bin names PowerShell, and none but lib/os.mjs names taskkill, which it does (AC-3, amendment A-1)', () => {
   const found = [];
   for (const top of ['lib', 'plugins', 'hooks', 'bin']) {
     for (const path of files(join(ROOT, top))) {
-      for (const n of named(readFileSync(path, 'utf8'))) found.push(`${relative(ROOT, path).replaceAll('\\', '/')}:${n}`);
+      const rel = relative(ROOT, path).replaceAll('\\', '/');
+      for (const n of named(readFileSync(path, 'utf8'))) if (!(rel === 'lib/os.mjs' && /taskkill$/i.test(n))) found.push(`${rel}:${n}`);
     }
   }
-  assert.deepEqual(found, [], `kirunak names no PowerShell or taskkill:\n${found.join('\n')}`);
+  assert.deepEqual(found, [], `kirunak names no PowerShell, and taskkill only in lib/os.mjs:\n${found.join('\n')}`);
+  assert.ok(named(readFileSync(join(ROOT, 'lib', 'os.mjs'), 'utf8')).some((n) => /taskkill$/i.test(n)), 'lib/os.mjs ends a tree on Windows with taskkill');
 });
