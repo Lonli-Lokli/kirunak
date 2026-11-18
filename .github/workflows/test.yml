@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # The dev dependency the promo recorder's tests load (@xterm/headless); kirunak itself needs none.
+      - run: npm ci
       - name: A git identity for the tests' own repos
         run: |
           git config --global user.name "kirunak ci"
