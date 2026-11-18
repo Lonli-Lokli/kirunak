@@ -154,7 +154,11 @@ committed by `k install`: the owner approves it first (§4), then it is committe
   and the real install alike, and the record is not written; `--print` says `would register` only for one it does
   not list (gulnya/kirunak-install-dry-run AC-2, AC-3, E-3). `--print` shows the starter. It writes `kirunak/tasks/.gitignore` with niva's lines for raw run output (game-minesweeper
   bd58b693), or appends only the pattern lines a file there lacks, the owner's kept; never the root `.gitignore`
-  (gulnya/close-leaves-untracked-step-files AC-3, E-1). The owner commits it.
+  (gulnya/close-leaves-untracked-step-files AC-3, E-1). The owner commits it. Unless `git check-attr eol` reads
+  `kirunak/` as LF already (any pattern of the owner's), it appends `kirunak/** text eol=lf` to the root
+  `.gitattributes`, or writes it, so git on Windows (core.autocrlf true) checks the records out LF; it rewrites LF
+  each record a checkout wrote with CRLF that git finds no change in (asilak/kirunak-cross-platform S-9). The owner
+  commits it.
 - **Rolling out to repos that already have the hooks**: run `k install --git` on each (the hooks are already there;
   the starter and the registry are new), then the owner reads the starters and runs `k slapignore approve --all`,
   then each starter is committed (it passes, being the approved one). Until a repo's starter is committed, its prose

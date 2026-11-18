@@ -153,7 +153,10 @@ You need Node 22 or later, git and Claude Code.
    `.slapignore`, the files left out of a commit's size (R21), when the repo has none: read it, type
    `! k slapignore approve ~/code/app`, and commit it. It writes `kirunak/tasks/.gitignore` too, so raw run output in
    a step's folder (`*.xcresult/`, Gradle's `xml/` and `*Test/` folders, `--profile` HTML, `*.log`, `*.out`) stays out
-   of git; a repo with one gets only the lines it lacks, its own kept. Commit it.
+   of git; a repo with one gets only the lines it lacks, its own kept. Commit it. And unless git already reads
+   kirunak's records as LF there, it adds `kirunak/** text eol=lf` to the repo's `.gitattributes`, so a checkout on
+   Windows does not turn them CRLF, which `k check` and the approvals refuse. Records a checkout already wrote with CRLF,
+   and that hold no change of their own, it rewrites LF. Commit the `.gitattributes`.
 
 4. In Claude Code, start your first task with `/k-intake`. When `k check` passes, type `! k approve <id>`.
 
