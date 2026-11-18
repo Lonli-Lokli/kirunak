@@ -28,14 +28,18 @@ jobs:
         run: |
           git config --global user.name "kirunak ci"
           git config --global user.email "ci@example.com"
+      # Windows' runner sets TEMP to the profile's short (8.3) name, C:\Users\RUNNER~1\...; the tests' repos go under
+      # the runner's own temp instead, a long name, as on a developer's machine. kirunak takes a short name where it
+      # makes a path relative to a repo (lib/git.mjs toplevel); the worktree sweep does not yet. Windows only: Node
+      # on Linux reads TMP and TEMP too, and the runner's temp is under its home, which kirunak prints as ~.
+      - name: A temp folder with a long name on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: The suite
         shell: bash
-        # Windows' runner sets TEMP to the profile's short (8.3) name, C:\Users\RUNNER~1\...; the tests' repos go
-        # under the runner's own temp instead, a long name, as on a developer's machine. kirunak takes a short name
-        # where it makes a path relative to a repo (lib/git.mjs toplevel); the worktree sweep does not yet.
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
         run: |
           code=0
           node --test --test-reporter=tap "test/*.test.mjs" > tap.txt || code=$?
