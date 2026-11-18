@@ -1,12 +1,12 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { BUGS_MATCHER, FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
 import { unlockHookLine } from '../lib/doctor.mjs';
 import { DEFAULT_HOOK } from '../lib/ladder.mjs';
-import { gitInit, KIRUNAK, tempDir } from './helpers.mjs';
+import { gitCommitAll, gitInit, KIRUNAK, tempDir } from './helpers.mjs';
 
 // A temp home: a settings file with someone else's hooks, an empty skills folder, a kirunak checkout.
 function home() {
@@ -472,6 +472,56 @@ test('--git --print writes no kirunak/tasks/.gitignore and says what it would wr
   const add = lines.findIndex((l) => l.startsWith(`would add to ${ownFile} the lines it lacks`));
   assert.ok(add >= 0, 'names the lines it would add to the repo\'s own file');
   assert.deepEqual(lines.slice(add + 1, add + 7), NIVA.filter((l) => l !== '*/steps/**/*.log'));
+});
+
+// git on Windows checks text out with CRLF (core.autocrlf true), while k check refuses a CRLF task.md and an approval
+// hashes its bytes: k install keeps a repo's records LF (asilak/kirunak-cross-platform S-9).
+const ATTR = 'kirunak/** text eol=lf';
+const eolOf = (r) => execFileSync('git', ['check-attr', 'eol', '--', 'kirunak/tasks/t/task.md'], { cwd: r, encoding: 'utf8' }).trim();
+
+test('--git makes kirunak/ LF in .gitattributes: written in a repo with none, after the owner\'s lines in one with its own, kept where git reads it LF already; a second run changes nothing (asilak/kirunak-cross-platform S-9)', () => {
+  const h = home();
+  const bare = repo(h.dir, 'weather');
+  const own = repo(h.dir, 'hub');
+  writeFileSync(join(own, '.gitattributes'), '*.png binary');
+  const lf = repo(h.dir, 'tools');
+  writeFileSync(join(lf, '.gitattributes'), '* text=auto eol=lf\n');
+  const { actions } = install({ ...h, git: [bare, own, lf] });
+  const ours = readFileSync(join(bare, '.gitattributes'), 'utf8');
+  assert.ok(ours.endsWith(`\n${ATTR}\n`), ours);
+  assert.equal(readFileSync(join(own, '.gitattributes'), 'utf8'), `*.png binary\n${ours}`, 'the owner\'s line kept, ours after it');
+  assert.equal(readFileSync(join(lf, '.gitattributes'), 'utf8'), '* text=auto eol=lf\n');
+  for (const r of [bare, own, lf]) assert.equal(eolOf(r), 'kirunak/tasks/t/task.md: eol: lf');
+  assert.ok(actions.some((a) => a.startsWith(`wrote ${join(bare, '.gitattributes')}`) && a.endsWith('commit it')));
+  assert.ok(actions.some((a) => a.startsWith(`added to ${join(own, '.gitattributes')}`) && a.endsWith('commit it')));
+  assert.ok(actions.includes(`${join(lf, '.gitattributes')} keeps kirunak/ LF already; kept`));
+  install({ ...h, git: [bare, own, lf] });
+  assert.equal(readFileSync(join(bare, '.gitattributes'), 'utf8'), ours);
+  assert.equal(readFileSync(join(own, '.gitattributes'), 'utf8'), `*.png binary\n${ours}`);
+});
+
+test('--git rewrites LF the records a CRLF checkout wrote with no change of their own; one with a change keeps its CRLF; --print writes nothing (asilak/kirunak-cross-platform S-9)', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  const t = join(r, 'kirunak', 'tasks', 't');
+  mkdirSync(t, { recursive: true });
+  writeFileSync(join(t, 'task.md'), '---\nid: t\n---\n# T\n');
+  writeFileSync(join(t, 'plan.md'), '# Plan\n');
+  gitCommitAll(r);
+  // A checkout as git on Windows writes it: core.autocrlf true, each text file CRLF.
+  execFileSync('git', ['config', 'core.autocrlf', 'true'], { cwd: r });
+  for (const f of ['task.md', 'plan.md']) rmSync(join(t, f));
+  execFileSync('git', ['checkout', '--', 'kirunak'], { cwd: r });
+  const crlf = '---\r\nid: t\r\n---\r\n# T\r\n';
+  assert.equal(readFileSync(join(t, 'task.md'), 'utf8'), crlf);
+  writeFileSync(join(t, 'plan.md'), '# Plan\r\nS-1 a change\r\n');
+  const dry = install({ ...h, git: r, print: true }).actions.join('\n');
+  assert.ok(dry.includes(`would write ${join(r, '.gitattributes')}`), dry);
+  assert.ok(!existsSync(join(r, '.gitattributes')) && readFileSync(join(t, 'task.md'), 'utf8') === crlf, 'the dry run writes nothing');
+  const { actions } = install({ ...h, git: r });
+  assert.equal(readFileSync(join(t, 'task.md'), 'utf8'), '---\nid: t\n---\n# T\n', 'LF, as the commit holds it');
+  assert.equal(readFileSync(join(t, 'plan.md'), 'utf8'), '# Plan\r\nS-1 a change\r\n', 'a record with a change of its own is left as it is');
+  assert.ok(actions.includes('rewrote LF 1 record a checkout wrote with CRLF, no change of their own: kirunak/tasks/t/task.md'), actions.join('\n'));
 });
 
 test('a hook kirunak wrote before is rewritten; the new one finds node with a GUI\'s bare PATH', () => {
