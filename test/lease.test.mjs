@@ -2,13 +2,13 @@
 // touched by its holder, stale when untouched for a minute. Staleness is made here by setting a file's time back.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { besideOf, hold, holderLive, letGo, read, STALE_MS, take } from '../lib/lease.mjs';
+import { tempDir } from './helpers.mjs';
 
-const place = () => join(mkdtempSync(join(tmpdir(), 'kirunak-lease-')), 'lock');
+const place = () => join(tempDir('kirunak-lease-'), 'lock');
 const age = (path, ms) => {
   const t = new Date(Date.now() - ms);
   utimesSync(path, t, t);
@@ -119,7 +119,7 @@ async function deadPid() {
 }
 
 test('AC-4: a file held by the lease beside it: hold() makes and keeps it, holderLive() reads it, letGo() removes it', () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-held-')), 'run.json');
+  const path = join(tempDir('kirunak-held-'), 'run.json');
   writeFileSync(path, '{}');
   assert.ok(hold(path));
   assert.equal(existsSync(besideOf(path)), true);
@@ -132,7 +132,7 @@ test('AC-4: a file held by the lease beside it: hold() makes and keeps it, holde
 });
 
 test('E-4: a file with no lease beside it, written before leases, is read by its pid alone', async () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-held-')), 'run.json');
+  const path = join(tempDir('kirunak-held-'), 'run.json');
   writeFileSync(path, '{}');
   assert.equal(holderLive(path, process.pid), true);
   assert.equal(holderLive(path, await deadPid()), false);
@@ -140,7 +140,7 @@ test('E-4: a file with no lease beside it, written before leases, is read by its
 });
 
 test('hold() refuses a fresh lease whose holder runs, and takes one over at once whose holder is gone or is the one handing it on', async () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'kirunak-held-')), 'lock.json');
+  const path = join(tempDir('kirunak-held-'), 'lock.json');
   const other = idle();
   try {
     take(besideOf(path), { pid: other.pid });

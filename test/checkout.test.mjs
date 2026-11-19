@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fingerprint } from '../lib/checkout.mjs';
-import { gitCommitAll, gitInit } from './helpers.mjs';
+import { gitCommitAll, gitInit, tempDir } from './helpers.mjs';
 
 // A folder's short (8.3) name, as cmd's %~s gives it; the long name when its volume makes none.
 const shortName = (p) =>
@@ -14,8 +14,7 @@ const shortName = (p) =>
 test('a task folder named by its Windows short (8.3) name is still left out of the checkout fingerprint', (t) => {
   if (process.platform !== 'win32') return t.skip('short (8.3) names are Windows\'s');
   // Under the home folder: C:, where Windows makes short names; a runner's or this machine's temp may not.
-  const base = mkdtempSync(join(homedir(), 'kirunak-short-name-'));
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const base = tempDir('kirunak-short-name-', homedir());
   const repo = join(base, 'checkout');
   mkdirSync(repo);
   gitInit(repo);

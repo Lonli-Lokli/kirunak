@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { live, read } from '../lib/lease.mjs';
 import { alive, killTree, programArgv, shell } from '../lib/os.mjs';
 import { HELD, sessionLease, wrapped } from '../lib/wrap.mjs';
+import { tempDir } from './helpers.mjs';
 
 // asilak/kirunak-cross-platform AC-6: the wrapper each session and heavy job runs under, on every OS.
 
@@ -18,7 +18,7 @@ async function until(ok, ms = 5000) {
     await sleep(20);
   }
 }
-const dir = () => mkdtempSync(join(tmpdir(), 'kirunak-wrap-'));
+const dir = () => tempDir('kirunak-wrap-');
 const node = (script, ...args) => [process.execPath, '-e', script, ...args];
 const run = (command, opts = {}, input = '') => {
   const [bin, ...args] = wrapped(command, opts);

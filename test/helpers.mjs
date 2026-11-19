@@ -16,7 +16,8 @@ export const sh = (cwd, cmd, args, env) =>
 // each test file in a process of its own): a run of the suite leaves $TMPDIR as it found it. Every temp folder a test
 // makes comes from here (test/temp-cleanup.test.mjs checks it); once, they stayed, 14.6 GB in a day
 // (gulnya/kirunak-tests-leave-temp). An exit handler, not node:test's `after`, so a folder a fixture script makes in a
-// process with no tests goes too, and one made inside a test lives until the file is done with it.
+// process with no tests goes too, and one made inside a test lives until the file is done with it. `parent` names
+// another folder to make it in (a Windows test that needs a volume making short names, the home folder's).
 const made = new Set();
 process.once('exit', () => {
   for (const dir of made) {
@@ -27,8 +28,8 @@ process.once('exit', () => {
     }
   }
 });
-export function tempDir(prefix = 'kirunak-') {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+export function tempDir(prefix = 'kirunak-', parent = tmpdir()) {
+  const dir = mkdtempSync(join(parent, prefix));
   made.add(dir);
   return dir;
 }

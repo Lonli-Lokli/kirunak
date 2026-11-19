@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn as spawnNode, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -13,7 +13,7 @@ import {
   claim, FIX_ENV, keepAwake, OWNER_STOP, OWNER_WHY, preview, progressCommand, progressOf, progressText, pushLine, release, run, runsDir, start,
   listenForStop, state, statusLine, stop, stopPath, summaryOf, summaryText, workBug,
 } from '../lib/quad-damage.mjs';
-import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
+import { events, gitCommitAll, gitInit, k, makeWorkspace, sh, tempDir } from './helpers.mjs';
 
 // gulnya/quad-damage S-3: Quad Damage's run, its run file, its limits gate, its summary and its status.
 
@@ -943,7 +943,7 @@ test('AC-8: a stop request is heard through fs.watch with no look due, on every 
 });
 
 test('AC-8: listenForStop keeps nothing alive: a process that only listens exits, and a watch that throws leaves the look', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kirunak-ear-'));
+  const home = tempDir('kirunak-ear-');
   mkdirSync(join(home, 'bugs'));
   const src = `import { listenForStop } from ${JSON.stringify(new URL('../lib/quad-damage.mjs', import.meta.url).href)};
 listenForStop(() => {}, { home: ${JSON.stringify(home)} });`;
