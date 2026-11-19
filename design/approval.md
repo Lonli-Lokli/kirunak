@@ -352,9 +352,11 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
 - no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
   Linux `/proc/<pid>/cwd` and `exe`. On Windows no process is asked about: kirunak runs no Windows tool for it
   (asilak/kirunak-cross-platform AC-3, AC-10), and Windows gives no other process's current folder anyway. There the
-  session locks below tell a worktree in use, and before the removal the folder is moved aside
-  (`<path>.kirunak-removing`) and straight back: Windows refuses that while a process works in it, and the worktree
-  stays whole, known to git with its branch, for a later pass. When the reader of macOS or Linux cannot tell, none
+  session locks below tell a worktree in use, and before the removal each program file in it (.exe, .dll, .node,
+  .com, .pyd) is opened for writing, nothing written, which Windows refuses while a program runs from it, wherever
+  that program works; then the folder is moved aside (`<path>.kirunak-removing`) and straight back, which Windows
+  refuses while a process works in it. Either refusal keeps the worktree whole, known to git with its branch, for a
+  later pass, where a removal would stop halfway. When the reader of macOS or Linux cannot tell, none
   goes;
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
@@ -635,7 +637,9 @@ the code has no third (the rule at the top of the hook file, which a reviewer ca
 `disable-model-invocation: true`, so Claude Code lists it for the owner and does not let the model call it. Typed at the
 terminal or in Remote Control from the phone, it fires UserPromptExpansion; the hook counts that, and only that, as the
 override, ignores one inside a subagent or in a `claude` run that another claude started (on `/k-go-on` alone it walks
-its ancestors with `ps`, at most 8 steps, and logs `/k-go-on refused: nested run`), lifts the block and clears the
+its ancestors with `ps` on macOS and Linux, at most 8 steps, and logs `/k-go-on refused: nested run`; on Windows no
+process is asked about, asilak/kirunak-cross-platform AC-3, so there a subagent's is ignored and a nested run's is
+not told from the owner's), lifts the block and clears the
 counted failures. The skill's text then tells
 the session to say in one line what it does next and go on. **Evidence** for the route (S-1): a typed `/k-go-on` fires
 UserPromptExpansion; a scheduled prompt fires UserPromptSubmit alone; a prompt sent with `claude -p` fires

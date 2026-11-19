@@ -56,7 +56,8 @@ The rest is in `REQUIREMENTS.md` and `design/`.
 
 ## Setup
 
-You need Node 22 or later, git and Claude Code.
+You need Node 22 or later, git and Claude Code, on macOS, Linux or Windows. On Windows, Git for Windows brings the
+POSIX shell a step's commands run through (Git Bash, as Claude Code uses it); kirunak needs no PowerShell and no WSL.
 
 1. Put `k` on your PATH:
 

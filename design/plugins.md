@@ -44,26 +44,35 @@ own implementations live in the workspace's repo, beside its config (D2).
   `handoff`, `frontend` and `tracker` compose. Loading a second implementation of a one-policy seam is an error that
   names both modules, never a silent override.
 - Judgement on the default guard: kirunak must work alone, on a machine with no lock of its own (R10). The default
-  keeps `$KIRUNAK_HOME/guard/lock` (a directory made with `mkdir`, which is atomic, holding `owner.json`: id,
-  session, what, pid, pidStart, job, jobStart, since; pid is the waiting kirunak process and pidStart its start, job
-  the command's process group and jobStart its start) and a first-in-first-out queue file `guard/queue` beside it,
-  one line per waiting process with the same id, pid and pidStart. `run` waits its turn, runs the command with
-  the job's `maxMinutes` as a deadline (past it, TERM to the process group and to every descendant, found by ppid from one `ps` before the first signal, whatever its group, each pid and each group one leads, then KILL after 10 s to what is left, its start checked against pid reuse; on Windows, at once, `taskkill /PID <pid> /T /F` of the job's wrapper, which ends what its command started through Git Bash too; exit code 124), and
-  releases however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first
-  (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from a file can name another
-  process by now (pids are reused): a pid is the same process only while it started when the file says (`isStill`:
-  now less the elapsed time `ps -o etime=` prints, within a minute of it), and a pid this user cannot signal is never
-  kirunak's. `isStill` has three answers: true, false (a start that is off, no start recorded, or `ps` saying no such
-  process, exit 1), and unknown (`ps` did not start, as when a fork is refused, or exited otherwise, or printed no
-  elapsed time). Unknown is never killed and never read as gone: a live pid whose start `ps` cannot tell is believed
-  to be that process, and the wait ends when `ps` answers. So an owner or a queue line is alive only while its pid is
-  still the process that started at its `pidStart` (or `ps` cannot tell); one with no `pidStart` is dead. A dead
-  waiter's line goes, and a lock whose owner is dead is taken over on the next try, after whatever is left of its
-  job's group is ended (TERM, then KILL), but only while `job` is still the process that started at `jobStart`; a
-  group this user cannot signal, a job with no `jobStart`, or one that started at another time is left alone, and one
-  whose start `ps` cannot tell is waited for, and said once: a `wait` line in `guard/log.jsonl` (it has no minutes, so
-  no estimate reads it) and the job's `say`, if it has one. While such a job runs, or `ps` cannot tell, `status()`
-  shows it as `held`, marked `orphan`, since it holds the lock for every waiter. `claim` and `release` record claims in `guard/claims.json` (resource,
+  keeps `$KIRUNAK_HOME/guard/lock`, a lease (`lib/lease.mjs`, below) whose holder file is `owner.json` (id, session,
+  what, pid, job, since; pid is the waiting kirunak process, job the command's wrapper), and a first-in-first-out
+  queue file `guard/queue` beside it, one line per waiting process with its id and pid, each waiter holding its own
+  lease in `guard/waiting/<id>`. `run` waits its turn and runs the command under the wrapper (`lib/wrap.mjs`), which
+  holds the job's lease `guard/jobs/<owner's id>` while it runs, with the job's `maxMinutes` as a deadline: past it,
+  the job's tree is killed (`killTree` in `lib/os.mjs`; on macOS and Linux TERM to the wrapper's process group and to
+  every descendant, found by parentage before the first signal, whatever its group, then KILL after 10 s to what is
+  left; on Windows, at once, `taskkill /PID <pid> /T /F` of the wrapper, which ends what its command started through
+  Git Bash too), exit code 124. It releases however the job ends; a kirunak stopped (Ctrl-C, TERM, a closed terminal)
+  ends the job's tree first (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from
+  a file can name another process by now (pids are reused), and no process's start time is read on any OS: an owner
+  or a waiter is alive while its pid answers `process.kill(pid, 0)` and its lease is fresh, so a pid another process
+  took since counts as dead within a minute, and a pid this user cannot signal is never kirunak's. A dead waiter's
+  line goes, with its lease. A lock whose owner is dead is taken over on the next try, once its job is settled: while
+  the job's wrapper still holds the job's lease fresh, that pid is the wrapper, which is ended first; with no such
+  lease, a job pid that still answers cannot be told from another process that took it, so it is believed to run,
+  never killed on a guess, and waited for, said once: a `wait` line in `guard/log.jsonl` (it has no minutes, so no
+  estimate reads it) and the job's `say`, if it has one. While such a job runs, `status()` shows it as `held`, marked
+  `orphan`, since it holds the lock for every waiter. An `owner.json` or a queue line written before leases (pid and
+  pidStart, no lease) is read by its pid alone until it goes. A holder whose machine slept past a minute and finds the
+  lock taken over gives way and ends its job, so two jobs never run at once.
+- A lease (`lib/lease.mjs`) is how every lock and registered process of kirunak's is held, the same on every OS: a
+  directory made with `mkdir`, which is atomic everywhere, holding one JSON file that names its holder, touched by
+  the holder every 5 s on an unref'd timer and stale when untouched for a minute. A stale lease is taken over; a
+  takeover and a late renewal each run inside a short mutex beside it, so a holder back from sleep finds its lease
+  still its own, and touches it, or another's, and gives way. A lock whose state is a file (k run's run file, the
+  machine guard's `running/` files, a bug's review lock, Quad Damage's run file) keeps that file and is held by the
+  lease `<file>.lease` beside it; its holder is alive while its pid answers and that lease is fresh, and a file with
+  no lease beside it, written before leases, while its pid answers. `claim` and `release` record claims in `guard/claims.json` (resource,
   by, why, until); `resources()` lists what was ever claimed, a held claim with its `by` and `why`. Every job appends one line to `guard/log.jsonl` (what,
   session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected
@@ -250,8 +259,8 @@ export default {
 ```
 workspace              the pointer (§3)
 machine.json           the limits, when the owner overrides the config's
-running/<pid>.json     one file per live step process: task, step, session id, since, the process's start (machineGuard);
-                       <k-run-pid>-<n>.json a step admitted and not started yet, with pidStart, that k run's start
+running/<pid>.json     one file per live step process: task, step, session id, since (machineGuard), held by the lease
+                       <pid>.json.lease beside it; <k-run-pid>-<n>.json a step admitted and not started yet, the same
 sessions/<id>.json     a session's current task and step, context and cache (set by k start and the status line)
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)
 events.jsonl           what the front ends show as toasts: build ended, review ready, keep-alive, refusal

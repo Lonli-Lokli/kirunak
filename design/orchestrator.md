@@ -161,23 +161,26 @@ pending  →  ready  →  running  →  done
 - `running`: `k step start <id> S-n` appends to `progress.md`, writes `running/<pid>.json` (machine guard), and
   the runner starts. The process is the only thing alive. When it exits, the orchestrator checks `outputs:`; all
   present and exit 0 → `done` (`k step finish`), else `failed` with the reason. An `agent` step with a `verify:`
-  line (§1) runs it first, once its outputs (and a review's grammar) pass: `/bin/sh -c <command>` in the task's repo,
-  limited to the step's budget minutes; a design run does not. A non-zero exit, a signal, sh's 126 or 127 (a command
-  that cannot run or is not there) or a shell that cannot start fails the step (`its verify command exited 3:
-  <command>`, or `could not start …`), and the failure report gives the command, its folder, its exit or error and
-  its last 20 lines. The failure is the step's own, so the ladder counts it as any other and a Sonnet step climbs to
-  Opus after its second (gulnya/k-run-step-models AC-3, E-1). A `k run` that takes a task's lock
-  and finds a step `running` whose run record (for a heavy step, its `started` line) names a `k run` that no longer
-  runs (dead, or its pid now another process than the one that started at the record's `krunStart`; a heavy step's
-  line records no start, so its `k run` counts as gone) kills that step's claude if it still runs (nobody will
-  collect its result) and fails the step: `the k run that started it stopped`. The claude is the record's pid (and
-  its `running/` file's) only while that pid still started when the record's `claudeStart` (or the file's `since`)
-  says, within a minute (pids are reused); any other process now holding the pid, or a record with no start, is left
-  running and named (`pid N is not the claude of that run`), and the step still fails. A pid whose start `ps` cannot
-  tell (it did not start or failed, `plugins.md` §2) is believed to be what the file says: such a `k run` still runs,
-  and a step whose claude may still run is left `running`, nothing killed or failed (`ps gave no answer for pid N`,
-  said once), for a later `k run` to decide; under `--watch`, for its next pass, which asks again about those steps
-  alone and decides each as at a start once `ps` answers. A step started by hand has neither: `k run` names it and leaves it.
+  line (§1) runs it first, once its outputs (and a review's grammar) pass: `<shell> -c <command>` in the task's repo,
+  limited to the step's budget minutes, the shell `lib/os.mjs`'s `shell()`: `/bin/sh` on macOS and Linux, Git for
+  Windows' `bash.exe` on Windows (`CLAUDE_CODE_GIT_BASH_PATH` when set, as Claude Code reads it, else the one beside
+  the install `git --exec-path` names); a design run does not. A non-zero exit, a signal, the shell's 126 or 127 (a
+  command that cannot run or is not there) or a shell that cannot start fails the step (`its verify command exited 3:
+  <command>`, or `could not start …`, on a Windows with no Git Bash `no POSIX shell: install Git for Windows`), and
+  the failure report gives the command, its folder, its exit or error and its last 20 lines. The failure is the
+  step's own, so the ladder counts it as any other and a Sonnet step climbs to Opus after its second
+  (gulnya/k-run-step-models AC-3, E-1). A `k run` that takes a task's lock and finds a step `running` whose run
+  record (for a heavy step, its `started` line) names a `k run` that no longer drives the task (it no longer holds
+  the task's run file alive, below; a record written before leases, by that `k run`'s pid alone) fails the step: `the
+  k run that started it stopped`, a stop's failure the step does not count. Its session runs under the wrapper
+  (`lib/wrap.mjs`, `plugins.md` §2), which holds the lease `sessions/<session id>.lease` while the session runs:
+  while that lease is alive its pid is still the wrapper, which is ended first, with the session's whole tree, since
+  nobody will collect its result. With no such lease (a session started before the wrapper, or its wrapper gone), a
+  claude pid of the record or of its `running/` file that still answers cannot be told from another process that
+  took the pid, since no process's start time is read: it is believed to run and never killed on a guess, and the
+  step is left `running`, said once (`… pid N may still be its claude, so it is believed to run and never killed`),
+  for a later `k run` to decide; under `--watch`, for its next pass, which asks again about those steps alone. A step
+  started by hand has neither: `k run` names it and leaves it.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes", "expectMinutes"? }, "then": "resume" }`) and ended its turn. `expectMinutes` is optional, given when
   the agent has a measured length of the same job and left out otherwise; one that is not a positive number or is
@@ -301,7 +304,7 @@ pending  →  ready  →  running  →  done
     repeated build and test failures; inside a `k run` step it stays quiet, because `k run` counts that step itself.
 - The orchestrator is `k run <id> [--once|--watch]`: a plain Node loop, no model, run by the owner in a terminal or
   as a background command of their session. `--watch` passes every 30 s and exits when nothing runs, no step is
-  left undecided because `ps` could not answer (above; with `ps` broken for good it waits in view, and Ctrl-C ends
+  left undecided because its claude may still run (above; while that pid answers it waits in view, and Ctrl-C ends
   it), no step waits for a machine slot and nothing but `owner` steps is ready. A ready `owner` step does not stop
   the passes: the watch goes on starting the task's other ready steps as slots free, a step the machine guard
   refused a slot included, and only once it would end does it stop for the owner. Then it reads the plan again and
@@ -316,9 +319,10 @@ pending  →  ready  →  running  →  done
   this a start the gate refused was tried again at once, about 55 times a second for 70 minutes, at a full core
   (`gulnya/k-run-start-error-spins`, niva/themes-zoom-bests S-44, 2026-10-26). Two `k run`s on the machine (two tasks) coordinate only through the machine guard and the queue: the front
   of the queue starts first, up to `maxAgents` running steps (judgement: strict queue order is the one rule the
-  owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid and its start,
-  `pidStart`; the id URI-encoded, `<repo>%2F<slug>.json`) while it runs, a second refuses and names that pid, and a
-  lock whose `k run` is dead, or whose pid is now another process or recorded no start, is taken over. A `k run`
+  owner can predict). One task has one `k run`: it holds `$KIRUNAK_HOME/k-run/<id>.json` (its pid; the id
+  URI-encoded, `<repo>%2F<slug>.json`) by the lease beside it (`plugins.md` §2) while it runs, a second refuses and
+  names that pid, and a lock whose `k run` is dead, or whose lease went stale (its pid another process's by now), is
+  taken over; one written before leases is read by its pid alone. A `k run`
   stopped by Ctrl-C, a TERM or a closed terminal kills every process it started (its steps' runs and keep-alives;
   the guard ends a heavy job), fails each step whose run it killed (`running`) with `k run was stopped (<signal>)`,
   a stop's failure that the step does not count, releases the device claims its steps hold, releases its lock and
@@ -386,19 +390,21 @@ claude -p
   `ephemeral_1h_input_tokens`, `model_usage` (totals including subagents), `num_turns`, `duration_ms`, `is_error`,
   `subtype`, `permission_denials`, `errors` (headless.md, prompt-caching.md, agent-sdk/typescript.md). The
   orchestrator writes `steps/S-n/run-<k>.json` before the run starts (the session id, and under `kirunak` its own
-  pid `krun` with its start `krunStart`, the claude's pid `claude` with its start `claudeStart` once it starts, and
-  the start `started`) and adds the whole object to it when the run ends, with the end and the exit code; §6
+  pid `krun`, the claude's pid `claude` once it starts, and the start `started`; no process's start time, and a
+  record from before that holds `krunStart` is read by that pid alone) and adds the whole object to it when the run ends, with the end and the exit code; §6
   derives the weight from `model_usage`. A record without a result (`kirunak.result: false`) counts no calls and no
   money.
 - `--permission-mode` comes from the workspace's `runner.permissionMode`, default `auto` (judgement: a headless step
   should run as the owner's interactive sessions do; a workspace whose sessions use another mode sets it). A
   behaviour to check in slice 2 before trusting it: a step that hits a prompt no one can answer must fail within the
-  timeout, not hang. The orchestrator's timeout (budget minutes) kills the process tree as the default guard does
-  (TERM, then KILL, `plugins.md` §2), a background job its claude started in a group of its own included.
+  timeout, not hang. The orchestrator's timeout (budget minutes) kills the session's wrapper and its tree as the
+  default guard does (`killTree`, `plugins.md` §2: TERM, then KILL on macOS and Linux, a background job its claude
+  started in a group of its own included; `taskkill /T /F` on Windows, what it started through Git Bash included).
 - On resume, pass the same `--add-dir`, `--settings`, `--plugin-dir` flags (sessions.md: they are not remembered).
 - **The limits reading** (`limits()`, gulnya/quad-damage AC-9, AC-10, outside the seam): `claude -p "reply with the
   word ok" --model haiku --max-turns 1 --output-format stream-json --verbose --tools ''` (`--tools` takes a list, so
-  its empty one goes last), in the temporary folder unless `cwd` names one, its process group killed after
+  its empty one goes last), in the temporary folder unless `cwd` names one, its process group (on Windows, its
+  process) killed after
   `timeoutMs` (default 2 minutes). The reading is the stream's last `rate_limit_event` whose `unifiedWindows` holds
   `seven_day`: `{ fiveHour: { used, resetsAt } | null, week: { used, resetsAt }, overage }`, `used` its
   utilization in percent, `resetsAt` in epoch seconds, `overage` its `isUsingOverage`, `fiveHour` null when it has no
@@ -433,11 +439,12 @@ last thing written. A design run's brief quotes the same two from the plan. The 
 - The machine guard: `running/<pid>.json` per live step process; `limits()` from the workspace (default
   `maxAgents: 2`; judgement: a laptop runs one build beside two headless sessions, not three; a number to check
   against memory pressure on the machine in slice 2). `k run` refuses to start a step past the cap and says who
-  runs. `maxHeavy: 1` is the lock itself. A pid file whose process is dead, or whose pid is now another process than
-  the one that started at its `since`, is removed on the next pass (as the default guard treats a dead owner).
-  Counting and reserving are one step across processes, inside a short mutex (`running/.admit`): an admitted step's
-  reservation, `running/<k-run-pid>-<n>.json`, counts as running while that `k run` lives (its pid still the process
-  that started at the file's `pidStart`), becomes the run's pid file by a rename when the run starts (a resume takes
+  runs. `maxHeavy: 1` is the lock itself. Each pid file is held by the lease beside it, which the `k run` that wrote
+  it keeps fresh; a pid file whose process is dead, or whose lease went stale (its `k run` gone, or its pid another
+  process's by now), is removed on the next pass (as the default guard treats a dead owner), and one written before
+  leases is read by its pid alone. Counting and reserving are one step across processes, inside a short mutex
+  (`running/.admit`): an admitted step's reservation, `running/<k-run-pid>-<n>.json`, counts as running while that
+  `k run` lives and keeps its lease fresh, becomes the run's pid file by a rename when the run starts (a resume takes
   a slot as a start does), and is removed if the step never starts, by the `k run`'s end or its stop.
 
 ## 5. The cache keeper (R11, D9)

@@ -90,14 +90,18 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
 - **Quad Damage** (`k bugs quad-damage`, the owner's verb, `approval.md` §2; R34, gulnya/quad-damage;
   `lib/quad-damage.mjs`) is one unattended run over the bugs marked yes. Its run file,
   `$KIRUNAK_HOME/bugs/quad-damage.json`, `{ pid, started, by, via, folder, bug, phase, try, since, waitUntil }`, is
-  made with O_EXCL: a second start is refused while its pid lives, naming that pid, its start and its bug (E-3), and a
-  dead pid's file is taken over. The start takes the file, is refused when no bug is marked yes, and hands the file to
-  a detached `k bugs quad-damage` in its own process group, printing its pid, its log and its folder
+  made with O_EXCL and held by the lease beside it (`plugins.md` §2): a second start is refused while its holder
+  lives (its pid answers and its lease is fresh), naming that pid, its start and its bug (E-3), and a dead holder's
+  file is taken over. The start takes the file, is refused when no bug is marked yes, and hands the file to a
+  detached `k bugs quad-damage` (in its own process group on macOS and Linux), printing its pid, its log and its folder
   `$KIRUNAK_HOME/bugs/quad-damage/<started>/` (`run.log`, `progress.log`, `state.json`, `summary.md`, and a folder a
   bug with each fixing session's `fix-<n>.brief.md`, `fix-<n>.md` report and `fix-<n>.json` result), and the command
   that waits for its progress; `--dry-run` names the bugs it
-  would take; `--via` records who started it (the mod passes `mod`, else `shell`). The run keeps the Mac awake with
-  `caffeinate -i -w <pid>` on macOS (E-2), then before each bug reads the list again and takes the first marked bug it
+  would take; `--via` records who started it (the mod passes `mod`, else `shell`). The run keeps the machine awake
+  while it lives (E-2; `keepAwake` in `lib/os.mjs`: `caffeinate -i -w <pid>` on macOS, a sleep and idle lock of
+  `systemd-inhibit` on Linux where there is one, nothing on Windows). The owner's stop (`--stop`) sends no signal: it
+  writes `bugs/quad-damage.stop.json` naming the run's pid, which the run hears at once through `fs.watch` on that
+  folder, or within a second by a look that does not need it, on every OS. The run then before each bug reads the list again and takes the first marked bug it
   has not tried, in `k bugs`' order, so a bug marked during the run joins it and one whose lock another live pid holds
   is passed over as "waits: being reviewed". It holds the bug's review lock with its own pid for the whole bug, so
   Review & merge, Start fix and Drop on it are refused, naming Quad Damage (E-4). Nothing of a run goes into a repo
