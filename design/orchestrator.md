@@ -199,7 +199,12 @@ pending  →  ready  →  running  →  done
   steps' records (S-x, S-y)` under `KIRUNAK_RECORDING`; then the hold goes. A release step that fails keeps the hold
   (its `failed` line and `failure-<n>.md` held), so the retry runs on the same clean tree and commit. A run that
   will not finish ends by `k records <id>`, which commits the held lines with the folder's records; `k accept`
-  refuses while a hold is open. Judgement: the gates stay strict and kirunak stays out of their way, rather than
+  refuses while a hold is open. A step that stops for the owner in the run (past the top rung, a repeated `not met`)
+  writes its `[escalate]` and `failures:` into the hold too, `marks.json` (`{ "S-n": [failure reports] }`), never
+  into the tree's `plan.md`: every reader of the plan (the step states, k run, k list and the board, `k plan check`,
+  the compaction hooks' plan part) reads the tree's file with the held marks on it, and the run's last finish or
+  `k records <id>` puts them on `plan.md` in its records commit. The way back from a held mark starts with that
+  commit: `k records <id>, then take [escalate] off S-n's header in plan.md, then k run`. Judgement: the gates stay strict and kirunak stays out of their way, rather than
   each gate learning to forgive kirunak's own files.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes", "expectMinutes"? }, "then": "resume" }`) and ended its turn. `expectMinutes` is optional, given when

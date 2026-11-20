@@ -299,8 +299,9 @@ parser of about a hundred lines with no dependency.
 
 Who commits these records (gulnya/accept-leaves-task-files): `k step finish` commits a step's evidence, then its
 `progress.md` line with the step's brief, report and `given.json`, and no more of the folder; while a release run
-holds them (`orchestrator.md` §2, `clean-tree: yes`), its lines wait in `$KIRUNAK_HOME/held/` and its last step's
-finish commits the run's evidence and records in two commits. The rest (notes, plan,
+holds them (`orchestrator.md` §2, `clean-tree: yes`), its lines and any step's `[escalate]` mark wait in
+`$KIRUNAK_HOME/held/` and its last step's finish commits the run's evidence and records in two commits, the marks on
+`plan.md` with the records. The rest (notes, plan,
 reviews, the checklist, evidence and screenshots the owner looked at, a file deleted) is committed by `k records <id>
 [<file>...] [--dry-run]`: it lists every changed, new or deleted file of the folder, `task.md`, `done.json`,
 `cost.md` and ignored files aside, then commits exactly those paths in one commit, `kirunak: <id> records`, under

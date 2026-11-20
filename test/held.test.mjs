@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import * as steps from '../lib/steps.mjs';
 import { holdOf, progressText } from '../lib/held.mjs';
 import { parsePlan, releaseRun } from '../lib/plan.mjs';
+import { rows } from '../lib/list.mjs';
+import { run } from '../lib/run.mjs';
+import { stoppedFor } from '../lib/waiting.mjs';
 import { approvedWorkspace, k, sh } from './helpers.mjs';
 
 // A release run keeps the tree clean (orchestrator.md §2; the bug gulnya/step-records-void-release-receipts): while
@@ -147,4 +150,37 @@ test('k records ends a hold whose run will not finish: the held lines and the st
   assert.match(atHead(w, 'progress.md'), /S-2 started \(session rel-1\)\n.* S-2 failed: the store is down\n$/);
   assert.ok(existsSync(join(w.p.dir, 'steps', 'S-2', 'failure-1.md')));
   assert.ok(atHead(w, 'steps/S-2/failure-1.md'));
+});
+
+test('a release step that escalates leaves the tree clean and HEAD unmoved: the mark is held, every reader takes it, and k records commits it', async () => {
+  const w = await built();
+  const before = gate(w);
+  ok(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rel-1']));
+  ok(k(w.home, ['step', 'fail', w.id, 'S-2', '--why', 'the emulator went away']));
+  ok(k(w.home, ['step', 'start', w.id, 'S-2', '--session', 'rel-2']));
+  ok(k(w.home, ['step', 'fail', w.id, 'S-2', '--why', 'the emulator went away again']));
+  const { failures } = steps.escalate({ ws: w.ws, id: w.id, step: 'S-2' });
+  assert.deepEqual(failures, ['steps/S-2/failure-1.md', 'steps/S-2/failure-2.md']);
+  assert.deepEqual(gate(w), before, 'the gate sees a clean tree at the same commit after S-2 escalates');
+  assert.doesNotMatch(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /\[escalate\]|failures:/, 'the tree\'s plan.md is untouched');
+
+  const t = steps.load(w.ws, w.id);
+  assert.equal(t.states.get('S-2').state, 'escalated', 'the step states take the held mark');
+  assert.deepEqual(t.plan.steps.find((s) => s.id === 'S-2').failures, failures);
+  assert.deepEqual(steps.stopsOf(w.ws, w.p).map((s) => [s.step, s.kind]), [['S-2', 'escalated']], 'the board takes it');
+  ok(k(w.home, ['plan', 'check', w.id]));
+  const [waiting] = stoppedFor(await rows(w.ws, { all: true }));
+  assert.match(waiting.lines[1], /^S-2 stopped, failed on every rung/);
+  assert.match(waiting.lines[2], /^k records weather\/offline-forecast, then take \[escalate\] off S-2/, 'the way back commits the held mark first');
+  const r = await run({ ws: w.ws, id: w.id });
+  assert.match(r.stopped, /^S-2 is marked \[escalate\] in plan\.md, held out of the tree.*k records weather\/offline-forecast/, 'k run takes it');
+  assert.deepEqual(gate(w), before, 'and k run moves nothing');
+
+  ok(k(w.home, ['records', w.id]));
+  assert.equal(holdOf(w.p.dir), null);
+  assert.equal(gate(w).dirty, '');
+  const plan = atHead(w, 'plan.md');
+  assert.match(plan, /^### S-2 Check the build on the devices \[agent\] \[escalate\]$/m);
+  assert.match(plan, /^failures: steps\/S-2\/failure-1\.md, steps\/S-2\/failure-2\.md$/m);
+  assert.equal(statesOf(w)['S-2'], 'escalated');
 });
