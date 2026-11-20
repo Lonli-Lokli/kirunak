@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { heldDir, holdOf, progressText } from '../lib/held.mjs';
+import { heldDir, holdOf, planText, progressText } from '../lib/held.mjs';
 import { clearFire, sessionFile, taskOf, within } from './compact-clear.mjs';
 import {
   agentTranscript, BOUNDARY_WAIT_S, boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, openAgents,
@@ -202,9 +202,11 @@ export async function onStart(input, home, part, now = new Date()) {
     if (part === 'task') text = fileBody(file('task.md'), (t, cap) => cut(t, cap, file('task.md')));
     if (part === 'progress') text = progressBody(dir, home);
     if (part === 'plan') {
-      const planText = readText(file('plan.md')) ?? '';
-      const states = await statesOf(dir, config.repos[fire.task.split('/')[0]], planText, progressText(dir, home) ?? '');
-      text = fileBody(file('plan.md'), (t, cap) => planFor(t, states, file('plan.md'), cap));
+      // With the escalate marks a release run holds out of the tree on it (lib/held.mjs).
+      const plan = planText(dir, home);
+      const states = await statesOf(dir, config.repos[fire.task.split('/')[0]], plan ?? '', progressText(dir, home) ?? '');
+      text = plan == null ? `the file ${file('plan.md')}: none yet` : `the file ${file('plan.md')}:\n`;
+      if (plan != null) text += planFor(plan, states, file('plan.md'), CAP - text.length);
     }
     if (part === 'state') text = await stateBody(home, input, fire, dir, source, now);
     text = `${labelOf(part, source)}\n${text}`;

@@ -11,6 +11,7 @@ import { expandHome, kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, allTaskIds, defaultChecklist, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask, removedIds } from '../lib/task.mjs';
+import { planText } from '../lib/held.mjs';
 import { checkPlan, parsePlan } from '../lib/plan.mjs';
 import { isCommitted } from '../lib/git.mjs';
 import * as approval from '../lib/approval.mjs';
@@ -390,7 +391,7 @@ const VERBS = {
     if (!existsSync(p.task)) throw new KError(`unknown task ${id}: ${p.task} does not exist`, 1);
     const plan = join(p.dir, 'plan.md');
     if (!existsSync(plan)) throw new KError(`${id} has no plan: ${p.rel('plan.md')}`, 1);
-    const found = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p, ws);
+    const found = checkPlan(parsePlan(planText(p.dir)), parseTask(readFileSync(p.task, 'utf8')), p, ws);
     // A warning refuses nothing (gulnya/k-run-step-models E-3): printed after the result, the exit still 0.
     const warnings = found.filter((x) => x.warning).map((x) => `  warning, line ${x.line}: ${x.problem}`);
     const r = report(`${id} plan`, found.filter((x) => !x.warning), '');
