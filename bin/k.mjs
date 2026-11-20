@@ -465,14 +465,15 @@ const VERBS = {
       return { path: r.path, text: r.path };
     }
     if (sub === 'start') {
-      await steps.start({ ws, id, step, session: session(flags) });
-      return { text: `${id} ${step}: started` };
+      const r = await steps.start({ ws, id, step, session: session(flags) });
+      return { text: `${id} ${step}: started${r.held ? ', a release step: its records stay out of the tree until its release run\'s last step finishes' : ''}` };
     }
     if (sub === 'finish') {
       const r = steps.finish({ ws, id, step });
       if (r.state === 'waiting-owner') return { code: 1, text: `${id} ${step} waits for the owner: ${r.owner}` };
       const c = await closing.closeIfFinal({ ws, id, step });
-      return { text: `${id} ${step}: done${c ? `\n${id}: done, its final steps passed` : ''}` };
+      const kept = r.held ? ', its records held out of the tree until the release run ends' : r.committed ? `, the release run ${r.committed.join(', ')} ended and its records committed` : '';
+      return { text: `${id} ${step}: done${kept}${c ? `\n${id}: done, its final steps passed` : ''}` };
     }
     const why = need(flags.why, '--why "<why>"');
     // The owner's stop (gulnya/escalation-counts-non-work-failures): no failure counted; the freeze hook refuses it
