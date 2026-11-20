@@ -9,6 +9,7 @@ import {
   PRUNE_DAYS, SLACK, stateText, waitingLines,
 } from '../hooks/compact-rules.mjs';
 import { DEFAULT_COMPACT } from '../lib/compact.mjs';
+import { appendProgress, heldDir, openHold } from '../lib/held.mjs';
 import { makeRepos, writeJson } from './fixtures/compact/repos.mjs';
 import { makeWorkspace } from './helpers.mjs';
 
@@ -254,6 +255,18 @@ test('SessionStart compact after the PreCompact hook\'s allow: four labelled par
   assert.deepEqual({ ...rec.fire, at: null }, { at: null, source: 'compact', put: true, why: 'expect boundary', boundaryAt: null });
   const line = h.log().at(-1);
   assert.deepEqual([line.event, line.put, line.why, line.boundary, line.chars], ['SessionStart', true, 'expect boundary', null, state.length]);
+});
+
+test('a compaction between release steps puts back the lines the release run holds out of the tree (lib/held.mjs)', () => {
+  const h = makeHome();
+  openHold(h.dir, { task: 'app/demo', run: ['S-2', 'S-3'], head: 'abc', opened: '2026-01-05 10:00' }, h.home);
+  appendProgress(h.dir, '2026-01-05 10:40 S-2 finished', h.home);
+  appendProgress(h.dir, '2026-01-05 10:41 S-3 started (session s-main)', h.home);
+  assert.equal(readFileSync(join(h.dir, 'progress.md'), 'utf8'), PROGRESS, 'the tree\'s file is untouched');
+  const progress = run(h, 'progress');
+  const held = join(heldDir(h.dir, h.home), 'progress.md');
+  assert.equal(progress, `kirunak, after a compaction (part 4 of 4): progress\nthe file ${join(h.dir, 'progress.md')}, then the lines the release run S-2, S-3 holds out of the tree until its last step finishes, ${held}:\n${PROGRESS}2026-01-05 10:40 S-2 finished\n2026-01-05 10:41 S-3 started (session s-main)\n`);
+  assert.ok(run(h, 'state').includes('\nrunning steps of this session: S-3 (started 2026-01-05 10:41)\n'));
 });
 
 test('a manual /compact: the parts are put back, and a part run before the state part reads expect itself (E-4, R5.4)', () => {
