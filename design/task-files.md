@@ -174,7 +174,8 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   reason in the message (R27).
 
 - `evidence/` is committed by `k step finish`: the step's own files there that are new or changed, and nothing
-  else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks. A commit
+  else that is staged, in one commit `<id> <step>: the step's evidence` through the repo's own hooks (a release
+  run's, by its last step's finish, `orchestrator.md` §2). A commit
   kirunak's own hook refuses (its message starts `kirunak: `) leaves the step waiting for the owner, no failure
   counted, until `k step finish` commits it; one git refuses otherwise fails the finish. So a review's `measure` or `screenshot` row cites a path that stands at `head`
   (`review.md` §2). A file is a step's when the step declares it among its outputs, else when its first path segment
@@ -297,7 +298,9 @@ parser of about a hundred lines with no dependency.
   is a review step's `given.json`, what kirunak gave the review (`review.md` §1).
 
 Who commits these records (gulnya/accept-leaves-task-files): `k step finish` commits a step's evidence, then its
-`progress.md` line with the step's brief, report and `given.json`, and no more of the folder. The rest (notes, plan,
+`progress.md` line with the step's brief, report and `given.json`, and no more of the folder; while a release run
+holds them (`orchestrator.md` §2, `clean-tree: yes`), its lines wait in `$KIRUNAK_HOME/held/` and its last step's
+finish commits the run's evidence and records in two commits. The rest (notes, plan,
 reviews, the checklist, evidence and screenshots the owner looked at, a file deleted) is committed by `k records <id>
 [<file>...] [--dry-run]`: it lists every changed, new or deleted file of the folder, `task.md`, `done.json`,
 `cost.md` and ignored files aside, then commits exactly those paths in one commit, `kirunak: <id> records`, under

@@ -249,6 +249,9 @@ the commit: `git restore --staged <file>` takes a file out, `git add -p` stages 
 prepare-commit-msg hook, so `--no-verify` does not skip it; merges, reverts and cherry-picks are not measured,
 nor are the records `k approve`, `k accept` and `k hold` commit for their task when the commit holds nothing else,
 nor the task folder's records `k step finish` and `k records` commit (`task.md` and the owner's records aside).
+A release step (`clean-tree: yes` in `plan.md`) starts only on a tree with no tracked change, and until its release
+run's last step finishes kirunak commits nothing and writes nothing git tracks (its progress lines wait in
+`$KIRUNAK_HOME/held/`), so a release gate that reads `git status` and `HEAD` sees the tree it checked.
 
 ## Working a task
 
