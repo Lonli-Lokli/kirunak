@@ -838,6 +838,13 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   A step holds the session only while it runs, whatever task it is of: after another task's step the session's calls
   count to its own link's task again, and only a session no link holds falls back to the task of the step it last
   started (lib/usage/tasks.mjs's `joinOf`; gulnya/usage-improve-11-22 AC-4, AC-5, D-1).
+- An agent is told to hand over before it grows long: `hooks/kirunak-count.mjs`, which `k install` wires on
+  PostToolUse with no matcher (every tool call is a call) and `k doctor` reads, counts each agent of a session apart
+  (the input's `agent_id`) in `<KIRUNAK_HOME>/counts/<session>.json`. At the agent's 75th call it adds "About 25 calls
+  are left for this agent: finish the piece in hand, and write what is left to a handoff file by call 100.", at its
+  100th "Return now with the short report and the handoff file's path.", each once, as `additionalContext`. A main
+  session's call gets no agent notice. It never blocks and fails open: input it cannot read or a count file it cannot
+  write lets the call through silent (gulnya/usage-improve-11-22 AC-15).
 
 ## 7. Requirements this file satisfies
 
