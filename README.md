@@ -37,7 +37,9 @@ is done.
   choice, the fix is in one repo, and it is no music-engine or real-time audio work; set it to no to keep a bug out.
   Quad Damage, the first row of `/k-bugs` while a marked bug waits (or `k bugs quad-damage` at your own prompt),
   works the bugs marked yes one at a time, unattended: a fresh session fixes each on its branch, a second reviews it,
-  and a fix with no finding merges into master, never pushed. It reads your plan's limits before every session,
+  and a fix with no finding merges into master, never pushed. A bug it skips or gives up on (a failed fix, a session
+  at its limit, a fix refused twice) it sets to no, with the reason under What was found, so the next run does not
+  repeat it; set it to yes again once the reason no longer holds. It reads your plan's limits before every session,
   waits for the 5-hour window at 90% (a plan with none never waits) and stops at 98% of the week or on extra usage. `k bugs quad-damage --status`
   says where it is, `--summary` what it did, `--progress <folder> --after <n>` waits for its next progress lines,
   `--dry-run` which bugs it would take; from the mod the session writes a short line in its chat at each change of
