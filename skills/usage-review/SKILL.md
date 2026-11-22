@@ -13,8 +13,8 @@ covers the one that just ended. Run it in a fresh session and keep its context s
    `--out` for another window) and prints the summary, each task's and step's weight, and, last, the line
    `reviews: <folder>`: the workspace's `usage.reviews`, where every review is kept. If it says `none named`, ask the
    owner for a folder to name there, and until then give the review in the reply only. Read the summary,
-   `report.txt` and `tasks.txt`; open `carry.txt`, `ttl.txt`, `escalations.txt`, `quality.txt`, `compact.txt` or
-   `replay.txt` only for the item a question is about. If it also printed `heavy jobs: <command>` (the workspace's
+   `report.txt` and `tasks.txt`; open `carry.txt`, `ttl.txt`, `escalations.txt`, `quality.txt`, `compact.txt`,
+   `replay.txt` or `fable.txt` only for the item a question is about. If it also printed `heavy jobs: <command>` (the workspace's
    `usage.heavyReport`, the week filled in), run that command: its table of the week's slowest jobs and suites per
    repo, the jobs of 50 minutes or more and the minutes lost to failed jobs goes into the review as it prints.
 2. **Compare.** Read the newest review in the folder (the files are named by date) and set this week beside it: the

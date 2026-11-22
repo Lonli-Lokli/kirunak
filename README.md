@@ -486,7 +486,8 @@ from every Claude Code transcript on this machine and writes it to `<KIRUNAK_HOM
 (every call), `report.txt` (with every agent past 100 calls: its type, calls, weight, task and step), `ttl.txt` (the
 week under a 5-minute and a 1-hour cache), `carry.txt`, `writes.txt`, `escalations.txt` (with the steps stopped for
 the owner by reason and by task, each task once however many worktrees it has), `quality.txt` and `.tsv`, `compact.txt`, `replay.txt` and `.tsv` (the handover replayed),
-`summary.txt`, and `tasks.txt` and `.tsv` (each task's and step's weight, heaviest first, "no task" last). It prints
+`fable.txt` (each Fable step and agent: its weight, calls, first context, whether it designed, reviewed or took an
+escalation, and whether its design was redone), `summary.txt`, and `tasks.txt` and `.tsv` (each task's and step's weight, heaviest first, "no task" last). It prints
 the summary, the tasks and the review folder. A transcript cut short or unreadable is skipped and counted. The
 `usage-review` skill (`/usage-review`) runs it once a week, compares with the last review in `usage.reviews`, answers
 that folder's `standing.md` and writes the new review there.
