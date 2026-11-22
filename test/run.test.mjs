@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readLines } from '../lib/keeper.mjs';
+import { shell } from '../lib/os.mjs';
 import { run, timed, verifyStep } from '../lib/run.mjs';
 import { renderBrief } from '../lib/board-brief.mjs';
 import { snapshot } from '../lib/board.mjs';
@@ -14,10 +15,12 @@ import { FAST_QUEUE_SINCE } from '../lib/plan.mjs';
 import { stoppedFor } from '../lib/waiting.mjs';
 import * as queue from '../lib/queue.mjs';
 import * as steps from '../lib/steps.mjs';
-import { register } from '../plugins/machine-guard-pids.mjs';
-import { alive, groupAlive } from '../plugins/resource-guard-local.mjs';
+import { register, unregister } from '../plugins/machine-guard-pids.mjs';
+import { alive, groupAlive, killTree } from '../plugins/resource-guard-local.mjs';
 import runnerClaude from '../plugins/runner-claude.mjs';
-import { approvedWorkspace, events, fakeClaude, fakePs, k, KIRUNAK, repeatedWorkspace, tempDir } from './helpers.mjs';
+import { read as readLease } from '../lib/lease.mjs';
+import { sessionLease, wrapped } from '../lib/wrap.mjs';
+import { approvedWorkspace, endedPid, events, fakeClaude, k, KIRUNAK, repeatedWorkspace, sleeper, tempDir } from './helpers.mjs';
 
 // The user's settings folder of every step this file runs: empty, so a step's window is the one R7.4 gives with no
 // user window (orchestrator.md §5), whatever this machine's own settings say.
@@ -67,7 +70,7 @@ function fakeRunner(w, act = () => 'write') {
   const runner = {
     start(step) {
       const n = calls.push(step);
-      const child = spawn('sleep', [step.sleep || '0.05'], { detached: true });
+      const child = sleeper(step.sleep || 0.05, { detached: true });
       const sessionId = step.resume || step.sessionId;
       const done = new Promise((resolve) =>
         child.on('exit', (code, signal) => {
@@ -103,7 +106,7 @@ test('pending → ready → running → done, with the run records, the briefs a
   const calls = fakeRunner(w, (step, n, w2, pid) => {
     const rec = JSON.parse(readFileSync(join(w2.p.dir, 'steps', step.env.KIRUNAK_STEP, 'run-1.json'), 'utf8'));
     assert.deepEqual([rec.session_id, rec.kirunak.krun, rec.kirunak.claude, rec.kirunak.ended, rec.kirunak.result], [step.sessionId, process.pid, pid, null, false], 'the record is written before the run ends');
-    assert.ok(Math.abs(Date.now() - Date.parse(rec.kirunak.claudeStart)) < 10000, 'the claude\'s start is recorded beside its pid');
+    assert.equal('claudeStart' in rec.kirunak || 'krunStart' in rec.kirunak, false, 'no start time is recorded (AC-5)');
     seen.push({ states: Object.fromEntries([...steps.load(w2.ws, w2.id).states].map(([s, v]) => [s, v.state])), pidFile: existsSync(join(w2.home, 'running', `${pid}.json`)) });
     return 'write';
   });
@@ -996,7 +999,7 @@ test('every needs-<k>.json takes its number from one index: heavy, the owner, he
 test('a step started by hand that asks for a job: k run runs it and starts no claude; one that asks the owner: k run stops', async () => {
   const w = await approvedWorkspace(PLAN);
   // Started by hand with its own session id, after an earlier k run's conversation that left a record.
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: 'an-earlier-run', num_turns: 2, kirunak: { krun: spawnSync('true').pid, claude: null, started: new Date().toISOString(), ended: new Date().toISOString(), result: true } }));
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: 'an-earlier-run', num_turns: 2, kirunak: { krun: endedPid(), claude: null, started: new Date().toISOString(), ended: new Date().toISOString(), result: true } }));
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: randomUUID() });
   put(w, 'steps/S-1/needs.json', HEAVY('weather unit tests'));
   const jobs = [];
@@ -1029,7 +1032,7 @@ test('a step started by hand that asks for a job: k run runs it and starts no cl
 test('k run refuses a step past the machine cap and says who runs', async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);
-  const others = [spawn('sleep', ['5']), spawn('sleep', ['5'])];
+  const others = [sleeper(5), sleeper(5)];
   try {
     others.forEach((c, i) => register(w.ws, c.pid, { task: 'hub/other', step: `S-${i + 1}`, session: `s${i}` }));
     const r = await run({ ws: w.ws, id: w.id });
@@ -1087,7 +1090,7 @@ test('one k run per task: a second refuses, naming the pid, and starts nothing; 
   await first;
   assert.equal(calls.length, 1, 'the second k run started nothing');
   assert.ok(!existsSync(lock), 'the lock goes when k run ends');
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   writeFileSync(lock, JSON.stringify({ pid: dead, task: w.id }));
   const lines = [];
   await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
@@ -1096,11 +1099,22 @@ test('one k run per task: a second refuses, naming the pid, and starts nothing; 
   assert.ok(!existsSync(lock));
 });
 
+// The pid of a child that has exited, and a process that runs until killed, on every OS.
+async function deadPid() {
+  const c = spawn(process.execPath, ['-e', '']);
+  await new Promise((r) => c.on('exit', r));
+  return c.pid;
+}
+const idle = () => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore' });
+
 const until = async (ok, what) => {
   for (const t0 = Date.now(); !ok(); await new Promise((r) => setTimeout(r, 20))) assert.ok(Date.now() - t0 < 10000, what);
 };
 
-test('k run stopped by a signal kills its claude, fails the step, frees the lock and exits with the signal; the next k run retries the step', async () => {
+// k run in a child stopped as Ctrl-C stops it: a SIGINT sent to the child.
+const NO_SIGINT = process.platform === 'win32' && 'Windows cannot send a child SIGINT: its kill ends k run at once';
+
+test('k run stopped by a signal kills its claude, fails the step, frees the lock and exits with the signal; the next k run retries the step', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run in a child, with a fake claude on PATH that says its pid and sleeps.
   const bin = tempDir('kirunak-sleepy-claude-');
@@ -1123,35 +1137,29 @@ test('k run stopped by a signal kills its claude, fails the step, frees the lock
   assert.doesNotMatch(calls[0].prompt, /failure-1\.md|the last attempt failed/, 'a stop is not the attempt\'s failure');
 });
 
-test('k run --watch stopped by a signal while a step is left undecided exits with the signal and leaves that step and its claude', async () => {
+test('k run --watch stopped by a signal while a step is left undecided exits with the signal and leaves that step and its claude', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const claude = sleeper(30, { detached: true, stdio: 'ignore' });
   const start = new Date().toISOString();
   register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
-  const dead = spawnSync('true').pid;
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  const dead = endedPid();
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, started: start, ended: null, result: false } }));
   // Nothing should start; a claude that did would fail at once rather than reach the real one.
   const bin = tempDir('kirunak-no-claude-');
   writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(bin, 'claude'), 0o755);
-  const restore = fakePs('fails');
-  let child;
-  try {
-    child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id, '--watch'], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
-  } finally {
-    restore();
-  }
+  const child = spawn(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), 'run', w.id, '--watch'], { env: { ...process.env, KIRUNAK_HOME: w.home, PATH: `${bin}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => (out += d));
   child.stderr.on('data', (d) => (out += d));
   const exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
   try {
-    await until(() => out.includes(`S-1 is left running: ps gave no answer for pid ${claude.pid}`), `no left-running line: ${out}`);
+    await until(() => out.includes(`S-1 is left running: the k run that started it (pid ${dead}) stopped, but pid ${claude.pid} may still be its claude`), `no left-running line: ${out}`);
     child.kill('SIGINT');
     assert.deepEqual(await Promise.race([exited, new Promise((r) => setTimeout(r, 3000)).then(() => 'still running')]), { code: 130, signal: null }, out);
-    assert.equal(alive(claude.pid), true, 'the claude ps could not tell about is not killed');
+    assert.equal(alive(claude.pid), true, 'the claude kirunak cannot tell about is not killed (E-5)');
     assert.ok(existsSync(join(w.home, 'running', `${claude.pid}.json`)), 'its running file is kept');
     assert.doesNotMatch(progress(w), /S-1 failed/);
     assert.deepEqual(readdirSync(join(w.home, 'k-run')), [], 'the lock is released');
@@ -1161,7 +1169,7 @@ test('k run --watch stopped by a signal while a step is left undecided exits wit
   }
 });
 
-test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', async () => {
+test('k run stopped while a step waits for its job ends the job and leaves the step waiting; the next k run runs the job and resumes the conversation', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   // The real k run --watch in a child, with a fake claude on PATH that asks for a long job.
   const bin = tempDir('kirunak-heavy-claude-');
@@ -1215,7 +1223,7 @@ echo "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,
   return { bin, child, said: () => said, exited: new Promise((r) => child.on('exit', (code, signal) => r({ code, signal }))) };
 }
 
-test('k run stopped while a resume waits for a machine slot, its job done, leaves the step waiting; the next k run runs the job again and resumes', async () => {
+test('k run stopped while a resume waits for a machine slot, its job done, leaves the step waiting; the next k run runs the job again and resumes', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   // The job lowers the machine's cap to none, so the resume after it waits for a slot.
   const full = join(tempDir('kirunak-full-'), 'machine.json');
@@ -1238,7 +1246,7 @@ test('k run stopped while a resume waits for a machine slot, its job done, leave
   assert.match(progress(w), /S-1 heavy job ended: .*\n.*S-1 heavy job ended: .*\n.*S-1 resumed \(session /);
 });
 
-test('k run stopped while the owner\'s answer waits for a machine slot leaves the step waiting for the owner; the next k run resumes it', async () => {
+test('k run stopped while the owner\'s answer waits for a machine slot leaves the step waiting for the owner; the next k run resumes it', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w, (step, n) => (n > 1 ? 'write' : (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing')));
   assert.equal((await watch(w)).stopped, 'S-1 waits for the owner: Three days or a week?');
@@ -1258,7 +1266,7 @@ test('k run stopped while the owner\'s answer waits for a machine slot leaves th
   assert.equal(progress(w).match(/resumed/g).length, 1);
 });
 
-test('k run stopped releases the device its step holds: a resume waiting for a machine slot leaves the device free', async () => {
+test('k run stopped releases the device its step holds: a resume waiting for a machine slot leaves the device free', { skip: NO_SIGINT }, async () => {
   const w = await approvedWorkspace(PLAN.replace('outputs: steps/S-1/report.md, evidence/S-1-cache-sizes.tsv', '$&\ndevice: ios.low'));
   fakeRunner(w, () => (put(w, 'steps/S-1/needs.json', JSON.stringify({ owner: 'Three days or a week?' })), 'nothing'));
   await run({ ws: w.ws, id: w.id });
@@ -1278,7 +1286,7 @@ test('a k run that died while a resume waited for its slot leaves the step waiti
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   const at = new Date().toISOString();
   put(w, 'steps/S-1/run-1.json', JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: sid, total_cost_usd: 0.1, kirunak: { krun: dead, krunStart: at, claude: dead, claudeStart: at, started: at, ended: at, exitCode: 0, result: true } }));
   put(w, 'steps/S-1/needs.json', HEAVY('tests'));
@@ -1304,51 +1312,25 @@ test('the attempt after a stop reads the step\'s last own failure report; a stop
   }
 });
 
-test('a step a dead k run left running is failed, its claude killed, and retried; a step started by hand is left alone', async () => {
+test('a step a dead k run left running, its claude ended, is failed and retried, its running file gone; a step started by hand is left alone', async () => {
   const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const claude = spawn('sleep', ['30'], { detached: true });
-  const gone = new Promise((r) => claude.on('exit', (code, signal) => r(signal)));
-  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid });
-  const dead = spawnSync('true').pid;
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, claudeStart: new Date().toISOString(), started: new Date().toISOString(), ended: null, result: false } }));
+  const claude = await deadPid();
+  mkdirSync(join(w.home, 'running'), { recursive: true });
+  writeFileSync(join(w.home, 'running', `${claude}.json`), JSON.stringify({ pid: claude, task: w.id, step: 'S-1', session: sid, since: new Date().toISOString() }));
+  const dead = await deadPid();
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude, started: new Date().toISOString(), ended: null, result: false } }));
   await steps.start({ ws: w.ws, id: w.id, step: 'S-2' });
   const calls = fakeRunner(w);
   const lines = [];
   const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
-  assert.equal(await gone, 'SIGTERM', 'the claude nobody would collect is killed');
-  assert.ok(!existsSync(join(w.home, 'running', `${claude.pid}.json`)));
+  assert.ok(!existsSync(join(w.home, 'running', `${claude}.json`)));
   assert.match(progress(w), /S-1 failed: the k run that started it stopped\n/);
-  assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; its claude (pid ${claude.pid}) was killed`), lines.join('\n'));
+  assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped`), lines.join('\n'));
   assert.ok(lines.includes(`${w.id} S-2 is running by hand`));
   assert.deepEqual(calls.map((c) => c.env.KIRUNAK_STEP), ['S-1'], 'S-1 is retried, S-2 left alone');
   assert.deepEqual(r.states, { 'S-1': 'done', 'S-2': 'running', 'S-3': 'pending', 'S-4': 'pending' });
-});
-
-test('a dead k run\'s claude pid that a later process holds is left running; the step still fails and is retried', async () => {
-  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
-  const sid = randomUUID();
-  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
-  const hourAgo = new Date(Date.now() - 3600000).toISOString();
-  register(w.ws, other.pid, { task: w.id, step: 'S-1', session: sid, since: hourAgo });
-  const dead = spawnSync('true').pid;
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: other.pid, claudeStart: hourAgo, started: hourAgo, ended: null, result: false } }));
-  put(w, 'steps/S-2/report.md');
-  const calls = fakeRunner(w);
-  const lines = [];
-  try {
-    const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
-    assert.equal(alive(other.pid), true, 'a process that is not that claude is not killed');
-    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; pid ${other.pid} is not the claude of that run, so it was left running`), lines.join('\n'));
-    assert.match(progress(w), /S-1 failed: the k run that started it stopped\n/);
-    assert.ok(!existsSync(join(w.home, 'running', `${other.pid}.json`)), 'the dead step\'s running file goes');
-    assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 1, 'S-1 is retried');
-    assert.equal(r.states['S-1'], 'done');
-  } finally {
-    other.kill();
-  }
 });
 
 // A task first approved before the heavy and store-set rules, whose plan keeps a [heavy] step beside an agent step:
@@ -1362,7 +1344,7 @@ const approvedBeforeFastQueue = (w) => {
 test('a heavy step a dead k run left running is failed and run again; its started line names its k run', async () => {
   const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
   approvedBeforeFastQueue(w);
-  const dead = spawnSync('true').pid;
+  const dead = endedPid();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${dead}` });
   const jobs = [];
   w.ws.seams.resourceGuard = { run: (job) => (jobs.push(job.what), job.say('waits: a line of the guard\'s'), put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
@@ -1376,15 +1358,15 @@ test('a heavy step a dead k run left running is failed and run again; its starte
   assert.match(progress(w), new RegExp(`S-2 started \\(heavy: Restart keeps it, k run ${process.pid}\\)`));
 });
 
-test('a step whose k run\'s pid is now another process is failed and retried, as is a heavy step, whose line records no start', async () => {
+test('a step whose k run no longer holds the task\'s run file is failed and retried though its pid runs (another process\'s by now), as is a heavy step', async () => {
   const w = await approvedWorkspace(PLAN.replace('### S-2 Restart keeps it [agent]\nneeds: S-1\ncovers: AC-3\ninputs: task, evidence/S-1-cache-sizes.tsv\n', '### S-2 Restart keeps it [heavy]\ncovers: AC-3\ncommand: npm test\n'));
   approvedBeforeFastQueue(w);
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const other = idle();
   try {
     const sid = randomUUID();
     const hourAgo = new Date(Date.now() - 3600000).toISOString();
     await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-    put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: other.pid, krunStart: hourAgo, claude: null, claudeStart: null, started: hourAgo, ended: null, result: false } }));
+    put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: other.pid, claude: null, started: hourAgo, ended: null, result: false } }));
     await steps.start({ ws: w.ws, id: w.id, step: 'S-2', label: `heavy: npm test, k run ${other.pid}` });
     w.ws.seams.resourceGuard = { run: () => (put(w, 'steps/S-2/report.md'), { exitCode: 0, log: '' }), status: () => ({}), claim() {}, release() {}, resources: () => [] };
     const calls = fakeRunner(w);
@@ -1399,26 +1381,31 @@ test('a step whose k run\'s pid is now another process is failed and retried, as
   }
 });
 
-test('a task lock whose pid is now another process, or that recorded no start, is taken over', async () => {
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+test('AC-4, E-9: a task lock whose lease went stale, its pid another process\'s by now, is taken over, its lease with it; one held fresh refuses a second k run', async () => {
+  const other = idle();
   try {
-    for (const pidStart of [new Date(Date.now() - 3600000).toISOString(), undefined]) {
-      const w = await approvedWorkspace(PLAN);
-      const calls = fakeRunner(w);
-      mkdirSync(join(w.home, 'k-run'), { recursive: true });
-      writeFileSync(join(w.home, 'k-run', `${encodeURIComponent(w.id)}.json`), JSON.stringify({ pid: other.pid, pidStart, task: w.id }));
-      const lines = [];
-      await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
-      assert.equal(calls.length, 1, `pidStart ${pidStart}`);
-      assert.ok(lines.includes(`${w.id} took over the lock of k run ${other.pid}, which no longer runs`), lines.join('\n'));
-    }
+    const w = await approvedWorkspace(PLAN);
+    const calls = fakeRunner(w);
+    const lock = join(w.home, 'k-run', `${encodeURIComponent(w.id)}.json`);
+    mkdirSync(`${lock}.lease`, { recursive: true });
+    writeFileSync(lock, JSON.stringify({ pid: other.pid, task: w.id }));
+    writeFileSync(join(`${lock}.lease`, 'holder.json'), JSON.stringify({ id: 'x', pid: other.pid }));
+    await assert.rejects(run({ ws: w.ws, id: w.id }), new RegExp(`has a k run already \\(pid ${other.pid}\\)`), 'fresh: held');
+    const old = new Date(Date.now() - 61000);
+    utimesSync(join(`${lock}.lease`, 'holder.json'), old, old);
+    const lines = [];
+    await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.equal(calls.length, 1);
+    assert.ok(lines.includes(`${w.id} took over the lock of k run ${other.pid}, which no longer runs`), lines.join('\n'));
+    assert.deepEqual(readdirSync(join(w.home, 'k-run')), [], 'released with its lease at the end');
+    assert.equal(alive(other.pid), true, 'the process that holds the pid now is left alone');
   } finally {
     other.kill();
   }
 });
 
-test('while ps cannot answer, a live k run\'s task lock refuses a second, and a step it runs is left running', async () => {
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+test('E-4: a k run\'s task lock and step record written before leases (pidStart, krunStart) are read by the pid: a live one refuses a second, and a step it runs is left running', async () => {
+  const other = idle();
   const start = new Date().toISOString();
   const w = await approvedWorkspace(PLAN);
   const calls = fakeRunner(w);
@@ -1428,7 +1415,6 @@ test('while ps cannot answer, a live k run\'s task lock refuses a second, and a 
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
   put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: other.pid, krunStart: start, claude: null, claudeStart: null, started: start, ended: null, result: false } }));
-  const restore = fakePs('fails');
   try {
     await assert.rejects(run({ ws: w.ws, id: w.id }), new RegExp(`has a k run already \\(pid ${other.pid}\\)`));
     assert.equal(JSON.parse(readFileSync(lock, 'utf8')).pid, other.pid, 'the lock is not taken over');
@@ -1440,66 +1426,103 @@ test('while ps cannot answer, a live k run\'s task lock refuses a second, and a 
     assert.doesNotMatch(progress(w), /S-1 failed/);
     assert.equal(calls.length, 0, 'nothing started');
   } finally {
-    restore();
     other.kill();
   }
 });
 
-test('while ps cannot answer, a step whose k run is dead and whose claude may still run is left running, its claude not killed', async () => {
+test('AC-11: with no machine.freeMemoryMB a k run says once what memory is free before its first session; with a margin met it says nothing of memory', async () => {
+  const w = await approvedWorkspace(PLAN);
+  fakeRunner(w);
+  const lines = [];
+  await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+  const said = lines.filter((l) => l.includes('MB of memory free'));
+  assert.equal(said.length, 1, lines.join('\n'));
+  assert.ok(said[0].startsWith(`${w.id} S-`) && said[0].endsWith(' MB of memory free (no machine.freeMemoryMB to wait for)'), said[0]);
+  const v = await approvedWorkspace(PLAN);
+  v.ws.machine = { ...v.ws.machine, freeMemoryMB: 1 };
+  fakeRunner(v);
+  const quiet = [];
+  await run({ ws: v.ws, id: v.id, out: (l) => quiet.push(l) });
+  assert.deepEqual(quiet.filter((l) => l.includes('memory')), []);
+});
+
+test('AC-6: a step whose k run is dead and whose session\'s wrapper still holds the session\'s lease is that session: it is ended with its claude, the step failed and its running file gone', async () => {
   const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const lease = sessionLease(w.ws.home || w.home, sid);
+  const [bin, ...args] = wrapped([process.execPath, '-e', 'setTimeout(() => {}, 30000)'], { lease });
+  const wrapper = spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  const start = new Date().toISOString();
+  try {
+    const t0 = Date.now();
+    while (!readLease(lease)?.holder?.child && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 20));
+    const claude = readLease(lease).holder.child;
+    register(w.ws, wrapper.pid, { task: w.id, step: 'S-1', session: sid, since: start });
+    const dead = await deadPid();
+    put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: wrapper.pid, started: start, ended: null, result: false } }));
+    fakeRunner(w);
+    const lines = [];
+    await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
+    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped, and its session (pid ${wrapper.pid}) was ended`), lines.join('\n'));
+    assert.equal(alive(wrapper.pid), false, 'its wrapper is ended');
+    assert.equal(alive(claude), false, 'and the claude under it');
+    assert.equal(existsSync(join(w.home, 'running', `${wrapper.pid}.json`)), false, 'its running file goes');
+    assert.match(progress(w), /S-1 failed/);
+  } finally {
+    unregister(w.ws, wrapper.pid);
+    if (alive(wrapper.pid)) await killTree(wrapper.pid, 300);
+  }
+});
+
+test('E-5: a step whose k run is dead and whose claude may still run is left running, its claude never killed, its running file kept', async () => {
+  const w = await approvedWorkspace(PLAN.replace('needs: S-1\n', '').replace('inputs: task, evidence/S-1-cache-sizes.tsv', 'inputs: task'));
+  const sid = randomUUID();
+  await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
+  const claude = idle();
   const start = new Date().toISOString();
   register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
-  const dead = spawnSync('true').pid;
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  const dead = await deadPid();
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, started: start, ended: null, result: false } }));
   const calls = fakeRunner(w);
   const lines = [];
-  const restore = fakePs('fails');
   try {
     const r = await run({ ws: w.ws, id: w.id, out: (l) => lines.push(l) });
-    assert.ok(lines.includes(`${w.id} S-1 is left running: ps gave no answer for pid ${claude.pid}, so its claude is believed to run`), lines.join('\n'));
+    assert.ok(lines.includes(`${w.id} S-1 is left running: the k run that started it (pid ${dead}) stopped, but pid ${claude.pid} may still be its claude, so it is believed to run and never killed`), lines.join('\n'));
     assert.equal(alive(claude.pid), true, 'not killed');
     assert.ok(existsSync(join(w.home, 'running', `${claude.pid}.json`)), 'its running file is kept');
     assert.doesNotMatch(progress(w), /S-1 failed/);
     assert.equal(r.states['S-1'], 'running');
     assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 0, 'S-1 is not started again');
   } finally {
-    restore();
+    unregister(w.ws, claude.pid);
     claude.kill();
   }
 });
 
-test('under --watch, a step left running while ps cannot answer keeps the watch alive and is decided once ps answers', async () => {
+test('E-5: under --watch, a step left running keeps the watch alive, said once, and is decided once its claude ends: failed and retried, nothing killed', async () => {
   const w = await approvedWorkspace(PLAN);
   const sid = randomUUID();
   await steps.start({ ws: w.ws, id: w.id, step: 'S-1', session: sid, label: `default model, session ${sid}` });
-  const claude = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const claude = idle();
   const start = new Date().toISOString();
-  register(w.ws, claude.pid, { task: w.id, step: 'S-1', session: sid, since: start });
-  const dead = spawnSync('true').pid;
-  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, krunStart: start, claude: claude.pid, claudeStart: start, started: start, ended: null, result: false } }));
+  const dead = await deadPid();
+  put(w, 'steps/S-1/run-1.json', JSON.stringify({ session_id: sid, kirunak: { krun: dead, claude: claude.pid, started: start, ended: null, result: false } }));
   const calls = fakeRunner(w);
   const lines = [];
-  const restore = fakePs('fails');
-  let restored = false;
   try {
     const running = run({ ws: w.ws, id: w.id, watch: true, intervalMs: 50, out: (l) => lines.push(l) });
     assert.equal(await Promise.race([running, new Promise((r) => setTimeout(r, 2000)).then(() => 'waiting')]), 'waiting', lines.join('\n'));
-    const left = `${w.id} S-1 is left running: ps gave no answer for pid ${claude.pid}, so its claude is believed to run`;
+    const left = `${w.id} S-1 is left running: the k run that started it (pid ${dead}) stopped, but pid ${claude.pid} may still be its claude, so it is believed to run and never killed`;
     assert.equal(lines.filter((l) => l === left).length, 1, 'said once, not once a pass');
-    assert.equal(alive(claude.pid), true, 'not killed while ps cannot tell');
-    restore();
-    restored = true;
+    assert.equal(alive(claude.pid), true, 'not killed');
+    claude.kill();
     const r = await running;
-    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped; its claude (pid ${claude.pid}) was killed`), lines.join('\n'));
-    assert.equal(groupAlive(claude.pid), false, 'killed once ps could tell it was that claude');
+    assert.ok(lines.includes(`${w.id} S-1 failed: the k run that started it (pid ${dead}) stopped`), lines.join('\n'));
     assert.match(progress(w), /S-1 failed: the k run that started it stopped\n/);
     assert.equal(calls.filter((c) => c.env.KIRUNAK_STEP === 'S-1').length, 1, 'S-1 is retried in the same k run');
     assert.deepEqual(r.states, BOTH, 'the night goes on: S-2 after it, up to the owner\'s step');
   } finally {
-    if (!restored) restore();
     claude.kill();
   }
 });
@@ -1567,12 +1590,13 @@ test('a keep-alive that never ends is killed at its deadline, and the step resum
   withCache(w);
   let ended = 'still running';
   w.ws.seams.runner.keepAlive = () => {
-    const child = spawn('sleep', ['30'], { detached: true });
-    const done = new Promise((r) => child.on('exit', (code, signal) => ((ended = signal), release(), r({ exitCode: 143, result: null }))));
+    const child = sleeper(30, { detached: true });
+    const done = new Promise((r) => child.on('exit', (code, signal) => ((ended = signal ?? code), release(), r({ exitCode: 143, result: null }))));
     return { pid: child.pid, done };
   };
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, clock, keepAliveMinutes: 0.002 });
-  assert.equal(ended, 'SIGTERM', 'the keep-alive was killed at its deadline');
+  // TERM on macOS and Linux; on Windows the end at once, exit 1.
+  assert.equal(ended, process.platform === 'win32' ? 1 : 'SIGTERM', 'the keep-alive was killed at its deadline');
   assert.deepEqual(r.states, BOTH);
   assert.equal(calls[1].resume, calls[0].sessionId);
   assert.deepEqual(readLines(w.home)[0].reason, 'the keep-alive did not end within 0.002 minutes');
@@ -1649,7 +1673,7 @@ test('k run stops before a review whose two latest counting reviews repeat a not
   w.ws.seams.runner = {
     start(step) {
       calls.push(step);
-      const child = spawn('sleep', ['0.05'], { detached: true });
+      const child = sleeper(0.05, { detached: true });
       const done = new Promise((resolve) => child.on('exit', () => {
         w.review('review-3.md', ['AC-2']);
         resolve({ exitCode: 0, result: { type: 'result', subtype: 'success', is_error: false, num_turns: 2, session_id: step.sessionId, total_cost_usd: 0.1 } });
@@ -1692,22 +1716,26 @@ test('k run stops before a review whose two latest counting reviews repeat a not
   assert.match(r3.stopped, /^S-5 AC-2 not met in review-2 and review-3; the owner decides: read steps\/S-5\/repeat\.md\n  review-2: \| AC-2 \| not met \| AC-2 still fails in review-2\.md: the cache keeps one day \|\n  review-3: \| AC-2 \| not met \| AC-2 still fails in review-3\.md: the cache keeps one day \|$/);
 });
 
-test('a step ended on its budget leaves no background job running, though the job is in a process group of its own', async () => {
+test('a step ended on its budget leaves no background job running, though the job is in a process group of its own; on Windows too, where taskkill /T ends it (amendment A-1)', async () => {
   const dir = tempDir('kirunak-timed-');
   const pidFile = join(dir, 'job.pid');
-  // The step's claude, leading its own group as the runner starts it, keeps a background job in another group.
-  const js = `const c = require('child_process').spawn('/bin/sh', ['-c', 'sleep 60'], { detached: true, stdio: 'ignore' });
+  // The step's claude, leading its own group as the runner starts it, keeps a background job in another group: on
+  // Windows, with no /bin/sh to start, a node started detached.
+  const js = `const [cmd, args] = process.platform === 'win32' ? [process.execPath, ['-e', 'setTimeout(() => {}, 60000)']] : ['/bin/sh', ['-c', 'sleep 60']];
+const c = require('child_process').spawn(cmd, args, { detached: true, stdio: 'ignore' });
 require('fs').writeFileSync(process.argv[1], String(c.pid));
 setTimeout(() => {}, 60000);`;
   const child = spawn(process.execPath, ['-e', js, pidFile], { detached: true, stdio: 'ignore' });
   const done = new Promise((r) => child.on('exit', (code) => r({ exitCode: code })));
-  const o = await timed({ pid: child.pid, done }, 0.01);
+  // Two seconds, so a slow start still writes the job's pid before the budget ends.
+  const o = await timed({ pid: child.pid, done }, 2 / 60);
   assert.equal(o.exitCode, 124);
   assert.equal(o.timedOut, true);
   const job = Number(readFileSync(pidFile, 'utf8'));
+  const running = () => (process.platform === 'win32' ? alive(job) : groupAlive(job));
   const end = Date.now() + 2000;
-  while (groupAlive(job) && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(groupAlive(job), false, 'the background job is gone with its step');
+  while (running() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(running(), false, 'the background job is gone with its step');
 });
 
 // gulnya/k-run-step-models: S-1 proves its work with a verify command, run in the task's repo as its agent ends.
@@ -1738,8 +1766,26 @@ test('a verify command that cannot start is the step\'s failure, with its error 
   assert.match(readFileSync(join(w.p.dir, 'steps', 'S-1', 'failure-1.md'), 'utf8'), /It exited 127\.\n\nIts last lines:\n\n```\n.*no-such-check.*\n```/);
   // A shell that cannot be spawned at all (here, in a folder that is gone) says its own error.
   const gone = await verifyStep('true', join(w.p.root, 'no-such-folder'));
-  assert.deepEqual([gone.ok, gone.why], [false, 'its verify command could not start: spawn /bin/sh ENOENT: true']);
-  assert.match(gone.detail, /It could not start: spawn \/bin\/sh ENOENT\.\n\nIt printed nothing\./);
+  assert.deepEqual([gone.ok, gone.why], [false, `its verify command could not start: spawn ${shell()} ENOENT: true`]);
+  assert.match(gone.detail, new RegExp(`It could not start: spawn ${escape(shell())} ENOENT\\.\\n\\nIt printed nothing\\.`));
+});
+
+test('AC-9: a [heavy] step\'s job and a verify command run through shell(); on this machine `echo ok > out.txt` writes its file both ways (asilak/kirunak-cross-platform S-2)', async () => {
+  const w = await approvedWorkspace(heavyIn('echo ok > out.txt'));
+  const jobs = [];
+  const dir = tempDir('kirunak-heavy-');
+  heavyGuard(w, jobs, (n) => {
+    const [cmd, ...args] = jobs[n - 1].command;
+    const r = spawnSync(cmd, args, { cwd: dir, encoding: 'utf8' });
+    return { exitCode: r.status, log: `${r.stdout}${r.stderr}` };
+  });
+  fakeRunner(w);
+  await run({ ws: w.ws, id: w.id });
+  assert.deepEqual(jobs[0].command, [shell(), '-c', 'echo ok > out.txt']);
+  assert.equal(readFileSync(join(dir, 'out.txt'), 'utf8'), 'ok\n');
+  const here = tempDir('kirunak-verify-');
+  assert.deepEqual(await verifyStep('echo ok > out.txt && test -f out.txt', here), { ok: true, why: null, detail: '' });
+  assert.equal(readFileSync(join(here, 'out.txt'), 'utf8'), 'ok\n');
 });
 
 test('an agent step starts with only Read, Edit, Write, Bash, Glob, Grep and Skill, kept in its run record (gulnya/k-run-step-models AC-4)', async () => {

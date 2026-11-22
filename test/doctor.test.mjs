@@ -219,12 +219,13 @@ test('the bugs\' notice is ok after k install, and FAILs naming k install when i
   const w = await installed();
   const check = () => bugsHookLine({ settingsPath: w.settingsPath });
   assert.deepEqual(check(), [true, "bugs' notice: wired on SessionStart startup|clear"]);
-  const ours = (json) => json.hooks.SessionStart.find((b) => b.hooks[0].command.endsWith('hooks/kirunak-bugs.mjs'));
+  const bugs = (b) => /hooks[\\/]+kirunak-bugs\.mjs"?$/.test(b.hooks[0].command);
+  const ours = (json) => json.hooks.SessionStart.find(bugs);
   w.settings((json) => { ours(json).matcher = 'startup|resume|clear'; });
   assert.deepEqual(check(), [false, "bugs' notice: wired on SessionStart with matcher startup|resume|clear, kirunak's startup|clear (run k install)"]);
   w.settings((json) => { delete ours(json).matcher; });
   assert.deepEqual(check(), [false, "bugs' notice: wired on SessionStart with matcher none, kirunak's startup|clear (run k install)"]);
-  w.settings((json) => { json.hooks.SessionStart = json.hooks.SessionStart.filter((b) => !b.hooks[0].command.endsWith('hooks/kirunak-bugs.mjs')); });
+  w.settings((json) => { json.hooks.SessionStart = json.hooks.SessionStart.filter((b) => !bugs(b)); });
   assert.deepEqual(check(), [false, `bugs' notice: not wired on SessionStart in ${w.settingsPath} (run k install)`]);
   writeFileSync(w.settingsPath, 'not json');
   assert.equal(check()[0], false, 'a settings file it cannot read');
@@ -233,15 +234,20 @@ test('the bugs\' notice is ok after k install, and FAILs naming k install when i
 test('the status line tracker is a WARN naming the line to add until statusLine, or a script it names, runs it (cost-untracked-sessions AC-3)', async () => {
   const w = await installed();
   const check = () => trackerLine({ settingsPath: w.settingsPath, kirunakRoot: KIRUNAK, home: w.dir });
-  const add = `add this line to the status line command, fed the same JSON on stdin, with "refreshInterval": 30: node ${join(KIRUNAK, 'hooks', 'statusline-track.mjs')}`;
+  // The line as k install writes it: on Windows the path quoted, each backslash doubled.
+  const tracker = join(KIRUNAK, 'hooks', 'statusline-track.mjs');
+  const line = process.platform === 'win32' ? `node "${tracker.replaceAll('\\', '\\\\')}"` : `node ${tracker}`;
+  const add = `add this line to the status line command, fed the same JSON on stdin, with "refreshInterval": 30: ${line}`;
   assert.deepEqual(check(), ['warn', `status line tracker: no statusLine command in ${w.settingsPath}, so sessions' cost is not tracked and the cache keeper cannot see them: ${add}`]);
   // A script of the user's, named from the home folder, that prints a status line without the tracker.
   const script = join(w.dir, 'statusline.sh');
   writeFileSync(script, '#!/usr/bin/env bash\necho status\n');
   w.settings((s) => { s.statusLine = { type: 'command', command: '~/statusline.sh', refreshInterval: 30 }; });
   assert.deepEqual(check(), ['warn', `status line tracker: statusLine in ${w.settingsPath} and ${script} do not run it, so sessions' cost is not tracked and the cache keeper cannot see them: ${add}`]);
-  writeFileSync(script, `#!/usr/bin/env bash\ninput=$(cat)\nprintf '%s' "$input" | node ${join(KIRUNAK, 'hooks', 'statusline-track.mjs')}\necho status\n`);
+  writeFileSync(script, `#!/usr/bin/env bash\ninput=$(cat)\nprintf '%s' "$input" | ${line}\necho status\n`);
   assert.deepEqual(check(), [true, `status line tracker: run by ${script}`]);
-  w.settings((s) => { s.statusLine.command = `bash -c 'node ${join(KIRUNAK, 'hooks', 'statusline-track.mjs')}'`; });
+  w.settings((s) => { s.statusLine.command = `bash "${script}"`; });
+  assert.deepEqual(check(), [true, `status line tracker: run by ${script}`], 'the script named by its full path, with backslashes on Windows');
+  w.settings((s) => { s.statusLine.command = `bash -c '${line}'`; });
   assert.deepEqual(check(), [true, `status line tracker: run by statusLine in ${w.settingsPath}`]);
 });

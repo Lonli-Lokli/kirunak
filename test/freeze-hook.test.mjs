@@ -61,6 +61,8 @@ const edit = (file, oldString, newString, extra = {}) => ({
 });
 const write = (file, content) => ({ session_id: 's1', tool_name: 'Write', tool_input: { file_path: file, content } });
 const bash = (command, cwd) => ({ session_id: 's1', tool_name: 'Bash', tool_input: { command }, cwd });
+// A path as a Bash command writes it: Git Bash on Windows reads `\` as an escape, so it takes `/` there too.
+const sh = (path) => path.replaceAll('\\', '/');
 
 test('an Edit of a frozen task.md is denied with the amendment instruction, and logged', () => {
   const r = makeRepo();
@@ -112,7 +114,7 @@ test('any Write under approvals/, to done.json or hold.md is denied as the owner
 test('a Write, an Edit or a shell write of cost.md is denied: it is generated from done.json', () => {
   const r = makeRepo();
   const file = r.task(FROZEN, 'cost.md');
-  for (const input of [write(file, '# Cost\n'), { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' } }, { tool_name: 'Bash', tool_input: { command: `echo x > ${file}` } }]) {
+  for (const input of [write(file, '# Cost\n'), { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' } }, { tool_name: 'Bash', tool_input: { command: `echo x > ${sh(file)}` } }]) {
     const res = run(input, r.home);
     assert.match(res.reason ?? '', /^kirunak: cost\.md is generated from done\.json's cost, which only `k accept` records: `k cost .+ --write` writes it again$/, JSON.stringify(input));
   }
@@ -324,7 +326,7 @@ test('decide: git checkout and git restore of a frozen task or a record', () => 
     `git checkout -- kirunak/tasks/${FROZEN}/task.md`,
     `git checkout HEAD~1 -- kirunak/tasks/${FROZEN}/task.md`,
     `git restore --source HEAD~1 kirunak/tasks/${FROZEN}/task.md`,
-    `git -C ${r.repo} restore kirunak/approvals/${FROZEN}.json`,
+    `git -C ${sh(r.repo)} restore kirunak/approvals/${FROZEN}.json`,
     `git rm kirunak/approvals/${FROZEN}.json`,
   ]) {
     assert.ok(denies(r, command, command.includes('-C') ? r.top : r.repo), command);
@@ -339,8 +341,8 @@ test('decide: paths resolve against cwd, cd, ~ and absolute paths', () => {
   const r = makeRepo();
   const taskDir = join(r.repo, 'kirunak', 'tasks', FROZEN);
   assert.ok(denies(r, "sed -i '' s/a/b/ task.md", taskDir));
-  assert.ok(denies(r, `sed -i '' s/a/b/ ${r.task(FROZEN, 'task.md')}`, tmpdir()));
-  assert.ok(denies(r, `cd ${r.repo} && echo x > kirunak/approvals/x.json`, tmpdir()));
+  assert.ok(denies(r, `sed -i '' s/a/b/ ${sh(r.task(FROZEN, 'task.md'))}`, tmpdir()));
+  assert.ok(denies(r, `cd ${sh(r.repo)} && echo x > kirunak/approvals/x.json`, tmpdir()));
   assert.equal(denies(r, "sed -i '' s/a/b/ task.md", join(r.repo, 'kirunak', 'tasks', DRAFT)), null);
   const home = process.env.HOME;
   process.env.HOME = r.top;
@@ -348,9 +350,25 @@ test('decide: paths resolve against cwd, cd, ~ and absolute paths', () => {
     assert.ok(denies(r, `sed -i '' s/a/b/ ~/weather/kirunak/tasks/${FROZEN}/task.md`, tmpdir()));
     assert.ok(denies(r, `echo x > $HOME/weather/kirunak/approvals/x.json`, tmpdir()));
   } finally {
-    process.env.HOME = home;
+    if (home === undefined) delete process.env.HOME; // Windows may have none
+    else process.env.HOME = home;
   }
-  assert.equal(denies(r, `echo x > ${join(r.top, 'approvals.json')}`, r.repo), null);
+  assert.equal(denies(r, `echo x > ${sh(join(r.top, 'approvals.json'))}`, r.repo), null);
+});
+
+test('decide: on Windows a protected path is found with either slash, in any case, and as Git Bash writes a drive (E-2)', {
+  skip: process.platform !== 'win32' && 'only Windows reads `\\`, any case and /c/ as the same path',
+}, () => {
+  const r = makeRepo();
+  const task = r.task(FROZEN, 'task.md');
+  for (const file of [sh(task), task.toUpperCase(), sh(task).toUpperCase()]) {
+    assert.match(decide(edit(file, 'a', 'b')) ?? '', /frozen since 2026-11-05/, file);
+  }
+  const gitBash = sh(task).replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+  assert.match(denies(r, `sed -i '' s/a/b/ ${gitBash}`, tmpdir()) ?? '', /frozen since 2026-11-05/, gitBash);
+  assert.match(denies(r, `echo x > "${join(r.repo, 'KIRUNAK', 'Approvals', 'x.json')}"`, tmpdir()) ?? '', /only the owner's own command/);
+  assert.match(denies(r, String.raw`node "D:\kirunak\bin\K.mjs" accept x`) ?? '', /`k accept` is the owner's/);
+  assert.equal(denies(r, `echo x > "${join(r.repo, 'kirunak', 'tasks', FROZEN, 'notes.md')}"`, tmpdir()), null);
 });
 
 test('decide: the owner\'s verbs however k is invoked, never in a quoted mention or with --dry-run', () => {
@@ -394,6 +412,9 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     ['k --session s1 accept x', 'accept'],
     ['k --json --via mod bug review weather/stale-tiles', 'bug review'],
     ['k --why later queue remove x', 'queue'],
+    // The command `k heavy --` runs is read as if typed bare (asilak/kirunak-cross-platform AC-7).
+    ['k heavy --session s1 -- k approve x', 'approve'],
+    ['k heavy -- node bin/k.mjs bugs quad-damage --stop', 'bugs quad-damage --stop'],
   ]) {
     assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
   }
@@ -419,6 +440,8 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'k queue add x --dry-run',
     'k queue show',
     'k --via mod queue show',
+    'k heavy --session s1 -- npm test',
+    'k heavy -- k queue show',
     'k --json approve x --dry-run',
     'k amend new weather/offline-forecast',
     'k amend check weather/offline-forecast A-1',
@@ -430,6 +453,51 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
     'grep -n "k approve" design/approval.md',
     'echo k approve x # k approve x',
     'ls k',
+  ]) {
+    assert.equal(denies(r, command), null, command);
+  }
+});
+
+// asilak/kirunak-guard-misses-timeout: two `timeout 3600 k bug review …` ran Review & merge from an agent's shell.
+test('decide: the owner\'s verbs behind timeout, stdbuf, xargs and chrt, their operands skipped, and behind a wrapper the guard does not know', () => {
+  const r = makeRepo();
+  for (const [command, verb] of [
+    ['timeout 3600 k bug review asilak/x', 'bug review'],
+    ['cd /d/sources/asilak && timeout 3600 k bug review asilak/x --session s > log 2>&1; echo', 'bug review'],
+    ['timeout -k 10 --signal KILL 1h node bin/k.mjs approve x', 'approve'],
+    ['timeout --preserve-status --kill-after=5 90m k accept x', 'accept'],
+    ['timeout -s TERM 2.5 k bugs quad-damage --stop', 'bugs quad-damage --stop'],
+    ['stdbuf -oL k approve x', 'approve'],
+    ['stdbuf -o L -e 0 k bugs quad-damage', 'bugs quad-damage'],
+    ['stdbuf --output=L --error 0 k hold x', 'hold'],
+    ['echo x | xargs k approve', 'approve'],
+    ['xargs -n 1 -I {} k accept {}', 'accept'],
+    ['ls ids | xargs -P 2 --max-args 1 -r node bin/k.mjs bug review', 'bug review'],
+    ['xargs -a ids -d , -L 1 k resume', 'resume'],
+    ['chrt 10 k resume x', 'resume'],
+    ['chrt -f -T 5 99 k queue remove x', 'queue'],
+    ['chrt --idle k approve x', 'approve'],
+    ['nohup timeout 60 stdbuf -oL k approve x &', 'approve'],
+    // The backstop: `k` and an owner's verb anywhere in the words, past a wrapper or an operand the strip does not know.
+    ['flock /tmp/k.lock k bug review asilak/x', 'bug review'],
+    ['taskset -c 0 node bin/k.mjs bugs quad-damage --stop', 'bugs quad-damage --stop'],
+    ['nice -n 10 k approve x', 'approve'],
+    ['sudo -u owner k accept x', 'accept'],
+    ['k heavy -- flock /tmp/l k approve x', 'approve'],
+  ]) {
+    assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
+  }
+  for (const command of [
+    'timeout 3600 k bugs quad-damage --status',
+    'timeout 60 k bug review asilak/x --dry-run',
+    'timeout 600 k bug check asilak/x',
+    'stdbuf -oL npm test',
+    'xargs -n 1 k check',
+    'chrt 10 k board',
+    'flock /tmp/l k list',
+    'nice -n 10 k approve x --dry-run',
+    'echo k approve x',
+    "printf '%s\\n' k bug review x",
   ]) {
     assert.equal(denies(r, command), null, command);
   }
@@ -464,7 +532,7 @@ test('Bash: writes to .slapignore and `k slapignore approve` are denied; reading
   ]) {
     assert.match(run(bash(command, r.repo), r.home).reason ?? '', /\.slapignore is the owner's/, command);
   }
-  assert.match(run(bash(`echo '{}' > ${join(r.home, 'slapignore.json')}`, r.repo), r.home).reason, /\.slapignore approvals/);
+  assert.match(run(bash(`echo '{}' > ${sh(join(r.home, 'slapignore.json'))}`, r.repo), r.home).reason, /\.slapignore approvals/);
   for (const command of ['k slapignore approve --all', 'k slapignore approve .', 'node bin/k.mjs slapignore approve ~/repo']) {
     assert.match(run(bash(command, r.repo), r.home).reason, /`k slapignore approve` is the owner's/, command);
   }
@@ -579,11 +647,12 @@ test('decide: the escalation hook\'s state files and log are refused to every ed
       { tool_name: 'MultiEdit', tool_input: { file_path: state, edits: [] } }, { tool_name: 'NotebookEdit', tool_input: { notebook_path: join(home, 'escalate', 'x.ipynb') } },
     ];
     for (const input of tools) assert.match(decide(input) ?? '', /escalation hook's state and log are its own/, input.tool_name);
+    const [st, lg, hm] = [state, log, home].map(sh);
     for (const command of [
-      `echo '{}' > ${state}`, `rm ${state}`, `rm -rf ${home}`, `mv ${join(home, 'escalate')} /tmp/x`, `sed -i '' s/null/1/ ${log}`,
-      `cd ${home} && rm -r escalate`, `cp /tmp/x.json ${join(home, 'escalate')}/`, `node -e "require('fs').writeFileSync('${state}', '{}')"`,
+      `echo '{}' > ${st}`, `rm ${st}`, `rm -rf ${hm}`, `mv ${hm}/escalate /tmp/x`, `sed -i '' s/null/1/ ${lg}`,
+      `cd ${hm} && rm -r escalate`, `cp /tmp/x.json ${hm}/escalate/`, `node -e "require('fs').writeFileSync('${st}', '{}')"`,
     ]) assert.match(decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' }) ?? '', /escalation hook's state/, command);
-    for (const command of [`cat ${state}`, `ls ${join(home, 'escalate')}`, `tail -5 ${log}`, `echo x > ${join(home, 'escalate-notes.txt')}`]) {
+    for (const command of [`cat ${st}`, `ls ${hm}/escalate`, `tail -5 ${lg}`, `echo x > ${hm}/escalate-notes.txt`]) {
       assert.equal(decide({ tool_name: 'Bash', tool_input: { command }, cwd: '/tmp' }), null, command);
     }
     assert.equal(decide(write(join(home, 'escalate-notes.txt'), 'x')), null);

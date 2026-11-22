@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import machineGuardPids, { admit, register, release, unregister } from '../plugins/machine-guard-pids.mjs';
 import pricesDefault from '../plugins/prices-default.mjs';
-import { fakePs, makeWorkspace, tempDir } from './helpers.mjs';
+import { makeWorkspace, tempDir } from './helpers.mjs';
 
 const fresh = (machine) => {
   const home = tempDir('kirunak-machine-');
@@ -19,10 +19,20 @@ async function deadPid() {
   return c.pid;
 }
 
+// A process that runs until killed, on every OS.
+const idle = () => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore' });
+const ended = (c) => new Promise((r) => (c.exitCode !== null || c.signalCode !== null ? r() : (c.on('exit', r), c.kill())));
+// The running/ files, without the leases beside them.
+const files = (home) => readdirSync(join(home, 'running')).filter((f) => f.endsWith('.json')).sort();
+const age = (path, ms) => {
+  const t = new Date(Date.now() - ms);
+  utimesSync(path, t, t);
+};
+
 test('the machine guard refuses past maxAgents and says who runs', async () => {
   const { ws, mg } = fresh();
-  const a = spawn('sleep', ['5']);
-  const b = spawn('sleep', ['5']);
+  const a = idle();
+  const b = idle();
   try {
     const [aSince, bSince] = [new Date().toISOString(), new Date(Date.now() + 1).toISOString()];
     register(ws, a.pid, { task: 'weather/a', step: 'S-1', session: 's-a', since: aSince });
@@ -38,8 +48,23 @@ test('the machine guard refuses past maxAgents and says who runs', async () => {
     assert.equal(r.why, `2 of 2 steps run: weather/a S-1 (pid ${a.pid} since ${aSince}); weather/b S-2 (pid ${b.pid} since ${bSince})`);
     assert.deepEqual((await mg.running()).map((x) => [x.pid, x.task, x.step, x.session]), [[a.pid, 'weather/a', 'S-1', 's-a'], [b.pid, 'weather/b', 'S-2', 's-b']]);
   } finally {
-    a.kill();
-    b.kill();
+    unregister(ws, a.pid);
+    unregister(ws, b.pid);
+    await Promise.all([ended(a), ended(b)]);
+  }
+});
+
+test('AC-4: a registered session survives running() on every OS while its lease is fresh, and goes with its lease on unregister()', async () => {
+  const { home, ws, mg } = fresh();
+  const p = idle();
+  try {
+    register(ws, p.pid, { task: 'weather/a', step: 'S-1', session: 's' });
+    assert.equal(existsSync(join(home, 'running', `${p.pid}.json.lease`)), true, 'held by the lease beside it');
+    for (let i = 0; i < 3; i++) assert.deepEqual((await mg.running()).map((r) => r.pid), [p.pid]);
+    unregister(ws, p.pid);
+    assert.deepEqual(readdirSync(join(home, 'running')), [], 'the file and its lease are gone');
+  } finally {
+    await ended(p);
   }
 });
 
@@ -50,45 +75,54 @@ test('a dead pid is cleared on the next look', async () => {
   assert.equal(existsSync(join(home, 'running', `${pid}.json`)), true);
   assert.deepEqual(await mg.running(), []);
   assert.equal(existsSync(join(home, 'running', `${pid}.json`)), false);
-  assert.equal((await admit(ws, mg)).ok, true);
+  assert.equal(existsSync(join(home, 'running', `${pid}.json.lease`)), false);
+  const a = await admit(ws, mg);
+  assert.equal(a.ok, true);
+  release(ws, a.slot);
 });
 
-test('a pid file or a reservation whose pid is now another process, or that recorded no start, is cleared on the next look', async () => {
+test('AC-4, E-9: a pid file or a reservation whose lease went stale, its pid another process\'s by now, is cleared on the next look with its lease', async () => {
   const { home, ws, mg } = fresh({ maxAgents: 1 });
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
-  mkdirSync(join(home, 'running'));
+  const other = idle();
+  const dir = join(home, 'running');
+  mkdirSync(dir);
   try {
-    for (const start of [new Date(Date.now() - 3600000).toISOString(), undefined]) {
-      writeFileSync(join(home, 'running', `${other.pid}.json`), JSON.stringify({ pid: other.pid, task: 'weather/a', step: 'S-1', session: 's', since: start }));
-      assert.deepEqual(await mg.running(), [], `since ${start}`);
-      assert.equal(existsSync(join(home, 'running', `${other.pid}.json`)), false);
-      writeFileSync(join(home, 'running', `${other.pid}-1.json`), JSON.stringify({ pid: other.pid, pidStart: start, task: 'weather/b', step: 'S-2', since: start }));
-      const a = await admit(ws, mg);
-      assert.equal(a.ok, true, `the reservation does not count (pidStart ${start})`);
-      assert.deepEqual(readdirSync(join(home, 'running')), [`${a.slot.name}.json`], 'and is removed');
-      release(ws, a.slot);
+    for (const name of [`${other.pid}.json`, `${other.pid}-1.json`]) {
+      writeFileSync(join(dir, name), JSON.stringify({ pid: other.pid, task: 'weather/a', step: 'S-1', session: 's', since: new Date().toISOString() }));
+      mkdirSync(join(dir, `${name}.lease`));
+      writeFileSync(join(dir, `${name}.lease`, 'holder.json'), JSON.stringify({ id: 'x', pid: other.pid }));
+      age(join(dir, `${name}.lease`, 'holder.json'), 61000);
     }
+    assert.deepEqual(await mg.running(), []);
+    const a = await admit(ws, mg);
+    assert.equal(a.ok, true, 'the reservation does not count');
+    assert.deepEqual(files(home), [`${a.slot.name}.json`], 'and both are removed');
+    assert.equal(existsSync(join(dir, `${other.pid}-1.json.lease`)), false);
+    release(ws, a.slot);
   } finally {
-    other.kill();
+    await ended(other);
   }
 });
 
-test('while ps cannot answer, a live pid\'s file and reservation are kept and counted', async () => {
+test('E-4: a pid file and a reservation written before leases (no lease beside them) are read by their pid: kept and counted while it runs, cleared once it ends', async () => {
   const { home, ws, mg } = fresh({ maxAgents: 1 });
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const other = idle();
   const start = new Date().toISOString();
-  register(ws, other.pid, { task: 'weather/a', step: 'S-1', session: 's', since: start });
-  const restore = fakePs('fails');
+  const dir = join(home, 'running');
+  mkdirSync(dir);
   try {
+    writeFileSync(join(dir, `${other.pid}.json`), JSON.stringify({ pid: other.pid, task: 'weather/a', step: 'S-1', session: 's', since: start }));
     assert.deepEqual((await mg.running()).map((r) => r.pid), [other.pid]);
-    assert.equal(existsSync(join(home, 'running', `${other.pid}.json`)), true);
     unregister(ws, other.pid);
-    writeFileSync(join(home, 'running', `${other.pid}-1.json`), JSON.stringify({ pid: other.pid, pidStart: start, task: 'weather/b', step: 'S-2', since: start }));
+    writeFileSync(join(dir, `${other.pid}-1.json`), JSON.stringify({ pid: other.pid, pidStart: start, task: 'weather/b', step: 'S-2', since: start }));
     assert.equal((await admit(ws, mg)).ok, false, 'the reservation counts');
-    assert.equal(existsSync(join(home, 'running', `${other.pid}-1.json`)), true);
+    await ended(other);
+    const a = await admit(ws, mg);
+    assert.equal(a.ok, true, 'its pid ended: cleared');
+    assert.deepEqual(files(home), [`${a.slot.name}.json`]);
+    release(ws, a.slot);
   } finally {
-    restore();
-    other.kill();
+    await ended(other);
   }
 });
 
@@ -105,19 +139,20 @@ setTimeout(() => {}, 30000);`;
   const kids = [0, 1].map(() => spawn(process.execPath, ['--input-type=module', '-e', child, home, String(at)]));
   const said = await Promise.all(kids.map((c) => new Promise((r) => c.stdout.on('data', (d) => r(String(d))))));
   assert.deepEqual(said.sort(), ['no', 'yes']);
-  assert.equal(readdirSync(join(home, 'running')).filter((f) => /^\d+-\d+\.json$/.test(f)).length, 1);
-  await Promise.all(kids.map((c) => new Promise((r) => (c.on('exit', r), c.kill()))));
+  assert.equal(files(home).filter((f) => /^\d+-\d+\.json$/.test(f)).length, 1);
+  await Promise.all(kids.map((c) => ended(c)));
   const mine = await admit(ws, mg);
   assert.equal(mine.ok, true, 'the dead holder\'s reservation does not count');
-  assert.deepEqual(readdirSync(join(home, 'running')), [`${mine.slot.name}.json`], 'and is removed');
+  assert.deepEqual(files(home), [`${mine.slot.name}.json`], 'and is removed');
   // A slot given to a run becomes its pid file; one never started goes.
-  const run = spawn('sleep', ['5']);
+  const run = idle();
   try {
     register(ws, run.pid, { task: 'weather/a', step: 'S-1', session: 's' }, mine.slot);
-    assert.deepEqual(readdirSync(join(home, 'running')), [`${run.pid}.json`]);
+    assert.deepEqual(files(home), [`${run.pid}.json`]);
+    assert.equal(existsSync(join(home, 'running', `${mine.slot.name}.json.lease`)), false, 'the slot\'s lease went with it');
     assert.equal((await admit(ws, mg)).ok, false);
   } finally {
-    await new Promise((r) => (run.on('exit', r), run.kill()));
+    await ended(run);
   }
   const next = await admit(ws, mg);
   assert.equal(next.ok, true);

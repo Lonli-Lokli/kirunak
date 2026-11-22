@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { k, makeWorkspace, tempDir } from './helpers.mjs';
 import { loadWorkspace } from '../lib/workspace.mjs';
 import { DEFAULT_USAGE, lastWeek, weekTo, windowOf, zoned } from '../lib/usage/week.mjs';
@@ -70,7 +70,8 @@ test('the workspace\'s usage block: kirunak\'s defaults, the limits log from bug
   assert.equal(ws2.usage.reviews, join(w2.hub, 'kirunak', 'reviews'));
   assert.equal(ws2.usage.limitsLog, join(w2.hub, 'kirunak', 'limits.log'));
   const w3 = await withUsage(t, { limitsLog: '/x/own.log' }, { limitsLog: './limits.log' });
-  assert.equal((await loadWorkspace(join(w3.home, 'workspace'))).usage.limitsLog, '/x/own.log');
+  // An absolute path is kept: Windows reads it on the module's drive.
+  assert.equal((await loadWorkspace(join(w3.home, 'workspace'))).usage.limitsLog, resolve(dirname(w3.module), '/x/own.log'));
   const w4 = await withUsage(t, { weekStart: { day: 'Sun', zone: 'Mars/Olympus' } });
   await assert.rejects(loadWorkspace(join(w4.home, 'workspace')), (e) => /usage\.weekStart\.day must be one of/.test(e.message) && /usage\.weekStart\.zone/.test(e.message));
 });
@@ -107,7 +108,8 @@ function transcripts(root) {
   writeFileSync(join(proj, 'cccccccc-0000-0000-0000-000000000003.jsonl'), `not json at all\n${call('2026-10-22T09:01:00.000Z', 'u1')}\n`);
   mkdirSync(join(proj, 'dddddddd-0000-0000-0000-000000000004.jsonl'));
   let refused = 0;
-  if (process.getuid?.() !== 0) {
+  // Windows reads a file whatever its mode, so there it has none nobody may read.
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
     const f = join(proj, 'eeeeeeee-0000-0000-0000-000000000005.jsonl');
     writeFileSync(f, `${call('2026-10-22T10:00:00.000Z', 'u2')}\n`);
     chmodSync(f, 0o000);

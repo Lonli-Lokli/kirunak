@@ -1,12 +1,12 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { BUGS_MATCHER, FREEZE_MATCHER, install, MARKER, SKILLS } from '../lib/install.mjs';
 import { unlockHookLine } from '../lib/doctor.mjs';
 import { DEFAULT_HOOK } from '../lib/ladder.mjs';
-import { gitInit, KIRUNAK, tempDir } from './helpers.mjs';
+import { gitCommitAll, gitInit, KIRUNAK, tempDir } from './helpers.mjs';
 
 // A temp home: a settings file with someone else's hooks, an empty skills folder, a kirunak checkout.
 function home() {
@@ -27,6 +27,21 @@ function home() {
   return { dir, kirunakRoot, settingsPath, skillsDir: join(dir, '.claude', 'skills'), agentsDir: join(dir, '.claude', 'agents'), settings, home: join(dir, 'state') };
 }
 
+// The command k install writes for the file at `parts` on this machine: on Windows the path quoted, each backslash
+// doubled; `inJson` is how --print shows it inside a block.
+const node = (...parts) => {
+  const p = join(...parts);
+  return process.platform === 'win32' ? `node "${p.replaceAll('\\', '\\\\')}"` : `node ${p}`;
+};
+const inJson = (s) => JSON.stringify(s).slice(1, -1);
+
+// A git hook git can run: mode 755 on macOS and Linux; Windows keeps no such bits, and Git for Windows runs a hook by
+// its #! line.
+const assertRunnable = (hook) => {
+  if (process.platform === 'win32') assert.match(readFileSync(hook, 'utf8'), /^#!\/bin\/sh\n/);
+  else assert.equal(statSync(hook).mode & 0o777, 0o755);
+};
+
 const repo = (dir, name) => {
   const r = join(dir, name);
   mkdirSync(r, { recursive: true });
@@ -42,12 +57,12 @@ test('the block is written with the absolute path, and every other hook and key 
   const json = JSON.parse(text);
   assert.deepEqual(json.hooks.PreToolUse[1], {
     matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor|Skill|CronCreate|ScheduleWakeup|SendMessage',
-    hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`, timeout: 10 }],
+    hooks: [{ type: 'command', command: node(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs'), timeout: 10 }],
   });
-  assert.ok(json.hooks.PreToolUse[1].hooks[0].command.split(' ')[1].startsWith('/'), 'an absolute path');
+  assert.ok(isAbsolute(json.hooks.PreToolUse[1].hooks[0].command.split(' ')[1].replaceAll('"', '')), 'an absolute path');
   assert.deepEqual(json.hooks.PreToolUse[0], h.settings.hooks.PreToolUse[0]);
   assert.deepEqual(json.hooks.SessionStart.slice(0, 2), [...h.settings.hooks.SessionStart, {
-    matcher: 'resume', hooks: [{ type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`, timeout: 10 }],
+    matcher: 'resume', hooks: [{ type: 'command', command: node(h.kirunakRoot, 'hooks', 'kirunak-session.mjs'), timeout: 10 }],
   }]);
   assert.equal(json.model, 'sonnet');
   assert.deepEqual(json.permissions, h.settings.permissions);
@@ -64,7 +79,7 @@ test('the block is written with the absolute path, and every other hook and key 
   assert.equal(actions.length, 1 + SKILLS.length + 8 + 1 + 1 + 6 + 1 + 2 + 1 + 1 + 3);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
   assert.match(actions.at(-2), /added the kirunak SessionStart hook/);
-  assert.ok(actions.at(-1).endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
+  assert.ok(actions.at(-1).endsWith(`: ${node(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
 });
 
 test('a missing settings file is created; a second run changes nothing', () => {
@@ -92,15 +107,15 @@ test('the SessionStart block from an older checkout is updated; a status line th
   const { actions } = install(h);
   const after = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
   assert.equal(after.hooks.SessionStart.length, 8, 'the old block pointed here, and the bugs\' notice, the escalation hook\'s and the compact hook\'s added');
-  assert.equal(after.hooks.SessionStart[1].hooks[0].command, `node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`);
+  assert.equal(after.hooks.SessionStart[1].hooks[0].command, node(h.kirunakRoot, 'hooks', 'kirunak-session.mjs'));
   assert.deepEqual(after.statusLine, json.statusLine, 'k install never writes the status line');
   assert.match(actions.at(-1), /already runs kirunak's tracker/);
 });
 
 test('the bugs\' notice is one SessionStart block on startup|clear, after the session hook, its older checkout\'s pointed here and never added twice; --print names it (gulnya/kirunak-bugs AC-7)', () => {
   const h = home();
-  const command = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-bugs.mjs')}`;
-  const ours = (hooks) => hooks.SessionStart.filter((b) => b.hooks.some((x) => x.command.endsWith('hooks/kirunak-bugs.mjs')));
+  const command = node(h.kirunakRoot, 'hooks', 'kirunak-bugs.mjs');
+  const ours = (hooks) => hooks.SessionStart.filter((b) => b.hooks.some((x) => /hooks[\\/]+kirunak-bugs\.mjs"?$/.test(x.command)));
   const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
   json.hooks.SessionStart.push({ matcher: 'startup', hooks: [{ type: 'command', command: 'node /old/place/hooks/kirunak-bugs.mjs', timeout: 10 }] });
   writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
@@ -114,7 +129,7 @@ test('the bugs\' notice is one SessionStart block on startup|clear, after the se
   const fresh = home();
   const settingsPath = join(fresh.dir, 'printed', 'settings.json');
   const all = install({ ...fresh, settingsPath, print: true }).actions.join('\n');
-  assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"startup|clear","hooks":[{"type":"command","command":${JSON.stringify(`node ${join(fresh.kirunakRoot, 'hooks', 'kirunak-bugs.mjs')}`)}`), all);
+  assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"startup|clear","hooks":[{"type":"command","command":${JSON.stringify(node(fresh.kirunakRoot, 'hooks', 'kirunak-bugs.mjs'))}`), all);
   install({ ...fresh });
   assert.equal(ours(JSON.parse(readFileSync(fresh.settingsPath, 'utf8')).hooks).length, 1);
   const s = JSON.parse(readFileSync(fresh.settingsPath, 'utf8')).hooks.SessionStart;
@@ -129,25 +144,25 @@ test('its own block from an older checkout is updated, never added twice', () =>
   install(h);
   const pre = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks.PreToolUse;
   assert.equal(pre.length, 2);
-  assert.equal(pre[1].hooks[0].command, `node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`);
+  assert.equal(pre[1].hooks[0].command, node(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs'));
 });
 
 test('a block of its own whose timeout differs is rewritten to kirunak\'s, the note naming both; --print says the same; one that matches is already there (gulnya/kirunak-install-hook-timeouts)', () => {
   const h = home();
   install(h);
   const json = JSON.parse(readFileSync(h.settingsPath, 'utf8'));
-  const own = (event, end) => json.hooks[event].find((b) => b.hooks[0].command.endsWith(end)).hooks[0];
+  const own = (event, end) => json.hooks[event].find((b) => b.hooks[0].command.replace(/"$/, '').endsWith(end)).hooks[0];
   own('SessionStart', '--part task').timeout = 30;
   own('SessionEnd', 'kirunak-compact.mjs').timeout = 1;
   delete own('Stop', 'kirunak-escalate.mjs').timeout;
   writeFileSync(h.settingsPath, JSON.stringify(json, null, 2) + '\n');
-  const part = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-compact.mjs')} --part task`;
+  const part = `${node(h.kirunakRoot, 'hooks', 'kirunak-compact.mjs')} --part task`;
   const printed = install({ ...h, print: true }).actions;
   assert.ok(printed.includes(`would set in ${h.settingsPath} hooks.SessionStart: ${JSON.stringify({ matcher: 'compact|clear', hooks: [{ type: 'command', command: part, timeout: 20 }] })}`), printed.join('\n'));
   const { actions } = install(h);
   assert.ok(actions.includes(`updated the kirunak SessionStart hook in ${h.settingsPath} to ${part} (matcher compact|clear), its timeout from 30 s to 20 s`), actions.join('\n'));
-  assert.ok(actions.includes(`updated the kirunak SessionEnd hook in ${h.settingsPath} to node ${join(h.kirunakRoot, 'hooks', 'kirunak-compact.mjs')} (matcher clear), its timeout from 1 s to 5 s`));
-  assert.ok(actions.includes(`updated the kirunak Stop hook in ${h.settingsPath} to node ${join(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs')}, its timeout from none to 10 s`));
+  assert.ok(actions.includes(`updated the kirunak SessionEnd hook in ${h.settingsPath} to ${node(h.kirunakRoot, 'hooks', 'kirunak-compact.mjs')} (matcher clear), its timeout from 1 s to 5 s`));
+  assert.ok(actions.includes(`updated the kirunak Stop hook in ${h.settingsPath} to ${node(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs')}, its timeout from none to 10 s`));
   const after = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
   const task = after.SessionStart.filter((b) => b.hooks[0].command.endsWith('--part task'));
   assert.deepEqual([task.length, task[0].hooks[0].timeout, after.SessionEnd[0].hooks[0].timeout, after.Stop[0].hooks[0].timeout], [1, 20, 5, 10], 'rewritten, never added twice');
@@ -156,13 +171,13 @@ test('a block of its own whose timeout differs is rewritten to kirunak\'s, the n
 
 test("AC-1: the worktree lock's release on every SessionEnd, no matcher, 5 s, beside the compact hook's; a block of ours with a matcher or another timeout is set back; k doctor reads it (approval.md §4)", () => {
   const h = home();
-  const unlock = { type: 'command', command: `node ${join(h.kirunakRoot, 'hooks', 'kirunak-unlock.mjs')}`, timeout: 5 };
+  const unlock = { type: 'command', command: node(h.kirunakRoot, 'hooks', 'kirunak-unlock.mjs'), timeout: 5 };
   const printed = install({ ...h, print: true }).actions;
   assert.ok(printed.includes(`would set in ${h.settingsPath} hooks.SessionEnd: ${JSON.stringify({ hooks: [unlock] })}`), printed.join('\n'));
   assert.ok(install(h).actions.includes(`added the kirunak SessionEnd hook to ${h.settingsPath}`));
   const read = () => JSON.parse(readFileSync(h.settingsPath, 'utf8'));
   assert.deepEqual(read().hooks.SessionEnd[1], { hooks: [unlock] });
-  assert.match(read().hooks.SessionEnd[0].hooks[0].command, /kirunak-compact\.mjs$/);
+  assert.match(read().hooks.SessionEnd[0].hooks[0].command, /kirunak-compact\.mjs"?$/);
   assert.deepEqual(unlockHookLine(h), [true, 'worktree lock release: wired on SessionEnd, every end']);
   const json = read();
   Object.assign(json.hooks.SessionEnd[1], { matcher: 'clear' });
@@ -213,17 +228,17 @@ test('--print writes nothing and prints everything with the paths filled in', ()
   assert.ok(!existsSync(h.skillsDir));
   assert.ok(!existsSync(join(bare, '.git', 'hooks', 'pre-commit')));
   const all = actions.join('\n');
-  assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs')}`));
+  assert.ok(all.includes(inJson(node(h.kirunakRoot, 'hooks', 'kirunak-freeze.mjs'))));
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-intake')} -> ${join(h.kirunakRoot, 'skills', 'k-intake')}`));
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-draft')} -> ${join(h.kirunakRoot, 'skills', 'k-draft')}`), 'the k-draft skill is linked like the others');
   assert.ok(all.includes(`would link ${join(h.skillsDir, 'k-bug')} -> ${join(h.kirunakRoot, 'skills', 'k-bug')}`), 'the k-bug skill is linked like the others (gulnya/kirunak-bugs AC-9)');
-  assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`));
+  assert.ok(all.includes(inJson(`${node(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`)));
   assert.ok(all.includes(`would add to ${settingsPath} hooks.SessionStart: {"matcher":"resume"`));
-  assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'kirunak-session.mjs')}`));
-  assert.ok(all.includes(`node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`));
+  assert.ok(all.includes(inJson(node(h.kirunakRoot, 'hooks', 'kirunak-session.mjs'))));
+  assert.ok(all.includes(node(h.kirunakRoot, 'hooks', 'statusline-track.mjs')));
   assert.ok(!all.includes('<kirunak>'));
   const real = install({ settingsPath, skillsDir: h.skillsDir, print: true }).actions.join('\n');
-  assert.ok(real.includes(join(resolve(KIRUNAK), 'hooks', 'kirunak-freeze.mjs')), 'the default root is this checkout');
+  assert.ok(real.includes(inJson(node(resolve(KIRUNAK), 'hooks', 'kirunak-freeze.mjs'))), 'the default root is this checkout');
 });
 
 test('--git writes a hook in a repo with none, and only prints for a repo with its own', () => {
@@ -231,12 +246,12 @@ test('--git writes a hook in a repo with none, and only prints for a repo with i
   const bare = repo(h.dir, 'weather');
   const own = repo(h.dir, 'hub');
   const fallback = 'PATH="$PATH":/opt/node/bin';
-  const line = `${fallback} node ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`;
+  const line = `${fallback} ${node(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1`;
   writeFileSync(join(own, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nnpm test\n', { mode: 0o755 });
   const { actions } = install({ ...h, git: [bare, own], nodePath: '/opt/node/bin/node' });
   const hook = join(bare, '.git', 'hooks', 'pre-commit');
-  assert.equal(readFileSync(hook, 'utf8'), `#!/bin/sh\n${fallback}\nnode ${join(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1\n`);
-  assert.equal(statSync(hook).mode & 0o777, 0o755);
+  assert.equal(readFileSync(hook, 'utf8'), `#!/bin/sh\n${fallback}\n${node(h.kirunakRoot, 'hooks', 'git-pre-commit.mjs')} || exit 1\n`);
+  assertRunnable(hook);
   assert.equal(readFileSync(join(own, '.git', 'hooks', 'pre-commit'), 'utf8'), '#!/bin/sh\nnpm test\n');
   assert.ok(actions.includes(`wrote ${hook}`));
   assert.ok(actions.some((a) => a.endsWith(`add this line to it: ${line}`)));
@@ -246,8 +261,8 @@ test('--git writes a hook in a repo with none, and only prints for a repo with i
   for (const r of [bare, own]) {
     for (const [name, module] of [['prepare-commit-msg', 'git-prepare-commit-msg.mjs'], ['commit-msg', 'git-commit-msg.mjs']]) {
       const msg = join(r, '.git', 'hooks', name);
-      assert.equal(readFileSync(msg, 'utf8'), `#!/bin/sh\n${fallback}\nexec node ${join(h.kirunakRoot, 'hooks', module)} "$@"\n`);
-      assert.equal(statSync(msg).mode & 0o777, 0o755);
+      assert.equal(readFileSync(msg, 'utf8'), `#!/bin/sh\n${fallback}\nexec ${node(h.kirunakRoot, 'hooks', module)} "$@"\n`);
+      assertRunnable(msg);
     }
   }
   assert.throws(() => install({ ...h, git: join(h.dir, 'not-a-repo') }), /not a git repository/);
@@ -356,7 +371,7 @@ test('a hook of only #!/bin/sh and kirunak\'s absolute line commented out is the
 test('a registered repo, given with a trailing slash, is "already registered" in the dry run and the real install, and slapignore.json is kept (AC-2, AC-3, AC-6, E-3)', () => {
   const h = home();
   const r = repo(h.dir, 'katyafm');
-  const key = realpathSync(r);
+  const key = realpathSync.native(r); // git spells the key: long names on Windows, not a short (8.3) one
   const file = join(h.home, 'slapignore.json');
   const first = install({ ...h, git: r }).actions;
   assert.ok(first.includes(`registered ${key} in ${file}`), `the first install: ${first.filter((a) => a.includes('regist'))}`);
@@ -377,7 +392,7 @@ test('a repo slapignore.json does not list gets "would register" in the dry run,
   const file = join(h.home, 'slapignore.json');
   const bytes = readFileSync(file);
   const dry = install({ ...h, git: r, print: true }).actions;
-  assert.ok(dry.includes(`would register ${realpathSync(r)} in ${file}`), `the dry run: ${dry.filter((a) => a.includes('regist'))}`);
+  assert.ok(dry.includes(`would register ${realpathSync.native(r)} in ${file}`), `the dry run: ${dry.filter((a) => a.includes('regist'))}`);
   assert.ok(!dry.some((a) => a.includes('already registered')));
   assert.deepEqual(readFileSync(file), bytes, 'the dry run writes nothing');
 });
@@ -459,6 +474,56 @@ test('--git --print writes no kirunak/tasks/.gitignore and says what it would wr
   assert.deepEqual(lines.slice(add + 1, add + 7), NIVA.filter((l) => l !== '*/steps/**/*.log'));
 });
 
+// git on Windows checks text out with CRLF (core.autocrlf true), while k check refuses a CRLF task.md and an approval
+// hashes its bytes: k install keeps a repo's records LF (asilak/kirunak-cross-platform S-9).
+const ATTR = 'kirunak/** text eol=lf';
+const eolOf = (r) => execFileSync('git', ['check-attr', 'eol', '--', 'kirunak/tasks/t/task.md'], { cwd: r, encoding: 'utf8' }).trim();
+
+test('--git makes kirunak/ LF in .gitattributes: written in a repo with none, after the owner\'s lines in one with its own, kept where git reads it LF already; a second run changes nothing (asilak/kirunak-cross-platform S-9)', () => {
+  const h = home();
+  const bare = repo(h.dir, 'weather');
+  const own = repo(h.dir, 'hub');
+  writeFileSync(join(own, '.gitattributes'), '*.png binary');
+  const lf = repo(h.dir, 'tools');
+  writeFileSync(join(lf, '.gitattributes'), '* text=auto eol=lf\n');
+  const { actions } = install({ ...h, git: [bare, own, lf] });
+  const ours = readFileSync(join(bare, '.gitattributes'), 'utf8');
+  assert.ok(ours.endsWith(`\n${ATTR}\n`), ours);
+  assert.equal(readFileSync(join(own, '.gitattributes'), 'utf8'), `*.png binary\n${ours}`, 'the owner\'s line kept, ours after it');
+  assert.equal(readFileSync(join(lf, '.gitattributes'), 'utf8'), '* text=auto eol=lf\n');
+  for (const r of [bare, own, lf]) assert.equal(eolOf(r), 'kirunak/tasks/t/task.md: eol: lf');
+  assert.ok(actions.some((a) => a.startsWith(`wrote ${join(bare, '.gitattributes')}`) && a.endsWith('commit it')));
+  assert.ok(actions.some((a) => a.startsWith(`added to ${join(own, '.gitattributes')}`) && a.endsWith('commit it')));
+  assert.ok(actions.includes(`${join(lf, '.gitattributes')} keeps kirunak/ LF already; kept`));
+  install({ ...h, git: [bare, own, lf] });
+  assert.equal(readFileSync(join(bare, '.gitattributes'), 'utf8'), ours);
+  assert.equal(readFileSync(join(own, '.gitattributes'), 'utf8'), `*.png binary\n${ours}`);
+});
+
+test('--git rewrites LF the records a CRLF checkout wrote with no change of their own; one with a change keeps its CRLF; --print writes nothing (asilak/kirunak-cross-platform S-9)', () => {
+  const h = home();
+  const r = repo(h.dir, 'weather');
+  const t = join(r, 'kirunak', 'tasks', 't');
+  mkdirSync(t, { recursive: true });
+  writeFileSync(join(t, 'task.md'), '---\nid: t\n---\n# T\n');
+  writeFileSync(join(t, 'plan.md'), '# Plan\n');
+  gitCommitAll(r);
+  // A checkout as git on Windows writes it: core.autocrlf true, each text file CRLF.
+  execFileSync('git', ['config', 'core.autocrlf', 'true'], { cwd: r });
+  for (const f of ['task.md', 'plan.md']) rmSync(join(t, f));
+  execFileSync('git', ['checkout', '--', 'kirunak'], { cwd: r });
+  const crlf = '---\r\nid: t\r\n---\r\n# T\r\n';
+  assert.equal(readFileSync(join(t, 'task.md'), 'utf8'), crlf);
+  writeFileSync(join(t, 'plan.md'), '# Plan\r\nS-1 a change\r\n');
+  const dry = install({ ...h, git: r, print: true }).actions.join('\n');
+  assert.ok(dry.includes(`would write ${join(r, '.gitattributes')}`), dry);
+  assert.ok(!existsSync(join(r, '.gitattributes')) && readFileSync(join(t, 'task.md'), 'utf8') === crlf, 'the dry run writes nothing');
+  const { actions } = install({ ...h, git: r });
+  assert.equal(readFileSync(join(t, 'task.md'), 'utf8'), '---\nid: t\n---\n# T\n', 'LF, as the commit holds it');
+  assert.equal(readFileSync(join(t, 'plan.md'), 'utf8'), '# Plan\r\nS-1 a change\r\n', 'a record with a change of its own is left as it is');
+  assert.ok(actions.includes('rewrote LF 1 record a checkout wrote with CRLF, no change of their own: kirunak/tasks/t/task.md'), actions.join('\n'));
+});
+
 test('a hook kirunak wrote before is rewritten; the new one finds node with a GUI\'s bare PATH', () => {
   const h = home();
   const r = repo(h.dir, 'weather');
@@ -469,7 +534,9 @@ test('a hook kirunak wrote before is rewritten; the new one finds node with a GU
   assert.match(readFileSync(slap, 'utf8'), /^#!\/bin\/sh\nPATH="\$PATH":.+\nexec node /);
   writeFileSync(join(r, 'a.mjs'), 'export {};\n');
   execFileSync('git', ['add', 'a.mjs'], { cwd: r });
-  const env = { HOME: h.dir, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', KIRUNAK_HOME: h.home };
+  // A GUI's bare PATH: the system's folders on macOS and Linux; on Windows git's own folder alone.
+  const PATH = process.platform === 'win32' ? process.env.PATH.split(';').find((d) => d && existsSync(join(d, 'git.exe'))) : '/usr/bin:/bin:/usr/sbin:/sbin';
+  const env = { HOME: h.dir, PATH, KIRUNAK_HOME: h.home, ...(process.env.SYSTEMROOT && { SYSTEMROOT: process.env.SYSTEMROOT }) };
   execFileSync('git', ['commit', '-q', '-m', 'From a GUI'], { cwd: r, env });
   assert.match(execFileSync('git', ['log', '-1', '--format=%B'], { cwd: r, encoding: 'utf8' }), /SLAP: 0 \(S\)/);
 });
@@ -627,7 +694,7 @@ test('config.json: the ladder with each rung\'s agents, the hook switches, the r
     ],
     hook: { enabled: true, block: true, repeats: 3, commands: ['^bun test'] },
     repos: { hub: '/ws/hub' },
-    compact: { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 167000, roots: ['/ws/hub'] },
+    compact: { enabled: true, handoverSize: 150000, window: 183000, midStepLimit: 167000, roots: [resolve('/ws/hub')] },
     usage: { stale: { minutes: 60, context: 150000 }, limitsLog: null },
   });
   install({ ...h, ws: ws(), now: new Date('2026-10-26T08:00:00Z') });
@@ -643,7 +710,7 @@ test('the escalation hook on its eight events, SubagentStop matching every named
   const h = home();
   install({ ...h, ws: ws() });
   const hooks = JSON.parse(readFileSync(h.settingsPath, 'utf8')).hooks;
-  const command = `node ${join(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs')}`;
+  const command = node(h.kirunakRoot, 'hooks', 'kirunak-escalate.mjs');
   const ours = (event) => hooks[event].filter((b) => b.hooks[0].command === command);
   const matchers = Object.fromEntries(['PostToolUseFailure', 'PostToolUse', 'SubagentStop', 'UserPromptSubmit', 'UserPromptExpansion', 'SessionStart', 'PostModelSwitch', 'Stop']
     .map((event) => [event, ours(event)]).map(([event, blocks]) => {

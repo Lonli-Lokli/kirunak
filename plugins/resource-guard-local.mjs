@@ -1,15 +1,25 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { join } from 'node:path';
 import { refuse } from '../lib/errors.mjs';
 import { kirunakHome } from '../lib/home.mjs';
+import { live as liveLease, read as readLease, RENEW_MS, take as takeLease } from '../lib/lease.mjs';
+import { alive, groupAlive, killTree, signalGroup } from '../lib/os.mjs';
 import { onStop } from '../lib/stop.mjs';
+import { leftBy, wrapped } from '../lib/wrap.mjs';
+
+// The process calls live in lib/os.mjs (asilak/kirunak-cross-platform AC-1); these stay importable from here.
+export { alive, groupAlive, killTree };
 
 // The core's default `resourceGuard` (plugins.md §2): one heavy job at a time on this machine. The lock is
-// guard/lock, a directory made with mkdir (atomic) holding owner.json; waiting jobs queue first in, first out in
-// guard/queue, one JSON line each; every job appends a line to guard/log.jsonl; claims are in guard/claims.json.
+// guard/lock, a lease (lib/lease.mjs) whose holder file is owner.json; waiting jobs queue first in, first out in
+// guard/queue, one JSON line each, each waiter holding its own lease in guard/waiting/<id>; every job appends a line to
+// guard/log.jsonl; claims are in guard/claims.json. An owner or a waiter is alive while its pid answers kill 0 and its
+// lease is fresh, so a pid another process took since is dead within a minute; no process's start time is read
+// (asilak/kirunak-cross-platform AC-4, AC-5). Each job runs under the wrapper (lib/wrap.mjs), which holds the job's own
+// lease, guard/jobs/<the owner's id>, while it runs (AC-6).
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LOG_TAIL = 5 * 1024 * 1024;
@@ -31,133 +41,15 @@ const readJson = (p, fallback = null) => {
   }
 };
 
-// A pid this user cannot signal (EPERM) is not alive: nothing of kirunak's runs as another user, so it is never ours,
-// and waiting for it would be waiting for ever.
-export function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// A gone owner's job that may still run with no lease of its wrapper to tell it: kirunak cannot tell that its pid is
+// still the job, so it is believed to run, waited for and never killed (E-5). Its process group on macOS and Linux,
+// the pid itself on Windows.
+const jobRuns = (pid) => groupAlive(pid) || alive(pid);
 
-// A pid of 0 or 1 would name this process's own group or every process: never a job's group.
-const isGroup = (pid) => Number.isInteger(pid) && pid > 1;
-
-// A group this user cannot signal (EPERM) is no job's or claude's of kirunak's and could not be killed anyway: not
-// alive, as alive() says of a single pid.
-export const groupAlive = (pid) => {
-  if (!isGroup(pid)) return false;
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-// ps's elapsed time, [[dd-]hh:]mm:ss (the same on macOS and Linux, whatever the locale), in seconds.
-const elapsed = (s) => {
-  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(s.trim());
-  return m ? ((Number(m[1] || 0) * 24 + Number(m[2] || 0)) * 60 + Number(m[3])) * 60 + Number(m[4]) : null;
-};
-
-// A pid read from a file may name another process by now (pids are reused). True only while pid runs and started
-// within slackMs of startIso: now less its elapsed time is its start. No start recorded, or no such process (ps exits
-// 1), is false. Null when ps could not answer (it did not start, failed otherwise, or printed no elapsed time): the
-// pid may be that process or another, so callers neither kill it nor read it as gone.
-// A minute of slack: a start recorded late by a fork or a write on a loaded machine must still match, and a pid is
-// not reused within a minute of the start of the process that held it.
-export function isStill(pid, startIso, slackMs = 60000) {
-  const recorded = Date.parse(startIso);
-  if (!isGroup(pid) || Number.isNaN(recorded)) return false;
-  const ps = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
-  if (ps.status === 1) return false;
-  const s = ps.status === 0 ? elapsed(ps.stdout) : null;
-  if (s === null) return null;
-  return Math.abs(Date.now() - s * 1000 - recorded) <= slackMs;
-}
-
-// This process's start, written beside its pid wherever kirunak writes that pid to a file, for isStill to read.
-export const OWN_START = new Date(Date.now() - process.uptime() * 1000).toISOString();
-
-// A pid of kirunak's read from a file: alive, and still the process that started at startIso. No start is dead. A
-// pid whose start ps cannot tell now is believed to run, so nothing is taken over or failed on a guess.
-export const stillRuns = (pid, startIso) => alive(pid) && isStill(pid, startIso) !== false;
-
-// Every process now, from one `ps`: pid, ppid, pgid and its start (now less its elapsed time, in ms). Null when ps
-// cannot answer.
-function processes() {
-  const ps = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid=,etime='], { encoding: 'utf8' });
-  if (ps.status !== 0) return null;
-  const now = Date.now();
-  const all = [];
-  for (const line of ps.stdout.split('\n')) {
-    const [pid, ppid, pgid, etime] = line.trim().split(/\s+/);
-    const s = etime ? elapsed(etime) : null;
-    if (s !== null) all.push({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), start: now - s * 1000 });
-  }
-  return all;
-}
-
-// The processes of the group pid leads and every descendant of theirs, whatever its group: a child may start one
-// in a group of its own (Claude Code does, for a background Bash job), which a kill of -pid misses and which, once
-// its parent dies, is reparented and no descendant any more. So they are found before the first signal.
-function treeOf(all, roots) {
-  const kids = new Map();
-  for (const p of all) kids.set(p.ppid, [...(kids.get(p.ppid) || []), p]);
-  const found = new Map(all.filter((p) => roots.has(p.pgid) || roots.has(p.pid)).map((p) => [p.pid, p]));
-  for (const p of found.values()) for (const k of kids.get(p.pid) || []) if (!found.has(k.pid)) found.set(k.pid, k);
-  return found;
-}
-
-// TERM to the process group and to every descendant found (each pid, and each group one of them leads), then KILL
-// after graceMs to what is left, again looking for descendants started meanwhile. A pid whose start is not the one
-// found is another process by now (pids are reused) and is not signalled; this process's own group never is.
-export async function killTree(pid, graceMs = 10000) {
-  if (!isGroup(pid)) return;
-  const own = new Set([process.pid, process.ppid]);
-  const ownGroup = processes()?.find((p) => p.pid === process.pid)?.pgid;
-  let tree = treeOf(processes() || [], new Set([pid]));
-  const send = (signal) => {
-    try {
-      process.kill(-pid, signal);
-    } catch {}
-    for (const p of tree.values()) {
-      if (own.has(p.pid)) continue;
-      if (p.pgid === p.pid && p.pid !== ownGroup && isGroup(p.pid)) {
-        try {
-          process.kill(-p.pid, signal);
-        } catch {}
-      }
-      try {
-        process.kill(p.pid, signal);
-      } catch {}
-    }
-  };
-  // The tree as it is now: what still runs with the start it was found with, and its descendants since.
-  const still = () => {
-    const all = processes();
-    if (!all) return tree;
-    const now = new Map(all.map((p) => [p.pid, p]));
-    const kept = new Set([pid, ...[...tree.values()].filter((p) => now.has(p.pid) && Math.abs(now.get(p.pid).start - p.start) <= 2000).map((p) => p.pid)]);
-    return treeOf(all, kept);
-  };
-  send('SIGTERM');
-  const until = Date.now() + graceMs;
-  const left = () => groupAlive(pid) || [...tree.values()].some((p) => !own.has(p.pid) && alive(p.pid));
-  while (left() && Date.now() < until) await sleep(50);
-  if (left()) {
-    tree = still();
-    send('SIGKILL');
-  }
-}
-
-// Runs argv in its own process group with maxMinutes as a deadline: past it, the group is killed, exit code 124.
-// onSpawn(pid) is called as soon as the group exists.
-export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10000, onSpawn } = {}) {
+// Runs argv under the wrapper (lib/wrap.mjs), holding `lease` when one is named, in its own process group with
+// maxMinutes as a deadline: past it, the tree is killed, exit code 124. onSpawn(pid), the wrapper's, is called as soon
+// as the group exists. output(chunk, 'stdout' | 'stderr'), when given, gets the command's output as it comes.
+export function runCommand({ command, cwd, maxMinutes, env, output }, { killAfterMs = 10000, onSpawn, lease = null } = {}) {
   return new Promise((resolve) => {
     let log = '';
     const keep = (b) => {
@@ -171,7 +63,8 @@ export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10
     };
     let child;
     try {
-      child = spawn(command[0], command.slice(1), { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const [node, ...wrap] = wrapped(command, { lease });
+      child = spawn(node, wrap, { cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch (e) {
       return end({ exitCode: 127, log: e.message });
     }
@@ -179,14 +72,23 @@ export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10
     const closed = new Promise((r) => child.on('close', r));
     let killing = null;
     const timer = maxMinutes > 0 ? setTimeout(() => (killing = killTree(child.pid, killAfterMs)), maxMinutes * 60000) : null;
-    child.stdout.on('data', keep);
-    child.stderr.on('data', keep);
+    const pass = (stream) => (b) => {
+      keep(b);
+      if (typeof output === 'function') {
+        try {
+          output(b, stream);
+        } catch {}
+      }
+    };
+    child.stdout.on('data', pass('stdout'));
+    child.stderr.on('data', pass('stderr'));
     child.on('error', (e) => {
       clearTimeout(timer);
       end({ exitCode: 127, log: log + e.message });
     });
     child.on('exit', async (code, signal) => {
       clearTimeout(timer);
+      leftBy(lease, child.pid);
       if (killing) await killing;
       // A child left in the group may hold the pipes open; read what is there, then let go.
       await Promise.race([closed, sleep(1000)]);
@@ -197,12 +99,31 @@ export function runCommand({ command, cwd, maxMinutes, env }, { killAfterMs = 10
   });
 }
 
-export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10000 } = {}) {
+// renewMs: how often a waiter and the owner touch their leases (lib/lease.mjs RENEW_MS); a test shortens it.
+export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10000, renewMs = RENEW_MS } = {}) {
   const at = () => {
     const d = join(ws?.home || kirunakHome(), 'guard');
     mkdirSync(d, { recursive: true });
-    return { d, lock: join(d, 'lock'), owner: join(d, 'lock', 'owner.json'), queue: join(d, 'queue'), edit: join(d, 'queue.edit'), claims: join(d, 'claims.json'), log: join(d, 'log.jsonl') };
+    return { d, lock: join(d, 'lock'), owner: join(d, 'lock', 'owner.json'), queue: join(d, 'queue'), waiting: join(d, 'waiting'), jobs: join(d, 'jobs'), edit: join(d, 'queue.edit'), claims: join(d, 'claims.json'), log: join(d, 'log.jsonl') };
   };
+  // The lease the wrapper of the owner's job holds: guard/jobs/<owner's id>.
+  const jobLease = (P, owner) => (typeof owner?.id === 'string' && /^[\w-]+$/.test(owner.id) ? join(P.jobs, owner.id) : null);
+  // A gone owner's job: { pid, wrapped: true } while its wrapper holds its lease alive, so that pid is the job's
+  // wrapper and may be ended; { pid } while its pid may still be the job with no lease to tell (E-5); else null.
+  const goneJob = (P, owner) => {
+    const l = jobLease(P, owner) && liveLease(jobLease(P, owner));
+    if (l) return { pid: l.holder.pid, wrapped: true };
+    return owner?.job && jobRuns(owner.job) ? { pid: owner.job } : null;
+  };
+  const fresh = (dir, file) => {
+    const l = readLease(dir, { file });
+    return !!l && !l.stale;
+  };
+  // The owner lives while its pid does and its lease is fresh; owner.json written before leases (no `lease`) is read
+  // by its pid alone until it goes (E-4). A lock whose owner.json is not written yet counts from the lock's own time.
+  const ownerLive = (P, owner) => (owner && !owner.lease ? alive(owner.pid) : (!owner || alive(owner.pid)) && fresh(P.lock, 'owner.json'));
+  // A waiter the same way, by its lease in guard/waiting/<id>.
+  const waiterLive = (P, e) => (e.lease ? alive(e.pid) && fresh(join(P.waiting, e.id)) : alive(e.pid));
   const readQueue = (P) => (existsSync(P.queue) ? readFileSync(P.queue, 'utf8').split('\n').filter((l) => l.trim()).map(parse) : []);
   const writeQueue = (P, entries) => writeFileSync(P.queue, entries.map((e) => JSON.stringify(e) + '\n').join(''));
 
@@ -227,52 +148,31 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
     }
   }
 
-  // owner.json is replaced whole, so a reader never sees half of it.
-  const writeOwner = (P, owner) => {
-    writeFileSync(`${P.owner}.tmp`, JSON.stringify(owner) + '\n');
-    renameSync(`${P.owner}.tmp`, P.owner);
-  };
-
-  // A lock without owner.json is dead after 10 s; one removed since it was seen is no lock at all.
-  const stale = (P) => {
-    try {
-      return Date.now() - statSync(P.lock).mtimeMs > 10000;
-    } catch (e) {
-      if (e.code === 'ENOENT') return true;
-      throw e;
-    }
-  };
-
-  // The head of the queue takes the lock, or takes it over when its owner's process is dead. A dead owner's job that
-  // still runs is returned as { orphan: pid } first: nobody will collect its result, and it must end before the take.
-  // It is that job only while it started at jobStart; a pid that names another process by now is left alone, and one
-  // ps cannot tell about now is waited for, neither killed nor run beside ({ unknown: pid }). A waiter or an owner is
-  // alive only while its pid is still the process that started at its pidStart (or ps cannot tell).
+  // The head of the queue takes the lock, or takes it over once its owner is gone: → the lock's lease, false, or
+  // { orphan: pid, wrapped } while a gone owner's job may still run. Nobody will collect its result. Its wrapper's live
+  // lease tells that pid is the job's wrapper, which the caller ends (wrapped); with none, kirunak cannot tell that pid
+  // is still the job, which is waited for and never killed (E-5).
   const tryTake = (P, me) =>
     edit(P, () => {
       const all = readQueue(P);
-      // A dead waiter's line goes; a line someone removed (a handoff's release) comes back at the end.
-      const live = all.filter((e) => e && stillRuns(e.pid, e.pidStart));
+      // A dead waiter's line goes, with its lease; a line someone removed (a handoff's release) comes back at the end.
+      const live = all.filter((e) => e && waiterLive(P, e));
+      for (const e of all) if (e?.lease && !live.includes(e)) rmSync(join(P.waiting, e.id), { recursive: true, force: true });
       if (!live.some((e) => e.id === me.id)) live.push(me);
       if (live.length !== all.length) writeQueue(P, live);
       if (live[0].id !== me.id) return false;
       if (existsSync(P.lock)) {
         const owner = readJson(P.owner);
-        const dead = owner ? !stillRuns(owner.pid, owner.pidStart) : stale(P);
-        if (!dead) return false;
-        const job = groupAlive(owner?.job) ? isStill(owner.job, owner.jobStart) : false;
-        if (job === null) return { unknown: owner.job };
-        if (job === true) return { orphan: owner.job };
+        if (ownerLive(P, owner)) return false;
+        const gone = goneJob(P, owner);
+        if (gone) return { orphan: gone.pid, wrapped: !!gone.wrapped };
         rmSync(P.lock, { recursive: true, force: true });
+        if (jobLease(P, owner)) rmSync(jobLease(P, owner), { recursive: true, force: true });
       }
-      try {
-        mkdirSync(P.lock);
-      } catch {
-        return false;
-      }
-      writeOwner(P, { session: me.session, what: me.what, pid: me.pid, pidStart: me.pidStart, since: new Date().toISOString(), id: me.id, expectMinutes: me.expectMinutes, maxMinutes: me.maxMinutes });
+      const held = takeLease(P.lock, { id: me.id, lease: 1, session: me.session, what: me.what, since: new Date().toISOString(), expectMinutes: me.expectMinutes, maxMinutes: me.maxMinutes }, { file: 'owner.json' });
+      if (!held) return false;
       writeQueue(P, live.slice(1));
-      return true;
+      return held;
     });
 
   const history = (P) => (existsSync(P.log) ? readFileSync(P.log, 'utf8').split('\n').map(parse).filter((x) => x && typeof x.minutes === 'number') : []);
@@ -302,33 +202,56 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
         // taken and not used: this guard runs every job whole and gives it no deadline, so such a job runs to its end.
         async run(job) {
           const P = at();
-          const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, pidStart: OWN_START, since: new Date().toISOString(), expectMinutes: minutesOr(job.expectMinutes), maxMinutes: minutesOr(job.maxMinutes) };
-          await edit(P, () => appendFileSync(P.queue, JSON.stringify(me) + '\n'));
-          let told = false;
-          for (;;) {
-            const t = await tryTake(P, me);
-            if (t === true) break;
-            if (t?.orphan) await killTree(t.orphan, killAfterMs);
-            else {
-              // A wait on a job ps cannot tell about lasts as long as that job: said once, in the log and to the caller.
-              if (t?.unknown && !told) {
+          const me = { id: randomUUID(), session: job.session, what: job.what, pid: process.pid, lease: 1, since: new Date().toISOString(), expectMinutes: minutesOr(job.expectMinutes), maxMinutes: minutesOr(job.maxMinutes) };
+          mkdirSync(P.waiting, { recursive: true });
+          const waiter = takeLease(join(P.waiting, me.id), { id: me.id }).keep({ everyMs: renewMs });
+          let held;
+          try {
+            await edit(P, () => appendFileSync(P.queue, JSON.stringify(me) + '\n'));
+            let told = false;
+            for (;;) {
+              const t = await tryTake(P, me);
+              if (t?.dir) {
+                held = t;
+                break;
+              }
+              // Its wrapper's lease tells the gone owner's job is still that job: it is ended, and the lock taken next.
+              if (t?.wrapped) {
+                appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: 'ended', session: job.session, pid: t.orphan, reason: "the owner is gone; its job's wrapper holds the job's lease" }) + '\n');
+                job.say?.(`ends the job (pid ${t.orphan}) of the lock's holder, which is gone: its wrapper's lease tells it is that job`);
+                await killTree(t.orphan, killAfterMs);
+                continue;
+              }
+              // A wait on a gone owner's job lasts as long as that job: said once, in the log and to the caller.
+              if (t?.orphan && !told) {
                 told = true;
-                appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: 'wait', session: job.session, pid: t.unknown, reason: 'ps gave no answer' }) + '\n');
-                job.say?.(`waits: the lock's holder is gone, but ps gave no answer for its job (pid ${t.unknown}), so that job is believed to run`);
+                appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: 'wait', session: job.session, pid: t.orphan, reason: 'the owner is gone, its job may run' }) + '\n');
+                job.say?.(`waits: the lock's holder is gone, but its job (pid ${t.orphan}) may still run, so it is waited for, never killed`);
               }
               await sleep(pollMs);
             }
+          } finally {
+            waiter.release();
           }
           // The caller's `started` (plugins.md): the lock is held and the command starts now.
           job.started?.();
           const started = Date.now();
           let r = { exitCode: 1, log: '' };
           let pid = null;
+          let lost = false;
           let finished;
           const done = new Promise((res) => (finished = res));
-          const release = () => {
-            if (readJson(P.owner)?.id === me.id) rmSync(P.lock, { recursive: true, force: true });
-          };
+          // A machine that slept past a minute may find the lock taken over: this job gives way, so two never run (E-8).
+          held.keep({
+            everyMs: renewMs,
+            onLost: () => {
+              lost = true;
+              appendFileSync(P.log, JSON.stringify({ ts: new Date().toISOString(), what: 'lost', session: job.session, pid }) + '\n');
+              job.say?.('gave way: the lock was taken over while this machine slept, so its job is ended');
+              if (pid) killTree(pid, killAfterMs);
+            },
+          });
+          const release = () => held.release();
           // k run stopped (Ctrl-C, TERM, a closed terminal): end the job's group, then wait for the release below.
           const unstop = onStop(async () => {
             await killTree(pid, killAfterMs);
@@ -337,21 +260,20 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
           // A crash or a second Ctrl-C leaves no time to wait: TERM the job and keep the lock while it runs, so the
           // next take ends what is left of it; with nothing running, release now (outside the mutex: takes allow it).
           const onExit = () => {
-            if (!groupAlive(pid)) return release();
-            try {
-              process.kill(-pid, 'SIGTERM');
-            } catch {}
+            if (!pid || !jobRuns(pid)) return release();
+            signalGroup(pid, 'SIGTERM');
           };
           process.on('exit', onExit);
           try {
             r = await runCommand(job, {
               killAfterMs,
+              lease: jobLease(P, held.holder),
               onSpawn: (p) => {
                 pid = p;
-                const owner = readJson(P.owner);
-                if (owner?.id === me.id) writeOwner(P, { ...owner, job: p, jobStart: new Date().toISOString() });
+                held.update({ job: p });
               },
             });
+            if (lost) r = { ...r, lost: true };
           } finally {
             process.off('exit', onExit);
             try {
@@ -367,16 +289,14 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
         },
 
         // { held, queued, estimateMinutes }: each job's estimate, and at the top the wait of a job that queued now. A
-        // dead owner's job that still runs, or that ps cannot tell about, holds the lock for every waiter: it is held,
-        // marked orphan. One ps says is another process by now is not; the next take takes the lock over.
+        // gone owner's job that may still run holds the lock for every waiter: it is held, marked orphan.
         status() {
           const P = at();
           const owner = readJson(P.owner);
           const minutesSince = (iso) => (Date.now() - Date.parse(iso)) / 60000;
           const job = ({ session, what, since }) => ({ session, what, since, estimateMinutes: estimate(P, what) });
-          const orphan = () => groupAlive(owner.job) && isStill(owner.job, owner.jobStart) !== false;
-          const h = !owner ? null : stillRuns(owner.pid, owner.pidStart) ? job(owner) : orphan() ? { ...job(owner), orphan: true } : null;
-          const queued = readQueue(P).filter((e) => e && stillRuns(e.pid, e.pidStart)).map(job);
+          const h = !owner ? null : ownerLive(P, owner) ? job(owner) : goneJob(P, owner) ? { ...job(owner), orphan: true } : null;
+          const queued = readQueue(P).filter((e) => e && waiterLive(P, e)).map(job);
           const left = h ? Math.max(0, h.estimateMinutes - minutesSince(h.since)) : 0;
           return { held: h, queued, estimateMinutes: Math.round((left + queued.reduce((s, q) => s + q.estimateMinutes, 0)) * 100) / 100 };
         },
@@ -391,12 +311,12 @@ export default function resourceGuardLocal(ws, { pollMs = 1000, killAfterMs = 10
             session: e.session, what: e.what, [at]: e.since ?? null, pid: Number.isInteger(e.pid) ? e.pid : null,
             expectMinutes: minutesOr(e.expectMinutes), maxMinutes: minutesOr(e.maxMinutes), kind: null, usualMinutes: usual(P, e.what),
           });
-          const live = owner && (stillRuns(owner.pid, owner.pidStart) || (groupAlive(owner.job) && isStill(owner.job, owner.jobStart) !== false));
+          const live = owner && (ownerLive(P, owner) || goneJob(P, owner));
           return {
             now: new Date().toISOString(),
             first: null,
             held: live ? job(owner, 'since') : null,
-            waiting: readQueue(P).filter((e) => e && stillRuns(e.pid, e.pidStart)).map((e) => job(e, 'queuedAt')),
+            waiting: readQueue(P).filter((e) => e && waiterLive(P, e)).map((e) => job(e, 'queuedAt')),
           };
         },
 

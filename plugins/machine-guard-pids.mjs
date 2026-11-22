@@ -1,13 +1,14 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { kirunakHome } from '../lib/home.mjs';
-import { OWN_START, stillRuns } from './resource-guard-local.mjs';
+import { besideOf, hold, holderLive, letGo } from '../lib/lease.mjs';
 
 // The core's default `machineGuard` (plugins.md §2, orchestrator.md §4): one file per live step process,
-// running/<pid>.json (task, step, session, since: the process's start), and one per step admitted and not started
-// yet, running/<k-run-pid>-<n>.json (with pidStart, the k run's start); the limits from the config, or from
-// machine.json when the owner overrides them there. A file whose process is dead, or whose pid is now another process
-// than the one that started at the start it records, is removed on the next look.
+// running/<pid>.json (task, step, session, since), and one per step admitted and not started yet,
+// running/<k-run-pid>-<n>.json; the limits from the config, or from machine.json when the owner overrides them there.
+// Each file is held by the lease beside it (lib/lease.mjs), which the k run that wrote it keeps fresh. A file whose
+// process is dead, or whose lease went stale (its k run gone, or its pid another process's by now), is removed on the
+// next look; one written before leases is read by its pid alone (asilak/kirunak-cross-platform AC-4, E-4).
 
 export const DEFAULT_LIMITS = { maxAgents: 2, maxHeavy: 1 };
 
@@ -25,29 +26,36 @@ const readJson = (p) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let seq = 0;
 
-// An admitted step's slot becomes its process's file by a rename, so the step is counted all along.
+// An admitted step's slot becomes its process's file by a rename, so the step is counted all along. This process
+// keeps the file's lease fresh until unregister().
 export function register(ws, pid, { task, step, session, since = new Date().toISOString() }, slot = null) {
   mkdirSync(runningDir(ws), { recursive: true });
   const path = join(runningDir(ws), `${pid}.json`);
+  hold(path, { pid });
   if (slot) {
+    const from = join(runningDir(ws), `${slot.name}.json`);
     try {
-      renameSync(join(runningDir(ws), `${slot.name}.json`), path);
+      renameSync(from, path);
     } catch {}
+    letGo(from);
   }
   writeFileSync(path, JSON.stringify({ pid, task, step, session, since }, null, 2) + '\n');
 }
 
+// A running/ file and its lease go.
+function drop(path) {
+  letGo(path);
+  rmSync(besideOf(path), { recursive: true, force: true });
+  rmSync(path, { force: true });
+}
+
 // A slot whose step never started: its reservation goes.
 export function release(ws, slot) {
-  try {
-    unlinkSync(join(runningDir(ws), `${slot.name}.json`));
-  } catch {}
+  drop(join(runningDir(ws), `${slot.name}.json`));
 }
 
 export function unregister(ws, pid) {
-  try {
-    unlinkSync(join(runningDir(ws), `${pid}.json`));
-  } catch {}
+  drop(join(runningDir(ws), `${pid}.json`));
 }
 
 // The steps admitted and not started yet, by the reservations of k runs that still run; a dead one's is removed.
@@ -58,8 +66,8 @@ function reservations(ws) {
     const m = /^(\d+)-\d+\.json$/.exec(f);
     if (!m) continue;
     const r = readJson(join(dir, f)) || {};
-    if (!stillRuns(Number(m[1]), r.pidStart)) {
-      rmSync(join(dir, f), { force: true });
+    if (!holderLive(join(dir, f), Number(m[1]))) {
+      drop(join(dir, f));
       continue;
     }
     out.push({ pid: Number(m[1]), task: r.task ?? null, step: r.step ?? null, since: r.since ?? null });
@@ -101,7 +109,9 @@ export async function admit(ws, mg, { task = null, step = null } = {}) {
     const running = await mg.running();
     if (running.length + starting.length < limits.maxAgents) {
       const slot = { name: `${process.pid}-${++seq}`, held: true };
-      writeFileSync(join(runningDir(ws), `${slot.name}.json`), JSON.stringify({ pid: process.pid, pidStart: OWN_START, task, step, since: new Date().toISOString() }) + '\n');
+      const path = join(runningDir(ws), `${slot.name}.json`);
+      hold(path);
+      writeFileSync(path, JSON.stringify({ pid: process.pid, task, step, since: new Date().toISOString() }) + '\n');
       return { ok: true, limits, running, slot };
     }
     const who = [
@@ -132,8 +142,8 @@ export default function machineGuardPids(ws) {
             if (!m) continue;
             const pid = Number(m[1]);
             const r = readJson(join(dir, f)) || {};
-            if (!stillRuns(pid, r.since)) {
-              unregister(ws, pid);
+            if (!holderLive(join(dir, f), pid)) {
+              drop(join(dir, f));
               continue;
             }
             out.push({ pid, task: r.task ?? null, step: r.step ?? null, session: r.session ?? null, since: r.since ?? null });

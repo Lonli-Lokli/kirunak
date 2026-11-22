@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { tempDir } from './helpers.mjs';
 
 const STOP = new URL('../lib/stop.mjs', import.meta.url).href;
+// A kill of SIGINT or SIGTERM on Windows ends the process at once, no handler run, and SIGHUP cannot be sent at all.
+const NO_SIGNALS = process.platform === 'win32' && 'Windows has no SIGINT, SIGTERM or SIGHUP to send a process';
 
 // A child that runs `body` with onStop imported and `out` a file to append to, says ready, and stays up.
 function child(body) {
@@ -24,7 +26,7 @@ setInterval(() => {}, 1000); process.stdout.write('ready\\n');`;
 }
 
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
-  test(`${signal}: every registered callback runs, then the process exits with ${code}`, async () => {
+  test(`${signal}: every registered callback runs, then the process exits with ${code}`, { skip: NO_SIGNALS }, async () => {
     const k = child(`onStop((s) => say('one ' + s)); onStop((s) => say('two ' + s));`);
     await k.ready;
     k.c.kill(signal);
@@ -33,7 +35,7 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]
   });
 }
 
-test('with no callback registered, or the last one unregistered, a signal keeps its default', async () => {
+test('with no callback registered, or the last one unregistered, a signal keeps its default', { skip: NO_SIGNALS }, async () => {
   for (const body of ['', `const off = onStop(() => say('ran')); off();`]) {
     const k = child(body);
     await k.ready;
@@ -43,7 +45,7 @@ test('with no callback registered, or the last one unregistered, a signal keeps 
   }
 });
 
-test('a callback\'s promise is awaited before the exit; a callback that throws does not stop the others', async () => {
+test('a callback\'s promise is awaited before the exit; a callback that throws does not stop the others', { skip: NO_SIGNALS }, async () => {
   const k = child(`onStop(() => { throw new Error('boom'); });
 onStop(() => new Promise((r) => setTimeout(() => { say('cleaned'); r(); }, 100)));`);
   await k.ready;
@@ -53,7 +55,7 @@ onStop(() => new Promise((r) => setTimeout(() => { say('cleaned'); r(); }, 100))
   assert.match(k.err(), /while stopping: boom/);
 });
 
-test('a second signal while stopping exits at once', async () => {
+test('a second signal while stopping exits at once', { skip: NO_SIGNALS }, async () => {
   const k = child(`onStop(() => { say('stopping'); return new Promise(() => {}); });`);
   await k.ready;
   k.c.kill('SIGTERM');

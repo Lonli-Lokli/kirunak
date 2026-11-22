@@ -257,6 +257,7 @@ validation, archives) then go unused, and what the owner needs is not in it:
 
 ### Product
 - R19 Node, with no dependency beyond Node's own modules; no Python.
+- R19a kirunak runs on macOS, Linux and Windows alike; the test suite passes on all three before a change merges.
 - R20 openspec folders stay readable and untouched (D6, D11). kirunak's intake can start a task from an openspec
   change, reading it as background; that is the migration path a workspace's freeze hook names.
 

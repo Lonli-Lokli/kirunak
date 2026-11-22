@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +16,8 @@ export const sh = (cwd, cmd, args, env) =>
 // each test file in a process of its own): a run of the suite leaves $TMPDIR as it found it. Every temp folder a test
 // makes comes from here (test/temp-cleanup.test.mjs checks it); once, they stayed, 14.6 GB in a day
 // (gulnya/kirunak-tests-leave-temp). An exit handler, not node:test's `after`, so a folder a fixture script makes in a
-// process with no tests goes too, and one made inside a test lives until the file is done with it.
+// process with no tests goes too, and one made inside a test lives until the file is done with it. `parent` names
+// another folder to make it in (a Windows test that needs a volume making short names, the home folder's).
 const made = new Set();
 process.once('exit', () => {
   for (const dir of made) {
@@ -27,8 +28,8 @@ process.once('exit', () => {
     }
   }
 });
-export function tempDir(prefix = 'kirunak-') {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+export function tempDir(prefix = 'kirunak-', parent = tmpdir()) {
+  const dir = mkdtempSync(join(parent, prefix));
   made.add(dir);
   return dir;
 }
@@ -49,10 +50,12 @@ export function gitCommitAll(dir, message = 'fixture') {
 // A copy of the invented workspace (two git repos, a checklist, a queue, the finished task) in a temp
 // folder, with its own $KIRUNAK_HOME and pointer. Options: { finished: false } leaves the task out.
 export async function makeWorkspace({ finished = true } = {}) {
-  const root = tempDir('kirunak-');
+  // On Windows the long name, as git prints it, even when TEMP is a short (8.3) one such as C:\Users\RUNNER~1.
+  const made = tempDir('kirunak-');
+  const root = process.platform === 'win32' ? realpathSync.native(made) : made;
   cpSync(join(FIXTURES, 'workspace'), root, { recursive: true });
   if (!finished) {
-    execFileSync('rm', ['-rf', join(root, 'weather', 'kirunak')]);
+    rmSync(join(root, 'weather', 'kirunak'), { recursive: true, force: true });
   }
   for (const repo of ['weather', 'hub']) {
     gitInit(join(root, repo));
@@ -67,42 +70,39 @@ export async function makeWorkspace({ finished = true } = {}) {
   return { root, home, ws, weather: join(root, 'weather'), hub: join(root, 'hub'), modulePath };
 }
 
+// A process that does nothing for `seconds` (a fraction too) and then ends, started with spawn's `options`: node itself, as no OS has the same `sleep`.
+export const sleeper = (seconds, options) => spawn(process.execPath, ['-e', `setTimeout(() => {}, ${Math.round(Number(seconds) * 1000)})`], options);
+
+// The pid of a process that has ended already.
+export const endedPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+
 // `k <args>` as the command, in a child with the given $KIRUNAK_HOME: { status, stdout, stderr }.
 export const k = (home, args, env = {}) =>
   spawnSync(process.execPath, [join(KIRUNAK, 'bin', 'k.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, KIRUNAK_HOME: home, ...env } });
 
 export const RESULT = readFileSync(join(FIXTURES, 'run', 'result.json'), 'utf8');
 
+// A `claude` in `dir` that runs the node script `body`: a sh script, as npm's shim beside claude.cmd is, so kirunak
+// starts it as it starts a real one on every OS (on Windows through Git Bash, programArgv in lib/os.mjs). → its path.
+export function nodeClaude(dir, body) {
+  const q = (s) => `'${s.replaceAll("'", `'\\''`)}'`;
+  writeFileSync(join(dir, 'claude.cjs'), body);
+  writeFileSync(join(dir, 'claude'), `#!/bin/sh\nexec ${q(process.execPath)} ${q(join(dir, 'claude.cjs'))} "$@"\n`);
+  chmodSync(join(dir, 'claude'), 0o755);
+  return join(dir, 'claude');
+}
+
 // A fake `claude`: it records its argv, stdin, cwd and the step's variables, and prints the fixture result.
 export function fakeClaude(result = RESULT) {
   const dir = realpathSync(tempDir('kirunak-fake-claude-'));
-  const bin = join(dir, 'claude');
   writeFileSync(join(dir, 'result.json'), result);
-  writeFileSync(bin, `#!${process.execPath}
-const fs = require('fs');
+  const bin = nodeClaude(dir, `const fs = require('fs');
 const calls = fs.existsSync(${JSON.stringify(join(dir, 'calls.json'))}) ? JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, 'calls.json'))}, 'utf8')) : [];
 calls.push({ argv: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8'), cwd: process.cwd(), task: process.env.KIRUNAK_TASK, step: process.env.KIRUNAK_STEP });
 fs.writeFileSync(${JSON.stringify(join(dir, 'calls.json'))}, JSON.stringify(calls));
 process.stdout.write(fs.readFileSync(${JSON.stringify(join(dir, 'result.json'))}, 'utf8'));
 `);
-  chmodSync(bin, 0o755);
   return { dir, bin, calls: () => JSON.parse(readFileSync(join(dir, 'calls.json'), 'utf8')) };
-}
-
-// A fake `ps` first on PATH until the returned function is called: 'fails' exits 2, 'garbled' prints no elapsed time,
-// 'gone' says no such process (exit 1), 'missing' leaves nothing on PATH at all, so no ps.
-export function fakePs(kind) {
-  const dir = tempDir('kirunak-ps-');
-  const body = { fails: 'echo "ps: cannot get process info" >&2\nexit 2', garbled: 'echo "not a time"', gone: 'exit 1' }[kind];
-  if (body) {
-    writeFileSync(join(dir, 'ps'), `#!/bin/sh\n${body}\n`);
-    chmodSync(join(dir, 'ps'), 0o755);
-  }
-  const was = process.env.PATH;
-  process.env.PATH = kind === 'missing' ? dir : `${dir}:${was}`;
-  return () => {
-    process.env.PATH = was;
-  };
 }
 
 // The invented workspace with its task approved (and so queued) and the given plan.md.

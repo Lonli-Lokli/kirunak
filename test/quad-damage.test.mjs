@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { spawn as spawnNode, spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { lock, review } from '../lib/bug-review.mjs';
 import { checkBugText, drop, fixLine, list, quadDamagePath, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { start as intakeStart } from '../lib/intake.mjs';
+import { readText } from '../lib/os.mjs';
 import {
   claim, FIX_ENV, keepAwake, OWNER_STOP, OWNER_WHY, preview, progressCommand, progressOf, progressText, pushLine, release, run, runsDir, start,
-  state, statusLine, stop, STOP_SIGNAL, stopPath, summaryOf, summaryText, workBug,
+  listenForStop, state, statusLine, stop, stopPath, summaryOf, summaryText, workBug,
 } from '../lib/quad-damage.mjs';
-import { events, gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
+import { events, gitCommitAll, gitInit, k, makeWorkspace, sh, tempDir } from './helpers.mjs';
 
 // gulnya/quad-damage S-3: Quad Damage's run, its run file, its limits gate, its summary and its status.
 
@@ -262,6 +265,22 @@ test('run: a bug marked during the run joins it; a bug another live pid holds is
   assert.equal(reviewing(w.home, 'hub/a').pid, OTHER);
 });
 
+test('AC-4, E-9: the run file held by the lease beside it refuses a second run while that lease is fresh, and is taken over once it went stale though its pid runs', async () => {
+  const w = await qdWorkspace();
+  const path = quadDamagePath(w.home);
+  const holder = join(`${path}.lease`, 'holder.json');
+  writeRun(w.home, { pid: OTHER, started: '2026-10-27T21:00:00+00:00' });
+  mkdirSync(`${path}.lease`);
+  writeFileSync(holder, JSON.stringify({ id: 'x', pid: OTHER }));
+  assert.throws(() => claim(w.home), /Quad Damage runs already: pid/);
+  const old = new Date(Date.now() - 61000);
+  utimesSync(holder, old, old);
+  assert.equal(claim(w.home).pid, process.pid);
+  assert.equal(JSON.parse(readFileSync(holder, 'utf8')).pid, process.pid, 'the lease is this process\'s now');
+  release(w.home);
+  assert.deepEqual([existsSync(path), existsSync(`${path}.lease`)], [false, false]);
+});
+
 test('claim: a second run while the first lives is refused, naming it; a dead one is taken over (E-3)', async () => {
   const w = await qdWorkspace();
   writeRun(w.home, { pid: OTHER, started: '2026-10-27T21:00:00+00:00', by: 'owner', via: 'mod', bug: 'hub/a', phase: 'fixing', try: 2 });
@@ -466,16 +485,17 @@ test('k bugs quad-damage: refused with no marked bug; else a detached run that r
   assert.deepEqual(out.bugs, ['hub/c']);
   assert.equal(out.log, join(out.folder, 'run.log'));
   assert.equal(dirname(out.folder), runsDir(w.home));
-  for (let i = 0; i < 400 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
-  for (let i = 0; i < 100 && existsSync(quadDamagePath(w.home)); i++) await new Promise((done) => setTimeout(done, 50));
+  // Up to four minutes: its dozens of git calls are slow on a busy Windows machine.
+  for (let i = 0; i < 4800 && !existsSync(join(out.folder, 'summary.md')); i++) await new Promise((done) => setTimeout(done, 50));
+  for (let i = 0; i < 600 && existsSync(quadDamagePath(w.home)); i++) await new Promise((done) => setTimeout(done, 50));
   assert.match(readFileSync(join(out.folder, 'summary.md'), 'utf8'), /^Quad Damage, \d\d:\d\d to \d\d:\d\d: 1 merged, 0 waits?, 0 not reached\n- hub\/c: merged [0-9a-f]{7} into hub's master\n/);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n', 'the fake fix merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n', 'the fake fix merged');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'c.md')), false, 'the bug closed');
   assert.equal(existsSync(quadDamagePath(w.home)), false);
   const log = readFileSync(out.log, 'utf8');
   assert.match(log, /^--- Quad Damage, \S+ \(via mod\)\n/);
   assert.match(log, new RegExp(`Quad Damage runs: pid ${out.pid}, via mod`));
-  assert.deepEqual(readdirSync(runsDir(w.home)), [out.folder.split('/').pop()]);
+  assert.deepEqual(readdirSync(runsDir(w.home)), [basename(out.folder)]);
   assert.equal(k(w.home, ['bugs', 'quad-damage', 'x']).status, 2);
   // AC-16: its progress, and the session's wait on it, which ends at once with the summary.
   assert.match(progressFile(out.folder), /^\d\d:\d\d hub\/c: started\n\d\d:\d\d hub\/c: fix committed [0-9a-f]{7}\n\d\d:\d\d hub\/c: review clean, merged [0-9a-f]{7} into hub\n\d\d:\d\d Quad Damage done: 1 merged, 0 wait, 0 not reached\n$/);
@@ -484,10 +504,22 @@ test('k bugs quad-damage: refused with no marked bug; else a detached run that r
   assert.equal(waited.stdout, `${progressFile(out.folder)}${k(w.home, ['bugs', 'quad-damage', '--summary']).stdout}`);
 });
 
-test('keepAwake: caffeinate -i -w on macOS, nothing elsewhere (E-2)', () => {
-  assert.equal(keepAwake(123, { platform: 'linux' }), null);
-  const c = keepAwake(123, { platform: 'darwin', bin: '/usr/bin/true' });
-  assert.deepEqual(c.spawnargs, ['/usr/bin/true', '-i', '-w', '123']);
+test('keepAwake: caffeinate -i -w on macOS, systemd-inhibit holding tail --pid on Linux, nothing on Windows (E-2, asilak/kirunak-cross-platform AC-12)', () => {
+  const spawned = [];
+  const spawn = (cmd, args, opts) => {
+    spawned.push([cmd, args, opts.detached]);
+    return { on: () => {}, unref: () => {} };
+  };
+  assert.equal(keepAwake(123, { platform: 'win32', spawn }), null);
+  assert.ok(keepAwake(123, { platform: 'darwin', spawn }));
+  assert.ok(keepAwake(123, { platform: 'linux', spawn }));
+  assert.deepEqual(spawned, [
+    ['caffeinate', ['-i', '-w', '123'], true],
+    ['systemd-inhibit', ['--what=sleep:idle', '--who=kirunak', '--why=Quad Damage runs', '--mode=block', 'tail', '--pid=123', '-f', '/dev/null'], true],
+  ]);
+  // Where systemd-inhibit is not there, its spawn fails quietly.
+  const missing = keepAwake(process.pid, { platform: 'linux', spawn: (cmd, args, opts) => spawnNode('no-such-inhibit-tool', args, opts) });
+  assert.ok(missing);
 });
 
 // --- gulnya/quad-damage S-4: one bug's work, with the fake runner of fixtures/quad-damage (no claude anywhere) ---
@@ -554,7 +586,7 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.ok(!fix.brief.includes('This is the retry'));
   const [rv] = reviewsRun(w);
   assert.ok(rv.brief.includes(`\`heavy run --session ${rv.sessionId} --\``), 'AC-14: the review\'s own session id too');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false);
   assert.equal(existsSync(`${w.hubRoot}-quad-a`), false, 'its worktree removed');
   assert.match(gitIn(w.hubRoot, 'log', '-1', '--format=%s'), /^kirunak: close the bug hub\/a: bug\/a merged into hub's master/);
@@ -625,7 +657,7 @@ test('findings, then the retry from them, then clean: merged; the retry\'s brief
   const head1 = /^head: (\S+)$/m.exec(reviewsRun(w)[0].brief)[1];
   assert.match(retry.brief, /^# Quad Damage: the bug hub\/a, try 2$/m);
   assert.ok(retry.brief.includes(`This is the retry after a review: kirunak/bugs/a/review-1.md (${join(w.hubRoot, 'kirunak', 'bugs', 'a', 'review-1.md')}) judged the head ${head1} of bug/a`), retry.brief);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: as the forecast\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: as the forecast\n');
   assert.equal(reviewsRun(w).length, 2);
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a')), false, 'closed with its reviews');
   const said = progressLines(r.folder);
@@ -651,7 +683,7 @@ test('findings twice: the bug waits with both reviews and the run goes on; a con
   assert.match(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md'), 'utf8'), /^verdict: conflict$/m);
   assert.equal(reviewsRun(w).length, 2, 'a conflict runs no review session');
   assert.equal(fixes(w).length, 3);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: a day\n', 'nothing merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: a day\n', 'nothing merged');
   assert.deepEqual(gitIn(w.hubRoot, 'log', '--format=%s', `${master}..master`).split('\n'), [
     'kirunak: the bug hub/c: bug/c no longer merges onto master, review-1.md', 'master moves on',
     'kirunak: review-2.md of the bug hub/a: findings', 'kirunak: review-1.md of the bug hub/a: findings',
@@ -679,7 +711,8 @@ test('the 150th call\'s result ends the session, and so do its minutes: the bug 
     { id: 'hub/c', outcome: 'waits', why: 'its fixing session, try 1, reached 0.005 minutes; what holds is on bug/c in hub' },
   ]);
   const a = JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8'));
-  assert.deepEqual([a.calls, a.ended, a.exit], [150, 'calls', 143]);
+  // Its session's end: TERM on macOS and Linux, the end at once on Windows.
+  assert.deepEqual([a.calls, a.ended, a.exit], [150, 'calls', process.platform === 'win32' ? 1 : 143]);
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'c', 'fix-1.json'), 'utf8')).ended, 'minutes');
   assert.equal(reviewsRun(w).length, 0);
   assert.deepEqual(readdirSync(join(w.home, 'running')), [], 'each session unregistered');
@@ -713,8 +746,8 @@ test('a fix in another repo than the bug\'s: run there with the bug\'s repo adde
   assert.equal(fix.cwd, w.self);
   assert.deepEqual(fix.addDirs, [w.hubRoot, r.folder]);
   assert.match(fix.brief, /^Its fix repo: kirunak, at /m);
-  assert.equal(readFileSync(join(w.self, 'tiles.txt'), 'utf8'), 'cache: one hour\n');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(readText(join(w.self, 'tiles.txt')), 'cache: one hour\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: forever\n');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false);
   assert.match(summaryFile(r), /- hub\/a: merged [0-9a-f]{7} into kirunak's master\n/);
 });
@@ -756,7 +789,7 @@ test('E-7 for the review: a review session that wrote nothing before working sto
   ].map(({ stop, ...b }) => b));
   assert.equal(r.stopped, 'a review session failed: the login is gone: Invalid API key · Please run /login');
   assert.equal(fixes(w).length, 1, 'no retry');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: forever\n');
 
   // A crash with no result, and a session of one turn, stop it too.
   for (const [verdict, why] of [
@@ -798,11 +831,11 @@ function ear() {
   return e;
 }
 
-// Until `ok()`, at most 10 s.
+// Until `ok()`, at most 30 s: git's work before it is slow on a busy Windows machine.
 async function until(ok) {
-  const ends = Date.now() + 10000;
+  const ends = Date.now() + 30000;
   while (!ok()) {
-    if (Date.now() > ends) throw new Error('waited 10 s in vain');
+    if (Date.now() > ends) throw new Error('waited 30 s in vain');
     await new Promise((r) => setTimeout(r, 20));
   }
 }
@@ -818,16 +851,40 @@ function stoppedByOwner(w, r) {
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /the owner asked the run to stop\n/);
 }
 
-test('stop while fixing: k bugs quad-damage --stop signals the run, its session is ended, the bug waits, the rest not reached', async () => {
+// Every signal sent to this process while fn runs; signal 0, which only asks whether a pid lives, is none.
+async function signalsTo(fn) {
+  const sent = [];
+  const kill = process.kill;
+  process.kill = (pid, signal) => {
+    if (pid === process.pid && signal !== 0) sent.push(signal);
+    return kill.call(process, pid, signal);
+  };
+  try {
+    return { r: await fn(), sent };
+  } finally {
+    process.kill = kill;
+  }
+}
+
+test('stop while fixing: k bugs quad-damage --stop writes the request and sends no signal; the run hears it, its session is ended, the bug waits, the rest not reached', async () => {
   const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], { fixes: [{ calls: 3, sleep: 30, ...fixed() }] });
-  const ears = process.listenerCount(STOP_SIGNAL);
-  const t = Date.now();
-  const going = fixRun(w);
+  let ears = 0;
+  const listen = (heard, o) => {
+    ears++;
+    const off = listenForStop(heard, o);
+    return () => {
+      ears--;
+      off();
+    };
+  };
+  const going = run({ ws: w.ws, ...seams(), runner: w.runner, listen, work: (ctx) => workBug({ ...ctx, processes: NOBODY }) });
   await until(() => fixes(w).length === 1);
-  assert.equal(process.listenerCount(STOP_SIGNAL), ears + 1, 'the run listens');
+  const t = Date.now();
+  assert.equal(ears, 1, 'the run listens');
   assert.equal(state(w.home).phase, 'fixing');
-  // The real verb and the real signal, to this process's run.
-  const s = await stop({ ws: w.ws, via: 'mod', waitMs: 20000, poll: 20 });
+  // The real verb and the real ear (fs.watch and its look), to this process's run (asilak/kirunak-cross-platform AC-8).
+  const { r: s, sent } = await signalsTo(() => stop({ ws: w.ws, via: 'mod', waitMs: 20000, poll: 20 }));
+  assert.deepEqual(sent, [], 'no signal to the run');
   const r = await going;
   assert.ok(Date.now() - t < 10000, 'the session killed, not waited for');
   assert.equal(s.stopped, true);
@@ -835,22 +892,80 @@ test('stop while fixing: k bugs quad-damage --stop signals the run, its session 
   assert.deepEqual(r.bugs, [{ id: 'hub/a', outcome: 'waits', why: OWNER_WHY }, { id: 'hub/c', outcome: 'not-reached' }]);
   stoppedByOwner(w, r);
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).ended, 'stopped');
-  assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: fixing, try 1: \d+ tool calls, ended by the owner's stop, exit 143/);
+  // Its session's end: TERM on macOS and Linux, the end at once on Windows.
+  const exit = process.platform === 'win32' ? 1 : 143;
+  assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), new RegExp(`hub/a: fixing, try 1: \\d+ tool calls, ended by the owner's stop, exit ${exit}\\n`));
   assert.deepEqual(progressLines(r.folder), ['hub/a: started', 'hub/a: waits: the owner stopped the run', 'Quad Damage stopped: the owner stopped it']);
   assert.equal(summaryFile(r).split('\n')[0], 'Quad Damage, 23:40 to 23:40: 0 merged, 1 wait, 1 not reached; stopped: the owner stopped it');
   assert.equal(reviewsRun(w).length, 0);
   assert.deepEqual(readdirSync(join(w.home, 'running')), [], 'its session unregistered');
-  assert.equal(process.listenerCount(STOP_SIGNAL), ears, 'the run no longer listens');
+  assert.equal(ears, 0, 'the run no longer listens');
   assert.equal(events(w.home).find((e) => e.kind === 'quad-damage-stop').via, 'mod');
+});
+
+// A run whose one bug writes the stop request (another pid's first, when `other`) and waits for the run's halt: how
+// long the run took to hear it, and whether another pid's request was heard.
+async function heardIn(w, listen, { other = false } = {}) {
+  const ask = (pid) => put(stopPath(w.home), JSON.stringify({ pid, by: 'owner', via: 'mod' }) + '\n');
+  const out = { ms: null, otherHeard: null };
+  const work = async (ctx) => {
+    if (other) {
+      ask(DEAD);
+      await new Promise((r) => setTimeout(r, 700));
+      out.otherHeard = ctx.halt.aborted;
+    }
+    const t0 = Date.now();
+    ask(process.pid);
+    // A bug's real work keeps the process alive (its session, a sleep); the ear does not, so this wait holds a timer.
+    const busy = setInterval(() => {}, 1000);
+    await new Promise((r) => (ctx.halt.aborted ? r() : ctx.halt.addEventListener('abort', r, { once: true })));
+    clearInterval(busy);
+    out.ms = Date.now() - t0;
+    return { outcome: 'waits', why: 'a stub' };
+  };
+  out.r = await run({ ws: w.ws, ...seams(), work, listen });
+  return out;
+}
+
+test('AC-8, E-7: a stop request written mid-bug is heard within one look with fs.watch faked away, and one naming another pid is not', async () => {
+  const w = await qdWorkspace();
+  const h = await heardIn(w, (heard, o) => listenForStop(heard, { ...o, watch: null, everyMs: 200 }), { other: true });
+  assert.equal(h.otherHeard, false, 'another pid\'s request, three looks long');
+  assert.ok(h.ms < 1000, `heard in ${h.ms} ms, one look being 200 ms`);
+  stoppedByOwner(w, h.r);
+});
+
+test('AC-8: a stop request is heard through fs.watch with no look due, on every OS', async () => {
+  const w = await qdWorkspace();
+  const h = await heardIn(w, (heard, o) => listenForStop(heard, { ...o, everyMs: 600000 }));
+  assert.ok(h.ms < 3000, `heard in ${h.ms} ms, the next look ten minutes away`);
+  stoppedByOwner(w, h.r);
+});
+
+test('AC-8: listenForStop keeps nothing alive: a process that only listens exits, and a watch that throws leaves the look', async () => {
+  const home = tempDir('kirunak-ear-');
+  mkdirSync(join(home, 'bugs'));
+  const src = `import { listenForStop } from ${JSON.stringify(new URL('../lib/quad-damage.mjs', import.meta.url).href)};
+listenForStop(() => {}, { home: ${JSON.stringify(home)} });`;
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', src], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(Date.now() - t0 < 15000, 'it exited on its own');
+  const looks = [];
+  const off = listenForStop(() => looks.push(1), { home: tmpdir(), watch: () => { throw new Error('no watch here'); }, everyMs: 20 });
+  await new Promise((r) => setTimeout(r, 200));
+  off();
+  assert.ok(looks.length >= 3, `${looks.length} looks`);
 });
 
 test('stop while reviewing: the review session is ended and nothing of it kept; the bug waits with its branch', async () => {
   const w = await fixWorkspace([['a', '2026-10-20', ''], ['c', '2026-10-22', '']], { fixes: [fixed()], verdicts: [{ verdict: 'clean', sleep: 30 }] });
   const e = ear();
-  const t = Date.now();
   const going = run({ ws: w.ws, ...seams(), runner: w.runner, listen: e.listen, work: (ctx) => workBug({ ...ctx, processes: NOBODY }) });
   await until(() => reviewsRun(w).length === 1);
   assert.equal(state(w.home).phase, 'reviewing');
+  // From the stop on: the fix before it is git's work, slow on a busy Windows machine.
+  const t = Date.now();
   e.stop(w.home);
   const r = await going;
   assert.ok(Date.now() - t < 10000, 'the review killed, not waited for');
@@ -859,7 +974,7 @@ test('stop while reviewing: the review session is ended and nothing of it kept; 
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a', 'review-1.md')), false, 'no review kept');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), true);
   assert.match(gitIn(w.hubRoot, 'rev-parse', '--verify', 'bug/a'), /^[0-9a-f]{40}$/, 'its branch kept');
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: forever\n', 'nothing merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: forever\n', 'nothing merged');
   assert.equal(events(w.home).filter((x) => x.kind === 'bug-review').at(-1).outcome, 'stopped');
 });
 
@@ -876,7 +991,7 @@ test('stop during a merge: the merge under way finishes and the bug counts merge
   assert.deepEqual(phases, ['merging']);
   assert.deepEqual(r.bugs.map((b) => [b.id, b.outcome]), [['hub/a', 'merged'], ['hub/c', 'not-reached']]);
   stoppedByOwner(w, r);
-  assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: one hour\n', 'merged');
+  assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n', 'merged');
   assert.equal(existsSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md')), false, 'the bug closed');
   assert.equal(fixes(w).length, 1, 'hub/c never started');
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: review clean: merging\n/);
@@ -951,8 +1066,16 @@ test('--stop with no run changes nothing; a run that does not end in time is sti
   assert.equal(k(w.home, ['bugs', 'quad-damage', '--stop', '--dry-run']).stdout, 'would stop Quad Damage: Quad Damage runs: hub/a, fixing (try 1) since 23:41\n');
   assert.equal(existsSync(stopPath(w.home)), false);
   const kills = [];
-  const s = await stop({ ws: w.ws, kill: (pid, sig) => kills.push([pid, sig]), waitMs: 100, poll: 20 });
-  assert.deepEqual(kills, [[OTHER, STOP_SIGNAL]]);
+  const kill = process.kill;
+  // Signal 0 asks whether the run's pid lives (state()); anything else would be a signal sent.
+  process.kill = (pid, sig) => (sig === 0 ? kill.call(process, pid, sig) : kills.push([pid, sig]));
+  let s;
+  try {
+    s = await stop({ ws: w.ws, waitMs: 100, poll: 20 });
+  } finally {
+    process.kill = kill;
+  }
+  assert.deepEqual(kills, [], 'stop() sends no signal (asilak/kirunak-cross-platform AC-8)');
   assert.deepEqual(s, { stopped: false, pid: OTHER, folder: null, text: `Quad Damage is still stopping: pid ${OTHER}; k bugs quad-damage --status shows it` });
   assert.equal(JSON.parse(readFileSync(stopPath(w.home), 'utf8')).pid, OTHER, 'the request stays for the run to take');
 });

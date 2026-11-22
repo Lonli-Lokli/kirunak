@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 
 // `claude plugin marketplace add <checkout>` reads this list. An entry whose source is a path inside the checkout is

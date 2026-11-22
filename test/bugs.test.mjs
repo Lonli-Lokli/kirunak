@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve, verify } from '../lib/approval.mjs';
 import { bugPaths, checkBug, checkBugText, drop, format, from, list, newBug, readReview, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { parseDraft } from '../lib/drafts.mjs';
-import { gitCommitAll, gitInit, k, makeWorkspace, sh } from './helpers.mjs';
+import { isBranch } from '../lib/git.mjs';
+import { gitCommitAll, gitInit, k, makeWorkspace, sh, tempDir } from './helpers.mjs';
 
 // gulnya/kirunak-bugs S-1: a bug, kirunak/bugs/<slug>.md, its checks, its list, its drop and the move into it.
 
@@ -79,6 +80,33 @@ ${fix === null ? '' : `\n## Fix written\n${fix}`}
    Proposed: only the owner can say whether offline tiles must survive a start
 `;
 
+// asilak/kirunak-review-git-failure-reads-gone: only git's quiet exit 1 is no such branch; any other failure of the
+// call, git that would not start or that could not read the repo, is thrown, never read as the branch gone.
+test('isBranch is true for a branch, false for none, and throws git\'s error when git fails for another reason', () => {
+  const repo = join(tempDir('kirunak-is-branch-'), 'r');
+  mkdirSync(repo);
+  gitInit(repo);
+  writeFileSync(join(repo, 'a.txt'), 'a\n');
+  gitCommitAll(repo);
+  assert.equal(isBranch(repo, 'master'), true);
+  assert.equal(isBranch(repo, 'bug/none'), false);
+  writeFileSync(join(repo, '.git', 'refs', 'heads', 'broken'), 'garbage\n');
+  assert.throws(() => isBranch(repo, 'broken'), /broken ref/, 'a ref git cannot read is no branch gone');
+  const config = join(repo, '.git', 'config');
+  const good = readFileSync(config, 'utf8');
+  writeFileSync(config, `${good}[core\n`);
+  assert.throws(() => isBranch(repo, 'master'), /bad config/);
+  writeFileSync(config, good);
+  const path = process.env.PATH;
+  process.env.PATH = join(repo, 'no-git-here');
+  try {
+    assert.throws(() => isBranch(repo, 'master'), /ENOENT/, 'git that would not start');
+  } finally {
+    process.env.PATH = path;
+  }
+  assert.equal(isBranch(repo, 'master'), true);
+});
+
 test('k bug new writes the skeleton in kirunak/bugs/, commits nothing, and the check refuses every placeholder', async () => {
   const w = await bugWorkspace();
   const r = newBug({ ws: w.ws, id: BUG, title: ' Stale map tiles ', quadDamage: ' yes ', bugOf: ` ${TASK} `, session: '5f0c2a', now: OCT22 });
@@ -119,7 +147,7 @@ test('k bug new refuses an unknown repo, a bad id, a title missing or long, and 
   assert.throws(nu('hub/wind', { dryRun: true }), (e) => e.code === 1 && e.message === `hub/wind is already a draft: ${draftFile(w, 'wind')}; \`k bug from hub/wind --quad-damage yes|no\` moves it into kirunak/bugs/`);
   assert.throws(nu(TASK), (e) => e.code === 1 && /^weather\/offline-forecast is already a task: /.test(e.message));
   put(join(w.hub, 'kirunak', 'approvals', 'gone.json'), '{}\n');
-  assert.throws(nu('hub/gone'), /hub\/gone is already a task: .*approvals\/gone\.json$/);
+  assert.throws(nu('hub/gone'), /hub\/gone is already a task: .*approvals[\\/]gone\.json$/);
   assert.equal(existsSync(bugFile(w, 'wind')), false);
 });
 
@@ -189,7 +217,7 @@ test('E-4, E-6: k bug check finds the fix\'s commits in its fix repo, its own or
   put(bugFile(w), unknown);
   assert.deepEqual(checkBug(w.ws, BUG), [{ line: 5, problem: "fix-repo: unknown repo radio: name a repo of the workspace (weather, hub) or kirunak, kirunak's own checkout" }]);
   // A task not accepted any more is refused, as the drafts' bugs were (kirunak-spikes E-4).
-  sh(w.weather, 'rm', [join('kirunak', 'tasks', 'offline-forecast', 'done.json')]);
+  rmSync(join(w.weather, 'kirunak', 'tasks', 'offline-forecast', 'done.json'));
   put(bugFile(w), filled({ fix: null }));
   assert.deepEqual(checkBug(w.ws, BUG).map((p) => p.problem), [`bug-of: ${TASK} is not accepted yet: a bug found while a task is open goes into that task, through its review or an amendment (k amend new ${TASK} --title "...")`]);
   assert.throws(() => checkBug(w.ws, 'hub/none'), (e) => e.code === 1 && /^no bug hub\/none: /.test(e.message));

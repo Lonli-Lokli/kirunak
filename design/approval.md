@@ -51,7 +51,7 @@ It refuses, with the reason that says what to do instead:
 | Any write under `kirunak/approvals/`, to `done.json`, `hold.md`, or an amendment's `applied:`/`declined:` stamp (an Edit whose new text adds one) | D7: only the owner | "only the owner's own command writes this: ask them to type `! k approve <id>` / `! k accept <id>`" |
 | A Bash command that writes there (redirection, `tee`, `sed -i`, `cp`/`mv`/`rm` into it, `git checkout`/`restore` of it), found by a small segment parser (split on `;`, `&&`, `\|\|`, `\|` and newlines, then the write targets of each segment) | the same | the same |
 | Any write to `kirunak/tasks/<slug>/cost.md` (Edit, Write, or a Bash command that writes there) | generated from `done.json`'s `cost`, which only `k accept` records (`orchestrator.md` §6) | "cost.md is generated from done.json's cost, which only `k accept` records: `k cost <id> --write` writes it again" |
-| A Bash command running `k approve`, `k accept`, `k amend decline`, `k hold`, `k resume`, `k queue`, `k step stop` (a stop the owner orders, which counts no failure, gulnya/escalation-counts-non-work-failures), `k bug review` (Review & merge, which merges a bug's fix into master, R29), `k bugs quad-damage` without `--status`, `--summary` or `--progress` (Quad Damage, which merges fixes unattended, R34, gulnya/quad-damage AC-6, AC-16), `k bugs quad-damage --stop` with any other flag (the owner's stop of a run, gulnya/quad-damage AC-17; refused as "`k bugs quad-damage --stop` is the owner's") (or `k.mjs` with those verbs; any of them with `--dry-run` passes) | the owner's verbs | "`k <verb>` is the owner's: it runs only from the owner's own prompt (`!`) or the mod" |
+| A Bash command running `k approve`, `k accept`, `k amend decline`, `k hold`, `k resume`, `k queue`, `k step stop` (a stop the owner orders, which counts no failure, gulnya/escalation-counts-non-work-failures), `k bug review` (Review & merge, which merges a bug's fix into master, R29), `k bugs quad-damage` without `--status`, `--summary` or `--progress` (Quad Damage, which merges fixes unattended, R34, gulnya/quad-damage AC-6, AC-16), `k bugs quad-damage --stop` with any other flag (the owner's stop of a run, gulnya/quad-damage AC-17; refused as "`k bugs quad-damage --stop` is the owner's") (or `k.mjs` with those verbs; any of them with `--dry-run` passes), however wrapped: behind `timeout`, `stdbuf`, `xargs` or `chrt` with their flags and operands, and, the backstop for a wrapper the guard does not know, `k` and such a verb anywhere in a segment's words but after `echo` or `printf` (asilak/kirunak-guard-misses-timeout) | the owner's verbs | "`k <verb>` is the owner's: it runs only from the owner's own prompt (`!`) or the mod" |
 | Edit/Write of `kirunak/tasks/<slug>/intake.md` | append-only through `k intake` | "record the question or answer with `k intake question|answer`" |
 | Edit/Write of `checklist.md` ticks (`- [x]`) | R15: the owner's checklist | "the owner ticks the checklist" |
 | Edit/Write of any `.slapignore`, or a shell write to one (redirection, `sed -i`, `cp`, `rm`, `git checkout`/`restore` of it, a `node -e` that writes it) | R23: the owner's list (`change-size.md` §4) | "`.slapignore` is the owner's (R23): say which pattern to add or remove and why, and ask the owner to edit it and type `! k slapignore approve <repo>`" |
@@ -350,11 +350,14 @@ plugin adds (`plugins.md` §2), each repo once by git's common dir, nested ones 
   time, so a task's writing costs time, never memory; one over 4 MB, a binary one (a NUL byte in its first 8,000
   bytes, git's own test, read no further) and one that cannot be read name nothing (gulnya/worktrees-read-oom);
 - no process works in it or runs a program from it, as `lib/os.mjs` reads them: on macOS `lsof`'s cwd and txt, on
-  Linux `/proc/<pid>/cwd` and `exe`, on Windows one PowerShell `Get-CimInstance Win32_Process` call, whose
-  ExecutablePath inside it is a process running from it and whose CommandLine naming it (as a task's file would) is a
-  process working in it. Windows gives no other process's current folder, so before the removal the folder is moved
-  aside (`<path>.kirunak-removing`) and straight back: Windows refuses that while a process works in it, and the
-  worktree stays whole, known to git with its branch, for a later pass. When the reader cannot tell, none goes;
+  Linux `/proc/<pid>/cwd` and `exe`. On Windows no process is asked about: kirunak runs no Windows tool for it
+  (asilak/kirunak-cross-platform AC-3, AC-10), and Windows gives no other process's current folder anyway. There the
+  session locks below tell a worktree in use, and before the removal each program file in it (.exe, .dll, .node,
+  .com, .pyd) is opened for writing, nothing written, which Windows refuses while a program runs from it, wherever
+  that program works; then the folder is moved aside (`<path>.kirunak-removing`) and straight back, which Windows
+  refuses while a process works in it. Either refusal keeps the worktree whole, known to git with its branch, for a
+  later pass, where a removal would stop halfway. When the reader of macOS or Linux cannot tell, none
+  goes;
 - no checkout that stays is inside it, at any depth past build output (past 50 000 folders it stays). A checkout
   inside build output is not looked for, and goes with the worktree.
 
@@ -634,7 +637,9 @@ the code has no third (the rule at the top of the hook file, which a reviewer ca
 `disable-model-invocation: true`, so Claude Code lists it for the owner and does not let the model call it. Typed at the
 terminal or in Remote Control from the phone, it fires UserPromptExpansion; the hook counts that, and only that, as the
 override, ignores one inside a subagent or in a `claude` run that another claude started (on `/k-go-on` alone it walks
-its ancestors with `ps`, at most 8 steps, and logs `/k-go-on refused: nested run`), lifts the block and clears the
+its ancestors with `ps` on macOS and Linux, at most 8 steps, and logs `/k-go-on refused: nested run`; on Windows no
+process is asked about, asilak/kirunak-cross-platform AC-3, so there a subagent's is ignored and a nested run's is
+not told from the owner's), lifts the block and clears the
 counted failures. The skill's text then tells
 the session to say in one line what it does next and go on. **Evidence** for the route (S-1): a typed `/k-go-on` fires
 UserPromptExpansion; a scheduled prompt fires UserPromptSubmit alone; a prompt sent with `claude -p` fires

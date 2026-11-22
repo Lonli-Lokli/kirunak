@@ -49,8 +49,9 @@ one in a single step: Review & merge when its fix is ready, Start fix when it ha
    `[commit <sha>]`, and under What was found the test run, failing before and passing after. No fix: delete Fix
    written, heading and all.
 5. **A heavy test** (a Gradle or Xcode build or test, a booted emulator or simulator) runs only through the machine's
-   heavy lock, never bare: the command the workspace's `bugs.heavyLock` names, or this machine's CLAUDE.md, with the
-   job after it. It is the caller's job: an agent stops and returns the exact command and what it needs from it.
+   heavy lock, never bare: the command the workspace's `bugs.heavyLock` names with the job after it, or with none
+   `k heavy --session <your session id> -- <the job's command>`. It is the caller's job: an agent stops and returns the
+   exact command and what it needs from it.
 6. **Check**: `k bug check <id>` until it passes. It names each problem with its line: the shape, a question with no
    `Proposed:` line, a task not accepted, an unknown fix repo, a Fix written commit it cannot find.
 7. **Commit the bug alone**, in its repo:

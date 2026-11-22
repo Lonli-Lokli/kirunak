@@ -3,11 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { fakeClaude, fakePs, ladderWorkspace, makeWorkspace, tempDir } from '../../helpers.mjs';
+import { fakeClaude, ladderWorkspace, makeWorkspace, tempDir } from '../../helpers.mjs';
 
 test('every helper makes its folder', async () => {
-  const restore = fakePs('gone');
-  restore();
   const made = [(await makeWorkspace()).root, fakeClaude().dir, (await ladderWorkspace()).dir, tempDir('kirunak-x-')];
   assert.ok(made.every((d) => existsSync(d)));
 });

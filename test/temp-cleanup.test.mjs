@@ -12,8 +12,10 @@ const leftAfter = (file) => {
   const dir = mkdtempSync(join(tmpdir(), 'kirunak-temp-cleanup-'));
   try {
     // Without NODE_TEST_CONTEXT, which would make the child's `node --test` skip its files as a nested run.
+    // TEMP and TMP too: Node on Windows reads them, not TMPDIR, and there the child's folders went elsewhere, so
+    // nothing was ever counted (asilak/kirunak-cross-platform E-3).
     const { NODE_TEST_CONTEXT, ...env } = process.env;
-    const r = spawnSync(process.execPath, ['--test', file], { cwd: KIRUNAK, encoding: 'utf8', env: { ...env, TMPDIR: dir } });
+    const r = spawnSync(process.execPath, ['--test', file], { cwd: KIRUNAK, encoding: 'utf8', env: { ...env, TMPDIR: dir, TEMP: dir, TMP: dir } });
     return { status: r.status, out: r.stdout + r.stderr, left: readdirSync(dir) };
   } finally {
     rmSync(dir, { recursive: true, force: true });

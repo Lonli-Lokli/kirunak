@@ -150,7 +150,7 @@ test('E-2: an id that is already a draft or a task, in any state, is refused and
   assert.throws(() => newDraft({ ws: w.ws, id: 'hub/new-queue', title: 'x', dryRun: true }), /hub\/new-queue is already a task: /);
   mkdirSync(join(w.hub, 'kirunak', 'approvals'), { recursive: true });
   writeFileSync(join(w.hub, 'kirunak', 'approvals', 'gone.json'), '{}\n');
-  assert.throws(() => newDraft({ ws: w.ws, id: 'hub/gone', title: 'x' }), /hub\/gone is already a task: .*approvals\/gone\.json$/);
+  assert.throws(() => newDraft({ ws: w.ws, id: 'hub/gone', title: 'x' }), /hub\/gone is already a task: .*approvals[\\/]gone\.json$/);
 });
 
 test('k draft new: a title is required, a dry run writes nothing, and a missing draft is not checked', async () => {

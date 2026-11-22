@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { makeWorkspace, tempDir } from './helpers.mjs';
 import { kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, defaultChecklist, loadWorkspaceModule } from '../lib/workspace.mjs';
@@ -103,6 +103,7 @@ test('a plugin that throws on load stops with its name', async () => {
 });
 
 test('KIRUNAK_HOME moves the pointer', () => {
-  assert.equal(kirunakHome({ KIRUNAK_HOME: '/tmp/somewhere' }), '/tmp/somewhere');
+  // Resolved as the platform writes paths: on Windows the current drive's \tmp\somewhere.
+  assert.equal(kirunakHome({ KIRUNAK_HOME: '/tmp/somewhere' }), resolve('/tmp/somewhere'));
   assert.match(kirunakHome({}), /\.kirunak$/);
 });

@@ -16,6 +16,10 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+// A node process that sleeps `seconds`, as `sleep` would where Windows has none; on its own, since this file is
+// copied into each workspace's plugins and imports nothing of the tests.
+const sleeper = (seconds, options) => spawn(process.execPath, ['-e', `setTimeout(() => {}, ${Math.round(Number(seconds) * 1000)})`], options);
+
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const READING = { fiveHour: { used: 10, resetsAt: 1793142600 }, week: { used: 50, resetsAt: 1793545200 }, overage: false };
 const FINDING = "1. tiles.txt:1: the hour is not the forecast's refresh";
@@ -29,9 +33,10 @@ function review(step, script) {
   const out = /^## Write `([^`]+)`$/m.exec(step.brief)[1];
   const next = script.verdicts.shift() ?? 'clean';
   if (typeof next === 'object' && next.sleep != null) {
-    const child = spawn('sleep', [String(next.sleep)], { detached: true, stdio: 'ignore' });
+    const child = sleeper(next.sleep, { detached: true, stdio: 'ignore' });
     const done = new Promise((resolve) => child.on('exit', (code, signal) => {
-      if (signal) return resolve({ exitCode: 128 + 15, result: null });
+      // Killed: by a signal on macOS and Linux, on Windows ended with exit 1.
+      if (signal || code !== 0) return resolve({ exitCode: signal ? 128 + 15 : code, result: null });
       script.verdicts.unshift(next.verdict ?? 'clean');
       resolve(review(step, script).done);
     }));
@@ -85,9 +90,10 @@ export function fake(script = {}) {
       if (step.env?.KIRUNAK_BUG_REVIEW) return review(step, script);
       const act = script.fixes.shift() ?? { calls: 0, turns: 1, report: null };
       const calls = act.calls ?? 3;
-      const child = spawn('sleep', [String(act.sleep ?? 0.05)], { detached: true, stdio: 'ignore' });
+      const child = sleeper(act.sleep ?? 0.05, { detached: true, stdio: 'ignore' });
       const done = new Promise((resolve) => child.on('exit', (code, signal) => {
-        if (signal) return resolve({ exitCode: 128 + 15, result: null, stderr: '' });
+        // Killed: by a signal on macOS and Linux, on Windows ended with exit 1.
+        if (signal || code !== 0) return resolve({ exitCode: signal ? 128 + 15 : code, result: null, stderr: '' });
         try {
           play(step, act);
         } catch (e) {

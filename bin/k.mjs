@@ -2,7 +2,7 @@
 // k: kirunak's command line. `k <verb> [args] [--json] [--dry-run]`; exit 0 ok, 1 refused (the reason on stderr), 2 usage.
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { KError, refuse, usage } from '../lib/errors.mjs';
@@ -81,6 +81,9 @@ Read      k list [--repo <name>] [--all] | k board [--html <path>] [--no-open] [
           k board --brief: a line per task and per draft, for the phone; k board --card <id>: one task's or draft's card as markdown
           k status [--session <id>]: the lock, its queue, device claims, running steps, and the session's task
           k heavy [--json]: the heavy queue, the job holding the lock and each waiting job in turn, as two tables
+          k heavy [--session <id>] [--what "..."] [--max-minutes <n>] -- <command>: runs the command under the heavy
+            lock, its output as it comes, and exits with its code; one word is a command line for the shell, more a
+            program and its arguments; the session is $CLAUDE_CODE_SESSION_ID unless named
           k worktrees [--closing <id>]: the worktrees an acceptance would remove (what each holds besides build
             output) and keep, with why; it removes nothing
           k waiting: what waits for the owner (bugs, tasks and amendments to approve, tasks to accept, drafts) and what
@@ -482,7 +485,7 @@ const VERBS = {
     // from an agent's Bash tool.
     if (sub === 'stop') {
       const r = steps.stop({ ws, id, step, why });
-      return { ...r, text: `${id} ${step}: stopped by the owner, no failure counted, ${taskPaths(ws, id).rel(`steps/${step}/${r.report.split('/').at(-1)}`)}` };
+      return { ...r, text: `${id} ${step}: stopped by the owner, no failure counted, ${taskPaths(ws, id).rel(`steps/${step}/${basename(r.report)}`)}` };
     }
     if (steps.isOwnerStop(steps.reasonOf(why))) throw refuse(`"${steps.reasonOf(why)}" is the owner's stop: only \`k step stop\`, the owner's, writes it; say what went wrong`);
     // A stop's words, and an unfinished run's, are k run's own: such a failure would not count, a way around the two
@@ -753,7 +756,13 @@ const VERBS = {
   // line at all when none waits (gulnya/kirunak-bugs AC-7). Before them, Quad Damage's run while one lives: its one
   // line, and in --json its run file and that line, null when none lives (gulnya/quad-damage AC-12).
   // The heavy queue at a glance (gulnya/k-queue): the job holding the lock, then each waiting job in the guard's order.
-  async heavy({ ws }) {
+  // With `-- <command>`, the command runs under the heavy lock instead (asilak/kirunak-cross-platform AC-7).
+  async heavy({ ws, flags, rest }) {
+    if (rest) {
+      const session = typeof flags.session === 'string' ? flags.session : process.env.CLAUDE_CODE_SESSION_ID || `k-heavy-${process.pid}`;
+      const maxMinutes = Number(flags['max-minutes']) > 0 ? Number(flags['max-minutes']) : null;
+      return heavy.runHeavy(ws, rest, { session, what: typeof flags.what === 'string' ? flags.what : null, maxMinutes });
+    }
     if (typeof ws.seams.resourceGuard?.queue !== 'function') {
       const why = 'the resource guard has no queue(), so k heavy cannot show its queue';
       return { code: 1, json: { error: why }, text: why };
@@ -882,7 +891,7 @@ const VERBS = {
     if (sub !== 'approve') throw usage(`unknown slapignore verb ${sub}`);
     const dryRun = !!flags['dry-run'];
     const rows = slapignore.approve({ repos: pos.slice(1), all: !!flags.all, via: flags.via || 'shell', dryRun });
-    const text = rows.map((r) => `${r.already ? 'already approved' : dryRun ? 'would approve' : 'approved'} ${r.key}/.slapignore (${r.patterns} patterns, ${r.hash.slice(0, 19)}…)`).join('\n');
+    const text = rows.map((r) => `${r.already ? 'already approved' : dryRun ? 'would approve' : 'approved'} ${join(r.key, '.slapignore')} (${r.patterns} patterns, ${r.hash.slice(0, 19)}…)`).join('\n');
     return { rows, text: text || 'nothing to approve' };
   },
 
@@ -916,7 +925,7 @@ function report(what, problems, note) {
 const NO_WORKSPACE = new Set(['init', 'install', 'slap', 'slapignore']);
 
 export async function main(argv = process.argv.slice(2)) {
-  const { pos, flags } = parseArgs(argv);
+  const { pos, flags, rest } = parseArgs(argv);
   const verb = pos.shift();
   if (!verb || verb === 'help' || flags.help) {
     console.log(HELP);
@@ -926,7 +935,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!fn) throw usage(`unknown verb ${verb}\n\n${HELP}`);
   const needsWs = !NO_WORKSPACE.has(verb) && !(verb === 'check' && flags.file);
   const ws = needsWs ? await loadWorkspace() : null;
-  const r = (await fn({ ws, pos, flags })) || {};
+  const r = (await fn({ ws, pos, flags, rest })) || {};
   if (flags.json) {
     // A verb whose JSON must carry its text too returns it whole as `json`.
     const { text, code, json, ...rest } = r;

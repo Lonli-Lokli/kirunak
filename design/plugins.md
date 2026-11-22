@@ -25,7 +25,7 @@ own implementations live in the workspace's repo, beside its config (D2).
 | --- | --- | --- | --- | --- |
 | `checklist` | many, merged in load order | `aspects(task) → [{ id, title, question, edgeCases: [string], sources: [string], appliesWhen?: (task) → boolean }]` | `checklist-default.mjs`, loaded only while no workspace plugin provides a checklist: seven aspects any change can be asked about (`intake.md` §3); `k intake` still refuses a checklist that gives no aspect | its aspects, from its own rules (`intake.md` §3), in place of the default |
 | `storage` | one | `repos() → [{ name, root }]`, `queuePath() → path`, `read(path)`, `write(path, text)`, `exists(path)`, `hash(path) → "sha256:…"`, `commit(root, paths, message, env?) → sha`, `head(root) → sha`, `diff(root, base, head, exclude?) → patch` (leaving out the paths in `exclude`), `changedSince(root, sha, exclude?) → [path]` (likewise) | `storage-git.mjs`: files on disk, git for commit, hash, diff | none needed; the config names the repos (§3) |
-| `resourceGuard` | one | `run(job: { session, what, maxMinutes, expectMinutes, pieceMinutes?, command: [argv], cwd, say?, started? }) → { exitCode, log }` (`expectMinutes`: the length the step stated, or null; a guard may order its queue by it and must accept it; `pieceMinutes`: given only for a job that can resume (a `[heavy]` step's `resumable: yes`, a needs.json heavy job's `resumable: true`), the workspace's `plan.shortMinutes`; a guard may run such a job in pieces that long, each queued on its own with its deadline, the next queued when the job says work is left, and returns once the job ends; it must accept it, and one that runs every job whole changes nothing; `started()`: called once the guard holds the lock, just before the command starts, where k run takes a `[heavy]` step's checkout; a guard that never calls it leaves the one taken before the wait), `status() → { held: {session, what, since, orphan?} \| null, queued: [...] , estimateMinutes }`, `claim(resource, by, why, hours?)`, `release(resource, by)`, `resources() → [{ id, name, state }]`; optional `queue() → { now, first, held, waiting }` for `k heavy`: `now` its clock (ISO), `first` the session served before all or null, `held` null or `{ session, what, since, pid, expectMinutes, maxMinutes, kind, usualMinutes }`, `waiting` `[{ session, what, queuedAt, pid, expectMinutes, maxMinutes, kind, usualMinutes }]` already in the order the guard will serve it, a dead process's job left out (minutes a number or null: the stated length, the max, the guard's usual for the job; `kind` a string or null); the core ranks nothing, and without it `k heavy` says so | `resource-guard-local.mjs`: one job at a time, a lock in the state folder (§4), every job whole (`pieceMinutes` taken, unused); its `queue()` in the order the jobs came, the usual the median of the same `what` | a plugin over a lock and device claims it already has |
+| `resourceGuard` | one | `run(job: { session, what, maxMinutes, expectMinutes, pieceMinutes?, command: [argv], cwd, say?, started?, output? }) → { exitCode, log }` (`output(chunk, 'stdout' \| 'stderr')`: given by `k heavy -- <command>`, the command's output as it comes; a guard that never calls it has its `log` printed at the end; `expectMinutes`: the length the step stated, or null; a guard may order its queue by it and must accept it; `pieceMinutes`: given only for a job that can resume (a `[heavy]` step's `resumable: yes`, a needs.json heavy job's `resumable: true`), the workspace's `plan.shortMinutes`; a guard may run such a job in pieces that long, each queued on its own with its deadline, the next queued when the job says work is left, and returns once the job ends; it must accept it, and one that runs every job whole changes nothing; `started()`: called once the guard holds the lock, just before the command starts, where k run takes a `[heavy]` step's checkout; a guard that never calls it leaves the one taken before the wait), `status() → { held: {session, what, since, orphan?} \| null, queued: [...] , estimateMinutes }`, `claim(resource, by, why, hours?)`, `release(resource, by)`, `resources() → [{ id, name, state }]`; optional `queue() → { now, first, held, waiting }` for `k heavy`: `now` its clock (ISO), `first` the session served before all or null, `held` null or `{ session, what, since, pid, expectMinutes, maxMinutes, kind, usualMinutes }`, `waiting` `[{ session, what, queuedAt, pid, expectMinutes, maxMinutes, kind, usualMinutes }]` already in the order the guard will serve it, a dead process's job left out (minutes a number or null: the stated length, the max, the guard's usual for the job; `kind` a string or null); the core ranks nothing, and without it `k heavy` says so | `resource-guard-local.mjs`: one job at a time, a lock in the state folder (§4), every job whole (`pieceMinutes` taken, unused); its `queue()` in the order the jobs came, the usual the median of the same `what` | a plugin over a lock and device claims it already has |
 | `machineGuard` | one | `limits() → { maxAgents, maxHeavy }`, `running() → [{ pid, task, step, session, since }]` (session and since name a step's run; `since` is its process's start, within seconds) | `machine-guard-pids.mjs`: pid files under the state folder (§4); limits from the config, default `{ maxAgents: 2, maxHeavy: 1 }` | the default, with its own limits |
 | `runner` | one | `start(step: { brief, prompt, cwd, sessionId, resume?, model, effort, maxTurns, maxBudgetUsd, permissionMode, allowedTools, disallowedTools, deny?, addDirs, env }) → { pid, sessionId, done: Promise<{ exitCode, result, usage }> }`, `keepAlive(sessionId, cwd, step) → { pid, done: Promise<{ exitCode, result, usage }> }`; `deny` (a review step's, `review.md` §1) is a list of permission deny rules in Claude Code's syntax that the run, and a keep-alive given the same step, may not break, and a run given `deny` starts with auto memory off; `pid` leads its own process group, since the orchestrator ends a run by killing `-pid` and every descendant found under it, whatever its group (past its time, on a stop, and a dead `k run`'s left-over claude), and `start` returns it as soon as the process exists, since its start is recorded beside it; `onMessage` in a step, when given, gets each message of the run's stream as it comes (Quad Damage's fixing sessions count their tool calls by it); and, outside the seam and optional, `limits({ cwd, env, timeoutMs }) → { fiveHour: { used, resetsAt } | null, week: { used, resetsAt }, overage }` or `{ error }`, the plan's windows in percent and epoch seconds (`fiveHour` null for a plan with no 5-hour window, gulnya/five-hour-optional), which Quad Damage reads before every session (gulnya/quad-damage AC-9, AC-10): a runner without it gives no reading, and a run stops at its first session | `runner-claude.mjs`: headless `claude -p` (`orchestrator.md` §3) | the default |
 | `handoff` | many, merged in load order | `targets({ task, session, cwd }) → [{ where, what }]`, `release({ task, session, cwd }) → [{ resource, line }]` | `handoff-notes.mjs`: the handoff goes to the task's `handoff.md`; releases the session's own kirunak state (its `sessions/` file, the default guard's claims and queue line) | where its sessions keep handoffs, and what else a session holds that must be let go |
@@ -44,26 +44,35 @@ own implementations live in the workspace's repo, beside its config (D2).
   `handoff`, `frontend` and `tracker` compose. Loading a second implementation of a one-policy seam is an error that
   names both modules, never a silent override.
 - Judgement on the default guard: kirunak must work alone, on a machine with no lock of its own (R10). The default
-  keeps `$KIRUNAK_HOME/guard/lock` (a directory made with `mkdir`, which is atomic, holding `owner.json`: id,
-  session, what, pid, pidStart, job, jobStart, since; pid is the waiting kirunak process and pidStart its start, job
-  the command's process group and jobStart its start) and a first-in-first-out queue file `guard/queue` beside it,
-  one line per waiting process with the same id, pid and pidStart. `run` waits its turn, runs the command with
-  the job's `maxMinutes` as a deadline (past it, TERM to the process group and to every descendant, found by ppid from one `ps` before the first signal, whatever its group, each pid and each group one leads, then KILL after 10 s to what is left, its start checked against pid reuse; exit code 124), and
-  releases however the job ends; a kirunak stopped by SIGINT, SIGTERM or SIGHUP ends the job's group first
-  (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from a file can name another
-  process by now (pids are reused): a pid is the same process only while it started when the file says (`isStill`:
-  now less the elapsed time `ps -o etime=` prints, within a minute of it), and a pid this user cannot signal is never
-  kirunak's. `isStill` has three answers: true, false (a start that is off, no start recorded, or `ps` saying no such
-  process, exit 1), and unknown (`ps` did not start, as when a fork is refused, or exited otherwise, or printed no
-  elapsed time). Unknown is never killed and never read as gone: a live pid whose start `ps` cannot tell is believed
-  to be that process, and the wait ends when `ps` answers. So an owner or a queue line is alive only while its pid is
-  still the process that started at its `pidStart` (or `ps` cannot tell); one with no `pidStart` is dead. A dead
-  waiter's line goes, and a lock whose owner is dead is taken over on the next try, after whatever is left of its
-  job's group is ended (TERM, then KILL), but only while `job` is still the process that started at `jobStart`; a
-  group this user cannot signal, a job with no `jobStart`, or one that started at another time is left alone, and one
-  whose start `ps` cannot tell is waited for, and said once: a `wait` line in `guard/log.jsonl` (it has no minutes, so
-  no estimate reads it) and the job's `say`, if it has one. While such a job runs, or `ps` cannot tell, `status()`
-  shows it as `held`, marked `orphan`, since it holds the lock for every waiter. `claim` and `release` record claims in `guard/claims.json` (resource,
+  keeps `$KIRUNAK_HOME/guard/lock`, a lease (`lib/lease.mjs`, below) whose holder file is `owner.json` (id, session,
+  what, pid, job, since; pid is the waiting kirunak process, job the command's wrapper), and a first-in-first-out
+  queue file `guard/queue` beside it, one line per waiting process with its id and pid, each waiter holding its own
+  lease in `guard/waiting/<id>`. `run` waits its turn and runs the command under the wrapper (`lib/wrap.mjs`), which
+  holds the job's lease `guard/jobs/<owner's id>` while it runs, with the job's `maxMinutes` as a deadline: past it,
+  the job's tree is killed (`killTree` in `lib/os.mjs`; on macOS and Linux TERM to the wrapper's process group and to
+  every descendant, found by parentage before the first signal, whatever its group, then KILL after 10 s to what is
+  left; on Windows, at once, `taskkill /PID <pid> /T /F` of the wrapper, which ends what its command started through
+  Git Bash too), exit code 124. It releases however the job ends; a kirunak stopped (Ctrl-C, TERM, a closed terminal)
+  ends the job's tree first (`lib/stop.mjs`), and one that crashes keeps the lock while its job runs. A pid read from
+  a file can name another process by now (pids are reused), and no process's start time is read on any OS: an owner
+  or a waiter is alive while its pid answers `process.kill(pid, 0)` and its lease is fresh, so a pid another process
+  took since counts as dead within a minute, and a pid this user cannot signal is never kirunak's. A dead waiter's
+  line goes, with its lease. A lock whose owner is dead is taken over on the next try, once its job is settled: while
+  the job's wrapper still holds the job's lease fresh, that pid is the wrapper, which is ended first; with no such
+  lease, a job pid that still answers cannot be told from another process that took it, so it is believed to run,
+  never killed on a guess, and waited for, said once: a `wait` line in `guard/log.jsonl` (it has no minutes, so no
+  estimate reads it) and the job's `say`, if it has one. While such a job runs, `status()` shows it as `held`, marked
+  `orphan`, since it holds the lock for every waiter. An `owner.json` or a queue line written before leases (pid and
+  pidStart, no lease) is read by its pid alone until it goes. A holder whose machine slept past a minute and finds the
+  lock taken over gives way and ends its job, so two jobs never run at once.
+- A lease (`lib/lease.mjs`) is how every lock and registered process of kirunak's is held, the same on every OS: a
+  directory made with `mkdir`, which is atomic everywhere, holding one JSON file that names its holder, touched by
+  the holder every 5 s on an unref'd timer and stale when untouched for a minute. A stale lease is taken over; a
+  takeover and a late renewal each run inside a short mutex beside it, so a holder back from sleep finds its lease
+  still its own, and touches it, or another's, and gives way. A lock whose state is a file (k run's run file, the
+  machine guard's `running/` files, a bug's review lock, Quad Damage's run file) keeps that file and is held by the
+  lease `<file>.lease` beside it; its holder is alive while its pid answers and that lease is fresh, and a file with
+  no lease beside it, written before leases, while its pid answers. `claim` and `release` record claims in `guard/claims.json` (resource,
   by, why, until); `resources()` lists what was ever claimed, a held claim with its `by` and `why`. Every job appends one line to `guard/log.jsonl` (what,
   session, minutes, exit code).
 - The resource guard's contract carries `estimateMinutes`: the cache keeper (`orchestrator.md` §5) needs an expected
@@ -90,7 +99,7 @@ export default {
   queue: '~/code/hub/kirunak/queue.md',
   records: [],                        // more of kirunak's records (approval.md §3); a folder ends with a slash
   plugins: ['./plugins/checklist.mjs'],
-  machine: { maxAgents: 2, maxHeavy: 1 },
+  machine: { maxAgents: 2, maxHeavy: 1 },  // freeMemoryMB: optional; a heavy job or a session waits while less is free (on Windows, the commit left)
   models: {},                         // per step kind: { model, effort }; empty means Claude Code's own defaults
   budget: { calls: 100, minutes: 40, usd: 3 },
   runner: { permissionMode: 'auto' },
@@ -161,8 +170,10 @@ export default {
   checkout, where a bug with `fix-repo: kirunak` has its fix made and merged; by default the folder above `lib/` of the
   code that runs. `bugs.reviewModel` (default `opus`) and `bugs.reviewEffort` (default none, Claude Code's own) set
   the fresh session `k bug review` runs on a fix's diff; `bugs.heavyLock` is the command its brief and the k-bug skill
-  name for a heavy test, the job's command after it, and with none they name the heavy lock the machine's CLAUDE.md
-  names. Judgement: the machine's resource guard is the workspace's, so kirunak names no path of its own.
+  name for a heavy test, the job's command after it, and with none they name kirunak's own
+  `k heavy --session <the session's id> -- <command>`, which runs the command through the workspace's `resourceGuard`
+  (asilak/kirunak-cross-platform AC-7). Judgement: the machine's resource guard is the workspace's, so kirunak names no
+  path of its own.
   `bugs.disallowedTools` is the tools a review and a fixing session start without, each a `--disallowedTools`, and
   neither names `--tools`: by default the 10 that Claude Code loads whole and that a session with no person there
   cannot use (Agent, Artifact, Workflow, AskUserQuestion, Skill, ScheduleWakeup, SendFeedback, ReportFindings,
@@ -248,8 +259,8 @@ export default {
 ```
 workspace              the pointer (§3)
 machine.json           the limits, when the owner overrides the config's
-running/<pid>.json     one file per live step process: task, step, session id, since, the process's start (machineGuard);
-                       <k-run-pid>-<n>.json a step admitted and not started yet, with pidStart, that k run's start
+running/<pid>.json     one file per live step process: task, step, session id, since (machineGuard), held by the lease
+                       <pid>.json.lease beside it; <k-run-pid>-<n>.json a step admitted and not started yet, the same
 sessions/<id>.json     a session's current task and step, context and cache (set by k start and the status line)
 sessions/links.jsonl   every k start link and release, append-only: { session, task, since } or { ..., until }
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)

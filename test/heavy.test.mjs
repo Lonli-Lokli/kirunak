@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { k, makeWorkspace } from './helpers.mjs';
+import { parseArgs } from '../lib/args.mjs';
 import { updateSession } from '../lib/keeper.mjs';
 import { lengthOf, rows, span, text } from '../lib/heavy.mjs';
 
@@ -168,6 +169,50 @@ test('AC-11: k heavy prints the tables, and --json the same rows', async () => {
   assert.equal(plain.stdout.trimEnd(), text(r));
   assert.deepEqual(tableAfter(plain.stdout, 'Now'), [[r.held.task, r.held.left, r.held.ends, r.held.step]]);
   assert.deepEqual(tableAfter(plain.stdout, 'Next'), r.waiting.map((x) => [x.task, x.length, x.ends, x.step]));
+});
+
+test('AC-7: k heavy -- <command> runs it under the heavy lock, its output as it comes, and exits with its code; one word is a command line', async () => {
+  const w = await makeWorkspace();
+  const owner = join(w.home, 'guard', 'lock', 'owner.json');
+  const script = "const o = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(o.session, o.what); console.error('to stderr'); process.exit(3)";
+  const r = k(w.home, ['heavy', '--session', 's-1', '--what', 'a build', '--', process.execPath, '-e', script, owner]);
+  assert.equal(r.status, 3, r.stderr);
+  assert.equal(r.stdout, 's-1 a build\n', 'it ran holding the lock, under its session and what');
+  assert.match(r.stderr, /to stderr/);
+  assert.equal(existsSync(join(w.home, 'guard', 'lock')), false, 'the lock is let go');
+  const log = readFileSync(join(w.home, 'guard', 'log.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(log.map((x) => [x.what, x.session, x.exitCode]), [['a build', 's-1', 3]]);
+  const line = k(w.home, ['heavy', '--', 'echo one && echo two']);
+  assert.equal(line.status, 0, line.stderr);
+  assert.equal(line.stdout, 'one\ntwo\n');
+  assert.equal(k(w.home, ['heavy', '--']).status, 2, 'no command');
+});
+
+test('AC-6, AC-7: k heavy past --max-minutes ends the program and the child it started, on every OS: an .exe runs straight under the wrapper on Windows', async () => {
+  const w = await makeWorkspace();
+  const pidFile = join(w.home, 'child.pid');
+  const parent = "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' }); require('fs').writeFileSync(process.argv[1], String(c.pid)); setTimeout(() => {}, 30000);";
+  const t0 = Date.now();
+  // Three seconds, so a slow start (a busy Windows, a node behind the wrapper's node) still writes the child's pid.
+  const r = k(w.home, ['heavy', '--max-minutes', '0.05', '--', process.execPath, '-e', parent, pidFile]);
+  assert.equal(r.status, 124, r.stderr);
+  assert.ok(Date.now() - t0 < 20000, `ended in ${Date.now() - t0} ms`);
+  const child = Number(readFileSync(pidFile, 'utf8'));
+  const gone = () => {
+    try {
+      process.kill(child, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  for (let i = 0; i < 100 && !gone(); i++) await new Promise((res) => setTimeout(res, 30));
+  assert.ok(gone(), 'the program\'s child is gone too');
+});
+
+test('parseArgs: every word after a bare -- is the command\'s, whole', () => {
+  assert.deepEqual(parseArgs(['heavy', '--session', 's', '--', 'npm', '--json', 'test']), { pos: ['heavy'], flags: { session: 's' }, rest: ['npm', '--json', 'test'] });
+  assert.deepEqual(parseArgs(['heavy', '--json']), { pos: ['heavy'], flags: { json: true } }, 'no rest with no --');
 });
 
 test('a guard without queue() makes k heavy say so in one line and fail', async () => {

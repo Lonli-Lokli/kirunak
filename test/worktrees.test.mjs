@@ -1,12 +1,12 @@
 // The worktrees an acceptance removes (approval.md §4), on fixture repos: lib/worktrees.mjs, `k worktrees`, `k accept`.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
-import { processPaths } from '../lib/os.mjs';
-import { holdsLine, pluginsBefore, worktrees } from '../lib/worktrees.mjs';
+import { processPaths, readerName, samePath } from '../lib/os.mjs';
+import { holdsLine, pluginsBefore, tilde, worktrees } from '../lib/worktrees.mjs';
 import { gitCommitAll, gitInit, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && key !== 'KIRUNAK_HOME') delete process.env[key];
@@ -16,11 +16,14 @@ const NOV5 = new Date(2026, 10, 5, 9, 12, 0);
 const none = () => [];
 const taskDir = (weather) => join(weather, 'kirunak/tasks/offline-forecast');
 
-// A worktree of `repo` at `path` on a new branch from master (or detached), its path as git and the module see it.
+// A worktree of `repo` at `path` on a new branch from master (or detached), its path as git and the module see it
+// (the case on disk, and on Windows no short 8.3 name).
 function add(repo, path, branch) {
   sh(repo, 'git', ['worktree', 'add', '-q', ...(branch ? ['-b', branch] : ['--detach']), path, 'master']);
-  return realpathSync(path);
+  return realpathSync.native(path);
 }
+// A path as a regular expression matches it: Windows' `\` and the dots taken as they are.
+const re = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function commitIn(dir, file, text = file) {
   writeFileSync(join(dir, file), text);
   sh(dir, 'git', ['add', file]);
@@ -140,13 +143,15 @@ test('AC-1: a worktree an open task names stays, unless that task is the one clo
   writeFileSync(plan, `work in ${named}/src, then merge\n`);
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [named]: `the open task ${ID} names it (plan.md)` });
   assert.deepEqual(paths((await worktrees({ ws, closing: ID, processes: none })).removed), [named]);
-  const home = process.env.HOME;
+  // The home folder Node reads: $HOME, on Windows %USERPROFILE%.
+  const homeKey = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
+  const home = process.env[homeKey];
   try {
-    process.env.HOME = realpathSync(root);
+    process.env[homeKey] = realpathSync.native(root);
     writeFileSync(plan, 'work in ~/named.\n');
     assert.deepEqual(paths((await worktrees({ ws, processes: none })).kept), [named], 'from ~');
   } finally {
-    process.env.HOME = home;
+    process.env[homeKey] = home;
   }
   writeFileSync(join(taskDir(weather), 'done.json'), '{}\n');
   assert.deepEqual(paths((await worktrees({ ws, processes: none })).removed), [named], 'an accepted task is not open');
@@ -211,16 +216,22 @@ test('read-oom AC-1, AC-2: with the written files of open tasks holding more tex
   openTask(weather, 'heavy', { ...files, 'steps/S-31/report.md': `work in ${named}\n` });
   const r = k(home, ['worktrees', '--closing', ID], { NODE_OPTIONS: '--max-old-space-size=48' });
   assert.equal(r.status, 0, r.stderr.split('\n').find((l) => /heap|FATAL/.test(l)) ?? r.stderr);
-  assert.match(r.stdout, new RegExp(`^would remove ${free} \\(free merged into master\\): `, 'm'));
-  assert.match(r.stdout, new RegExp(`^would keep ${named}: the open task weather/heavy names it \\(steps/S-31/report\\.md\\)$`, 'm'));
+  assert.match(r.stdout, new RegExp(`^would remove ${re(tilde(free))} \\(free merged into master\\): `, 'm'));
+  assert.match(r.stdout, new RegExp(`^would keep ${re(tilde(named))}: the open task weather/heavy names it \\(steps/S-31/report\\.md\\)$`, 'm'));
 });
 
-test('read-oom AC-3, E-1: a binary file naming a worktree names nothing, and a file that cannot be read is skipped, never a stop', async () => {
+test('read-oom AC-3: a binary file naming a worktree names nothing', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const shot = add(weather, join(root, 'shot'), 'shot');
-  const dir = openTask(weather, 'shots', { 'steps/S-1/report.md': Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n\0\0'), Buffer.from(`made in ${shot}\n`)]) });
-  let look = await worktrees({ ws, processes: none });
-  assert.deepEqual(paths(look.removed), [shot], 'a NUL byte in the first 8,000 bytes: binary');
+  openTask(weather, 'shots', { 'steps/S-1/report.md': Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n\0\0'), Buffer.from(`made in ${shot}\n`)]) });
+  assert.deepEqual(paths((await worktrees({ ws, processes: none })).removed), [shot], 'a NUL byte in the first 8,000 bytes: binary');
+});
+
+test('read-oom E-1: a file that cannot be read is skipped, never a stop', { skip: process.platform === 'win32' && 'chmod cannot make a file unreadable on Windows' }, async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const shot = add(weather, join(root, 'shot'), 'shot');
+  const dir = openTask(weather, 'shots', {});
+  let look;
   writeFileSync(join(dir, 'notes.md'), `work in ${shot}\n`);
   chmodSync(join(dir, 'notes.md'), 0o000);
   try {
@@ -233,18 +244,30 @@ test('read-oom AC-3, E-1: a binary file naming a worktree names nothing, and a f
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), { [shot]: `the open task weather/shots names it (notes.md)` });
 });
 
-test('AC-1: a worktree a process works in stays (lsof), and so does every one when lsof cannot tell', async () => {
+// A process working in the worktree is named by lsof (macOS) or /proc (Linux); Windows is asked about no process, and
+// refuses to move the worktree aside at its removal.
+test('AC-1: a worktree a process works in stays (lsof, /proc, or on Windows the move aside)', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const busy = add(weather, join(root, 'busy'), 'busy');
   mkdirSync(join(busy, 'deep'));
-  const child = spawn('sleep', ['30'], { cwd: join(busy, 'deep'), stdio: 'ignore' });
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { cwd: join(busy, 'deep'), stdio: 'ignore' });
   try {
     await new Promise((resolve) => child.once('spawn', resolve));
-    assert.deepEqual(whys((await worktrees({ ws })).kept), { [busy]: `sleep (pid ${child.pid}) works in it` });
+    if (process.platform === 'win32') {
+      const r = await worktrees({ ws, remove: true });
+      assert.deepEqual(r.removed, []);
+      assert.match(whys(r.kept)[busy], /^Windows refuses to move it \(\w+\): a process works in it$/);
+      assert.ok(existsSync(join(busy, 'deep')) && branchExists(weather, 'busy'));
+    } else assert.deepEqual(whys((await worktrees({ ws })).kept), { [busy]: `node (pid ${child.pid}) works in it` });
   } finally {
     child.kill();
   }
-  assert.deepEqual(whys((await worktrees({ ws, processes: () => null })).kept), { [busy]: 'cannot tell whether a process works in it or runs from it (lsof gave no answer)' });
+});
+
+test('AC-1: every worktree stays when lsof or /proc cannot tell', { skip: process.platform === 'win32' && 'Windows is asked about no process, so no look fails' }, async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const busy = add(weather, join(root, 'busy'), 'busy');
+  assert.deepEqual(whys((await worktrees({ ws, processes: () => null })).kept), { [busy]: `cannot tell whether a process works in it or runs from it (${readerName()} gave no answer)` });
 });
 
 test('E-6: a detached worktree a plugin offers goes or stays as the plugin says; a keep from any plugin wins; a plugin adds repos; a failing plugin removes nothing', async () => {
@@ -365,7 +388,7 @@ test('a worktree holding another checkout stays while that one stays, and goes a
   const inner = add(hub, join(outer, 'tmp', 'inner'), 'inner');
   commitIn(inner, 'i.txt');
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).kept), {
-    [outer]: `it holds the checkout ${inner}`,
+    [outer]: `it holds the checkout ${tilde(inner)}`,
     [inner]: 'inner has 1 commit not in master',
   });
   sh(hub, 'git', ['merge', '-q', 'inner']);
@@ -386,8 +409,10 @@ test('AC-4: what a worktree that would go holds besides build output, one short 
   writeFileSync(join(shots, 'store', 'g.bin'), 'x'.repeat(10000));
   writeFileSync(join(shots, 'top.log'), 'log');
   ws.seams.worktrees = [{ repos: () => [], candidates: () => [], buildOutput: () => ['build'] }];
+  // The disk a file or folder takes is the file system's: a folder's own blocks count on Linux and not on macOS, and
+  // NTFS keeps a file of a few bytes in its table, taking none.
   const [w] = (await worktrees({ ws, sizes: true, processes: none })).removed;
-  assert.match(w.holds, /^store\/ 30\dK, renders\/ 2\dK, \.\/ 4K$/);
+  assert.match(w.holds, /^store\/ 3[01]\dK, renders\/ 2\dK, \.\/ \dK$/);
   assert.doesNotMatch(w.holds, /build/);
 
   for (const d of ['a', 'b', 'c', 'd', 'e']) {
@@ -395,7 +420,7 @@ test('AC-4: what a worktree that would go holds besides build output, one short 
     writeFileSync(join(shots, d, 'f'), 'x');
   }
   const [many] = (await worktrees({ ws, sizes: true, processes: none })).removed;
-  assert.match(many.holds, /^store\/ 30\dK, renders\/ 2\dK, (\S+ 4K, ){3}and 3 more, 12K$/);
+  assert.match(many.holds, /^store\/ 3[01]\dK, renders\/ 2\dK, (\S+ \dK, ){3}and 3 more, \d+K$/);
 
   assert.equal(holdsLine([]), 'nothing besides build output');
 });
@@ -425,6 +450,8 @@ test('AC-2, E-4, E-7: k accept removes after its commit and prints each removed 
   mkdirSync(join(stuck, 'locked'));
   writeFileSync(join(stuck, 'locked', 'f'), 'f');
   chmodSync(join(stuck, 'locked'), 0o555);
+  // Windows ignores the mode of a folder: a file held open there makes the removal fail, refused the move aside.
+  const held = process.platform === 'win32' ? openSync(join(stuck, 'locked', 'f'), 'r') : null;
   try {
     await approve({ ws, id: ID, now: NOV5 });
     const refused = k(home, ['accept', ID]);
@@ -440,21 +467,23 @@ test('AC-2, E-4, E-7: k accept removes after its commit and prints each removed 
 
     const preview = k(home, ['worktrees', '--closing', ID]);
     assert.equal(preview.status, 0);
-    assert.match(preview.stdout, new RegExp(`^would remove ${gone} \\(gone merged into master\\): nothing besides build output$`, 'm'));
-    assert.match(preview.stdout, new RegExp(`^would keep ${stays}: stays has 1 commit not in master$`, 'm'));
+    assert.match(preview.stdout, new RegExp(`^would remove ${re(tilde(gone))} \\(gone merged into master\\): nothing besides build output$`, 'm'));
+    assert.match(preview.stdout, new RegExp(`^would keep ${re(tilde(stays))}: stays has 1 commit not in master$`, 'm'));
     assert.ok(existsSync(gone), 'k worktrees removes nothing');
 
     const r = k(home, ['accept', ID]);
     assert.equal(r.status, 0, r.stderr);
     const out = r.stdout.trim().split('\n');
     assert.equal(out[0], `${ID}: done`);
-    assert.ok(out.includes(`removed ${gone} (gone merged into master, branch deleted)`), r.stdout);
-    assert.ok(out.some((l) => l.startsWith(`kept ${stuck}: git worktree remove failed: `)), r.stdout);
-    assert.ok(out.includes(`kept ${stays}: stays has 1 commit not in master`), r.stdout);
+    assert.ok(out.includes(`removed ${tilde(gone)} (gone merged into master, branch deleted)`), r.stdout);
+    const failed = process.platform === 'win32' ? 'Windows refuses to move it' : 'git worktree remove failed: ';
+    assert.ok(out.some((l) => l.startsWith(`kept ${tilde(stuck)}: ${failed}`)), r.stdout);
+    assert.ok(out.includes(`kept ${tilde(stays)}: stays has 1 commit not in master`), r.stdout);
     assert.ok(existsSync(join(taskDir(weather), 'done.json')), 'E-4: the acceptance stands');
     assert.equal(existsSync(gone), false);
     assert.ok(existsSync(stays));
   } finally {
+    if (held !== null) closeSync(held);
     chmodSync(join(stuck, 'locked'), 0o755);
   }
 });
@@ -471,57 +500,37 @@ test("AC-18: k accept takes the session that runs it ($CLAUDE_CODE_SESSION_ID he
   gitCommitAll(weather, 'review');
   const r = k(home, ['accept', ID], { CLAUDE_CODE_SESSION_ID: 's1' });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.stdout.split('\n').includes(`removed ${mine} (mine merged into master, branch deleted)`), r.stdout);
-  assert.match(r.stdout, new RegExp(`^kept ${shared}: locked: session s2 works in it until \\d\\d:\\d\\d$`, 'm'));
+  assert.ok(r.stdout.split('\n').includes(`removed ${tilde(mine)} (mine merged into master, branch deleted)`), r.stdout);
+  assert.match(r.stdout, new RegExp(`^kept ${re(tilde(shared))}: locked: session s2 works in it until \\d\\d:\\d\\d$`, 'm'));
   assert.equal(existsSync(mine), false);
   assert.equal(sh(weather, 'git', ['worktree', 'list', '--porcelain']).match(/^locked (.*)$/m)?.[1], 'kirunak s2 2099-01-01T00:00:00.000Z');
 });
 
-// asilak/kirunak-worktrees-lsof-windows: the cleanup as Windows reads it, PowerShell's answer faked over real repos.
-const win = (path) => path.replaceAll('/', '\\');
-const powershell = (list) => (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: JSON.stringify(list) }) });
+// asilak/kirunak-worktrees-lsof-windows, asilak/kirunak-cross-platform AC-10: the cleanup as Windows reads it over
+// real repos. Windows is asked about no process: the session locks and the move aside alone tell a worktree in use.
+const asksNothing = (o) => processPaths({ ...o, run: () => assert.fail('Windows is asked nothing') });
 
-test('AC-7: on win32 a merged worktree no process names goes, and its branch with it', async () => {
+test('AC-7: on win32 a merged worktree goes, and its branch with it, no process asked about', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const free = add(weather, join(root, 'free'), 'free');
-  const processes = powershell([
-    { ProcessId: 4, Name: 'System', ExecutablePath: null, CommandLine: null },
-    { ProcessId: 50, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: `node.exe ${win(free)}-capture\\serve.js` },
-  ]);
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing });
   assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted]), [[free, 'free merged into master', true]]);
   assert.deepEqual(r.kept, []);
   assert.equal(existsSync(free), false);
   assert.equal(branchExists(weather, 'free'), false);
 });
 
-test('AC-4, AC-8, E-2: on win32 a worktree a process runs from, or whose path a command line names, stays and the line names the pid', async () => {
+test('AC-10: on win32 the empty look is no "cannot tell": a worktree a session\'s lock holds stays, the one no lock holds goes', async () => {
   const { ws, root, weather } = await makeWorkspace();
-  const runs = add(weather, join(root, 'runs'), 'runs');
-  const named = add(weather, join(root, 'named'), 'named');
-  const processes = powershell([
-    { ProcessId: 61, Name: 'app.exe', ExecutablePath: `${win(runs).toUpperCase()}\\BIN\\APP.EXE`, CommandLine: null },
-    { ProcessId: 62, Name: 'node.exe', ExecutablePath: 'C:\\Program Files\\nodejs\\node.exe', CommandLine: `"C:\\Program Files\\nodejs\\node.exe" ${win(named)}\\serve.js` },
-  ]);
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
-  assert.deepEqual(whys(r.kept), {
-    [named]: 'node.exe (pid 62) works in it: its command line names it',
-    [runs]: 'app.exe (pid 61) runs from it',
-  });
-  assert.deepEqual(r.removed, []);
-  assert.ok(existsSync(runs) && existsSync(named) && branchExists(weather, 'runs') && branchExists(weather, 'named'));
-});
-
-test('AC-9: on win32, when PowerShell gives no answer every candidate stays', async () => {
-  const { ws, root, weather } = await makeWorkspace();
-  const a = add(weather, join(root, 'a'), 'a');
-  const b = add(weather, join(root, 'b'), 'b');
-  const processes = (o) => processPaths({ ...o, run: () => ({ status: 0, stdout: 'Get-CimInstance : not recognized' }) });
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes });
-  const why = 'cannot tell whether a process works in it or runs from it (PowerShell gave no answer)';
-  assert.deepEqual(whys(r.kept), { [a]: why, [b]: why });
-  assert.deepEqual(r.removed, []);
-  assert.ok(existsSync(a) && existsSync(b));
+  const held = add(weather, join(root, 'held'), 'held');
+  const free = add(weather, join(root, 'free'), 'free');
+  sh(weather, 'git', ['worktree', 'lock', '--reason', 'kirunak s1 2099-01-01T00:00:00.000Z', held]);
+  const until = new Date('2099-01-01T00:00:00.000Z');
+  const hhmm = `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`;
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing });
+  assert.deepEqual(whys(r.kept), { [held]: `locked: session s1 works in it until ${hhmm}` });
+  assert.deepEqual(paths(r.removed), [free]);
+  assert.ok(existsSync(held) && branchExists(weather, 'held'));
 });
 
 // A rename that refuses as Windows does while a process works in the folder.
@@ -533,15 +542,15 @@ test('AC-5 (A-1): on win32 a worktree Windows refuses to move aside is kept whol
   const { ws, root, weather } = await makeWorkspace();
   const held = add(weather, join(root, 'held'), 'held');
   let tried = 0;
-  const look = await worktrees({ ws, platform: 'win32', processes: powershell([]), rename: () => tried++ });
+  const look = await worktrees({ ws, platform: 'win32', processes: asksNothing, rename: () => tried++ });
   assert.deepEqual(paths(look.removed), [held]);
   assert.equal(tried, 0, 'a look moves nothing');
 
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename: refuses('EBUSY') });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing, rename: refuses('EBUSY') });
   assert.deepEqual(r.removed, []);
   assert.deepEqual(whys(r.kept), { [held]: 'Windows refuses to move it (EBUSY): a process works in it' });
   assert.ok(existsSync(join(held, 'README.md')), 'whole');
-  assert.match(sh(weather, 'git', ['worktree', 'list', '--porcelain']), new RegExp(`^worktree ${held}$`, 'm'));
+  assert.ok(sh(weather, 'git', ['worktree', 'list', '--porcelain']).split('\n').some((l) => l.startsWith('worktree ') && samePath(l.slice(9), held)), 'still known to git');
   assert.ok(branchExists(weather, 'held'));
 
   const moves = [];
@@ -549,7 +558,7 @@ test('AC-5 (A-1): on win32 a worktree Windows refuses to move aside is kept whol
     renameSync(from, to);
     moves.push([from, to, existsSync(held)]);
   };
-  const later = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename });
+  const later = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing, rename });
   const aside = `${held}.kirunak-removing`;
   assert.deepEqual(moves, [[held, aside, false], [aside, held, true]], 'aside and straight back, at its own path before the removal');
   assert.deepEqual(later.removed.map((w) => [w.path, w.branchDeleted]), [[held, true]]);
@@ -565,7 +574,7 @@ test('A-1: on win32 a worktree Windows moves aside but not back is kept, the lin
     if (from === aside) refuses('EPERM')();
     renameSync(from, to);
   };
-  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: powershell([]), rename });
+  const r = await worktrees({ ws, remove: true, platform: 'win32', processes: asksNothing, rename });
   assert.deepEqual(whys(r.kept), {
     [stuck]: `moved to ${aside} to see whether a process works in it, and Windows refuses to move it back to ${stuck} (EPERM): move it back by hand`,
   });
@@ -573,13 +582,14 @@ test('A-1: on win32 a worktree Windows moves aside but not back is kept, the lin
   renameSync(aside, stuck);
 });
 
-// A lock as a session's lease leaves it (lib/worktree-lock.mjs), or as a hand makes it.
+// A lock as a session's lease leaves it (lib/worktree-lock.mjs), or as a hand makes it; read back from git, which
+// writes the path with `/` on Windows too.
 const lock = (repo, path, reason) => sh(repo, 'git', ['worktree', 'lock', ...(reason === undefined ? [] : ['--reason', reason]), path]);
 const lockOf = (repo, path) => {
   let at = null;
   for (const f of sh(repo, 'git', ['worktree', 'list', '--porcelain', '-z']).split('\0')) {
     if (f.startsWith('worktree ')) at = f.slice(9);
-    else if (at === path && (f === 'locked' || f.startsWith('locked '))) return f.slice(7);
+    else if (at !== null && samePath(at, path) && (f === 'locked' || f.startsWith('locked '))) return f.slice(7);
   }
   return null;
 };
@@ -619,7 +629,7 @@ test('AC-2: a live lease keeps a merged worktree, any other lock keeps it as bef
   assert.equal(branchExists(weather, 'stale'), false);
   assert.equal(lockOf(weather, staleDirty), null, 'lifted, though kept for its change');
   assert.deepEqual([lockOf(weather, live), lockOf(weather, hand), lockOf(weather, bare)], ['kirunak s1 2026-11-10T10:30:00.000Z', 'moving disks', '']);
-  for (const p of [live, hand, bare]) assert.ok(existsSync(p) && branchExists(weather, p.split('/').pop()));
+  for (const p of [live, hand, bare]) assert.ok(existsSync(p) && branchExists(weather, basename(p)));
 
   const k2 = await worktrees({ ws, remove: true, processes: none, now: new Date('2026-11-10T10:30:00.000Z') });
   assert.deepEqual(k2.removed.map((w) => [w.path, w.branchDeleted]), [[live, true]], 'once its lease ends, the live one goes too');

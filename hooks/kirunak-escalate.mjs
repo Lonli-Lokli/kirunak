@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kirunakHome } from '../lib/home.mjs';
+import { processField } from '../lib/os.mjs';
 import {
   blockLines, commandOf, costOf, count, logLine, message, modelOf, notificationOf, prune, pushIn, pushLines, readConfig,
   readState, repeatsOf, runEnd, rungFor, signatureOf, statePath, tail, taskOf, unfitFor, unmarkEdited, withState,
@@ -321,10 +321,9 @@ export function override(input, home, now, ancestors = ancestry) {
 
 // The commands of the hook's ancestors, nearest first, read with ps on a /k-go-on alone: `claude` for Claude Code (its
 // binary, or node running its cli), else the command's base name. It stops at the second claude, after 8 steps or at
-// launchd. node:child_process loads here alone, so no other call pays for it (AC-12).
+// launchd. lib/os.mjs loads node:child_process on this call alone, so no other call pays for it (AC-12).
 export function ancestry(pid = process.ppid) {
-  const { execFileSync } = createRequire(import.meta.url)('node:child_process');
-  const ps = (field, p) => execFileSync('ps', ['-o', field, '-p', String(p)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const ps = (field, p) => processField(p, field);
   const names = [];
   for (let i = 0; i < 8 && pid > 1 && !nested(names); i++) {
     let m;

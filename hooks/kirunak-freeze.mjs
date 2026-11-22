@@ -5,10 +5,12 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from '../lib/args.mjs';
 import { kirunakHome } from '../lib/home.mjs';
+import { toolPath } from '../lib/os.mjs';
 
 // PreToolUse (approval.md §2): refuses the model's write to what only the owner's commands write, and the owner's
 // verbs run through the Bash tool. A guard against mistakes, not against a deliberate bypass; it fails open.
-// It imports nothing but node: modules and lib/home.mjs, because it runs on every Edit, Write and Bash call.
+// It imports only node: modules, lib/home.mjs, lib/args.mjs and lib/os.mjs, because it runs on every Edit, Write and
+// Bash call. Every path it compares is a toolPath, so on Windows `\`, `/` and any case are the same (E-2).
 // For the escalation hook (approval.md §7) it refuses edits while the session's block is in
 // force, and every way the model could reach what lifts the block: the Skill call of k-go-on, a scheduled prompt or a
 // message carrying /k-go-on, an agent's prompt that starts with it, a claude run from the shell that would type it into
@@ -60,8 +62,8 @@ const BLOCKED = 'kirunak: edits are blocked: a test failed again after the hand-
 // guards a folder that holds them (rm -r, mv).
 function hookState(path, removing = false) {
   const home = kirunakHome();
-  const dir = join(home, 'escalate');
-  if (path === dir || path.startsWith(`${dir}/`) || path === join(home, 'escalate.log')) return true;
+  const dir = toolPath(join(home, 'escalate'));
+  if (path === dir || path.startsWith(`${dir}/`) || path === toolPath(join(home, 'escalate.log'))) return true;
   return removing && `${dir}/`.startsWith(path.endsWith('/') ? path : `${path}/`);
 }
 
@@ -113,7 +115,7 @@ function frozenReason(root, found) {
 function verdict(path, change, removing = false) {
   if (hookState(path, removing)) return HOOK_STATE;
   if (basename(path) === '.slapignore') return SLAPIGNORE;
-  if (path === join(kirunakHome(), 'slapignore.json')) return SLAP_RECORD;
+  if (path === toolPath(join(kirunakHome(), 'slapignore.json'))) return SLAP_RECORD;
   const at = locate(path);
   if (!at) {
     return removing && basename(path) === 'kirunak' && existsSync(join(path, 'approvals')) ? ownerOnly() : null;
@@ -247,8 +249,20 @@ export function segments(command) {
 
 const WRAPPERS = new Set(['then', 'do', 'else', 'if', 'elif', 'while', 'until', '!', '{', 'time', 'nohup', 'exec', 'env',
   'sudo', 'npx', 'command', 'builtin', 'nice']);
+// Wrappers with flags that take the next word as their value, or an operand before their command
+// (asilak/kirunak-guard-misses-timeout): `timeout -k 5 3600 k …` runs `k …`. timeout always reads a duration; chrt's
+// priority is a number, left out by a policy that has none (`chrt --idle k …`).
+const OPERAND_WRAPPERS = new Map([
+  ['timeout', { valued: ['-k', '-s', '--kill-after', '--signal'], operand: () => true }],
+  ['stdbuf', { valued: ['-i', '-o', '-e', '--input', '--output', '--error'] }],
+  ['xargs', { valued: ['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s', '-J', '-R', '-S', '--arg-file', '--delimiter',
+    '--max-args', '--max-procs', '--max-chars', '--process-slot-var'] }],
+  ['chrt', { valued: ['-T', '-P', '-D', '--sched-runtime', '--sched-period', '--sched-deadline'], operand: (w) => /^\d+$/.test(w) }],
+]);
+// Commands that print their words and run none: the backstop leaves them be.
+const PRINTS = new Set(['echo', 'printf']);
 
-/** One segment's words past assignments and wrappers, and the targets of its output redirections. */
+/** One segment's words past assignments and wrappers, all its words, and the targets of its output redirections. */
 function parse(tokens) {
   const words = [];
   const redirected = [];
@@ -269,12 +283,17 @@ function parse(tokens) {
     else if (w.length && WRAPPERS.has(w[0])) {
       w = w.slice(1);
       while (w[0]?.startsWith('-')) w = w.slice(1);
+    } else if (w.length && OPERAND_WRAPPERS.has(w[0])) {
+      const { valued, operand } = OPERAND_WRAPPERS.get(w[0]);
+      w = w.slice(1);
+      while (w[0]?.startsWith('-')) w = w.slice(valued.includes(w[0]) ? 2 : 1);
+      if (operand && w.length && operand(w[0])) w = w.slice(1);
     } else break;
   }
-  return { words: w, redirected };
+  return { words: w, all: words, redirected };
 }
 
-const base = (word) => (word ?? '').split('/').pop();
+const base = (word) => toolPath(word ?? '').split('/').pop();
 const options = (words) => words.filter((w) => w && !w.startsWith('-'));
 
 /** The words after `k` when the segment runs kirunak's CLI (`k`, `k.mjs`, `node <path>/k.mjs`), else null. */
@@ -285,6 +304,16 @@ function kArgs(words) {
     while (w[0]?.startsWith('-')) w = w.slice(1);
   }
   return ['k', 'k.mjs'].includes(base(w[0])) ? w.slice(1) : null;
+}
+
+/** The words after `k` of the k command `k heavy -- <command>` runs, else null. */
+function heavyRuns(args) {
+  try {
+    const { pos, rest } = parseArgs(args);
+    return pos[0] === 'heavy' && rest ? kArgs(parse(rest).words) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** k's verb and what follows it, read as the CLI reads them: a valued flag's value is no verb (`k --via mod approve x`
@@ -298,6 +327,9 @@ function verbWords(args) {
 }
 
 function ownerVerbOf(args) {
+  // `k heavy -- <command>` runs its command: k's own verbs there are read as if typed bare.
+  const inner = heavyRuns(args);
+  if (inner) return ownerVerbOf(inner);
   if (args.includes('--dry-run')) return null;
   const [verb, sub] = verbWords(args);
   if (verb === 'queue' && sub === 'show') return null;
@@ -317,12 +349,24 @@ function ownerVerbOf(args) {
   return null;
 }
 
+/** The owner's verb a `k` anywhere in a segment's words runs, the backstop after the strip: a wrapper or operand it
+ * does not know (`flock /tmp/l k approve x`, `nice -n 10 k …`) fails closed (asilak/kirunak-guard-misses-timeout). */
+function ownerVerbAnywhere(words, all) {
+  if (PRINTS.has(base(words[0]))) return null;
+  for (let i = 0; i < all.length; i++) {
+    const k = kArgs(all.slice(i));
+    const verb = k && ownerVerbOf(k);
+    if (verb) return verb;
+  }
+  return null;
+}
+
 function absolute(path, dir) {
   let p = path;
   const home = process.env.HOME || homedir();
   if (p === '~' || p.startsWith('~/')) p = home + p.slice(1);
   p = p.replace(/^\$\{?HOME\}?(?=\/|$)/, home);
-  return resolve(dir, p);
+  return toolPath(resolve(toolPath(dir), toolPath(p)));
 }
 
 const isDir = (abs) => {
@@ -337,7 +381,7 @@ const isDir = (abs) => {
 function into(target, sources, dir) {
   const abs = absolute(target, dir);
   if (!target.endsWith('/') && !(locate(abs) && isDir(abs))) return [abs];
-  return [abs, ...sources.map((s) => join(abs, basename(s)))];
+  return [abs, ...sources.map((s) => toolPath(join(abs, basename(s))))];
 }
 
 const WRITE_API = /\b(writeFileSync|appendFileSync|writeFile|appendFile|rmSync|unlinkSync|unlink|renameSync|rename|copyFileSync|cpSync|createWriteStream|truncateSync)\b/;
@@ -390,14 +434,12 @@ function shell(command, cwd) {
   let dir = cwd;
   const named = HOOK_SCRIPT.test(command);
   for (const tokens of segments(command)) {
-    const { words, redirected } = parse(tokens);
+    const { words, all, redirected } = parse(tokens);
     // A hand-written event piped into the hook would have one claude above it, as the owner's /k-go-on has.
     if (named && runsHook(tokens, words)) return HOOK_RUN;
     const k = kArgs(words);
-    if (k) {
-      const verb = ownerVerbOf(k);
-      if (verb) return ownerVerb(verb);
-    }
+    const verb = (k && ownerVerbOf(k)) || ownerVerbAnywhere(words, all);
+    if (verb) return ownerVerb(verb);
     // A claude run from the shell that resumes a session (its prompt may come from a file) or carries /k-go-on would
     // fire UserPromptExpansion in that session as if the owner typed it.
     if (base(words[0]) === 'claude' && (GO_ON_TEXT.test(command) || words.slice(1).some((w) => RESUMES.test(w)))) return GO_ON_SHELL;
@@ -428,7 +470,7 @@ export function decide(input) {
     if (typeof path === 'string' && hookState(absolute(path, cwd))) return HOOK_STATE;
     const blocked = blockOf(input);
     if (blocked) return blocked;
-    if (typeof path !== 'string' || !/kirunak\/|\.slapignore$|slapignore\.json$/.test(path)) return null;
+    if (typeof path !== 'string' || !/kirunak\/|\.slapignore$|slapignore\.json$/.test(toolPath(path))) return null;
     return verdict(absolute(path, cwd), changeOf(tool, ti));
   }
   if (tool === 'Skill') {
