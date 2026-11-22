@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { progressText } from '../lib/held.mjs';
 import { kirunakHome } from '../lib/home.mjs';
 import {
   attribute, decide, expectPath, idleOf, lastUsage, limitOf, logLine, readJson, runningAgents, taskDir, thresholdOf,
@@ -46,16 +47,12 @@ const lazily = (seen) => (key, fn) => {
   };
 };
 
-// The task's progress.md, its folder and the session's chain (R1.1, R1.2); null when the folder cannot be found.
-function progressOf(config, session, id) {
+// The task's progress.md with a release run's held lines after it (lib/held.mjs), its folder and the session's chain
+// (R1.1, R1.2); null when the folder cannot be found. No progress.md yet: no step started.
+function progressOf(config, session, id, home) {
   const dir = taskDir(config, session?.task);
   if (!dir) return null;
-  let text = '';
-  try {
-    text = readFileSync(join(dir, 'progress.md'), 'utf8');
-  } catch {
-    // no progress.md yet: no step started
-  }
+  const text = progressText(dir, home) ?? '';
   return { dir, text, chain: [id, ...(Array.isArray(session.previous) ? session.previous : [])] };
 }
 
@@ -85,7 +82,7 @@ export function factsOf(input, home, env = process.env, now = new Date()) {
   const agents = once('agents', () => runningAgents(record(), { transcript: input.transcript_path, session: id, now: now.getTime() }));
   const turn = () => record()?.turn ?? null;
   const attribution = once('attribution', () => attribute({ turn: turn(), ctx: usage().ctx, T: T(), agents: agents(), now: now.getTime() }));
-  const progress = once('progress', () => progressOf(config(), session(), id));
+  const progress = once('progress', () => progressOf(config(), session(), id, home));
   const running = async () => {
     const p = progress();
     return (seen.running = p ? (await steps()).runningBy(p.text, p.chain, p.dir) : null);

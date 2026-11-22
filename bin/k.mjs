@@ -11,6 +11,7 @@ import { expandHome, kirunakHome } from '../lib/home.mjs';
 import { aspectsOf, allTaskIds, defaultChecklist, loadWorkspace, loadWorkspaceModule, taskPaths } from '../lib/workspace.mjs';
 import { amendmentTexts, checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask, removedIds } from '../lib/task.mjs';
+import { planText } from '../lib/held.mjs';
 import { checkPlan, parsePlan } from '../lib/plan.mjs';
 import { isCommitted } from '../lib/git.mjs';
 import * as approval from '../lib/approval.mjs';
@@ -393,7 +394,7 @@ const VERBS = {
     if (!existsSync(p.task)) throw new KError(`unknown task ${id}: ${p.task} does not exist`, 1);
     const plan = join(p.dir, 'plan.md');
     if (!existsSync(plan)) throw new KError(`${id} has no plan: ${p.rel('plan.md')}`, 1);
-    const found = checkPlan(parsePlan(readFileSync(plan, 'utf8')), parseTask(readFileSync(p.task, 'utf8')), p, ws);
+    const found = checkPlan(parsePlan(planText(p.dir)), parseTask(readFileSync(p.task, 'utf8')), p, ws);
     // A warning refuses nothing (gulnya/k-run-step-models E-3): printed after the result, the exit still 0.
     const warnings = found.filter((x) => x.warning).map((x) => `  warning, line ${x.line}: ${x.problem}`);
     const r = report(`${id} plan`, found.filter((x) => !x.warning), '');
@@ -468,14 +469,15 @@ const VERBS = {
       return { path: r.path, text: r.path };
     }
     if (sub === 'start') {
-      await steps.start({ ws, id, step, session: session(flags) });
-      return { text: `${id} ${step}: started` };
+      const r = await steps.start({ ws, id, step, session: session(flags) });
+      return { text: `${id} ${step}: started${r.held ? ', a release step: its records stay out of the tree until its release run\'s last step finishes' : ''}` };
     }
     if (sub === 'finish') {
       const r = steps.finish({ ws, id, step });
       if (r.state === 'waiting-owner') return { code: 1, text: `${id} ${step} waits for the owner: ${r.owner}` };
       const c = await closing.closeIfFinal({ ws, id, step });
-      return { text: `${id} ${step}: done${c ? `\n${id}: done, its final steps passed` : ''}` };
+      const kept = r.held ? ', its records held out of the tree until the release run ends' : r.committed ? `, the release run ${r.committed.join(', ')} ended and its records committed` : '';
+      return { text: `${id} ${step}: done${kept}${c ? `\n${id}: done, its final steps passed` : ''}` };
     }
     const why = need(flags.why, '--why "<why>"');
     // The owner's stop (gulnya/escalation-counts-non-work-failures): no failure counted; the freeze hook refuses it

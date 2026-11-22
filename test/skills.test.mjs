@@ -105,6 +105,22 @@ test('k-go-on names the way back for a step stopped for the owner: the plan edit
   assert.match(text, /runs again once the owner's session takes `\[escalate\]` off its header in plan\.md and starts `k run`/);
 });
 
+test('the usage review carries every lever forward and ends in one improvement task, run first (gulnya/usage-review-levers-unacted)', () => {
+  const text = read('skills/usage-review/SKILL.md').replace(/\s+/g, ' ');
+  // Compare reads the last review's table; Write puts this week's table in the review; Changes feed the task.
+  assert.match(text, /\*\*Compare\.\*\*[^]*the newest review's levers table/);
+  assert.match(text, /\*\*Write\*\*[^]*the levers table \(below\)/);
+  assert.match(text, /Anything larger goes into the week's improvement task/);
+  assert.doesNotMatch(text, /Anything larger is a kirunak draft/);
+  const table = text.slice(text.indexOf('## The levers table and the improvement task'), text.indexOf('## How to read the numbers'));
+  assert.ok(table.length > 30, 'the skill has "The levers table and the improvement task" before "How to read the numbers"');
+  assert.match(table, /a row for every lever \(a measured share of the week\) any review named/);
+  assert.match(table, /its work: the improvement task that holds it, or the owner's no with its date/);
+  assert.match(table, /A row leaves only once its work is done and measured/);
+  assert.match(table, /\*\*Every review ends in one improvement task\*\*, never drafts/);
+  assert.match(table, /through the intake \(the k-intake skill\) right after the review, for the owner to approve and run first/);
+});
+
 test('the README is its four parts and the licence line', () => {
   const text = read('README.md');
   assert.deepEqual([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]), ['What it is', 'Setup', 'Change size', 'Working a task']);

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { heldDir, holdOf, planText, progressText } from '../lib/held.mjs';
 import { clearFire, sessionFile, taskOf, within } from './compact-clear.mjs';
 import {
   agentTranscript, BOUNDARY_WAIT_S, boundarySeen, CAP, cut, EXPECT_S, expectPath, isId, labelOf, lastOf, logLine, openAgents,
@@ -120,6 +121,19 @@ function fileBody(path, shape) {
   return head + shape(text, CAP - head.length);
 }
 
+// The progress part: progress.md's last lines, with the lines a release run holds out of the tree after it, named
+// (lib/held.mjs), so a session that compacts between release steps loses none of them.
+function progressBody(dir, home) {
+  const path = join(dir, 'progress.md');
+  const text = progressText(dir, home);
+  if (text == null) return `the file ${path}: none yet`;
+  const hold = holdOf(dir, home);
+  const head = hold
+    ? `the file ${path}, then the lines the release run ${hold.run.join(', ')} holds out of the tree until its last step finishes, ${join(heldDir(dir, home), 'progress.md')}:\n`
+    : `the file ${path}:\n`;
+  return head + lastOf(text, CAP - head.length, path);
+}
+
 // The step states the plan part keeps blocks by (lib/steps.mjs stepStates); none when they cannot be read, so every
 // block is kept and the part cut.
 async function statesOf(dir, root, planText, progress) {
@@ -136,7 +150,7 @@ async function statesOf(dir, root, planText, progress) {
 // escalation records of this id (and the old one after /clear).
 async function stateBody(home, input, fire, dir, source, now) {
   const id = input.session_id;
-  const progress = readText(join(dir, 'progress.md')) ?? '';
+  const progress = progressText(dir, home) ?? '';
   const [{ events, runningBy }, status, waiting] = await Promise.all([
     import('../lib/steps.mjs'), k(['status', '--session', id], input.cwd), k(['waiting', '--json'], input.cwd),
   ]);
@@ -186,11 +200,13 @@ export async function onStart(input, home, part, now = new Date()) {
   if (dir) {
     const file = (name) => join(dir, name);
     if (part === 'task') text = fileBody(file('task.md'), (t, cap) => cut(t, cap, file('task.md')));
-    if (part === 'progress') text = fileBody(file('progress.md'), (t, cap) => lastOf(t, cap, file('progress.md')));
+    if (part === 'progress') text = progressBody(dir, home);
     if (part === 'plan') {
-      const planText = readText(file('plan.md')) ?? '';
-      const states = await statesOf(dir, config.repos[fire.task.split('/')[0]], planText, readText(file('progress.md')) ?? '');
-      text = fileBody(file('plan.md'), (t, cap) => planFor(t, states, file('plan.md'), cap));
+      // With the escalate marks a release run holds out of the tree on it (lib/held.mjs).
+      const plan = planText(dir, home);
+      const states = await statesOf(dir, config.repos[fire.task.split('/')[0]], plan ?? '', progressText(dir, home) ?? '');
+      text = plan == null ? `the file ${file('plan.md')}: none yet` : `the file ${file('plan.md')}:\n`;
+      if (plan != null) text += planFor(plan, states, file('plan.md'), CAP - text.length);
     }
     if (part === 'state') text = await stateBody(home, input, fire, dir, source, now);
     text = `${labelOf(part, source)}\n${text}`;

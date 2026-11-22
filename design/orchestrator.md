@@ -145,6 +145,14 @@ outputs: review.md
   fix, and the owner's next `k accept` signs off again and runs every final step, since the build may have changed.
   A plan with no final steps is accepted at once, as before. `k accept --dry-run` says "would sign off" and `k
   waiting`'s accept row names the final steps the accept would queue.
+- **Release steps: `clean-tree: yes`** (gulnya/step-records-void-release-receipts). A step whose gates count only for
+  a tree with no tracked change at one commit (a release's device checks and uploads: gulnya's `ios-smoke.mjs` and
+  the legacy gate read `git status --porcelain --untracked-files=no` and `git rev-parse HEAD`) says `clean-tree: yes`,
+  `yes` or left out as the other flags. It is its own field, not `final: yes`: that one is the owner's sign-off gate,
+  only in a `release: yes` plan and only at its end, while a release's device checks and uploads may come before a
+  review and the owner's steps; a final step may say both. The steps marked so that stand next to each other in the
+  file are one **release run** (lib/plan.mjs `releaseRun`), whose records §2 holds out of the tree until its last
+  step finishes.
 
 ## 2. The step lifecycle (R9)
 
@@ -181,6 +189,26 @@ pending  →  ready  →  running  →  done
   step is left `running`, said once (`… pid N may still be its claude, so it is believed to run and never killed`),
   for a later `k run` to decide; under `--watch`, for its next pass, which asks again about those steps alone. A step
   started by hand has neither: `k run` names it and leaves it.
+- **A release run keeps the tree clean** (lib/held.mjs; §1 `clean-tree: yes`). `k step start` of a release step
+  refuses a tree with a tracked change, naming each file, then opens the run's hold, `$KIRUNAK_HOME/held/<key>/`
+  (`hold.json`: the task, its folder, the run's steps, the commit it started on; the key, the task folder's real path
+  hashed). From then on every `progress.md` line of the task, any step's, goes to the hold's `progress.md`, and no
+  finish commits: a step's records and evidence stay on disk, untracked, which the gates do not count. Every reader of
+  `progress.md` (the states, k list, k run, the compaction hooks' parts) reads the tree's file and the held lines
+  after it, so a session that compacts or a `k run` that restarts between release steps loses nothing. The finish
+  of the run's last step (every step of the run's last line `finished`) commits them as one finish would: the
+  evidence of every step the hold names, `<id> S-n: the release steps' evidence (S-x, S-y)`, measured by SLAP, then
+  the held lines and its `finished` line appended to `progress.md` with those steps' records, `<id> S-n: the release
+  steps' records (S-x, S-y)` under `KIRUNAK_RECORDING`; then the hold goes. A release step that fails keeps the hold
+  (its `failed` line and `failure-<n>.md` held), so the retry runs on the same clean tree and commit. A run that
+  will not finish ends by `k records <id>`, which commits the held lines with the folder's records; `k accept`
+  refuses while a hold is open. A step that stops for the owner in the run (past the top rung, a repeated `not met`)
+  writes its `[escalate]` and `failures:` into the hold too, `marks.json` (`{ "S-n": [failure reports] }`), never
+  into the tree's `plan.md`: every reader of the plan (the step states, k run, k list and the board, `k plan check`,
+  the compaction hooks' plan part) reads the tree's file with the held marks on it, and the run's last finish or
+  `k records <id>` puts them on `plan.md` in its records commit. The way back from a held mark starts with that
+  commit: `k records <id>, then take [escalate] off S-n's header in plan.md, then k run`. Judgement: the gates stay strict and kirunak stays out of their way, rather than
+  each gate learning to forgive kirunak's own files.
 - `waiting-heavy`: the step's run wrote `steps/S-n/needs.json` (`{ "heavy": { "what", "command": [argv],
   "maxMinutes", "expectMinutes"? }, "then": "resume" }`) and ended its turn. `expectMinutes` is optional, given when
   the agent has a measured length of the same job and left out otherwise; one that is not a positive number or is
