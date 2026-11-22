@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { kirunakHome } from '../lib/home.mjs';
+import { appendLink } from '../lib/links.mjs';
 
 // The core's default `handoff` (review.md §4, plugins.md §2): the handoff goes to the task's handoff.md,
 // and release lets go of the session's own kirunak state. Writes nothing outside $KIRUNAK_HOME.
@@ -42,6 +43,13 @@ export default function handoffNotes(ws) {
           if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(session || '')) return [{ resource: 'kirunak', line: 'nothing held' }];
           const sessionFile = join(home(), 'sessions', `${session}.json`);
           if (existsSync(sessionFile)) {
+            // The link's end goes to links.jsonl first, so k usage still joins the calls made before it (lib/links.mjs).
+            try {
+              const task = readJson(sessionFile)?.task;
+              if (typeof task === 'string' && task) appendLink(home(), { session, task, until: new Date().toISOString() });
+            } catch {
+              // the log is a record: a release never fails on it
+            }
             unlinkSync(sessionFile);
             out.push({ resource: 'session', line: `cleared session ${session}` });
           }

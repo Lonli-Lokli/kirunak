@@ -266,6 +266,7 @@ machine.json           the limits, when the owner overrides the config's
 running/<pid>.json     one file per live step process: task, step, session id, since (machineGuard), held by the lease
                        <pid>.json.lease beside it; <k-run-pid>-<n>.json a step admitted and not started yet, the same
 sessions/<id>.json     a session's current task and step, context and cache (set by k start and the status line)
+sessions/links.jsonl   every k start link and release, append-only: { session, task, since } or { ..., until }
 keeper.jsonl           every keep-alive, miss and skip (R11, D9)
 events.jsonl           what the front ends show as toasts: build ended, review ready, keep-alive, refusal
 freeze.log             every refusal of the PreToolUse hook (approval.md §2)

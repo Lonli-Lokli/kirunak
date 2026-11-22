@@ -69,6 +69,13 @@ export async function clearFire(home, input, part, now) {
     updateSession(home, id, patch);
     // The status line's tracker merges into the same file: a write it made from an older read is made good once.
     if (readSession(home, id)?.task !== c.task) updateSession(home, id, patch);
+    // The new id's link goes to links.jsonl too, so k usage joins its calls after the release (lib/links.mjs).
+    try {
+      const { appendLink } = await import('../lib/links.mjs');
+      appendLink(home, { session: id, task: c.task, since: now.toISOString() });
+    } catch {
+      // the log is a record: the carry never fails on it
+    }
     if (existsSync(sessionFile(home, c.from))) updateSession(home, c.from, { clearedTo: id });
     remove(clearedPath(home));
   }

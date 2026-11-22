@@ -461,3 +461,51 @@ test('the workspace\'s plan settings: absent or good pass; a shortMinutes that i
   assert.deepEqual(checkPlanSettings({ storeSet: ['(unclosed'] }), ['plan.storeSet is a list of patterns, each a RegExp or a string that reads as one']);
   assert.deepEqual(checkPlanSettings([]), ['plan is { shortMinutes, storeSet }']);
 });
+
+// gulnya/usage-improve-11-22 AC-14: Fable designs and reviews; a step on Fable that is neither is refused. `fable`
+// runs checkPlan on a plan whose steps cover nothing the empty task has, and keeps only the Fable findings.
+const fable = (text, p = null, ws = null) => {
+  const plan = parsePlan(text);
+  assert.deepEqual(plan.problems, []);
+  return checkPlan(plan, parseTask(''), p, ws).filter((x) => /Fable/.test(x.problem));
+};
+const FABLE_BUILD = (id) => `${id} is a step on Fable that is neither a design nor a review: Fable designs and reviews, and Opus builds; put the step on Opus, or name the design or the review it is in its title or what:`;
+
+test('AC-14: an agent step on Fable passes when its title or what: names a design or a review; one that builds is refused, naming the step', () => {
+  const plan = (title, ...fields) => planOf('', step('S-1', title, 'agent, claude-fable-5-2, high', ...fields), REVIEW('S-1'));
+  assert.deepEqual(fable(plan('The design')), []);
+  assert.deepEqual(fable(plan('Review of gulnya\'s part')), []);
+  assert.deepEqual(fable(plan('Redesign the queue')), [], 'any form of the word');
+  assert.deepEqual(fable(plan('The engine', 'what: the rules the engine is designed from, for an Opus step to build')), [], 'the what: names a design');
+  assert.deepEqual(fable(plan('Build the engine', 'what: the engine, its tests and its docs')).map((x) => x.problem), [FABLE_BUILD('S-1')]);
+  assert.deepEqual(fable(plan('Build the engine')).map((x) => x.problem), [FABLE_BUILD('S-1')], 'no what: at all');
+  assert.deepEqual(fable(planOf('', step('S-1', 'Build the engine', 'agent, claude-opus-5-5, high'), REVIEW('S-1'))), [], 'on Opus');
+});
+
+test('AC-14: a [heavy] step on Fable is refused; a [review] step on Fable passes; the workspace\'s models.<kind> counts when the line names none', () => {
+  const heavy = planOf('', step('S-1', 'Unit tests', 'heavy, fable', 'command: npm test'), REVIEW('S-1'));
+  assert.deepEqual(fable(heavy).map((x) => x.problem), [FABLE_BUILD('S-1')]);
+  const review = planOf('', step('S-1', 'Fix it', 'agent, opus'), step('S-9', 'The last look', 'review, fable, xhigh', 'needs: S-1', 'covers: all', 'inputs: task, diff, evidence/', 'outputs: review.md'));
+  assert.deepEqual(fable(review), []);
+  const plain = planOf('', step('S-1', 'Build the engine', 'agent'), REVIEW('S-1'));
+  assert.deepEqual(fable(plain, null, { models: { agent: { model: 'claude-fable-5-2' } } }).map((x) => x.problem), [FABLE_BUILD('S-1')]);
+  assert.deepEqual(fable(plain, null, { models: { agent: { model: 'claude-opus-5-5' } } }), []);
+});
+
+test('AC-14: in a task first approved before FABLE_ROLE_SINCE the refusal is a warning, so no running task stops; one approved since is refused', () => {
+  // The review reads only task and diff, which need no file: a record's task has no folder for evidence/.
+  const plan = planOf('', step('S-1', 'Build the engine', 'agent, fable'), step('S-9', 'Review', 'review', 'needs: S-1', 'covers: all', 'inputs: task, diff', 'outputs: review.md'));
+  const dir = tempDir('kirunak-ac14-');
+  try {
+    const record = join(dir, 'approval.json');
+    writeFileSync(record, JSON.stringify({ history: [{ approved: '2026-11-01T09:00:00Z' }] }));
+    const old = fable(plan, { id: ID, record });
+    assert.equal(old.length, 1);
+    assert.equal(old[0].warning, true);
+    assert.match(old[0].problem, new RegExp(`^S-1 is a step on Fable .* \\(a warning: ${ID} was approved before \\d{4}-\\d{2}-\\d{2}\\)$`));
+    writeFileSync(record, JSON.stringify({ history: [{ approved: '2099-01-01T09:00:00Z' }] }));
+    assert.deepEqual(fable(plan, { id: ID, record }), [{ line: old[0].line, problem: FABLE_BUILD('S-1') }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

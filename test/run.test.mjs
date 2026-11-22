@@ -75,7 +75,7 @@ function fakeRunner(w, act = () => 'write') {
       const done = new Promise((resolve) =>
         child.on('exit', (code, signal) => {
           const what = act(step, n, w, child.pid);
-          if (what === 'write') for (const o of OUTPUTS[step.env.KIRUNAK_STEP]) put(w, o);
+          if (what === 'write') for (const o of OUTPUTS[step.env.KIRUNAK_STEP] ?? []) put(w, o);
           // 'cap <subtype>': claude's own cap cut the run off (--max-budget-usd, --max-turns), as claude -p ends then.
           const cap = typeof what === 'string' && what.startsWith('cap ') ? what.slice(4) : null;
           resolve({ exitCode: what === 'exit 1' || cap ? 1 : signal ? 143 : 0, result: { type: 'result', subtype: cap || 'success', is_error: !!cap, num_turns: 3, session_id: sessionId, total_cost_usd: 0.1, usage: RUN_USAGE } });
@@ -392,12 +392,13 @@ test('a [heavy] step whose job failed on a checkout that is still the same stops
   const calls = fakeRunner(w);
   const lines = [];
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
-  assert.deepEqual([calls.length, jobs.length], [0, 1]);
-  const why = `failed on an unchanged checkout (${c.dir} at ${c.head()}): a rerun would fail the same way`;
+  // Its fix step runs first (gulnya/usage-improve-11-22 AC-9); this one changes nothing and writes no report.
+  assert.deepEqual([calls.map((x) => x.env.KIRUNAK_STEP), jobs.length], [['S-1-F1'], 1]);
+  const why = `failed on an unchanged checkout (${c.dir} at ${c.head()}): a rerun would fail the same way, and the fix step S-1-F1 changed nothing`;
   assert.equal(r.stopped, `S-1 ${why}; the owner decides: read steps/S-1/failure-1.md`);
   const record = JSON.parse(readFileSync(join(w.p.dir, 'steps', 'S-1', 'heavy-1.json'), 'utf8'));
   assert.deepEqual([record.checkout.dir, record.checkout.head.slice(0, 7), record.checkout.status.length], [c.dir, c.head(), 64]);
-  assert.match(progress(w), new RegExp(`S-1 failed: exit 1\\n.*S-1 escalated: stopped for the owner, ${escape(why)}\\n$`));
+  assert.match(progress(w), new RegExp(`S-1 failed: exit 1\\n.*S-1-F1 started .*\\n.*S-1-F1 finished: changed nothing\\n.*S-1 escalated: stopped for the owner, ${escape(why)}\\n$`));
   assert.match(readFileSync(join(w.p.dir, 'plan.md'), 'utf8'), /^### S-1 Keep the last forecast on disk \[heavy\] \[escalate\]\n[^]*^failures: steps\/S-1\/failure-1\.md$/m);
   assert.deepEqual(events(w.home).filter((e) => /^escalate/.test(e.kind)).map((e) => [e.kind, e.to, e.stopped]), [['escalate', null, true]]);
   // The push and the notice name the way back (AC-4); a later k run says it on the escalated step's line.
@@ -504,9 +505,9 @@ test('a [heavy] step that timed out (exit 124) runs again on the same checkout: 
   const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
   const jobs = [];
   heavyGuard(w, jobs, () => ({ exitCode: 124, log: 'timed out' }));
-  fakeRunner(w);
+  const calls = fakeRunner(w);
   const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20 });
-  assert.equal(jobs.length, 2);
+  assert.deepEqual([jobs.length, calls.length], [2, 0], 'a timeout reruns with no fix step (gulnya/usage-improve-11-22 AC-9)');
   assert.equal(r.stopped, 'S-1 failed 2 times; the owner decides: read steps/S-1/failure-2.md');
 });
 
@@ -523,6 +524,88 @@ test('a [heavy] step whose job passed but wrote not its outputs stops for the ow
   assert.match(progress(w), new RegExp(`S-1 failed: missing outputs: steps/S-1/report\\.md, evidence/S-1-cache-sizes\\.tsv\\n.*S-1 escalated: stopped for the owner, ${escape(why)}\\n$`));
   assert.match(lines.at(-1), /^kirunak-push: The last fo… \(weather\/offline-forecast\): S-1 stopped, its job passed but wrote no steps\/S-1\/report\.md/);
   assert.ok(lines.at(-1).endsWith(` ${WAY_BACK}`), lines.at(-1));
+});
+
+// gulnya/usage-improve-11-22 AC-9: a [heavy] step failing on an unchanged checkout starts a fix step, S-n-F<k>, a
+// builder session briefed with the job's record, before the heavy step runs again. `fix(step, n)` is the fix
+// session's work; the guard's n-th job answers `answer(n)`, and a passing one writes the step's outputs.
+async function fixFixture(answer, fix) {
+  const c = checkoutFixture();
+  const w = await approvedWorkspace(heavyIn(`cd ${c.dir} && npm test`));
+  w.ws.builder = { rung: 'opus', tools: ['Read', 'Edit', 'Bash'] };
+  const jobs = [];
+  heavyGuard(w, jobs, (n) => {
+    const r = answer(n);
+    if (r.exitCode === 0) for (const o of OUTPUTS['S-1']) put(w, o);
+    return r;
+  });
+  const calls = fakeRunner(w, (step, n) => (step.env.KIRUNAK_STEP.startsWith('S-1-F') ? fix(step, n, c, w) : 'write'));
+  const lines = [];
+  const r = await run({ ws: w.ws, id: w.id, watch: true, intervalMs: 20, out: (l) => lines.push(l) });
+  const fixes = calls.filter((x) => x.env.KIRUNAK_STEP.startsWith('S-1-F'));
+  return { c, w, jobs, calls, fixes, lines, r };
+}
+const RED = (n) => ({ exitCode: 1, log: `compile error ${n}\nTest FAILED` });
+
+test('a [heavy] step failing on an unchanged checkout starts its fix step S-1-F1 on the builder\'s rung with the job\'s record in its brief; the fix commits, and the heavy step runs again and passes (gulnya/usage-improve-11-22 AC-9)', async () => {
+  const { c, w, jobs, fixes, r } = await fixFixture((n) => (n === 1 ? RED(n) : { exitCode: 0, log: 'green' }), (step, n, co, w2) => {
+    co.commit('fixed\n');
+    put(w2, 'steps/S-1-F1/report.md', 'Fixed the compile error.\n');
+    return 'nothing';
+  });
+  assert.equal(jobs.length, 2, 'the heavy step ran again after its fix');
+  assert.equal(fixes.length, 1);
+  const [f] = fixes;
+  assert.deepEqual([f.model, f.effort, f.tools, f.cwd, f.resume, f.maxTurns, f.maxBudgetUsd, f.permissionMode], ['opus', 'high', ['Read', 'Edit', 'Bash'], w.p.root, null, 100, 3, 'auto']);
+  assert.deepEqual(f.disallowedTools, ['Agent']);
+  assert.equal(f.env.KIRUNAK_TASK, w.id);
+  // The brief: the step's what and command, the job's record (exit, minutes, its record, log and failure report), the
+  // log's tail, and the rule (commit, the report, NEEDS-OWNER).
+  for (const want of [`cd ${c.dir} && npm test`, 'exit code 1', 'steps/S-1/heavy-1.json', 'steps/S-1/heavy-1.log', 'steps/S-1/failure-1.md', 'compile error 1', 'Test FAILED', 'commit', 'steps/S-1-F1/report.md', 'NEEDS-OWNER: ']) {
+    assert.ok(f.prompt.includes(want), `the brief names ${want}:\n${f.prompt}`);
+  }
+  assert.match(f.prompt, /minutes/);
+  assert.equal(r.states['S-1'], 'done');
+  const text = progress(w);
+  assert.match(text, new RegExp(`S-1 failed: exit 1\\n.*S-1-F1 started \\(opus high, session ${f.sessionId}\\)\\n.*S-1-F1 finished\\n.*S-1 started `));
+  assert.match(text, /S-1 finished\n/);
+  assert.ok(!/stopped for the owner/.test(text));
+});
+
+test('a fix step that changes nothing stops the heavy step for the owner with "the fix step changed nothing": one job (gulnya/usage-improve-11-22 AC-9)', async () => {
+  const { c, w, jobs, fixes, r, lines } = await fixFixture(RED, (step, n, co, w2) => (put(w2, 'steps/S-1-F1/report.md', 'Looked; found nothing to change.\n'), 'nothing'));
+  assert.deepEqual([jobs.length, fixes.length], [1, 1]);
+  const why = `failed on an unchanged checkout (${c.dir} at ${c.head()}): a rerun would fail the same way, and the fix step S-1-F1 changed nothing`;
+  assert.equal(r.stopped, `S-1 ${why}; the owner decides: read steps/S-1-F1/report.md`);
+  assert.match(progress(w), new RegExp(`S-1-F1 finished: changed nothing\\n.*S-1 escalated: stopped for the owner, ${escape(why)}\\n$`));
+  assert.ok(lines.at(-1).startsWith('kirunak-push: '), lines.at(-1));
+});
+
+test('a fix step whose report starts NEEDS-OWNER stops the heavy step with its why: one job (gulnya/usage-improve-11-22 AC-9)', async () => {
+  const { w, jobs, fixes, r } = await fixFixture(RED, (step, n, co, w2) => (put(w2, 'steps/S-1-F1/report.md', 'NEEDS-OWNER: the signing account has expired\n\nNothing changed.\n'), 'nothing'));
+  assert.deepEqual([jobs.length, fixes.length], [1, 1]);
+  assert.equal(r.stopped, 'S-1 needs the owner, its fix step S-1-F1 says: the signing account has expired; the owner decides: read steps/S-1-F1/report.md');
+  assert.match(progress(w), /S-1-F1 finished: NEEDS-OWNER\n.*S-1 escalated: stopped for the owner, needs the owner, its fix step S-1-F1 says: the signing account has expired\n$/);
+});
+
+test('a heavy step failing unchanged after two fix steps that changed the checkout stops with "failed after two fix steps": three jobs (gulnya/usage-improve-11-22 AC-9)', async () => {
+  const { c, w, jobs, fixes, r } = await fixFixture(RED, (step, n, co, w2) => {
+    co.commit(`fix ${n}\n`);
+    put(w2, `steps/${step.env.KIRUNAK_STEP}/report.md`, 'tried\n');
+    return 'nothing';
+  });
+  assert.deepEqual([jobs.length, fixes.map((f) => f.env.KIRUNAK_STEP)], [3, ['S-1-F1', 'S-1-F2']]);
+  assert.match(r.stopped, new RegExp(`^S-1 failed after two fix steps \\(S-1-F1, S-1-F2\\): failed on an unchanged checkout \\(${escape(c.dir)} at ${c.head()}\\)`));
+  const text = progress(w);
+  assert.match(text, /S-1-F1 finished\n[^]*S-1-F2 started [^]*S-1-F2 finished\n/);
+  assert.ok(!/S-1 failed 2 times/.test(text), 'a failure before a fix that changed the checkout does not count toward its two');
+});
+
+test('a fix step whose session fails stops the heavy step for the owner with its report: one job (gulnya/usage-improve-11-22 AC-9)', async () => {
+  const { w, jobs, fixes, r } = await fixFixture(RED, (step, n, co, w2) => (put(w2, 'steps/S-1-F1/report.md', 'half done\n'), 'exit 1'));
+  assert.deepEqual([jobs.length, fixes.length], [1, 1]);
+  assert.equal(r.stopped, 'S-1 its fix step S-1-F1 failed (exit 1); the owner decides: read steps/S-1-F1/report.md');
+  assert.match(progress(w), /S-1-F1 failed: exit 1\n.*S-1 escalated: stopped for the owner, its fix step S-1-F1 failed \(exit 1\)\n$/);
 });
 
 test('a resumable [heavy] step or needs.json job reaches the guard as pieceMinutes, the workspace\'s plan.shortMinutes (gulnya/fast-heavy-queue S-3)', async () => {

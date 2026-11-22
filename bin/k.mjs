@@ -24,7 +24,7 @@ import { card as boardCard, markdown as boardMarkdown } from '../lib/board-md.mj
 import { brief as boardBrief } from '../lib/board-brief.mjs';
 import * as handoff from '../lib/handoff.mjs';
 import { install, SKILLS } from '../lib/install.mjs';
-import { bugsHookLine, cacheChecks, compactChecks, copiesLine, freezeHookLine, ladderChecks, trackerLine, unlockHookLine } from '../lib/doctor.mjs';
+import { bugsHookLine, cacheChecks, compactChecks, copiesLine, countHookLine, freezeHookLine, ladderChecks, trackerLine, unlockHookLine } from '../lib/doctor.mjs';
 import * as slap from '../lib/slap.mjs';
 import * as slapignore from '../lib/slapignore.mjs';
 import * as cost from '../lib/cost.mjs';
@@ -321,6 +321,7 @@ const VERBS = {
     say(...trackerLine({ settingsPath: settings, kirunakRoot: KIRUNAK }));
     say(...bugsHookLine({ settingsPath: settings }));
     say(...unlockHookLine({ settingsPath: settings }));
+    say(...countHookLine({ settingsPath: settings }));
     try {
       const st = await ws.seams.resourceGuard.status();
       say(true, `resource guard: ${st.held ? `held by ${st.held.session} (${st.held.what}${st.held.orphan ? ', its holder gone, the job still running' : ''})` : 'free'}, ${st.queued.length} queued`);

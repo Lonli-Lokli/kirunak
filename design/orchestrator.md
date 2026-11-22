@@ -145,6 +145,13 @@ outputs: review.md
   fix, and the owner's next `k accept` signs off again and runs every final step, since the build may have changed.
   A plan with no final steps is accepted at once, as before. `k accept --dry-run` says "would sign off" and `k
   waiting`'s accept row names the final steps the accept would queue.
+- **Fable designs and reviews; Opus builds** (gulnya/usage-improve-11-22 AC-14). `k plan check` (lib/plan.mjs
+  `fableRole`) refuses a step whose model, the plan line's or else the workspace's `models.<kind>`, is in the fable
+  family, unless its kind is `review`, or its kind is `agent` and its title or `what:` names a design or a review (the
+  words design or review, in any form). A `[heavy]` step on Fable is refused too. For a task first approved before
+  `FABLE_ROLE_SINCE` (lib/plan.mjs, the day the rule reached the main branch) the finding is a warning, read from the
+  same first approval as the rules above. Judgement: the owner's rule of 2026-10-13, since building on Fable costs two
+  and a half times what Opus does; k usage's fable.txt measures what the Fable steps that pass were for.
 - **Release steps: `clean-tree: yes`** (gulnya/step-records-void-release-receipts). A step whose gates count only for
   a tree with no tracked change at one commit (a release's device checks and uploads: gulnya's `ios-smoke.mjs` and
   the legacy gate read `git status --porcelain --untracked-files=no` and `git rev-parse HEAD`) says `clean-tree: yes`,
@@ -268,7 +275,8 @@ pending  →  ready  →  running  →  done
     gets a `failures:` field naming every failure report of the step, and the stop line reads `S-1 failed on every
     rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md`. Removing the mark retries the
     step on its own rung. An older plan's `[escalate: <model>, <effort>]` mark still parses.
-  - **A heavy step that cannot pass on a rerun** stops at once (gulnya/heavy-retry-unchanged). Each job of a `[heavy]`
+  - **A heavy step that cannot pass on a rerun** gets a fix step first (gulnya/heavy-retry-unchanged,
+    gulnya/usage-improve-11-22 AC-9). Each job of a `[heavy]`
     step records in its `heavy-<k>.json` the checkout it started on (`lib/checkout.mjs`): the folder of its command's
     first `cd <dir>` (`~` and `$HOME` expanded, quotes taken off, relative to the task repo's root), its `git rev-parse
     HEAD` and the sha256 of its `git status --porcelain`, `git diff HEAD` and each untracked file's contents (A-1: the
@@ -277,8 +285,21 @@ pending  →  ready  →  running  →  done
     sessions write them between two jobs), taken when the guard starts the job (its `started`, plugins.md), so a change
     made while the job waited in the queue is in it; `null` with no `cd`, a folder outside a git work tree, or a git
     command that fails. Before a rerun after a failure of its own, `k run`'s pass compares: when that job exited
-    other than 0 and 124 and the checkout is the same now, the step does not start and stops as above, its why `failed
-    on an unchanged checkout (<dir> at <short head>): a rerun would fail the same way`. A new commit or a changed
+    other than 0 and 124 and the checkout is the same now, the step does not start: its **fix step** `S-n-F<k>` (k = 1, 2)
+    runs instead, one headless session through the runner seam on the workspace's `builder` rung (its model and
+    effort; with no builder, `models.agent`'s) with the builder's tools and the step's budget, in the task repo's root.
+    Its brief (`steps/S-n-F<k>/brief.md`, `steps.fixBrief`) holds the heavy step's what and command, the failed job's
+    exit code, minutes, record, log and failure report, the log's last lines, and the rule: fix what fails, commit, run
+    no heavy job, write `steps/S-n-F<k>/report.md`; a failure that needs the owner (a device, an account, a store)
+    changes nothing and makes the report's first line `NEEDS-OWNER: <why>`. Its lines in `progress.md` are its own,
+    `S-n-F<k> started (<model>, session <id>)` then `finished` or `failed`, so `k usage` counts it to the task. When
+    it ends, the step stops as above for the owner when its session failed (`its fix step S-n-F<k> failed (<why>)`),
+    when its report says `NEEDS-OWNER` (`needs the owner, its fix step S-n-F<k> says: <why>`), or when the checkout
+    is still the failed job's (`<the why below>, and the fix step S-n-F<k> changed nothing`); else its bare `finished`
+    line takes back the failure before it, which does not count toward the step's two, and the next pass runs the
+    heavy step again. A failure on an unchanged checkout after two fix steps since the step's count last started
+    afresh stops it: `failed after two fix steps (S-n-F1, S-n-F2): <the why below>`. The why is `failed on an
+    unchanged checkout (<dir> at <short head>): a rerun would fail the same way`. A new commit or a changed
     status runs it again; a timeout (exit 124) is always retried; a command with no checkout, and a failure with no job
     (a device not claimed), keep the retry. A job that exits 0 without every output stops in the same pass, with no
     rerun: `its job passed but wrote no <outputs>: a rerun cannot write them; the plan's command or outputs: is
@@ -829,6 +850,31 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   `k cost` and `cost.md` say `cost not tracked (the status line does not run kirunak's tracker)` when none did and
   `<n> of them not tracked` beside the money when some did not, never `0.00 USD` for an unknown
   (gulnya/cost-untracked-sessions AC-1, AC-2). A `done.json` written before `tracked` renders as it was committed.
+- `k usage` joins a session's calls to its task by the same link, read from the log as well as from the live file:
+  `k start` appends `{ session, task, since }` to `sessions/links.jsonl`, a /clear's carry does the same for the new
+  id, and the release appends `{ session, task, until }` before it deletes `sessions/<id>.json`. A hold runs from its
+  `since` to its `until`, the latest `since` winning, and a call after the release is in no task; a line that cannot
+  be read is skipped and counted on `tasks.txt`'s first line (lib/links.mjs; gulnya/usage-improve-11-22 AC-1, AC-2,
+  E-1, E-2).
+  A step holds the session only while it runs, whatever task it is of: after another task's step the session's calls
+  count to its own link's task again, and only a session no link holds falls back to the task of the step it last
+  started (lib/usage/tasks.mjs's `joinOf`; gulnya/usage-improve-11-22 AC-4, AC-5, D-1).
+- An agent is told to hand over before it grows long: `hooks/kirunak-count.mjs`, which `k install` wires on
+  PostToolUse with no matcher (every tool call is a call) and `k doctor` reads, counts each agent of a session apart
+  (the input's `agent_id`) in `<KIRUNAK_HOME>/counts/<session>.json`. At the agent's 75th call it adds "About 25 calls
+  are left for this agent: finish the piece in hand, and write what is left to a handoff file by call 100.", at its
+  100th "Return now with the short report and the handoff file's path.", each once, as `additionalContext`. A main
+  session's call gets no agent notice. It never blocks and fails open: input it cannot read or a count file it cannot
+  write lets the call through silent (gulnya/usage-improve-11-22 AC-15).
+- Work in the task's own session moves into steps: the same hook, in a main session that holds a task (its session
+  file's `task`) and is not a k run step (no `KIRUNAK_STEP`), counts a stretch outside any step. A Bash call running
+  `k step start` begins a step, whose calls are not counted; one running `k step finish` or `k step fail` ends it and
+  starts a new stretch. A stretch counts its calls and its context growth (the transcript tail's last call's context
+  minus the stretch's first call's), kept in the count file's `main`. At 150 calls or 150,000 tokens of growth, once
+  per stretch, it adds a notice naming the plan's next step (the first ready one, else the first not finished, read
+  through lib/held.mjs, lib/plan.mjs and lib/steps.mjs's `stepStates` only then) and `k run <id>`, and offering `k
+  handoff <id>` and a fresh session; a plan it cannot read gives the notice without a step. A session holding no task
+  counts nothing (gulnya/usage-improve-11-22 AC-12).
 
 ## 7. Requirements this file satisfies
 
