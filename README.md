@@ -110,8 +110,11 @@ You need Node 22 or later, git and Claude Code.
    over 150,000 tokens of context (the cache has expired, and the next call writes all of it again), to write the
    handoff (`k handoff <id>`) or start fresh; it never blocks. A **count hook** on PostToolUse, every tool, counts
    each agent's calls apart and tells it at its 75th call to finish the piece in hand and write what is left to a
-   handoff file by call 100, and at its 100th to return with its short report and that file's path; it never
-   blocks either (`design/orchestrator.md` §6).
+   handoff file by call 100, and at its 100th to return with its short report and that file's path. In a session
+   holding a task, outside a k run step, it counts the calls since the last `k step finish` or `k step fail` (none
+   between `k step start` and its end), and at 150 calls or 150,000 tokens of context growth says once to run the
+   plan's next step, which it names, with `k run <id>`, or to write the handoff; it never blocks either
+   (`design/orchestrator.md` §6).
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
    ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
    `k-go-on` skill.

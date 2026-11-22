@@ -845,6 +845,15 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   100th "Return now with the short report and the handoff file's path.", each once, as `additionalContext`. A main
   session's call gets no agent notice. It never blocks and fails open: input it cannot read or a count file it cannot
   write lets the call through silent (gulnya/usage-improve-11-22 AC-15).
+- Work in the task's own session moves into steps: the same hook, in a main session that holds a task (its session
+  file's `task`) and is not a k run step (no `KIRUNAK_STEP`), counts a stretch outside any step. A Bash call running
+  `k step start` begins a step, whose calls are not counted; one running `k step finish` or `k step fail` ends it and
+  starts a new stretch. A stretch counts its calls and its context growth (the transcript tail's last call's context
+  minus the stretch's first call's), kept in the count file's `main`. At 150 calls or 150,000 tokens of growth, once
+  per stretch, it adds a notice naming the plan's next step (the first ready one, else the first not finished, read
+  through lib/held.mjs, lib/plan.mjs and lib/steps.mjs's `stepStates` only then) and `k run <id>`, and offering `k
+  handoff <id>` and a fresh session; a plan it cannot read gives the notice without a step. A session holding no task
+  counts nothing (gulnya/usage-improve-11-22 AC-12).
 
 ## 7. Requirements this file satisfies
 
