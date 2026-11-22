@@ -58,10 +58,10 @@ test('the block is written with the absolute path, and every other hook and key 
     assert.equal(resolve(h.skillsDir, readlinkSync(link)), join(h.kirunakRoot, 'skills', s));
   }
   assert.ok(lstatSync(join(h.skillsDir, 'k-go-on')).isSymbolicLink(), 'the owner\'s override, /k-go-on, is linked (R5.4)');
-  // The PreToolUse block, the links, the escalation hook's 8 blocks, the stale-session hook's, the compact hook's 6, the
-  // lock release's, 2 rung agents, config.json, the windows' line (no workspace yet), the bugs' notice, SessionStart,
+  // The PreToolUse block, the links, the escalation hook's 8 blocks, the stale-session hook's, the count hook's, the
+  // compact hook's 6, the lock release's, 2 rung agents, config.json, the windows' line (no workspace yet), the bugs' notice, SessionStart,
   // the tracker.
-  assert.equal(actions.length, 1 + SKILLS.length + 8 + 1 + 6 + 1 + 2 + 1 + 1 + 3);
+  assert.equal(actions.length, 1 + SKILLS.length + 8 + 1 + 1 + 6 + 1 + 2 + 1 + 1 + 3);
   assert.match(actions[0], /added the kirunak PreToolUse hook/);
   assert.match(actions.at(-2), /added the kirunak SessionStart hook/);
   assert.ok(actions.at(-1).endsWith(`: node ${join(h.kirunakRoot, 'hooks', 'statusline-track.mjs')}`), 'the status line\'s line, printed');
