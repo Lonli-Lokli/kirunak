@@ -249,8 +249,20 @@ export function segments(command) {
 
 const WRAPPERS = new Set(['then', 'do', 'else', 'if', 'elif', 'while', 'until', '!', '{', 'time', 'nohup', 'exec', 'env',
   'sudo', 'npx', 'command', 'builtin', 'nice']);
+// Wrappers with flags that take the next word as their value, or an operand before their command
+// (asilak/kirunak-guard-misses-timeout): `timeout -k 5 3600 k …` runs `k …`. timeout always reads a duration; chrt's
+// priority is a number, left out by a policy that has none (`chrt --idle k …`).
+const OPERAND_WRAPPERS = new Map([
+  ['timeout', { valued: ['-k', '-s', '--kill-after', '--signal'], operand: () => true }],
+  ['stdbuf', { valued: ['-i', '-o', '-e', '--input', '--output', '--error'] }],
+  ['xargs', { valued: ['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s', '-J', '-R', '-S', '--arg-file', '--delimiter',
+    '--max-args', '--max-procs', '--max-chars', '--process-slot-var'] }],
+  ['chrt', { valued: ['-T', '-P', '-D', '--sched-runtime', '--sched-period', '--sched-deadline'], operand: (w) => /^\d+$/.test(w) }],
+]);
+// Commands that print their words and run none: the backstop leaves them be.
+const PRINTS = new Set(['echo', 'printf']);
 
-/** One segment's words past assignments and wrappers, and the targets of its output redirections. */
+/** One segment's words past assignments and wrappers, all its words, and the targets of its output redirections. */
 function parse(tokens) {
   const words = [];
   const redirected = [];
@@ -271,9 +283,14 @@ function parse(tokens) {
     else if (w.length && WRAPPERS.has(w[0])) {
       w = w.slice(1);
       while (w[0]?.startsWith('-')) w = w.slice(1);
+    } else if (w.length && OPERAND_WRAPPERS.has(w[0])) {
+      const { valued, operand } = OPERAND_WRAPPERS.get(w[0]);
+      w = w.slice(1);
+      while (w[0]?.startsWith('-')) w = w.slice(valued.includes(w[0]) ? 2 : 1);
+      if (operand && w.length && operand(w[0])) w = w.slice(1);
     } else break;
   }
-  return { words: w, redirected };
+  return { words: w, all: words, redirected };
 }
 
 const base = (word) => toolPath(word ?? '').split('/').pop();
@@ -329,6 +346,18 @@ function ownerVerbOf(args) {
   // flag comes with it.
   if (verb === 'bugs' && sub === 'quad-damage' && args.some((a) => a === '--stop' || a.startsWith('--stop='))) return 'bugs quad-damage --stop';
   if (verb === 'bugs' && sub === 'quad-damage' && !['--status', '--summary', '--progress'].some((f) => args.includes(f))) return 'bugs quad-damage';
+  return null;
+}
+
+/** The owner's verb a `k` anywhere in a segment's words runs, the backstop after the strip: a wrapper or operand it
+ * does not know (`flock /tmp/l k approve x`, `nice -n 10 k …`) fails closed (asilak/kirunak-guard-misses-timeout). */
+function ownerVerbAnywhere(words, all) {
+  if (PRINTS.has(base(words[0]))) return null;
+  for (let i = 0; i < all.length; i++) {
+    const k = kArgs(all.slice(i));
+    const verb = k && ownerVerbOf(k);
+    if (verb) return verb;
+  }
   return null;
 }
 
@@ -405,14 +434,12 @@ function shell(command, cwd) {
   let dir = cwd;
   const named = HOOK_SCRIPT.test(command);
   for (const tokens of segments(command)) {
-    const { words, redirected } = parse(tokens);
+    const { words, all, redirected } = parse(tokens);
     // A hand-written event piped into the hook would have one claude above it, as the owner's /k-go-on has.
     if (named && runsHook(tokens, words)) return HOOK_RUN;
     const k = kArgs(words);
-    if (k) {
-      const verb = ownerVerbOf(k);
-      if (verb) return ownerVerb(verb);
-    }
+    const verb = (k && ownerVerbOf(k)) || ownerVerbAnywhere(words, all);
+    if (verb) return ownerVerb(verb);
     // A claude run from the shell that resumes a session (its prompt may come from a file) or carries /k-go-on would
     // fire UserPromptExpansion in that session as if the owner typed it.
     if (base(words[0]) === 'claude' && (GO_ON_TEXT.test(command) || words.slice(1).some((w) => RESUMES.test(w)))) return GO_ON_SHELL;
