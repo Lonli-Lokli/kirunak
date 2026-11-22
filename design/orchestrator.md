@@ -822,6 +822,12 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   `k cost` and `cost.md` say `cost not tracked (the status line does not run kirunak's tracker)` when none did and
   `<n> of them not tracked` beside the money when some did not, never `0.00 USD` for an unknown
   (gulnya/cost-untracked-sessions AC-1, AC-2). A `done.json` written before `tracked` renders as it was committed.
+- `k usage` joins a session's calls to its task by the same link, read from the log as well as from the live file:
+  `k start` appends `{ session, task, since }` to `sessions/links.jsonl`, a /clear's carry does the same for the new
+  id, and the release appends `{ session, task, until }` before it deletes `sessions/<id>.json`. A hold runs from its
+  `since` to its `until`, the latest `since` winning, and a call after the release is in no task; a line that cannot
+  be read is skipped and counted on `tasks.txt`'s first line (lib/links.mjs; gulnya/usage-improve-11-22 AC-1, AC-2,
+  E-1, E-2).
 
 ## 7. Requirements this file satisfies
 

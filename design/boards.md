@@ -200,6 +200,7 @@ What it shows and does, each from the skill's table of shapes:
 
 - The current task of a session is `sessions/<session_id>.json`, written by `k start <id>` (also a `k-start`
   registered command) and read through `k status --session`; `k-done` clears it (through the default `handoff`).
+  Both also append to `sessions/links.jsonl`, the log `k usage` reads once the file is gone (orchestrator.md).
 - `k start` is the one write a mod command makes that is not the owner's alone; it is allowed from the Bash tool
   too (a session may say which task it works on).
 - **The turn after a verb** (gulnya/kirunak-bugs AC-11 to AC-14, `hooks/turns.ts`): once the command has answered,
