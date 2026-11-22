@@ -76,7 +76,8 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   `quadDamageRun`, `{ phase, try, since, waitUntil }` on the bug a live Quad Damage run is on, else null; `reviewing`
   is that run's pid too while it holds the bug's lock (gulnya/quad-damage AC-2, AC-12).
 - **Review & merge** (`k bug review <id>`, the owner's verb, `approval.md` §2) holds the lock
-  `$KIRUNAK_HOME/bugs/<repo>/<slug>.review.json`, `{ pid, started }`, a second run refused while that pid lives;
+  `$KIRUNAK_HOME/bugs/<repo>/<slug>.review.json`, `{ pid, started }`, a second run refused while that pid lives, or
+  while another live process holds the lease beside it (a taker that holds the lease before it writes the lock);
   writes `kirunak/bugs/<slug>/review-<n>.md` (front matter `verdict: clean | findings | conflict`, `head:`, `base:`,
   then `## Findings` numbered, or `## Conflict` with its files) and commits that path alone. Clean: the fix is merged
   with `--no-ff` into its repo's master, never pushed, and the bug and its folder go in one commit of those paths in
@@ -90,8 +91,9 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
 - **Quad Damage** (`k bugs quad-damage`, the owner's verb, `approval.md` §2; R34, gulnya/quad-damage;
   `lib/quad-damage.mjs`) is one unattended run over the bugs marked yes. Its run file,
   `$KIRUNAK_HOME/bugs/quad-damage.json`, `{ pid, started, by, via, folder, bug, phase, try, since, waitUntil }`, is
-  made with O_EXCL and held by the lease beside it (`plugins.md` §2): a second start is refused while its holder
-  lives (its pid answers and its lease is fresh), naming that pid, its start and its bug (E-3), and a dead holder's
+  made whole and linked into place, so of two starts one wins, and held by the lease beside it (`plugins.md` §2): a
+  second start is refused while its holder lives (its pid answers and its lease is fresh), naming that pid, its start
+  and its bug (E-3), and a dead holder's
   file is taken over. The start takes the file, is refused when no bug is marked yes, and hands the file to a
   detached `k bugs quad-damage` (in its own process group on macOS and Linux), printing its pid, its log and its folder
   `$KIRUNAK_HOME/bugs/quad-damage/<started>/` (`run.log`, `progress.log`, `state.json`, `summary.md`, and a folder a

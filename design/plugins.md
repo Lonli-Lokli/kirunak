@@ -71,7 +71,11 @@ own implementations live in the workspace's repo, beside its config (D2).
   takeover and a late renewal each run inside a short mutex beside it, so a holder back from sleep finds its lease
   still its own, and touches it, or another's, and gives way. A lock whose state is a file (k run's run file, the
   machine guard's `running/` files, a bug's review lock, Quad Damage's run file) keeps that file and is held by the
-  lease `<file>.lease` beside it; its holder is alive while its pid answers and that lease is fresh, and a file with
+  lease `<file>.lease` beside it. That file is written whole, a temp file renamed into place (`writeJson`), and a new
+  one linked into place, which fails while the name exists (`createJson`), so no reader finds it empty or half
+  written and of two makers one wins (asilak/kirunak-review-lock-read-empty). Windows refuses a rename over a file a
+  reader has open, so the rename is tried again for up to a second. Its holder is alive while its pid answers and
+  that lease is fresh, and a file with
   no lease beside it, written before leases, while its pid answers. `claim` and `release` record claims in `guard/claims.json` (resource,
   by, why, until); `resources()` lists what was ever claimed, a held claim with its `by` and `why`. Every job appends one line to `guard/log.jsonl` (what,
   session, minutes, exit code).

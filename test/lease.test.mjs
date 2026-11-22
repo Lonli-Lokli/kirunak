@@ -146,6 +146,7 @@ test('hold() refuses a fresh lease whose holder runs, and takes one over at once
     take(besideOf(path), { pid: other.pid });
     assert.equal(hold(path), null, 'held by a live holder');
     assert.ok(hold(path, {}, { from: other.pid }), 'handed on');
+    assert.ok(hold(path), 'taken again by its own holder (asilak/kirunak-review-lock-read-empty)');
     letGo(path);
     take(besideOf(path), { pid: await deadPid() });
     assert.ok(hold(path), 'its holder is gone');
