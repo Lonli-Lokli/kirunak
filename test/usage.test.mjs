@@ -136,7 +136,7 @@ test('k usage --to: the London week from the workspace, every file written, the 
   const r = k(w.home, ['usage', '--to', '2026-10-25T15:00:00Z'], { CLAUDE_CONFIG_DIR: fx.config });
   assert.equal(r.status, 0, r.stderr);
   const out = join(w.home, 'usage', '2026-10-25');
-  for (const f of ['calls.jsonl', 'report.txt', 'ttl.txt', 'carry.txt', 'writes.txt', 'escalations.txt', 'quality.txt', 'quality.tsv', 'compact.txt', 'replay.txt', 'summary.txt', 'tasks.txt', 'tasks.tsv']) {
+  for (const f of ['calls.jsonl', 'report.txt', 'ttl.txt', 'carry.txt', 'writes.txt', 'escalations.txt', 'quality.txt', 'quality.tsv', 'compact.txt', 'replay.txt', 'fable.txt', 'summary.txt', 'tasks.txt', 'tasks.tsv']) {
     assert.ok(existsSync(join(out, f)), `${f} written`);
   }
   const calls = readFileSync(join(out, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -153,6 +153,8 @@ test('k usage --to: the London week from the workspace, every file written, the 
   assert.match(lines[4], /^weekly limit: no .*rate-limits\.log yet \(the statusline writes it\)$/);
   assert.ok(lines.some((l) => /^main actual /.test(l)), 'ttl\'s actual lines');
   assert.ok(lines.some((l) => /^escalations: /.test(l)) && lines.some((l) => /^kirunak: /.test(l)) && lines.some((l) => /^compact\.log: /.test(l)));
+  // fable.txt's count line (gulnya/usage-improve-11-22 AC-13): the week's fixtures run no Fable step or agent.
+  assert.ok(lines.includes('fable: 0 steps (weight 0.0M), 0 agents (weight 0.0M); design 0, review 0, escalation 0; designs redone 0 (fable.txt)'), summary);
   assert.match(readFileSync(join(out, 'report.txt'), 'utf8'), /^== days covered 2026-10-18 2026-10-20 2026-10-25\n/);
   assert.match(readFileSync(join(out, 'report.txt'), 'utf8'), /\nsub claude-sonnet-5\t[\d.]+%\t1 calls\n/);
 });
