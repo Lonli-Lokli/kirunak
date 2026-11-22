@@ -828,6 +828,9 @@ session's ids, at the same `T`. Each fire is attributed from what the hook can k
   `since` to its `until`, the latest `since` winning, and a call after the release is in no task; a line that cannot
   be read is skipped and counted on `tasks.txt`'s first line (lib/links.mjs; gulnya/usage-improve-11-22 AC-1, AC-2,
   E-1, E-2).
+  A step holds the session only while it runs, whatever task it is of: after another task's step the session's calls
+  count to its own link's task again, and only a session no link holds falls back to the task of the step it last
+  started (lib/usage/tasks.mjs's `joinOf`; gulnya/usage-improve-11-22 AC-4, AC-5, D-1).
 
 ## 7. Requirements this file satisfies
 
