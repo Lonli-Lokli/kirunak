@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { list, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { checkReview, firstCall, lock, review, spent, unlock } from '../lib/bug-review.mjs';
 import { readText, shFolder } from '../lib/os.mjs';
-import { events, gitCommitAll, gitInit, k, makeWorkspace, sh, sleeper } from './helpers.mjs';
+import { events, gitCommitAll, gitInit, k, makeWorkspace, sh, sleeper, tempDir } from './helpers.mjs';
 
 // gulnya/kirunak-bugs S-2: `k bug review <id>`, Review & merge, with a fake runner that writes the review file in
 // scratch repos: never a real claude, never the real KIRUNAK_HOME.
@@ -401,7 +400,7 @@ test('AC-4, E-9: a review lock held by the lease beside it refuses while that le
 });
 
 test('asilak/kirunak-review-lock-read-empty: a review lock its holder takes again and again is never read empty: reviewing() names the holder each time, and a second lock() is refused each time', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'k-review-lock-'));
+  const home = tempDir('k-review-lock-');
   const lib = pathToFileURL(join(import.meta.dirname, '..', 'lib', 'bug-review.mjs')).href;
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { lock } from ${JSON.stringify(lib)};
@@ -442,7 +441,7 @@ test('asilak/kirunak-review-lock-read-empty: a review lock its holder takes agai
 });
 
 test('asilak/kirunak-review-lock-read-empty: lock() refuses, the lock untouched, when another live process holds the lease beside a dead holder\'s lock; a lock handed on is taken while the process that handed it still runs', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'k-review-lock-'));
+  const home = tempDir('k-review-lock-');
   const other = sleeper(30, { detached: true, stdio: 'ignore' });
   const path = reviewLockPath(home, BUG);
   try {
