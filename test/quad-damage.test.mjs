@@ -588,7 +588,7 @@ test('the run\'s log has each session\'s cost and first call; the workspace\'s l
   assert.deepEqual(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).firstCall, { input: 6, cacheRead: 0, cacheWrite: 15306 });
 });
 
-test('skipped: the mark set to no, the reason under What was found, the bug file committed alone; FAILED and an empty FIXED wait', async () => {
+test('skipped and FAILED: the mark set to no, the reason under What was found, each bug file committed alone; an empty FIXED waits, still yes', async () => {
   const skip = { calls: 2, report: 'SKIPPED\nWhy: the fix needs the owner\'s choice [of the hour]\n' };
   const w = await fixWorkspace([['a', '2026-10-20', ''], ['b', '2026-10-21', ''], ['c', '2026-10-22', '']], {
     fixes: [skip, { calls: 4, report: 'FAILED\nWhy: the test cannot see the cache\n' }, { calls: 4, report: FIXED }],
@@ -597,17 +597,24 @@ test('skipped: the mark set to no, the reason under What was found, the bug file
   const r = await fixRun(w);
   assert.deepEqual(r.bugs, [
     { id: 'hub/a', outcome: 'waits', why: 'skipped, quad-damage now no: the fix needs the owner\'s choice (of the hour)' },
-    { id: 'hub/b', outcome: 'waits', why: 'its fixing session failed: the test cannot see the cache; what holds is on bug/b in hub' },
+    { id: 'hub/b', outcome: 'waits', why: 'its fixing session failed: the test cannot see the cache; what holds is on bug/b in hub; quad-damage now no' },
     { id: 'hub/c', outcome: 'waits', why: 'its report says FIXED, but bug/c in hub has no commit ahead of master at a head no review refused' },
   ]);
   const text = readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8');
   assert.match(text, /^quad-damage: no$/m);
   assert.ok(text.includes(`- the tile cache never expires [file src/Tiles.kt]\n- Quad Damage skipped it on 2026-10-27: the fix needs the owner's choice (of the hour) [file ${join(r.folder, 'hub', 'a', 'fix-1.md')}]\n\n## Questions`));
   assert.deepEqual(checkBugText(text, 'hub/a'), []);
-  assert.equal(gitIn(w.hubRoot, 'log', '-1', '--format=%s'), 'kirunak: bug hub/a: Quad Damage skipped it, quad-damage: no');
-  assert.equal(gitIn(w.hubRoot, 'show', '--name-only', '--format=', 'HEAD'), 'kirunak/bugs/a.md');
+  const failed = readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'b.md'), 'utf8');
+  assert.match(failed, /^quad-damage: no$/m);
+  assert.ok(failed.includes(`- Quad Damage gave it up on 2026-10-27: its fixing session failed: the test cannot see the cache; what holds is on bug/b in hub [file ${join(r.folder, 'hub', 'b', 'fix-1.md')}]\n\n## Questions`), failed);
+  assert.deepEqual(checkBugText(failed, 'hub/b'), []);
+  assert.deepEqual(gitIn(w.hubRoot, 'log', '-2', '--format=%s').split('\n'), [
+    'kirunak: bug hub/b: Quad Damage gave it up, quad-damage: no', 'kirunak: bug hub/a: Quad Damage skipped it, quad-damage: no',
+  ]);
+  assert.equal(gitIn(w.hubRoot, 'show', '--name-only', '--format=', 'HEAD~1'), 'kirunak/bugs/a.md');
+  assert.equal(gitIn(w.hubRoot, 'show', '--name-only', '--format=', 'HEAD'), 'kirunak/bugs/b.md');
   assert.equal(gitIn(w.hubRoot, 'status', '--porcelain'), '?? notes.txt');
-  assert.equal(list(w.ws).find((b) => b.id === 'hub/a').quadDamage, false);
+  assert.deepEqual(list(w.ws).map((b) => [b.id, b.quadDamage]), [['hub/a', false], ['hub/b', false], ['hub/c', true]]);
   assert.equal(reviewsRun(w).length, 0, 'no review after SKIPPED, FAILED or FIXED with nothing ahead');
   assert.deepEqual(progressLines(r.folder), [
     'hub/a: started', 'hub/a: skipped: the fix needs the owner\'s choice (of the hour)',
@@ -615,6 +622,44 @@ test('skipped: the mark set to no, the reason under What was found, the bug file
     'hub/c: started', 'hub/c: waits: its report says FIXED, but bug/c in hub has no commit ahead of master at a head no review refused',
     'Quad Damage done: 0 merged, 3 wait, 0 not reached',
   ], 'AC-16');
+});
+
+test('dead ends set the mark to no, so no later run repeats them: no report, a report that starts otherwise, two sessions with no fix ready', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', ''], ['b', '2026-10-21', '']], {
+    fixes: [{ calls: 4, report: null }, { calls: 4, report: 'Done, I think\n' }],
+  });
+  const r = await fixRun(w);
+  assert.deepEqual(r.bugs, [
+    { id: 'hub/a', outcome: 'waits', why: 'its fixing session, try 1, wrote no report (exit 0); what holds is on bug/a in hub; quad-damage now no' },
+    { id: 'hub/b', outcome: 'waits', why: `its fixing session's report begins "Done, I think", not FIXED, SKIPPED or FAILED: ${join(r.folder, 'hub', 'b', 'fix-1.md')}; quad-damage now no` },
+  ]);
+  assert.deepEqual(list(w.ws).map((b) => [b.id, b.quadDamage]), [['hub/a', false], ['hub/b', false]]);
+  const a = readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8');
+  assert.ok(a.includes(`- Quad Damage gave it up on 2026-10-27: its fixing session, try 1, wrote no report (exit 0); what holds is on bug/a in hub [file ${join(r.folder, 'hub', 'a', 'fix-1.json')}]\n`), a);
+  assert.ok(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'b.md'), 'utf8').includes(`[file ${join(r.folder, 'hub', 'b', 'fix-1.md')}]\n`));
+  assert.deepEqual(checkBugText(a, 'hub/a'), []);
+  assert.deepEqual(gitIn(w.hubRoot, 'log', '-2', '--format=%s').split('\n'), [
+    'kirunak: bug hub/b: Quad Damage gave it up, quad-damage: no', 'kirunak: bug hub/a: Quad Damage gave it up, quad-damage: no',
+  ]);
+  assert.deepEqual(progressLines(r.folder).slice(1, 2), ['hub/a: waits: its fixing session, try 1, wrote no report (exit 0); what holds is on bug/a in hub; quad-damage now no']);
+  const again = await fixRun(w);
+  assert.deepEqual(again.bugs, [], 'nothing marked yes is left');
+  assert.equal(fixes(w).length, 2, 'no fixing session repeated');
+
+  // Two fixing sessions whose fixes each a review refused, its findings never counting twice (a review file written
+  // again): the bug is set to no, naming the review that refused the last head.
+  const u = await fixWorkspace([['a', '2026-10-20', '']], { fixes: [fixed(), fixed('cache: as the forecast\n')] });
+  const rel = 'kirunak/bugs/a/review-1.md';
+  const refuse = async () => {
+    put(join(u.hubRoot, rel), `---\nverdict: findings\nhead: ${gitIn(u.hubRoot, 'rev-parse', 'bug/a')}\nbase: x\n---\n\n## Findings\n1. tiles.txt:1: wrong\n`);
+    return { outcome: 'findings', review: { rel } };
+  };
+  const t = await fixRun(u, { review: refuse });
+  assert.deepEqual(t.bugs, [{ id: 'hub/a', outcome: 'waits', why: 'two fixing sessions in this run left no fix ready on bug/a; quad-damage now no' }]);
+  assert.equal(fixes(u).length, 2);
+  assert.equal(list(u.ws)[0].quadDamage, false);
+  assert.ok(readFileSync(join(u.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8').includes(
+    `- Quad Damage gave it up on 2026-10-27: two fixing sessions in this run left no fix ready on bug/a [file ${join(u.hubRoot, rel)}]\n`));
 });
 
 test('findings, then the retry from them, then clean: merged; the retry\'s brief names the review and its head (AC-7)', async () => {
@@ -643,10 +688,13 @@ test('findings twice: the bug waits with both reviews and the run goes on; a con
   const master = gitIn(w.hubRoot, 'rev-parse', 'master');
   const r = await fixRun(w);
   assert.deepEqual(r.bugs, [
-    { id: 'hub/a', outcome: 'waits', why: 'refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md' },
+    { id: 'hub/a', outcome: 'waits', why: 'refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md; quad-damage now no' },
     { id: 'hub/c', outcome: 'waits', why: 'bug/c no longer merges onto master (tiles.txt): kirunak/bugs/c/review-1.md' },
   ]);
   assert.equal(r.stopped, null);
+  assert.deepEqual(list(w.ws).map((b) => [b.id, b.quadDamage]), [['hub/a', false], ['hub/c', true]], 'a conflict keeps yes: only the merge failed');
+  const refused = readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8');
+  assert.ok(refused.includes(`- Quad Damage gave it up on 2026-10-27: refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md [file ${join(w.hubRoot, 'kirunak', 'bugs', 'a', 'review-2.md')}]\n`), refused);
   for (const n of [1, 2]) assert.match(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a', `review-${n}.md`), 'utf8'), /^verdict: findings$/m);
   assert.match(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md'), 'utf8'), /^verdict: conflict$/m);
   assert.equal(reviewsRun(w).length, 2, 'a conflict runs no review session');
@@ -654,16 +702,26 @@ test('findings twice: the bug waits with both reviews and the run goes on; a con
   assert.equal(readFileSync(join(w.hubRoot, 'tiles.txt'), 'utf8'), 'cache: a day\n', 'nothing merged');
   assert.deepEqual(gitIn(w.hubRoot, 'log', '--format=%s', `${master}..master`).split('\n'), [
     'kirunak: the bug hub/c: bug/c no longer merges onto master, review-1.md', 'master moves on',
+    'kirunak: bug hub/a: Quad Damage gave it up, quad-damage: no',
     'kirunak: review-2.md of the bug hub/a: findings', 'kirunak: review-1.md of the bug hub/a: findings',
   ]);
   for (const id of ['hub/a', 'hub/c']) assert.equal(existsSync(reviewLockPath(w.home, id)), false);
 
-  // Taken again, a bug refused twice waits at once, and a conflict at its head is no retry either.
+  // Taken again, a conflict at its head is no retry and keeps yes; a refused twice the owner marks yes again waits at
+  // once and is set to no again.
   const again = await fixRun(w);
   assert.deepEqual(again.bugs.map((b) => b.why), [
-    'refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md',
     `its review kirunak/bugs/c/review-1.md refused the head ${gitIn(w.hubRoot, 'rev-parse', 'bug/c').slice(0, 12)} (conflict)`,
   ]);
+  assert.equal(list(w.ws).find((b) => b.id === 'hub/c').quadDamage, true);
+  writeFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8').replace('quad-damage: no', 'quad-damage: yes'));
+  gitCommitAll(w.hubRoot, 'the owner marks a yes again');
+  const third = await fixRun(w);
+  assert.deepEqual(third.bugs.map((b) => [b.id, b.why]), [
+    ['hub/a', 'refused twice by its reviews: kirunak/bugs/a/review-1.md and kirunak/bugs/a/review-2.md; quad-damage now no'],
+    ['hub/c', `its review kirunak/bugs/c/review-1.md refused the head ${gitIn(w.hubRoot, 'rev-parse', 'bug/c').slice(0, 12)} (conflict)`],
+  ]);
+  assert.equal(list(w.ws).find((b) => b.id === 'hub/a').quadDamage, false);
   assert.equal(w.runner.steps.length, 5, 'no session for either');
 });
 
@@ -675,9 +733,12 @@ test('the 150th call\'s result ends the session, and so do its minutes: the bug 
   // KILL_WAIT_MS), so the record proves the kill; a wall-clock bound fails on a loaded machine.
   const r = await fixRun(w, { limit: { calls: 150, minutes: 0.005 } });
   assert.deepEqual(r.bugs, [
-    { id: 'hub/a', outcome: 'waits', why: 'its fixing session, try 1, reached 150 tool calls; what holds is on bug/a in hub' },
-    { id: 'hub/c', outcome: 'waits', why: 'its fixing session, try 1, reached 0.005 minutes; what holds is on bug/c in hub' },
+    { id: 'hub/a', outcome: 'waits', why: 'its fixing session, try 1, reached 150 tool calls; what holds is on bug/a in hub; quad-damage now no' },
+    { id: 'hub/c', outcome: 'waits', why: 'its fixing session, try 1, reached 0.005 minutes; what holds is on bug/c in hub; quad-damage now no' },
   ]);
+  assert.deepEqual(list(w.ws).map((b) => [b.id, b.quadDamage]), [['hub/a', false], ['hub/c', false]], 'no later run repeats them');
+  assert.ok(readFileSync(join(w.hubRoot, 'kirunak', 'bugs', 'a.md'), 'utf8').includes(
+    `- Quad Damage gave it up on 2026-10-27: its fixing session, try 1, reached 150 tool calls; what holds is on bug/a in hub [file ${join(r.folder, 'hub', 'a', 'fix-1.json')}]\n`));
   const a = JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8'));
   assert.deepEqual([a.calls, a.ended, a.exit], [150, 'calls', 143]);
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'c', 'fix-1.json'), 'utf8')).ended, 'minutes');
@@ -744,6 +805,7 @@ test('E-7 and overage: no tool call or the login gone stops the run, the bug not
     { id: 'hub/c', outcome: 'not-reached' },
   ]);
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).ended, 'overage');
+  assert.deepEqual(list(w.ws).map((b) => b.quadDamage), [true, true], 'no real try: the mark stays yes');
 });
 
 test('E-7 for the review: a review session that wrote nothing before working stops the run; one that worked keeps its malformed review a finding', async () => {
@@ -834,6 +896,7 @@ test('stop while fixing: k bugs quad-damage --stop signals the run, its session 
   assert.equal(s.text, `Quad Damage stopped: the owner stopped it; its summary: ${join(r.folder, 'summary.md')}`);
   assert.deepEqual(r.bugs, [{ id: 'hub/a', outcome: 'waits', why: OWNER_WHY }, { id: 'hub/c', outcome: 'not-reached' }]);
   stoppedByOwner(w, r);
+  assert.equal(list(w.ws).find((b) => b.id === 'hub/a').quadDamage, true, 'the owner\'s stop keeps yes');
   assert.equal(JSON.parse(readFileSync(join(r.folder, 'hub', 'a', 'fix-1.json'), 'utf8')).ended, 'stopped');
   assert.match(readFileSync(join(r.folder, 'run.log'), 'utf8'), /hub\/a: fixing, try 1: \d+ tool calls, ended by the owner's stop, exit 143/);
   assert.deepEqual(progressLines(r.folder), ['hub/a: started', 'hub/a: waits: the owner stopped the run', 'Quad Damage stopped: the owner stopped it']);
