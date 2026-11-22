@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_LAST, AGENT_SOON, reply } from '../hooks/kirunak-count.mjs';
 import { countHookLine } from '../lib/doctor.mjs';
@@ -61,14 +61,13 @@ test("AC-15: a main session's call never gets an agent notice, and is not counte
 });
 
 test('AC-15: an unwritable count file lets the call through silent; unreadable input and a bad session id too', () => {
+  // A count file that cannot be written on every OS: a folder where it goes (chmod makes no folder read-only on
+  // Windows, so a mode would let the writes through there).
+  const locked = tmp();
+  mkdirSync(join(locked, 'counts', `${SID}.json`), { recursive: true });
+  for (let n = 1; n <= 100; n++) assert.equal(reply(call('a1'), locked), null);
   const home = tmp();
   mkdirSync(join(home, 'counts'));
-  chmodSync(join(home, 'counts'), 0o500);
-  try {
-    for (let n = 1; n <= 100; n++) assert.equal(reply(call('a1'), home), null);
-  } finally {
-    chmodSync(join(home, 'counts'), 0o700);
-  }
   assert.equal(reply({ ...call('a1'), session_id: '../escape' }, home), null);
   assert.equal(existsSync(join(home, 'escape.json')), false);
   assert.equal(reply(null, home), null);
@@ -106,20 +105,22 @@ const installInto = (dir, extra = {}) => install({
 test("AC-15: k install's plan adds the count hook once on PostToolUse for every tool, beside the escalation hook's Agent block; k doctor reads it", () => {
   const dir = tmp();
   const settingsPath = join(dir, 'settings.json');
-  const count = { type: 'command', command: `node ${join(KIRUNAK, 'hooks', 'kirunak-count.mjs')}`, timeout: 10 };
+  // The command as k install writes it on this machine: on Windows the path quoted, each backslash doubled.
+  const script = join(KIRUNAK, 'hooks', 'kirunak-count.mjs');
+  const count = { type: 'command', command: process.platform === 'win32' ? `node "${script.replaceAll('\\', '\\\\')}"` : `node ${script}`, timeout: 10 };
   assert.deepEqual(countHookLine({ settingsPath }), [false, `the count hook: not wired on PostToolUse in ${settingsPath} (run k install)`]);
   const printed = installInto(dir, { print: true }).actions;
   assert.equal(printed.filter((a) => a === `would add to ${settingsPath} hooks.PostToolUse: ${JSON.stringify({ hooks: [count] })}`).length, 1, printed.join('\n'));
   installInto(dir);
   installInto(dir);
   const post = JSON.parse(readFileSync(settingsPath, 'utf8')).hooks.PostToolUse;
-  assert.deepEqual(post.filter((b) => b.hooks.some((h) => h.command.endsWith('kirunak-count.mjs'))), [{ hooks: [count] }], 'once, no matcher: every tool');
-  assert.equal(post.filter((b) => b.matcher === 'Agent' && b.hooks[0].command.endsWith('kirunak-escalate.mjs')).length, 1, "the escalation hook's block kept");
+  assert.deepEqual(post.filter((b) => b.hooks.some((h) => h.command.includes('kirunak-count.mjs'))), [{ hooks: [count] }], 'once, no matcher: every tool');
+  assert.equal(post.filter((b) => b.matcher === 'Agent' && b.hooks[0].command.includes('kirunak-escalate.mjs')).length, 1, "the escalation hook's block kept");
   assert.match(installInto(dir, { print: true }).actions.join('\n'), /already has the kirunak PostToolUse hook/);
   assert.deepEqual(countHookLine({ settingsPath }), [true, 'the count hook: wired on PostToolUse, every tool']);
   // A block of ours given a matcher is set back to every tool, and k doctor says so until then.
   const json = JSON.parse(readFileSync(settingsPath, 'utf8'));
-  json.hooks.PostToolUse.find((b) => b.hooks[0].command.endsWith('kirunak-count.mjs')).matcher = 'Bash';
+  json.hooks.PostToolUse.find((b) => b.hooks[0].command.includes('kirunak-count.mjs')).matcher = 'Bash';
   writeFileSync(settingsPath, JSON.stringify(json));
   assert.deepEqual(countHookLine({ settingsPath }), [false, "the count hook: wired on PostToolUse with matcher Bash, kirunak's none (run k install)"]);
   installInto(dir);
