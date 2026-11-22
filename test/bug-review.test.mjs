@@ -473,6 +473,27 @@ test('a fix whose branch moves during the review is not merged', async () => {
   assert.equal(readText(join(w.hub, 'tiles.txt')), 'cache: forever\n');
 });
 
+// asilak/kirunak-review-git-failure-reads-gone: git failing as the merge reads the branch again (it did, short of
+// memory) is no branch gone: the merge stops with git's error, the review kept clean for the head.
+test('a git call that fails as the merge reads the branch again refuses with its error, never "moved to nothing", and the clean review is taken again', async () => {
+  const w = await bugWorkspace({ fixRepo: 'kirunak' });
+  const runner = fakeRunner(({ head, base }) => answer('clean', head, base));
+  w.ws.seams.runner = runner;
+  const config = join(w.self, '.git', 'config');
+  const good = readFileSync(config, 'utf8');
+  const r = await review({ ws: w.ws, id: BUG, processes: NOBODY, onMerging: () => writeFileSync(config, `${good}[core\n`) });
+  writeFileSync(config, good);
+  assert.equal(r.outcome, 'merge-refused', JSON.stringify(r));
+  assert.doesNotMatch(r.why, /moved to/);
+  assert.match(r.why, /^could not read bug\/stale-tiles: .*bad config/);
+  assert.match(readText(review1(w)), /could not read bug\/stale-tiles: [^]*This review stays clean for the head/);
+  assert.equal(git(w.self, 'rev-parse', BRANCH), w.head);
+  const again = await review({ ws: w.ws, id: BUG, processes: NOBODY });
+  assert.equal(again.outcome, 'merged', JSON.stringify(again));
+  assert.equal(again.review.reused, true);
+  assert.equal(runner.calls.length, 1);
+});
+
 test('k bug review: no fix, a dry run, --json, and --detach returning at once with the lock held by the working process', async () => {
   const w = await bugWorkspace({ plugin: true });
   const scratch = w.root;
