@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { list, reviewLockPath, reviewing } from '../lib/bugs.mjs';
 import { checkReview, firstCall, lock, review, spent, unlock } from '../lib/bug-review.mjs';
@@ -395,6 +397,74 @@ test('AC-4, E-9: a review lock held by the lease beside it refuses while that le
     assert.deepEqual([existsSync(path), existsSync(`${path}.lease`)], [false, false]);
   } finally {
     other.kill();
+  }
+});
+
+test('asilak/kirunak-review-lock-read-empty: a review lock its holder takes again and again is never read empty: reviewing() names the holder each time, and a second lock() is refused each time', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'k-review-lock-'));
+  const lib = pathToFileURL(join(import.meta.dirname, '..', 'lib', 'bug-review.mjs')).href;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { lock } from ${JSON.stringify(lib)};
+    const [home, id] = process.argv.slice(1);
+    lock(home, id);
+    console.log('held');
+    for (const end = Date.now() + 4000; Date.now() < end;) lock(home, id);
+    process.exit(0);
+  `, home, BUG], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let err = '';
+  child.stderr.on('data', (b) => (err += b));
+  const exited = new Promise((r) => child.on('exit', r));
+  try {
+    await new Promise((r, j) => {
+      child.stdout.on('data', (b) => String(b).includes('held') && r());
+      child.on('exit', () => j(new Error(`the holder ended before it held the lock: ${err}`)));
+    });
+    let reads = 0;
+    let wrong = null;
+    for (const end = Date.now() + 3000; Date.now() < end && !wrong; reads++) {
+      const r = reviewing(home, BUG);
+      if (r?.pid !== child.pid) wrong = `reviewing() read ${JSON.stringify(r)} on read ${reads + 1}`;
+      try {
+        lock(home, BUG);
+        wrong ??= `a second lock() took the lock on try ${reads + 1}`;
+      } catch (e) {
+        if (!/in Review & merge already: pid \d+/.test(e.message)) wrong ??= `a second lock() failed so: ${e.message}`;
+      }
+    }
+    assert.equal(wrong, null);
+    assert.ok(reads > 100, `only ${reads} reads`);
+    assert.equal(await exited, 0, err);
+  } finally {
+    child.kill();
+    await exited;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('asilak/kirunak-review-lock-read-empty: lock() refuses, the lock untouched, when another live process holds the lease beside a dead holder\'s lock; a lock handed on is taken while the process that handed it still runs', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'k-review-lock-'));
+  const other = sleeper(30, { detached: true, stdio: 'ignore' });
+  const path = reviewLockPath(home, BUG);
+  try {
+    // Another process took the lease over from a dead holder and is about to write the lock: a second taker waits.
+    const dead = { pid: 1 << 22, started: '2026-10-27T09:00:00.000Z' };
+    put(path, JSON.stringify(dead) + '\n');
+    mkdirSync(`${path}.lease`);
+    writeFileSync(join(`${path}.lease`, 'holder.json'), JSON.stringify({ id: 'x', pid: other.pid }));
+    assert.throws(() => lock(home, BUG), new RegExp(`in Review & merge already: pid ${other.pid}`));
+    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), dead, 'the lock is left as it was');
+    rmSync(path);
+    rmSync(`${path}.lease`, { recursive: true });
+
+    // --detach's hand-on: this process holds the lock and names its child in it; the child takes it while this lives.
+    const mine = lock(home, BUG);
+    writeFileSync(path, JSON.stringify({ pid: other.pid, started: mine.started }) + '\n');
+    assert.deepEqual(lock(home, BUG, { pid: other.pid, from: process.pid }), { pid: other.pid, started: mine.started });
+    assert.equal(JSON.parse(readFileSync(join(`${path}.lease`, 'holder.json'), 'utf8')).pid, other.pid, 'the lease is the child\'s');
+    unlock(home, BUG, other.pid);
+  } finally {
+    other.kill();
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

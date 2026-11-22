@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { kirunakHome } from '../lib/home.mjs';
-import { besideOf, hold, holderLive, letGo } from '../lib/lease.mjs';
+import { besideOf, hold, holderLive, letGo, writeJson } from '../lib/lease.mjs';
 
 // The core's default `machineGuard` (plugins.md §2, orchestrator.md §4): one file per live step process,
 // running/<pid>.json (task, step, session, since), and one per step admitted and not started yet,
@@ -39,7 +39,7 @@ export function register(ws, pid, { task, step, session, since = new Date().toIS
     } catch {}
     letGo(from);
   }
-  writeFileSync(path, JSON.stringify({ pid, task, step, session, since }, null, 2) + '\n');
+  writeJson(path, { pid, task, step, session, since });
 }
 
 // A running/ file and its lease go.
@@ -111,7 +111,7 @@ export async function admit(ws, mg, { task = null, step = null } = {}) {
       const slot = { name: `${process.pid}-${++seq}`, held: true };
       const path = join(runningDir(ws), `${slot.name}.json`);
       hold(path);
-      writeFileSync(path, JSON.stringify({ pid: process.pid, task, step, since: new Date().toISOString() }) + '\n');
+      writeJson(path, { pid: process.pid, task, step, since: new Date().toISOString() });
       return { ok: true, limits, running, slot };
     }
     const who = [
