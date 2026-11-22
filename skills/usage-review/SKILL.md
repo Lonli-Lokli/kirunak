@@ -5,35 +5,35 @@ description: The weekly usage review, once per limit week, after the plan's week
 
 # usage-review: where the week's usage went
 
-The limit week starts where the workspace's `usage.weekStart` says (kirunak's default: Sunday 00:00 UTC); the review
-covers the one that just ended. Run it in a fresh session and keep its context small: read the summaries, never
-`calls.jsonl`.
+The limit week starts at the workspace's `usage.weekStart` (kirunak's default: Sunday 00:00 UTC); the review covers
+the one that just ended. Run it in a fresh session and keep its context small: read the summaries, never `calls.jsonl`.
 
 1. **Measure.** `k usage` writes the last finished week to `<KIRUNAK_HOME>/usage/<date>/` (`--from`, `--to` and
    `--out` for another window) and prints the summary, each task's and step's weight, and, last, the line
    `reviews: <folder>`: the workspace's `usage.reviews`, where every review is kept. If it says `none named`, ask the
-   owner for a folder to name there, and until then give the review in the reply only. Read the summary,
-   `report.txt` and `tasks.txt`; open `carry.txt`, `ttl.txt`, `escalations.txt`, `quality.txt`, `compact.txt`,
-   `replay.txt` or `fable.txt` only for the item a question is about. If it also printed `heavy jobs: <command>` (the workspace's
-   `usage.heavyReport`, the week filled in), run that command: its table of the week's slowest jobs and suites per
-   repo, the jobs of 50 minutes or more and the minutes lost to failed jobs goes into the review as it prints.
-2. **Compare.** Read the newest review in the folder (the files are named by date) and set this week beside it: the
-   weight, cache read : output, the average context per call (main sessions and agents), when the weekly limit
-   reached 100% (the summary's `weekly limit` line, from the rate-limit log), the heaviest tasks and steps, whether
-   each change the last review proposed or started held (its "Started this week" section says what to measure), and
-   the newest review's levers table: each row's share this week and where its work stands (`k bugs`, `k drafts`,
-   `k list`).
-3. **Standing questions.** Read `standing.md` in the folder, if there is one: the workspace's own questions, asked
-   every week (a baseline to compare with, a prediction to check, a decision waiting on a number). Answer each with
-   the numbers it names. The owner edits that file; this session only reads it.
+   owner for a folder to name there, and until then give the review in the reply only. Read the summary, `report.txt`
+   and `tasks.txt`, and every week `report.txt`'s `agents past 100 calls`, `tasks.txt`'s no-step split, `fable.txt`
+   and `escalations.txt`'s `stops for the owner` (by reason and by task); open `carry.txt`, `ttl.txt`, `quality.txt`,
+   `compact.txt`, `replay.txt` or the rest of `escalations.txt` only for the item a question is about. If it printed
+   `heavy jobs: <command>` (`usage.heavyReport`, the week filled in), run it: its slowest jobs and suites per repo,
+   the jobs of 50 minutes or more, the failed minutes per task and step and their share of the week, and each
+   `checks over 3 minutes` line go into the review as it prints.
+2. **Compare.** Read the newest review in the folder (named by date) and set this week beside it: the weight, cache
+   read : output, the average context per call (main sessions and agents), when the weekly limit reached 100% (the
+   summary's `weekly limit` line, from the rate-limit log), the heaviest tasks and steps, whether each change the last
+   review proposed or started held (its "Started this week" section says what to measure), and the newest review's
+   levers table: each row's share this week and where its work stands (`k bugs`, `k drafts`, `k list`).
+3. **Standing questions.** Answer each question in the folder's `standing.md`, if there is one (a baseline, a
+   prediction to check, a decision waiting on a number), with the numbers it names; the owner edits it, you only read.
 4. **ccusage.** A shared ccusage export's weekly totals go beside the transcripts', weeks against weeks (its dollars
    are its own price table, never an invoice). claude.ai, cloud sessions and another machine show as points the limit
    rose with no local call (the summary); the auto-mode classifier writes no transcript at all.
 5. **Write** `<date>.md` in the folder: the numbers beside last week's, what moved and why, the levers table (below);
-   the escalations per trigger from
-   `escalations.txt` and whether each step then passed; the answers to the standing questions; under "Slowest suites
-   and jobs", the heavy-job report's table when step 1 ran one, beside last week's totals; and a "Started this week"
-   section naming what next week's review measures.
+   the escalations per trigger from `escalations.txt` and whether each step then passed, and the stops for the owner
+   by reason and by task; the Fable steps and agents by role, with the designs redone; each task's no-step split; the
+   agents past 100 calls with their task and step; the answers to the standing questions; under "Slowest suites and
+   jobs", the heavy-job report's table beside last week's totals, the failed minutes per task and step, their share
+   and the `checks over 3 minutes` lines; and a "Started this week" section naming what next week's review measures.
 6. **Changes.** What costs no quality (a measurement, a tool list, a cache setting the replay proves) goes to the owner
    as a one-line question with its measured saving. A change to the owner's rules or to Claude Code's settings is the
    owner's decision, never this session's. Anything larger goes into the week's improvement task.

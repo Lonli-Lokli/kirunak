@@ -145,6 +145,13 @@ outputs: review.md
   fix, and the owner's next `k accept` signs off again and runs every final step, since the build may have changed.
   A plan with no final steps is accepted at once, as before. `k accept --dry-run` says "would sign off" and `k
   waiting`'s accept row names the final steps the accept would queue.
+- **Fable designs and reviews; Opus builds** (gulnya/usage-improve-11-22 AC-14). `k plan check` (lib/plan.mjs
+  `fableRole`) refuses a step whose model, the plan line's or else the workspace's `models.<kind>`, is in the fable
+  family, unless its kind is `review`, or its kind is `agent` and its title or `what:` names a design or a review (the
+  words design or review, in any form). A `[heavy]` step on Fable is refused too. For a task first approved before
+  `FABLE_ROLE_SINCE` (lib/plan.mjs, the day the rule reached the main branch) the finding is a warning, read from the
+  same first approval as the rules above. Judgement: the owner's rule of 2026-10-13, since building on Fable costs two
+  and a half times what Opus does; k usage's fable.txt measures what the Fable steps that pass were for.
 - **Release steps: `clean-tree: yes`** (gulnya/step-records-void-release-receipts). A step whose gates count only for
   a tree with no tracked change at one commit (a release's device checks and uploads: gulnya's `ios-smoke.mjs` and
   the legacy gate read `git status --porcelain --untracked-files=no` and `git rev-parse HEAD`) says `clean-tree: yes`,
