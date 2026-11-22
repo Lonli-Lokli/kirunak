@@ -50,7 +50,7 @@ after the review, for the owner to approve and run first, so the week runs on th
 
 - Weight is in Opus base-input tokens: input 1, cache read 0.1, 1h write 2, 5m write 1.25, output 5; Fable 2.5x,
   Sonnet 0.6x, Haiku 0.2x. `tasks.txt` and `tasks.tsv` weigh each task and step this way, a task's agents with it,
-  heaviest first and "no task" last.
+  heaviest first and "no task" last, a task's "no step" split by what the session was doing (the work to move into steps).
 - Almost all usage is re-reading context. It grows with calls times context size, so what counts is how long a
   session or agent lives and how large it starts, much more than how big one file read is.
 - `ttl.txt` replays the week under a 5-minute and a 1-hour cache, main sessions and agents apart: the evidence for
