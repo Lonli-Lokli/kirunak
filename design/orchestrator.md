@@ -272,7 +272,8 @@ pending  →  ready  →  running  →  done
     gets a `failures:` field naming every failure report of the step, and the stop line reads `S-1 failed on every
     rung (sonnet 2, opus 1, fable 1); the owner decides: read steps/S-1/failure-4.md`. Removing the mark retries the
     step on its own rung. An older plan's `[escalate: <model>, <effort>]` mark still parses.
-  - **A heavy step that cannot pass on a rerun** stops at once (gulnya/heavy-retry-unchanged). Each job of a `[heavy]`
+  - **A heavy step that cannot pass on a rerun** gets a fix step first (gulnya/heavy-retry-unchanged,
+    gulnya/usage-improve-11-22 AC-9). Each job of a `[heavy]`
     step records in its `heavy-<k>.json` the checkout it started on (`lib/checkout.mjs`): the folder of its command's
     first `cd <dir>` (`~` and `$HOME` expanded, quotes taken off, relative to the task repo's root), its `git rev-parse
     HEAD` and the sha256 of its `git status --porcelain`, `git diff HEAD` and each untracked file's contents (A-1: the
@@ -281,8 +282,21 @@ pending  →  ready  →  running  →  done
     sessions write them between two jobs), taken when the guard starts the job (its `started`, plugins.md), so a change
     made while the job waited in the queue is in it; `null` with no `cd`, a folder outside a git work tree, or a git
     command that fails. Before a rerun after a failure of its own, `k run`'s pass compares: when that job exited
-    other than 0 and 124 and the checkout is the same now, the step does not start and stops as above, its why `failed
-    on an unchanged checkout (<dir> at <short head>): a rerun would fail the same way`. A new commit or a changed
+    other than 0 and 124 and the checkout is the same now, the step does not start: its **fix step** `S-n-F<k>` (k = 1, 2)
+    runs instead, one headless session through the runner seam on the workspace's `builder` rung (its model and
+    effort; with no builder, `models.agent`'s) with the builder's tools and the step's budget, in the task repo's root.
+    Its brief (`steps/S-n-F<k>/brief.md`, `steps.fixBrief`) holds the heavy step's what and command, the failed job's
+    exit code, minutes, record, log and failure report, the log's last lines, and the rule: fix what fails, commit, run
+    no heavy job, write `steps/S-n-F<k>/report.md`; a failure that needs the owner (a device, an account, a store)
+    changes nothing and makes the report's first line `NEEDS-OWNER: <why>`. Its lines in `progress.md` are its own,
+    `S-n-F<k> started (<model>, session <id>)` then `finished` or `failed`, so `k usage` counts it to the task. When
+    it ends, the step stops as above for the owner when its session failed (`its fix step S-n-F<k> failed (<why>)`),
+    when its report says `NEEDS-OWNER` (`needs the owner, its fix step S-n-F<k> says: <why>`), or when the checkout
+    is still the failed job's (`<the why below>, and the fix step S-n-F<k> changed nothing`); else its bare `finished`
+    line takes back the failure before it, which does not count toward the step's two, and the next pass runs the
+    heavy step again. A failure on an unchanged checkout after two fix steps since the step's count last started
+    afresh stops it: `failed after two fix steps (S-n-F1, S-n-F2): <the why below>`. The why is `failed on an
+    unchanged checkout (<dir> at <short head>): a rerun would fail the same way`. A new commit or a changed
     status runs it again; a timeout (exit 124) is always retried; a command with no checkout, and a failure with no job
     (a device not claimed), keep the retry. A job that exits 0 without every output stops in the same pass, with no
     rerun: `its job passed but wrote no <outputs>: a rerun cannot write them; the plan's command or outputs: is
