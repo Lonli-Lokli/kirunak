@@ -458,6 +458,51 @@ test('decide: the owner\'s verbs however k is invoked, never in a quoted mention
   }
 });
 
+// asilak/kirunak-guard-misses-timeout: two `timeout 3600 k bug review …` ran Review & merge from an agent's shell.
+test('decide: the owner\'s verbs behind timeout, stdbuf, xargs and chrt, their operands skipped, and behind a wrapper the guard does not know', () => {
+  const r = makeRepo();
+  for (const [command, verb] of [
+    ['timeout 3600 k bug review asilak/x', 'bug review'],
+    ['cd /d/sources/asilak && timeout 3600 k bug review asilak/x --session s > log 2>&1; echo', 'bug review'],
+    ['timeout -k 10 --signal KILL 1h node bin/k.mjs approve x', 'approve'],
+    ['timeout --preserve-status --kill-after=5 90m k accept x', 'accept'],
+    ['timeout -s TERM 2.5 k bugs quad-damage --stop', 'bugs quad-damage --stop'],
+    ['stdbuf -oL k approve x', 'approve'],
+    ['stdbuf -o L -e 0 k bugs quad-damage', 'bugs quad-damage'],
+    ['stdbuf --output=L --error 0 k hold x', 'hold'],
+    ['echo x | xargs k approve', 'approve'],
+    ['xargs -n 1 -I {} k accept {}', 'accept'],
+    ['ls ids | xargs -P 2 --max-args 1 -r node bin/k.mjs bug review', 'bug review'],
+    ['xargs -a ids -d , -L 1 k resume', 'resume'],
+    ['chrt 10 k resume x', 'resume'],
+    ['chrt -f -T 5 99 k queue remove x', 'queue'],
+    ['chrt --idle k approve x', 'approve'],
+    ['nohup timeout 60 stdbuf -oL k approve x &', 'approve'],
+    // The backstop: `k` and an owner's verb anywhere in the words, past a wrapper or an operand the strip does not know.
+    ['flock /tmp/k.lock k bug review asilak/x', 'bug review'],
+    ['taskset -c 0 node bin/k.mjs bugs quad-damage --stop', 'bugs quad-damage --stop'],
+    ['nice -n 10 k approve x', 'approve'],
+    ['sudo -u owner k accept x', 'accept'],
+    ['k heavy -- flock /tmp/l k approve x', 'approve'],
+  ]) {
+    assert.equal(denies(r, command), `kirunak: \`k ${verb}\` is the owner's: it runs only from the owner's own prompt (\`!\`) or the mod`, command);
+  }
+  for (const command of [
+    'timeout 3600 k bugs quad-damage --status',
+    'timeout 60 k bug review asilak/x --dry-run',
+    'timeout 600 k bug check asilak/x',
+    'stdbuf -oL npm test',
+    'xargs -n 1 k check',
+    'chrt 10 k board',
+    'flock /tmp/l k list',
+    'nice -n 10 k approve x --dry-run',
+    'echo k approve x',
+    "printf '%s\\n' k bug review x",
+  ]) {
+    assert.equal(denies(r, command), null, command);
+  }
+});
+
 test('decide: tools it does not guard, and files outside kirunak/, are allowed', () => {
   const r = makeRepo();
   assert.equal(decide({ tool_name: 'Read', tool_input: { file_path: r.task(FROZEN, 'task.md') } }), null);
