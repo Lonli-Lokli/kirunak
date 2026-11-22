@@ -42,7 +42,9 @@ jobs:
         shell: bash
         run: |
           code=0
-          node --test --test-reporter=tap "test/*.test.mjs" > tap.txt || code=$?
+          # Through npm test, so package.json stays the one place that says what the suite is. Node takes no
+          # reporter flag after the test glob, so the TAP reporter comes through NODE_OPTIONS.
+          NODE_OPTIONS=--test-reporter=tap npm test --silent > tap.txt || code=$?
           grep -E '^not ok' tap.txt || true
           grep -E '^# (tests|pass|fail|skipped|cancelled|todo)' tap.txt
           grep -qE '^# tests [1-9]' tap.txt || { echo "::error::the suite ran no test"; exit 1; }
