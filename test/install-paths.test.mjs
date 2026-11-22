@@ -46,7 +46,7 @@ test('the fixture is what k install writes on win32: each kirunak command quoted
   const w = await windows();
   const all = Object.values(w.fixture.hooks).flat().flatMap((b) => b.hooks.map((h) => h.command));
   const ours = all.filter((c) => c.includes('kirunak-'));
-  assert.equal(ours.length, 19, 'freeze, session, bugs, 8 escalation, stale, 6 compact, unlock');
+  assert.equal(ours.length, 20, 'freeze, session, bugs, 8 escalation, stale, count, 6 compact, unlock');
   for (const c of ours) assert.match(c, /^node "D:\\\\sources\\\\kirunak\\\\hooks\\\\kirunak-[\w-]+\.mjs"( --part \w+)?$/, c);
   assert.ok(ours.includes(win('kirunak-escalate.mjs')) && ours.includes(`${win('kirunak-compact.mjs')} --part plan`));
   const fresh = join(w.dir, 'fresh.json');
@@ -99,7 +99,7 @@ test('a second k install on win32 plans nothing, and one from this machine point
   const { actions } = install({ ...winPaths, kirunakRoot: WIN, platform: 'win32', print: true });
   const settingsLines = actions.filter((a) => a.includes(`${w.settingsPath} hooks.`));
   assert.deepEqual(settingsLines, [], 'nothing to add or set');
-  assert.equal(actions.filter((a) => a.includes(`${w.settingsPath} already has the kirunak`)).length, 19);
+  assert.equal(actions.filter((a) => a.includes(`${w.settingsPath} already has the kirunak`)).length, 20);
   const bytes = readFileSync(w.settingsPath);
   const mtime = statSync(w.settingsPath).mtimeMs;
   install({ ...winPaths, kirunakRoot: WIN, platform: 'win32' });

@@ -108,7 +108,13 @@ You need Node 22 or later, git and Claude Code.
    edits your status line itself, and `k doctor` warns until the status line, or a script it names, runs that line. A
    **stale-session hook** on UserPromptSubmit says once, when a prompt comes over 60 minutes after the last call with
    over 150,000 tokens of context (the cache has expired, and the next call writes all of it again), to write the
-   handoff (`k handoff <id>`) or start fresh; it never blocks.
+   handoff (`k handoff <id>`) or start fresh; it never blocks. A **count hook** on PostToolUse, every tool, counts
+   each agent's calls apart and tells it at its 75th call to finish the piece in hand and write what is left to a
+   handoff file by call 100, and at its 100th to return with its short report and that file's path. In a session
+   holding a task, outside a k run step, it counts the calls since the last `k step finish` or `k step fail` (none
+   between `k step start` and its end), and at 150 calls or 150,000 tokens of context growth says once to run the
+   plan's next step, which it names, with `k run <id>`, or to write the handoff; it never blocks either
+   (`design/orchestrator.md` §6).
    It also writes what escalation needs (below): one `<model>-step` agent in `~/.claude/agents/` for every rung of the
    ladder above the lowest, `escalate/config.json` in the state folder, the escalation hook on eight events, and the
    `k-go-on` skill.
@@ -483,9 +489,11 @@ tap opens are Claude Code's, and every stop shows in `k waiting` and `k board --
 
 `k usage` measures the last finished limit week (`usage.weekStart`; `--from`, `--to` and `--out` for another window)
 from every Claude Code transcript on this machine and writes it to `<KIRUNAK_HOME>/usage/<date>/`: `calls.jsonl`
-(every call), `report.txt`, `ttl.txt` (the week under a 5-minute and a 1-hour cache), `carry.txt`, `writes.txt`,
-`escalations.txt`, `quality.txt` and `.tsv`, `compact.txt`, `replay.txt` and `.tsv` (the handover replayed),
-`summary.txt`, and `tasks.txt` and `.tsv` (each task's and step's weight, heaviest first, "no task" last). It prints
+(every call, and a mark for each command, skill or k or git command that says what a session turned to), `report.txt` (with every agent past 100 calls: its type, calls, weight, task and step), `ttl.txt` (the
+week under a 5-minute and a 1-hour cache), `carry.txt`, `writes.txt`, `escalations.txt` (with the steps stopped for
+the owner by reason and by task, each task once however many worktrees it has), `quality.txt` and `.tsv`, `compact.txt`, `replay.txt` and `.tsv` (the handover replayed),
+`fable.txt` (each Fable step and agent: its weight, calls, first context, whether it designed, reviewed or took an
+escalation, and whether its design was redone), `summary.txt`, and `tasks.txt` and `.tsv` (each task's and step's weight, heaviest first, "no task" last, a task's "no step" weight split by what its session was doing: intake, review and merge, k-done, a step's follow-up, other). It prints
 the summary, the tasks and the review folder. A transcript cut short or unreadable is skipped and counted. The
 `usage-review` skill (`/usage-review`) runs it once a week, compares with the last review in `usage.reviews`, answers
 that folder's `standing.md` and writes the new review there.

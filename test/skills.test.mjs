@@ -120,6 +120,26 @@ test('the usage review carries every lever forward and ends in one improvement t
   assert.match(table, /through the intake \(the k-intake skill\) right after the review, for the owner to approve and run first/);
 });
 
+test('the usage review reads the stops by reason and task, fable.txt, the no-step split, the agents past 100 and the heavy report\'s failed share and slow checks, and writes each (gulnya/usage-improve-11-22 S-6)', () => {
+  const text = read('skills/usage-review/SKILL.md').replace(/\s+/g, ' ');
+  const measure = text.slice(text.indexOf('1. **Measure.**'), text.indexOf('2. **Compare.**'));
+  const write = text.slice(text.indexOf('5. **Write**'), text.indexOf('6. **Changes.**'));
+  // Measure reads them every week, not only for a question.
+  assert.match(measure, /`escalations\.txt`'s `stops for the owner` \(by reason and by task\)/);
+  assert.match(measure, /`fable\.txt`/);
+  assert.match(measure, /`report\.txt`'s `agents past 100 calls`/);
+  assert.match(measure, /`tasks\.txt`'s no-step split/);
+  assert.match(measure, /the failed minutes per task and step and their share of the week, and each `checks over 3 minutes` line/);
+  assert.match(measure, /or the rest of `escalations\.txt` only for the item a question is about/);
+  assert.doesNotMatch(measure, /open [^;]*`fable\.txt`[^;]*only for the item a question is about/);
+  // Write says each in its sections.
+  assert.match(write, /the stops for the owner by reason and by task/);
+  assert.match(write, /the Fable steps and agents by role, with the designs redone/);
+  assert.match(write, /each task's no-step split/);
+  assert.match(write, /the agents past 100 calls with their task and step/);
+  assert.match(write, /"Slowest suites and jobs"[^]*the failed minutes per task and step, their share and the `checks over 3 minutes` lines/);
+});
+
 test('the README is its four parts and the licence line', () => {
   const text = read('README.md');
   assert.deepEqual([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1]), ['What it is', 'Setup', 'Change size', 'Working a task']);
