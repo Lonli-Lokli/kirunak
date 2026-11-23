@@ -10,7 +10,7 @@ import * as queue from '../lib/queue.mjs';
 import { generate } from '../lib/checklist.mjs';
 import { checkTaskDir } from '../lib/state.mjs';
 import { checkTask, parseTask } from '../lib/task.mjs';
-import { gitCommitAll, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
+import { gitCommitAll, k, makeWorkspace, reviewsRan, sh, tempDir } from './helpers.mjs';
 
 // Commits in the test repos must not inherit an owner variable from the shell that runs the tests.
 for (const k of Object.keys(process.env)) if (k.startsWith('KIRUNAK_') && k !== 'KIRUNAK_HOME') delete process.env[k];
@@ -150,6 +150,32 @@ test('approve takes a queue place, or none, and refuses a place it cannot find b
   assert.deepEqual([r2.state, r2.queuePlace], ['parked', null], 'approved out of the queue: parked');
   assert.deepEqual(queue.read(other.ws), []);
   assert.equal(subject(other.hub), 'fixture');
+});
+
+test('asilak/kirunak-approve-queue-not-git: approve refuses, before it writes or commits anything, when the queue it would add to is in no git repo; --no-queue approves', async () => {
+  const { ws, weather } = await makeWorkspace();
+  ws.queue = join(tempDir('kirunak-queue-'), 'queue.md');
+  writeFileSync(ws.queue, '# The queue\n');
+  const head = subject(weather);
+  await assert.rejects(approve({ ws, id: ID, now: NOV5, dryRun: true }), /the queue .*queue\.md is not in a git repo/, 'a dry run says so too');
+  await assert.rejects(approve({ ws, id: ID, now: NOV5 }), /the queue .*queue\.md is not in a git repo/);
+  assert.equal(readRecord(weather, 'offline-forecast'), null, 'no approval written');
+  assert.equal(subject(weather), head, 'nothing committed');
+  assert.equal(readFileSync(ws.queue, 'utf8'), '# The queue\n', 'the queue unchanged');
+  const r = await approve({ ws, id: ID, noQueue: true, now: NOV5 });
+  assert.equal(r.state, 'parked', 'with --no-queue the queue is never touched');
+  assert.equal(subject(weather), `kirunak: approve ${ID}`);
+});
+
+test('asilak/kirunak-approve-queue-not-git: approve refuses, before it writes or commits anything, when the queue file it would add to is missing from its git repo (review-1)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  rmSync(ws.queue);
+  const head = subject(weather);
+  await assert.rejects(approve({ ws, id: ID, now: NOV5, dryRun: true }), /the queue file .*queue\.md does not exist/, 'a dry run says so too');
+  await assert.rejects(approve({ ws, id: ID, now: NOV5 }), /the queue file .*queue\.md does not exist/);
+  assert.equal(readRecord(weather, 'offline-forecast'), null, 'no approval written');
+  assert.equal(subject(weather), head, 'nothing committed');
+  assert.equal(existsSync(ws.queue), false, 'no queue file made');
 });
 
 test("an amendment's replace, add and remove apply", async () => {
@@ -470,6 +496,23 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
   assert.deepEqual(queue.read(ws), []);
   assert.match(readFileSync(join(home, 'events.jsonl'), 'utf8'), /"kind":"accepted"/);
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'again' }), /already accepted/);
+});
+
+test('asilak/kirunak-approve-queue-not-git: accept refuses, before it writes or commits anything, when the queue it would remove the task from is in no git repo (review-2)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  const outside = join(tempDir('kirunak-queue-'), 'queue.md');
+  writeFileSync(outside, readFileSync(ws.queue));
+  ws.queue = outside;
+  const head = headOf(weather);
+  assert.throws(() => accept({ ws, id: ID, dryRun: true }), /the queue .*queue\.md is not in a git repo/, 'a dry run says so too');
+  assert.throws(() => accept({ ws, id: ID, now: NOV7 }), /the queue .*queue\.md is not in a git repo/);
+  assert.equal(existsSync(join(taskDir(weather), 'done.json')), false, 'no done.json');
+  assert.equal(headOf(weather), head, 'nothing committed');
+  assert.deepEqual(queue.read(ws), [ID], 'the task still queued');
 });
 
 test('accept with a review: every item the owner checks is ticked, or it refuses naming them; --checklist-open is recorded', async () => {
