@@ -123,8 +123,13 @@ Start fix has started an intake from it, and `tasks/<slug>/bug/` its records (R2
   retry briefed from that review, then a second review, and findings twice (counted over every findings review beside
   the bug, the owner's too) wait naming both (AC-7); a conflict or a refused merge waits as the review writes it
   (E-5). SKIPPED: the run sets `quad-damage: no`, writes the reason under What was found and commits the bug file
-  alone (AC-4, E-6). FAILED, an empty FIXED or a session ended at its limit waits. A fixing session with no tool call,
-  a login gone, extra usage, or a review session that failed before working stops the run (E-7).
+  alone (AC-4, E-6). Every dead end does the same, so no later run repeats the work (gulnya/quad-damage-repeats-dead-ends):
+  a FAILED, a session ended at its limit, no report or one that begins otherwise, two fixing sessions in a run with no
+  fix ready, and findings twice each wait with `quad-damage: no` and a line "Quad Damage gave it up on <date>: <why>
+  [file <report, fix-<n>.json or review>]". A conflict, a refused merge, a head refused with no findings and an empty
+  FIXED wait and keep yes. A fixing session with no tool call, a login gone, extra usage, or a review session that
+  failed before working stops the run (E-7), and the owner's stop ends it; the bug keeps yes, never having had a real
+  try.
 - **The run's limits** (AC-9, AC-10): before every session the run reads the plan's windows through the runner's
   `limits()` (`orchestrator.md` §3) and appends the reading to `ws.bugs.limitsLog`, labelled `quad-damage`. The 5-hour
   window at 90% or more sets the phase waiting with `waitUntil` and sleeps until its reset and a minute, then reads

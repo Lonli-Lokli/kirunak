@@ -38,8 +38,10 @@ Your report goes to {{report}}.
    of the owner's. Never play sound out loud. kirunak reviews and merges the fix after you, not you.
 7. Last, write the report. Its first line is exactly FIXED, SKIPPED or FAILED; its second `Why: ` and the reason in one
    line; then at most ten lines: the branch and its commits, the test and its result, and what is left for the owner.
-   FIXED only with the fix committed on {{branch}} and the test passing: kirunak sends it to its review.
+   FIXED only with the fix committed on {{branch}} and the test passing: kirunak sends it to its review. On FAILED,
+   kirunak sets the mark to `quad-damage: no` and names your report under What was found, so no later run repeats
+   the work; change nothing in the bug file yourself.
 
-Limits: {{calls}} tool calls and {{minutes}} minutes. At either, kirunak ends this session, and the bug waits with what
-is on {{branch}}. Running short, stop cleanly: commit what holds on the branch, or leave none, and report FAILED with
-what is left.
+Limits: {{calls}} tool calls and {{minutes}} minutes. At either, kirunak ends this session, sets the mark to no, and the
+bug waits with what is on {{branch}}. Running short, stop cleanly: commit what holds on the branch, or leave none, and
+report FAILED with what is left.
