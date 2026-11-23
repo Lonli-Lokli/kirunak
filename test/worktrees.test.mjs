@@ -6,7 +6,7 @@ import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { approve } from '../lib/approval.mjs';
 import { processPaths, readerName, samePath } from '../lib/os.mjs';
-import { holdsLine, pluginsBefore, tilde, worktrees } from '../lib/worktrees.mjs';
+import { holdsLine, lines, pluginsBefore, tilde, worktrees } from '../lib/worktrees.mjs';
 import { gitCommitAll, gitInit, k, makeWorkspace, reviewsRan, sh } from './helpers.mjs';
 
 for (const key of Object.keys(process.env)) if (key.startsWith('KIRUNAK_') && key !== 'KIRUNAK_HOME') delete process.env[key];
@@ -702,6 +702,90 @@ test("AC-18: worktrees({ remove, session }) first takes the session out of every
   assert.equal(existsSync(mine), false);
   assert.equal(lockOf(weather, shared), 'kirunak s2 2026-11-10T10:00:00.000Z');
   assert.equal(lockOf(hub, theirs), 'kirunak s2 2026-11-10T10:00:00.000Z');
+});
+
+// asilak/kirunak-sweep-keeps-gone-worktree: the worktrees git still lists, by path.
+const listed = (repo) => sh(repo, 'git', ['worktree', 'list', '--porcelain', '-z']).split('\0').filter((f) => f.startsWith('worktree ')).map((f) => f.slice(9));
+const lists = (repo, path) => listed(repo).some((p) => samePath(p, path));
+
+test('sweep-keeps-gone-worktree Q-2, Q-5: a gone worktree, unlocked or under an ended kirunak lease, is pruned on a removing run and gone from git worktree list; a dry run prunes and lifts nothing and says would prune', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const now = new Date('2026-11-10T09:00:00.000Z');
+  const t1 = add(weather, join(root, 't1'), null);
+  const t2 = add(weather, join(root, 't2'), null);
+  lock(weather, t2, 'kirunak abc 2026-11-01T00:00:00.000Z');
+  rmSync(t1, { recursive: true });
+  rmSync(t2, { recursive: true });
+
+  const look = await worktrees({ ws, processes: none, now });
+  assert.deepEqual(look.problems, []);
+  assert.deepEqual(whys(look.kept), {});
+  assert.deepEqual(whys(look.removed), {
+    [t1]: 'its folder is gone: would prune',
+    [t2]: 'would lift the lock of session abc: its lease ended 2026-11-01T00:00:00.000Z; its folder is gone: would prune',
+  });
+  assert.ok(lists(weather, t1) && lists(weather, t2), 'a dry run prunes nothing');
+  assert.equal(lockOf(weather, t2), 'kirunak abc 2026-11-01T00:00:00.000Z', 'a dry run lifts nothing');
+
+  const r = await worktrees({ ws, remove: true, processes: none, now });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(whys(r.kept), {});
+  assert.deepEqual(whys(r.removed), {
+    [t1]: 'its folder was gone: pruned',
+    [t2]: 'lock of session abc lifted: its lease ended 2026-11-01T00:00:00.000Z; its folder was gone: pruned',
+  });
+  assert.equal(lists(weather, t1), false);
+  assert.equal(lists(weather, t2), false);
+
+  const again = await worktrees({ ws, remove: true, processes: none, now });
+  assert.deepEqual([again.removed, again.kept, again.problems], [[], [], []], 'nothing stays from run to run');
+});
+
+test('sweep-keeps-gone-worktree Q-2: a gone worktree under a live kirunak lease or a hand-made lock stays, still listed', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const now = new Date('2026-11-10T09:00:00.000Z');
+  const live = add(weather, join(root, 'live'), null);
+  const hand = add(weather, join(root, 'hand'), null);
+  lock(weather, live, 'kirunak s1 2026-11-10T10:30:00.000Z');
+  lock(weather, hand, 'moving disks');
+  rmSync(live, { recursive: true });
+  rmSync(hand, { recursive: true });
+  const keeps = { [hand]: 'locked: moving disks', [live]: works('s1', '2026-11-10T10:30:00.000Z') };
+  for (const remove of [false, true]) {
+    const r = await worktrees({ ws, remove, processes: none, now });
+    assert.deepEqual([r.removed, whys(r.kept), r.problems], [[], keeps, []]);
+  }
+  assert.ok(lists(weather, live) && lists(weather, hand));
+  assert.deepEqual([lockOf(weather, live), lockOf(weather, hand)], ['kirunak s1 2026-11-10T10:30:00.000Z', 'moving disks']);
+});
+
+test('sweep-keeps-gone-worktree Q-3: a pruned worktree\'s branch is deleted when merged into the main line; an unmerged one stays, the line saying why', async () => {
+  const { ws, root, weather } = await makeWorkspace();
+  const done = add(weather, join(root, 'done'), 'done');
+  commitIn(done, 'a.txt');
+  sh(weather, 'git', ['merge', '-q', '--no-ff', 'done', '-m', 'merge done']);
+  const open = add(weather, join(root, 'open'), 'open');
+  commitIn(open, 'b.txt');
+  rmSync(done, { recursive: true });
+  rmSync(open, { recursive: true });
+
+  const look = await worktrees({ ws, processes: none });
+  assert.deepEqual(whys(look.removed), {
+    [done]: 'its folder is gone: would prune',
+    [open]: 'its folder is gone: would prune; its branch stays: open has 1 commit not in master',
+  });
+  assert.ok(branchExists(weather, 'done') && lists(weather, done), 'a dry run deletes nothing');
+
+  const r = await worktrees({ ws, remove: true, processes: none });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.removed.map((w) => [w.path, w.why, w.branchDeleted, w.branchError]), [
+    [done, 'its folder was gone: pruned', true, undefined],
+    [open, 'its folder was gone: pruned', false, 'open has 1 commit not in master'],
+  ]);
+  assert.equal(branchExists(weather, 'done'), false);
+  assert.ok(branchExists(weather, 'open'));
+  assert.equal(lists(weather, done) || lists(weather, open), false);
+  assert.deepEqual(lines(r).filter((l) => l.includes('open')), [`removed ${tilde(open)} (its folder was gone: pruned, branch kept: open has 1 commit not in master)`]);
 });
 
 // asilak/kirunak-worktrees-lsof-windows E-1: a bug's fix branch bug/<slug> that reads as merged.

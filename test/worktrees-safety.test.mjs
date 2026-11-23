@@ -36,7 +36,7 @@ test('E-6: a detached worktree a plugin offers stays while its HEAD is on no bra
   assert.deepEqual(whys((await worktrees({ ws, processes: none })).removed), { [cache]: 'a cache nothing pins' });
 });
 
-test('a plugin cannot offer an unmerged branch worktree or the main checkout; locked and prunable worktrees stay', async () => {
+test('a plugin cannot offer an unmerged branch worktree or the main checkout; a locked worktree stays; a prunable one would be pruned, whatever the plugin says (asilak/kirunak-sweep-keeps-gone-worktree)', async () => {
   const { ws, root, weather } = await makeWorkspace();
   const open = add(weather, join(root, 'open'), 'open');
   commitIn(open, 'b.txt');
@@ -46,11 +46,8 @@ test('a plugin cannot offer an unmerged branch worktree or the main checkout; lo
   rmSync(lost, { recursive: true });
   ws.seams.worktrees = offering(...[open, weather, locked, lost].map((path) => ({ path, remove: true, why: 'offered' })));
   const look = await worktrees({ ws, processes: none });
-  assert.deepEqual(look.removed, []);
-  assert.deepEqual(Object.keys(whys(look.kept)).sort(), [locked, lost, open].sort());
-  assert.equal(whys(look.kept)[open], 'open has 1 commit not in master');
-  assert.equal(whys(look.kept)[locked], 'locked: on a stick');
-  assert.match(whys(look.kept)[lost], /^its folder is gone \(.+\): git worktree prune forgets it$/);
+  assert.deepEqual(whys(look.removed), { [lost]: 'its folder is gone: would prune' });
+  assert.deepEqual(whys(look.kept), { [locked]: 'locked: on a stick', [open]: 'open has 1 commit not in master' });
 });
 
 test('a checkout at any depth inside an ignored folder keeps the worktree', async () => {
