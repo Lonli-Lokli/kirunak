@@ -167,6 +167,17 @@ test('asilak/kirunak-approve-queue-not-git: approve refuses, before it writes or
   assert.equal(subject(weather), `kirunak: approve ${ID}`);
 });
 
+test('asilak/kirunak-approve-queue-not-git: approve refuses, before it writes or commits anything, when the queue file it would add to is missing from its git repo (review-1)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  rmSync(ws.queue);
+  const head = subject(weather);
+  await assert.rejects(approve({ ws, id: ID, now: NOV5, dryRun: true }), /the queue file .*queue\.md does not exist/, 'a dry run says so too');
+  await assert.rejects(approve({ ws, id: ID, now: NOV5 }), /the queue file .*queue\.md does not exist/);
+  assert.equal(readRecord(weather, 'offline-forecast'), null, 'no approval written');
+  assert.equal(subject(weather), head, 'nothing committed');
+  assert.equal(existsSync(ws.queue), false, 'no queue file made');
+});
+
 test("an amendment's replace, add and remove apply", async () => {
   const { weather } = await makeWorkspace();
   const before = readFileSync(taskFile(weather), 'utf8');
