@@ -227,8 +227,10 @@ task and what kirunak's records are is `lib/records.mjs`, the same for the hooks
 `k approve <id> [--amendment A-n] [--first|--before <id>|--after <id>]`:
 
 1. refuses unless `k check <id>` passes, Open questions is empty and `task.md` is committed (the intake's commit,
-   `intake.md` §4); with `--amendment`, refuses unless `k amend check` passes, then applies the operations to
-   `task.md`;
+   `intake.md` §4), and, when it will queue the task, unless the queue file is in a git repo, where step 3 commits it
+   (asilak/kirunak-approve-queue-not-git): each checked before anything is written, so a refusal leaves no record, no
+   commit and the queue unchanged; with `--amendment`, refuses unless `k amend check` passes, then applies the
+   operations to `task.md`;
 2. computes the hash, writes the record (new, or with the old hash pushed to `history`), stamps the amendment
    `applied:`;
 3. stages `task.md`, the record, the amendment; commits `kirunak: approve <id>` (`... amendment A-n`) with
