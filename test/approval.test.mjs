@@ -498,6 +498,23 @@ test('accept: refuses with no review, even with --checklist-open; writes done.js
   assert.throws(() => accept({ ws, id: ID, checklistOpen: 'again' }), /already accepted/);
 });
 
+test('asilak/kirunak-approve-queue-not-git: accept refuses, before it writes or commits anything, when the queue it would remove the task from is in no git repo (review-2)', async () => {
+  const { ws, weather } = await makeWorkspace();
+  await approve({ ws, id: ID, now: NOV5 });
+  writeFileSync(join(taskDir(weather), 'review.md'), REVIEW(headOf(weather), 'verdict: met', false));
+  reviewsRan(taskDir(weather));
+  gitCommitAll(weather, 'review');
+  const outside = join(tempDir('kirunak-queue-'), 'queue.md');
+  writeFileSync(outside, readFileSync(ws.queue));
+  ws.queue = outside;
+  const head = headOf(weather);
+  assert.throws(() => accept({ ws, id: ID, dryRun: true }), /the queue .*queue\.md is not in a git repo/, 'a dry run says so too');
+  assert.throws(() => accept({ ws, id: ID, now: NOV7 }), /the queue .*queue\.md is not in a git repo/);
+  assert.equal(existsSync(join(taskDir(weather), 'done.json')), false, 'no done.json');
+  assert.equal(headOf(weather), head, 'nothing committed');
+  assert.deepEqual(queue.read(ws), [ID], 'the task still queued');
+});
+
 test('accept with a review: every item the owner checks is ticked, or it refuses naming them; --checklist-open is recorded', async () => {
   const { ws, weather } = await makeWorkspace();
   await approve({ ws, id: ID, now: NOV5 });
