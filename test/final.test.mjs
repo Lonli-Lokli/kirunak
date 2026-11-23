@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { accept, approve, hashBytes, readRecord } from '../lib/approval.mjs';
@@ -9,7 +9,7 @@ import * as queue from '../lib/queue.mjs';
 import { stateOf } from '../lib/state.mjs';
 import * as steps from '../lib/steps.mjs';
 import { acceptRow } from '../lib/waiting.mjs';
-import { gitCommitAll, makeWorkspace, sh } from './helpers.mjs';
+import { gitCommitAll, makeWorkspace, sh, tempDir } from './helpers.mjs';
 
 // gulnya/fast-heavy-queue AC-7, AC-8: the owner's accept on a release signs off, the final steps run, and kirunak
 // closes the release once they pass; a failed final step withdraws the sign-off.
@@ -65,6 +65,23 @@ test('k run holds a release\'s final steps until the owner signs off; the dry ru
   assert.equal(row.why, null);
   assert.deepEqual(row.final, ['S-3', 'S-4']);
   assert.equal(stateNow(ws, dir), 'reviewed');
+});
+
+test('asilak/kirunak-approve-queue-not-git: the sign-off refuses, before it writes or commits anything, when the queue it would add the task to is in no git repo or its file is missing (review-2)', async () => {
+  const { ws, weather, dir } = await reviewed();
+  queue.remove(ws, ID);
+  const inRepo = ws.queue;
+  ws.queue = join(tempDir('kirunak-queue-'), 'queue.md');
+  writeFileSync(ws.queue, readFileSync(inRepo));
+  const head = headOf(weather);
+  const progress = readFileSync(join(dir, 'progress.md'), 'utf8');
+  assert.throws(() => accept({ ws, id: ID, dryRun: true }), /the queue .*queue\.md is not in a git repo/, 'a dry run says so too');
+  assert.throws(() => accept({ ws, id: ID, session: 'sess-1', now: NOV7 }), /the queue .*queue\.md is not in a git repo/);
+  assert.deepEqual([headOf(weather), readFileSync(join(dir, 'progress.md'), 'utf8'), queue.read(ws)], [head, progress, []], 'nothing committed, no sign-off line, the queue unchanged');
+  ws.queue = inRepo;
+  rmSync(inRepo);
+  assert.throws(() => accept({ ws, id: ID, session: 'sess-1', now: NOV7 }), /the queue file .*queue\.md does not exist/);
+  assert.deepEqual([headOf(weather), readFileSync(join(dir, 'progress.md'), 'utf8'), existsSync(inRepo)], [head, progress, false]);
 });
 
 test('a release with two final steps: the accept signs off, the steps run, and the last one\'s finish closes it; a final step\'s commit never blocks', async () => {

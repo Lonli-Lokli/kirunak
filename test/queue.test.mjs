@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeWorkspace, sh } from './helpers.mjs';
+import { k, makeWorkspace, sh, tempDir } from './helpers.mjs';
 import * as queue from '../lib/queue.mjs';
 
 // The fixture plus three more draft tasks, so the queue has something to order.
@@ -77,4 +77,23 @@ test('each change is one commit in the queue repo', async () => {
   assert.equal(Number(sh(hub, 'git', ['rev-list', '--count', 'HEAD']).trim()), before + 4);
   assert.equal(sh(hub, 'git', ['status', '--porcelain']).trim(), '');
   assert.equal(sh(weather, 'git', ['rev-parse', 'HEAD']).trim(), weatherBefore);
+});
+
+test('asilak/kirunak-approve-queue-not-git: a queue in no git repo refuses add and move before it is written, and k doctor fails it', async () => {
+  const w = await makeWorkspace();
+  const outside = join(tempDir('kirunak-queue-'), 'queue.md');
+  writeFileSync(outside, 'hub/other\n');
+  const ws = { ...w.ws, queue: outside };
+  assert.throws(() => queue.add(ws, 'weather/offline-forecast'), /the queue .*queue\.md is not in a git repo/);
+  assert.throws(() => queue.move(ws, 'hub/other', { first: true }), /is not in a git repo/);
+  assert.equal(readFileSync(outside, 'utf8'), 'hub/other\n', 'the queue unchanged');
+  // k doctor prints to stderr once any line fails, as a fixture with no hooks installed does.
+  const doctor = () => {
+    const r = k(w.home, ['doctor']);
+    return r.stdout + r.stderr;
+  };
+  assert.match(doctor(), /^ok {3}queue /m, 'the fixture queue is in a git repo');
+  writeFileSync(w.modulePath, readFileSync(w.modulePath, 'utf8').replace("queue: './queue.md'", `queue: ${JSON.stringify(outside)}`));
+  const out = doctor();
+  assert.ok(out.split(/\r?\n/).includes(`FAIL queue ${outside} is not in a git repo`), out);
 });

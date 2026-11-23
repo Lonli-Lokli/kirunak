@@ -301,7 +301,9 @@ const VERBS = {
     };
     say(true, `state folder ${ws.home}, workspace ${ws.modulePath}`);
     for (const r of ws.repos) say(existsSync(join(r.root, '.git')), `repo ${r.name}: ${r.root} is a git repo`);
-    say(existsSync(ws.queue), `queue ${ws.queue}`);
+    // Every change of the queue is committed in its repo: a queue in none fails (asilak/kirunak-approve-queue-not-git).
+    const queueRepo = existsSync(ws.queue) && queue.repoOf(ws);
+    say(!!queueRepo, existsSync(ws.queue) && !queueRepo ? `queue ${ws.queue} is not in a git repo` : `queue ${ws.queue}`);
     const aspects = await aspectsOf(ws);
     say(aspects.length > 0, `${aspects.length} checklist aspects loaded${defaultChecklist(ws) ? " (kirunak's default: the workspace lists no checklist plugin)" : ''}`);
     for (const a of aspects) {
