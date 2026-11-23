@@ -385,7 +385,14 @@ another session holds with a live lease stays. The session is `--session <id>`, 
 mod passes its own by flag, since a `$.process.run` child carries none (`boards.md`), and `--detach` hands it to the
 detached run. With none, nothing is released and the removal runs as before; Quad Damage's run passes none.
 
-The main checkout never goes, nor a worktree locked by hand or by another tool, or one whose folder is gone. A
+The main checkout never goes, nor a worktree locked by hand or by another tool. One whose folder is gone (git lists
+it prunable, or its folder does not exist once its ended kirunak lease is lifted, git never marking a locked one
+prunable) is pruned, `git worktree prune` in its repo, which forgets only what git finds prunable; its line reads "its
+folder was gone: pruned" ("its folder is gone: would prune" in a dry run, which prunes nothing), and no git call runs
+in the missing folder (asilak/kirunak-sweep-keeps-gone-worktree). Its branch goes with `git branch -D` when it passes
+the merge test the other branch worktrees pass (the open-bug and Quad Damage keeps of `bug/<slug>` included); else it
+stays, the line saying why ("branch kept: open has 1 commit not in master"; in a dry run "; its branch stays: ...").
+One under a live lease or another lock stays, as above; a prune that fails keeps it with git's error. A
 detached one goes only when its HEAD is on a branch, remote branch or tag, so no commit is lost with it, and either a
 plugin offers it (a keep from any plugin wins) or, offered by none, its HEAD is on the main line or its upstream and it
 is over 3 days old (`DETACHED_DAYS`; gulnya/worktree-sweep-keeps-stale AC-3, D-2): "detached on master, 5 days old".
