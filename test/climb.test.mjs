@@ -92,7 +92,8 @@ test('an Opus step: opus twice, then fable designing, then the stop; a Fable ste
   assert.equal(climb(o).to, null);
   assert.equal(steps.escalate({ ws: o.ws, id: o.id, step: 'S-1' }).why, 'failed on every rung (opus 2, fable 1)');
 
-  const f = await approvedWorkspace(plan('agent, fable'));
+  // Fable designs and Opus builds: a Fable step whose what: names no design is refused since FABLE_ROLE_SINCE.
+  const f = await approvedWorkspace(plan('agent, fable', 'what: the design the cache is built from'));
   await fail(f);
   assert.deepEqual(where(f), ['ready', null, 'build']);
   await fail(f);
