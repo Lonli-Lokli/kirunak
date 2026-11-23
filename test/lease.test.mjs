@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { besideOf, hold, holderLive, letGo, read, STALE_MS, take } from '../lib/lease.mjs';
 import { tempDir } from './helpers.mjs';
@@ -14,6 +15,10 @@ const age = (path, ms) => {
   utimesSync(path, t, t);
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Waits until fn() holds, for up to `ms`, polling every 20 ms.
+async function until(fn, ms = 5000) {
+  for (const end = Date.now() + ms; !fn() && Date.now() < end; ) await sleep(20);
+}
 
 test('AC-4: a lease is a directory with its holder file; a fresh one refuses a second taker, and once released the next takes it', () => {
   const dir = place();
@@ -88,14 +93,59 @@ test('keep(): the timer touches the lease, never keeps the process alive, and ca
   let lost = 0;
   const a = take(dir).keep({ everyMs: 20, onLost: () => lost++ });
   age(file, 30_000);
-  await sleep(80);
+  await until(() => Date.now() - read(dir).touched < 5_000);
   assert.ok(Date.now() - read(dir).touched < 5_000, 'touched again');
   age(file, STALE_MS + 1000);
   a.stop();
   const b = take(dir);
   assert.ok(b);
   a.keep({ everyMs: 20, onLost: () => lost++ });
+  await until(() => lost > 0);
   await sleep(80);
+  assert.equal(lost, 1);
+  assert.equal(read(dir).holder.id, b.holder.id);
+  b.release();
+});
+
+test('asilak/kirunak-lease-stale-while-blocked: a process that keeps leases through the keeper still ends when its work does', async () => {
+  const dir = place();
+  const lib = pathToFileURL(join(import.meta.dirname, '..', 'lib', 'lease.mjs')).href;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { hold, take } from ${JSON.stringify(lib)};
+    take(${JSON.stringify(dir)}).keep({ everyMs: 20 });
+    hold(${JSON.stringify(`${dir}.file`)});
+    setTimeout(() => {}, 200);
+  `], { stdio: 'ignore' });
+  const code = await Promise.race([new Promise((r) => child.on('exit', r)), sleep(10_000).then(() => 'still running')]);
+  if (code === 'still running') child.kill();
+  assert.equal(code, 0, 'the keeper never keeps the process alive');
+});
+
+// Blocks this thread for `ms`, as a long synchronous call does (Quad Damage's merge runs git through execFileSync).
+const block = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+test('asilak/kirunak-lease-stale-while-blocked: a holder whose thread blocks past the stale time keeps its lease fresh', async () => {
+  const dir = place();
+  const a = take(dir, {}, { staleMs: 600 }).keep({ everyMs: 50 });
+  await until(() => Date.now() - read(dir).touched < 100);
+  block(1500);
+  assert.equal(read(dir, { staleMs: 600 }).stale, false, 'renewed while the thread was blocked');
+  assert.equal(a.lost, false);
+  a.release();
+});
+
+test('asilak/kirunak-lease-stale-while-blocked: a holder whose thread hangs past hungMs lets its lease go stale, and finds it taken once it wakes', async () => {
+  const dir = place();
+  let lost = 0;
+  // The main thread beats once a second, so hungMs is longer than that: the keeper renews for at most 2.5 s of the
+  // block, and the lease is stale by its end.
+  const a = take(dir, {}, { staleMs: 600 }).keep({ everyMs: 50, hungMs: 1500, onLost: () => lost++ });
+  await until(() => Date.now() - read(dir).touched < 100);
+  block(4000);
+  assert.equal(read(dir, { staleMs: 600 }).stale, true, 'no renewal for a thread hung past hungMs');
+  const b = take(dir, {}, { staleMs: 600 });
+  assert.ok(b, 'taken over');
+  await until(() => lost > 0);
   assert.equal(lost, 1);
   assert.equal(read(dir).holder.id, b.holder.id);
   b.release();
