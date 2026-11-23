@@ -304,6 +304,27 @@ test('findings merge nothing: the review is committed beside the bug and the fix
   await assert.rejects(review({ ws: w.ws, id: BUG, processes: NOBODY }), /has no fix ready \(fix not ready: review-1\.md found findings\)/);
 });
 
+test('asilak/kirunak-lease-stale-while-blocked: a process the session leaves in its tree never turns Review & merge into a throw: the review it wrote is kept', async () => {
+  const w = await bugWorkspace();
+  let holder = null;
+  w.ws.seams.runner = fakeRunner(({ head, base, step }) => {
+    // A child the session started and left running in the tree: on Windows a live process's folder cannot be removed.
+    holder = sleeper(120, { cwd: step.cwd, stdio: 'ignore' });
+    return answer('findings', head, base);
+  });
+  try {
+    const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
+    assert.equal(r.outcome, 'findings');
+    assert.equal(git(w.hub, 'log', '-1', '--format=%s'), 'kirunak: review-1.md of the bug hub/stale-tiles: findings');
+    assert.equal(reviewing(w.home, BUG), null);
+    // Elsewhere the folder goes all the same; on Windows it stays, and the outcome says so.
+    if (process.platform === 'win32') assert.match(r.problems.join('\n'), /the review's tree .*review-1[\\/]tree is left \(E[A-Z]+\)/);
+    else assert.deepEqual(r.problems, []);
+  } finally {
+    holder?.kill();
+  }
+});
+
 test('a malformed verdict is a finding: kirunak writes it so, quoting the session\'s file, and merges nothing', async () => {
   for (const [said, problem] of [
     [({ head, base }) => answer('looks good', head, base), /verdict looks good is neither clean nor findings/],
