@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { bugsHookLine, frontmatter, ladderChecks, trackerLine } from '../lib/doctor.mjs';
@@ -179,6 +179,14 @@ test('config.json missing, disagreeing with the workspace, or older than its mod
   const later = new Date(Date.now() + 60_000);
   utimesSync(w.modulePath, later, later);
   assert.deepEqual(line(), [false, `escalate/config.json is older than ${w.modulePath} (run k install)`]);
+});
+
+test('asilak/kirunak-doctor-test-mtime-flake: the fixture\'s workspace module is written well before k install stamps config.json, as it is in real use', async () => {
+  // On Windows a file's mtime can land a few ms after Date.now() read just after the write, so a module written in the
+  // same instant as the install would read as newer than config.json and add an "is older than" FAIL line.
+  const w = await installed();
+  assert.ok(statSync(w.modulePath).mtimeMs <= Date.now() - 1000, 'the module dated at least a second back');
+  assert.ok(!w.fails().some((l) => l.startsWith('escalate/config.json')));
 });
 
 test('the hook off and the block off are FAIL lines, so k doctor says when either is off (AC-29)', async () => {
