@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { k, makeWorkspace, sh, tempDir } from './helpers.mjs';
 import * as queue from '../lib/queue.mjs';
@@ -95,5 +95,6 @@ test('asilak/kirunak-approve-queue-not-git: a queue in no git repo refuses add a
   assert.match(doctor(), /^ok {3}queue /m, 'the fixture queue is in a git repo');
   writeFileSync(w.modulePath, readFileSync(w.modulePath, 'utf8').replace("queue: './queue.md'", `queue: ${JSON.stringify(outside)}`));
   const out = doctor();
-  assert.ok(out.split(/\r?\n/).includes(`FAIL queue ${outside} is not in a git repo`), out);
+  // The workspace makes its paths real (lib/workspace.mjs), so on macOS /var/folders is printed as /private/var/folders.
+  assert.ok(out.split(/\r?\n/).includes(`FAIL queue ${realpathSync(outside)} is not in a git repo`), out);
 });
