@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -136,6 +136,10 @@ export async function ladderWorkspace(extra = {}) {
   const dir = realpathSync(tempDir('kirunak-ladder-'));
   const modulePath = join(dir, 'workspace.mjs');
   writeFileSync(modulePath, `export default ${JSON.stringify({ repos: [], queue: './queue.md', ...extra }, null, 2)};\n`);
+  // Dated a minute back, as a workspace edited before k install is: on Windows a file's mtime can land a few ms after
+  // the Date.now() that install stamps config.json with, and doctor would call config.json older than the module.
+  const before = new Date(Date.now() - 60_000);
+  utimesSync(modulePath, before, before);
   const home = join(dir, 'state');
   process.env.KIRUNAK_HOME = home;
   const { loadWorkspaceModule } = await import('../lib/workspace.mjs');
