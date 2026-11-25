@@ -157,6 +157,22 @@ test('a review starts without the workspace\'s denied tools, Agent always among 
   assert.equal(saved.result.total_cost_usd, 0.1);
 });
 
+test('the review\'s tree gets the fix repo\'s localFiles from its root, one the root lacks skipped, so its build finds them (the fault of 2026-11-25)', async () => {
+  const w = await bugWorkspace();
+  put(join(w.fix, 'local.properties'), 'sdk.dir=/sdk\n');
+  w.ws.repos.find((r) => r.name === 'hub').localFiles = ['local.properties', 'missing.env'];
+  const seen = [];
+  w.ws.seams.runner = fakeRunner(({ head, base, step }) => {
+    const file = join(step.cwd, 'local.properties');
+    seen.push(existsSync(file) ? readFileSync(file, 'utf8') : null, existsSync(join(step.cwd, 'missing.env')));
+    return answer('findings', head, base);
+  });
+  const r = await review({ ws: w.ws, id: BUG, processes: NOBODY });
+  assert.equal(r.outcome, 'findings', JSON.stringify(r.problems));
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(seen, ['sdk.dir=/sdk\n', false]);
+});
+
 test('a failed call\'s all-zero <synthetic> message is no first call: the first real call is kept (gulnya/headless-tools AC-3)', () => {
   const zero = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 };
   const real = { input_tokens: 5, cache_read_input_tokens: 11000, cache_creation_input_tokens: 300 };

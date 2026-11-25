@@ -584,6 +584,7 @@ test('fixed, then clean: the fixing session as AC-4/AC-14 say, the review merges
   assert.ok(fix.brief.includes(`Your report goes to ${join(r.folder, 'hub', 'a', 'fix-1.md')}.\n\n1. Read the bug`));
   assert.ok(!/\{\{\w+\}\}/.test(fix.brief), 'every placeholder filled');
   assert.ok(!fix.brief.includes('This is the retry'));
+  assert.ok(fix.brief.includes(`worktree add ${w.hubRoot}-quad-a bug/a\`.\n   - First the test`), 'no local files named, no line on them');
   const [rv] = reviewsRun(w);
   assert.ok(rv.brief.includes(`\`heavy run --session ${rv.sessionId} --\``), 'AC-14: the review\'s own session id too');
   assert.equal(readText(join(w.hubRoot, 'tiles.txt')), 'cache: one hour\n');
@@ -797,6 +798,16 @@ test('a fix ready goes straight to review (E-1); a head a review refused takes i
   assert.match(fixes(w)[0].brief, /^# Quad Damage: the bug hub\/c, try 2$/m);
   assert.ok(fixes(w)[0].brief.includes(`kirunak/bugs/c/review-1.md (${join(w.hubRoot, 'kirunak', 'bugs', 'c', 'review-1.md')}) judged the head ${headC} of bug/c`));
   assert.deepEqual(progressLines(r.folder).slice(0, 2), ['hub/a: started, fix ready, to review', `hub/a: review clean, merged ${r.bugs[0].sha.slice(0, 7)} into hub`], 'AC-16');
+});
+
+test('the fixing session\'s brief names the fix repo\'s localFiles to copy into its tree after the worktree add (the fault of 2026-11-25)', async () => {
+  const w = await fixWorkspace([['a', '2026-10-20', '']], { fixes: [fixed()], verdicts: ['clean'] });
+  w.ws.repos.find((r) => r.name === 'hub').localFiles = ['local.properties', 'config/dev.env'];
+  await fixRun(w);
+  const [fix] = fixes(w);
+  assert.ok(fix.brief.includes(`worktree add ${w.hubRoot}-quad-a bug/a\`.\n   - Then copy into that worktree hub's local files, `), fix.brief);
+  assert.ok(fix.brief.includes(`needs: \`local.properties\`, \`config/dev.env\`, each from ${w.hubRoot} when it is there`), fix.brief);
+  assert.ok(!/\{\{\w+\}\}/.test(fix.brief), 'every placeholder filled');
 });
 
 test('a fix in another repo than the bug\'s: run there with the bug\'s repo added, merged there, the bug closed in its own (E-6)', async () => {
