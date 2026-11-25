@@ -44,6 +44,7 @@ one in a single step: Review & merge when its fix is ready, Start fix when it ha
    git -C <fix repo> worktree add <path> -b bug/<slug>
    ```
 
+   Copy into it each of the fix repo's `localFiles` (the workspace's; ignored, so a worktree lacks them) its root has.
    First a test that fails without the fix, seen failing; then the fix, the test passing, and the docs it makes
    untrue. Commit on the branch; never merge it, and never push. Under Fix written, a `- ` line a commit, ending
    `[commit <sha>]`, and under What was found the test run, failing before and passing after. No fix: delete Fix

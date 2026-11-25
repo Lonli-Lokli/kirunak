@@ -24,7 +24,7 @@ Your report goes to {{report}}.
    - In a worktree of its own, from the fix repo's {{main}}, never in a checkout other sessions use:
      `git -C {{fixRoot}} worktree add {{tree}} -b {{branch}} {{main}}`. When {{branch}} exists already, work on it:
      in the worktree that has it checked out (`git -C {{fixRoot}} worktree list`), else
-     `git -C {{fixRoot}} worktree add {{tree}} {{branch}}`.
+     `git -C {{fixRoot}} worktree add {{tree}} {{branch}}`.{{localFiles}}
    - First the test that fails without the fix, seen failing. Then the fix, the test passing, and the docs it makes
      untrue.
    - Commit on {{branch}} only. Never merge it, never rebase it onto another branch, never push, and never commit to
