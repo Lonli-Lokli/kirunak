@@ -99,7 +99,7 @@ own implementations live in the workspace's repo, beside its config (D2).
 
 ```js
 export default {
-  repos: [{ name: 'weather', root: '~/code/weather' }, { name: 'hub', root: '~/code/hub' }],
+  repos: [{ name: 'weather', root: '~/code/weather', localFiles: ['local.properties'] }, { name: 'hub', root: '~/code/hub' }],
   queue: '~/code/hub/kirunak/queue.md',
   records: [],                        // more of kirunak's records (approval.md §3); a folder ends with a slash
   plugins: ['./plugins/checklist.mjs'],
@@ -158,6 +158,14 @@ export default {
   what `k install` would write, naming what differs. Without the key, no builder is written and `k doctor` names
   none. The workspace is refused at load when `rung` names no rung, `tools` is not a non-empty list of names without
   commas, or the entry has another key.
+- **`localFiles`**, on a repo's entry (optional, none by default), names the files git ignores in that repo that a
+  build needs, such as a local SDK path: a new worktree has none of them, so a build there fails before it starts. Each
+  is a path relative to the repo's root. Review & merge copies them from the root into the review's tree as it makes
+  it, and Quad Damage's brief tells the fixing session to copy them into the fix's tree (the k-bug skill says the same
+  for a fix tried by hand): a file the root does not have is skipped, and so is one git tracks or the tree has already,
+  so nothing is overwritten. Judgement: which files a build needs and git ignores is each repo's own, so kirunak names
+  none. The workspace is refused at load, naming the repo, when `localFiles` is not a list of paths or names one that
+  is absolute or leaves the repo.
 - **`records`** names more files and folders as kirunak's records (`approval.md` §3, gulnya/kirunak-accept-shared-repo
   AC-5): never part of a task's own change, never blocking `k accept`, and committable naming an accepted task. Each
   is a path like the queue's, made real as the repos' roots are, a folder ending with a slash; one inside a repo counts

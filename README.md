@@ -84,6 +84,10 @@ POSIX shell a step's commands run through (Git Bash, as Claude Code uses it); ki
 
    Commit it with the queue file (one comment line is enough to start).
 
+   A repo's entry may name `localFiles`, paths relative to its root of files git ignores that a build needs (such as
+   `local.properties`): a new worktree lacks them, so the review and fix trees kirunak makes get them copied from the
+   root (`design/plugins.md` §3).
+
    Optional `bugs` settings (`design/plugins.md` §3): `reviewModel` and `reviewEffort` for Review & merge,
    `fixModel` (default `opus`) and `fixEffort` for Quad Damage's fixing sessions, `disallowedTools` the tools a
    fixing session and a review start without (default Agent, Artifact, Workflow, AskUserQuestion, Skill,
